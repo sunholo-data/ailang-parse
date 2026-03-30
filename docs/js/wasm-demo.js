@@ -70,11 +70,46 @@
   var panelMarkdown = document.getElementById('panel-markdown');
   var panelA2UI = document.getElementById('panel-a2ui');
   var aiUpsell = document.getElementById('ai-upsell');
+  var parseTimerEl = document.getElementById('parse-timer');
 
   // ── Loading spinner (CSS-only) ──
   var spinnerCSS = document.createElement('style');
   spinnerCSS.textContent = '.dp-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--dp-blue-border);border-top-color:var(--dp-blue);border-radius:50%;animation:dp-spin .6s linear infinite;vertical-align:-2px;margin-right:6px}@keyframes dp-spin{to{transform:rotate(360deg)}}';
   document.head.appendChild(spinnerCSS);
+
+  // ── Parse timer ──
+  var parseTimerStart = 0;
+  var parseTimerInterval = null;
+
+  function startParseTimer() {
+    parseTimerStart = performance.now();
+    if (parseTimerEl) {
+      parseTimerEl.style.display = '';
+      parseTimerEl.className = 'dp-parse-timer active';
+      parseTimerEl.textContent = '0ms';
+    }
+    clearInterval(parseTimerInterval);
+    parseTimerInterval = setInterval(function () {
+      if (!parseTimerEl) return;
+      var elapsed = performance.now() - parseTimerStart;
+      parseTimerEl.textContent = formatElapsed(elapsed);
+    }, 50);
+  }
+
+  function stopParseTimer() {
+    clearInterval(parseTimerInterval);
+    parseTimerInterval = null;
+    if (parseTimerEl) {
+      var elapsed = performance.now() - parseTimerStart;
+      parseTimerEl.textContent = formatElapsed(elapsed);
+      parseTimerEl.className = 'dp-parse-timer done';
+    }
+  }
+
+  function formatElapsed(ms) {
+    if (ms < 1000) return Math.round(ms) + 'ms';
+    return (ms / 1000).toFixed(2) + 's';
+  }
 
   // ── Status dot ──
   function setDotState(state) {
@@ -238,9 +273,28 @@
         });
 
         var data = await resp.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+
+        // Surface API errors visibly
+        if (!resp.ok || data.error) {
+          var errMsg = data.error ? (data.error.message || JSON.stringify(data.error)) : ('HTTP ' + resp.status);
+          console.error('Gemini API error:', errMsg);
+          pipelineLog('error', 'Gemini: ' + errMsg, 'error');
+          setStatus('AI error: ' + errMsg, true);
+          return '[]';
+        }
+
+        var text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) {
+          var reason = data.candidates?.[0]?.finishReason || 'no content returned';
+          console.warn('Gemini returned no text:', reason, data);
+          pipelineLog('error', 'Gemini returned no content: ' + reason, 'error');
+          return '[]';
+        }
+        return text;
       } catch (e) {
         console.error('Gemini handler error:', e);
+        pipelineLog('error', 'Gemini error: ' + e.message, 'error');
+        setStatus('AI error: ' + e.message, true);
         return '[]';
       }
     };
@@ -315,6 +369,9 @@
     if (!wasmReady && !wasmError) {
       await initWasm();
     }
+
+    // Start parse timer
+    startParseTimer();
 
     // Determine format
     var zipFormats = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'epub'];
@@ -664,6 +721,7 @@
 
   // ── Output rendering ──
   function showOutput(blocks, rawContent) {
+    stopParseTimer();
     if (outputEmpty) outputEmpty.style.display = 'none';
     if (outputTabs) outputTabs.classList.add('visible');
 
@@ -675,12 +733,24 @@
     var a2uiNodes = [];
     if (engine) {
       try {
+        // Try module-qualified call first, then unqualified fallback
         var a2uiResult = engine.call(DOCPARSE_MODULE, 'convertBlocksToA2UI', lastOutput.json);
+        if (!a2uiResult || !a2uiResult.success) {
+          console.warn('A2UI module-qualified call failed:', a2uiResult ? a2uiResult.error || a2uiResult : 'null result');
+          a2uiResult = engine.call('convertBlocksToA2UI', lastOutput.json);
+        }
         if (a2uiResult && a2uiResult.success) {
-          a2uiNodes = JSON.parse(a2uiResult.result);
+          var parsed = JSON.parse(a2uiResult.result);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            a2uiNodes = parsed;
+          } else {
+            console.warn('A2UI returned empty array, result was:', a2uiResult.result.substring(0, 200));
+          }
+        } else {
+          console.warn('A2UI conversion failed:', a2uiResult ? a2uiResult.error || JSON.stringify(a2uiResult) : 'null');
         }
       } catch (e) {
-        console.warn('A2UI WASM conversion failed, falling back to empty:', e);
+        console.warn('A2UI WASM conversion error:', e);
       }
     }
     lastOutput.a2ui = JSON.stringify(a2uiNodes, null, 2);
@@ -751,6 +821,10 @@
       renderPdfPreview(buffer);
     } else if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff'].indexOf(ext) !== -1) {
       renderImagePreview(buffer, ext);
+    } else if (['wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac'].indexOf(ext) !== -1) {
+      renderAudioPreview(buffer, ext);
+    } else if (['mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg'].indexOf(ext) !== -1) {
+      renderVideoPreview(buffer, ext);
     } else {
       panelPreview.innerHTML = '<div class="office-preview-fallback">No preview available for .' + ext + ' files</div>';
     }
@@ -917,6 +991,28 @@
     var blob = new Blob([buffer], { type: mimeMap[ext] || 'image/png' });
     var url = URL.createObjectURL(blob);
     panelPreview.innerHTML = '<div class="office-preview-image"><img src="' + url + '" alt="Image preview"></div>';
+  }
+
+  // ── Audio preview ──
+  function renderAudioPreview(buffer, ext) {
+    var mimeMap = { wav: 'audio/wav', mp3: 'audio/mpeg', aiff: 'audio/aiff', aac: 'audio/aac', ogg: 'audio/ogg', flac: 'audio/flac' };
+    var blob = new Blob([buffer], { type: mimeMap[ext] || 'audio/mpeg' });
+    var url = URL.createObjectURL(blob);
+    panelPreview.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;gap:16px">' +
+      '<svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="var(--dp-blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>' +
+      '<audio controls src="' + url + '" style="width:100%;max-width:400px">Your browser does not support audio playback.</audio>' +
+      '<div style="font-size:12px;color:var(--text-muted)">.' + ext.toUpperCase() + ' audio file</div></div>';
+  }
+
+  // ── Video preview ──
+  function renderVideoPreview(buffer, ext) {
+    var mimeMap = { mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm', wmv: 'video/x-ms-wmv', mpeg: 'video/mpeg', mpg: 'video/mpeg' };
+    var blob = new Blob([buffer], { type: mimeMap[ext] || 'video/mp4' });
+    var url = URL.createObjectURL(blob);
+    panelPreview.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;padding:20px;gap:12px">' +
+      '<video controls src="' + url + '" style="width:100%;max-width:100%;max-height:400px;border-radius:8px;background:#000">Your browser does not support video playback.</video>' +
+      '<div style="font-size:12px;color:var(--text-muted)">.' + ext.toUpperCase() + ' video file</div></div>';
   }
 
   // ── Shared preview table builder ──
@@ -1189,6 +1285,7 @@
 
   // ── Helpers ──
   function showError(msg) {
+    stopParseTimer();
     setDotState('error');
     if (panelBlocks) panelBlocks.innerHTML = '<div class="dp-block"><div class="dp-block-text" style="color:#ef4444">' + msg + '</div></div>';
     if (outputEmpty) outputEmpty.style.display = 'none';

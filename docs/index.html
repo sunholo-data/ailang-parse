@@ -16,6 +16,42 @@
 <link rel="stylesheet" href="css/design-system.css">
 <link rel="stylesheet" href="css/docparse.css">
 <style>
+/* ── Hero CTA ── */
+.dp-hero-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 40px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--dp-blue);
+  border: none;
+  border-radius: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35), 0 1px 3px rgba(0,0,0,0.08);
+  letter-spacing: -0.01em;
+}
+.dp-hero-cta:hover {
+  background: #1d4ed8;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4), 0 2px 6px rgba(0,0,0,0.1);
+}
+.dp-hero-cta:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+.dp-hero-cta svg {
+  animation: dp-cta-bounce 2s ease-in-out infinite;
+}
+@keyframes dp-cta-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
 /* ── WASM Demo (ported from try.html) ── */
 .dp-dropzone {
   background: var(--bg-card);
@@ -199,6 +235,23 @@
 .dp-file-info {
   font-family: var(--font-mono); font-size: 11px;
   color: var(--text-muted); margin-left: auto;
+}
+.dp-parse-timer {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+.dp-parse-timer.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+}
+.dp-parse-timer.done {
+  color: #059669;
+  background: rgba(5,150,105,0.08);
 }
 .dp-pipeline-panel {
   background: var(--bg-card);
@@ -585,6 +638,15 @@ details[open] summary svg { transform: rotate(180deg); }
       </div>
     </div>
 
+    <!-- Primary CTA -->
+    <div class="reveal reveal-delay-3" style="text-align:center;margin-top:36px">
+      <a href="#try-it" class="dp-hero-cta">
+        <span>Parse a document now</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+      </a>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:10px">Free, in your browser &mdash; no account required</div>
+    </div>
+
   </section>
 
   <!-- ============ WASM DEMO ============ -->
@@ -601,12 +663,14 @@ details[open] summary svg { transform: rotate(180deg); }
         <span id="wasm-status" style="color:var(--text-secondary)">Loading WASM runtime...</span>
       </div>
       <span class="dp-file-info" id="file-info"></span>
+      <span class="dp-parse-timer" id="parse-timer" style="display:none"></span>
     </div>
 
-    <!-- Privacy notice -->
-    <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(5,150,105,0.06);border:1px solid rgba(5,150,105,0.15);margin-bottom:16px;font-size:12px;color:#059669;font-weight:500">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      All parsing happens locally via WebAssembly. Your files never leave the browser.
+    <!-- Privacy notice (dynamic: updates when AI key is added) -->
+    <div id="privacy-notice" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(5,150,105,0.06);border:1px solid rgba(5,150,105,0.15);margin-bottom:16px;font-size:12px;color:#059669;font-weight:500">
+      <svg id="privacy-icon-lock" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <svg id="privacy-icon-cloud" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+      <span id="privacy-text">All parsing happens locally via WebAssembly. Your files never leave the browser.</span>
     </div>
 
     <!-- Demo file buttons -->
@@ -620,6 +684,8 @@ details[open] summary svg { transform: rotate(180deg); }
       <button class="dp-demo-btn" data-file="assets/poi_sampleshow.pptx">Slides PPTX</button>
       <button class="dp-demo-btn" data-file="assets/pandoc_basic.xlsx">Spreadsheet</button>
       <button class="dp-demo-btn ai" data-file="assets/table_report.pdf" title="Requires AI key">PDF Report</button>
+      <button class="dp-demo-btn ai" data-file="assets/sample.mp3" title="Requires AI key">Audio MP3</button>
+      <button class="dp-demo-btn ai" data-file="assets/sample.mp4" title="Requires AI key">Video MP4</button>
     </div>
 
     <!-- Main layout: dropzone + output -->
@@ -1472,6 +1538,28 @@ details[open] summary svg { transform: rotate(180deg); }
     document.querySelectorAll('.dp-demo-btn.ai').forEach(function (b) {
       b.style.opacity = hasKey ? '1' : '0.6';
     });
+    // Update privacy notice
+    var privacyNotice = document.getElementById('privacy-notice');
+    var privacyText = document.getElementById('privacy-text');
+    var lockIcon = document.getElementById('privacy-icon-lock');
+    var cloudIcon = document.getElementById('privacy-icon-cloud');
+    if (privacyNotice && privacyText) {
+      if (hasKey) {
+        privacyText.textContent = 'Office formats (DOCX, PPTX, XLSX) are parsed locally. PDF, image, audio, and video files are sent to Gemini API using your key.';
+        privacyNotice.style.background = 'rgba(245,158,11,0.06)';
+        privacyNotice.style.borderColor = 'rgba(245,158,11,0.2)';
+        privacyNotice.style.color = '#b45309';
+        if (lockIcon) lockIcon.style.display = 'none';
+        if (cloudIcon) cloudIcon.style.display = '';
+      } else {
+        privacyText.textContent = 'All parsing happens locally via WebAssembly. Your files never leave the browser.';
+        privacyNotice.style.background = 'rgba(5,150,105,0.06)';
+        privacyNotice.style.borderColor = 'rgba(5,150,105,0.15)';
+        privacyNotice.style.color = '#059669';
+        if (lockIcon) lockIcon.style.display = '';
+        if (cloudIcon) cloudIcon.style.display = 'none';
+      }
+    }
   }
 
   apiKeyInput.addEventListener('input', function () {
