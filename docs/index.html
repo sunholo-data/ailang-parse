@@ -83,6 +83,13 @@
   padding: 2px 8px; border-radius: 3px;
   background: var(--bg-input); color: var(--text-muted);
 }
+.dp-badge-ai {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500;
+  padding: 2px 8px; border-radius: 3px;
+  background: rgba(245, 158, 11, 0.08); color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.15);
+}
 .dp-output {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -626,10 +633,14 @@ details[open] summary svg { transform: rotate(180deg); }
           <h3>Drop a file here</h3>
           <p>Or click to browse</p>
           <button class="dp-dropzone-btn" onclick="event.stopPropagation(); document.getElementById('file-input').click()">Choose File</button>
-          <input type="file" id="file-input" accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.epub,.html,.htm,.md,.csv,.tsv,.pdf,.png,.jpg,.jpeg">
+          <input type="file" id="file-input" accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.epub,.html,.htm,.md,.csv,.tsv,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp,.wav,.mp3,.aiff,.aac,.ogg,.flac,.mp4,.mov,.avi,.webm,.wmv,.mpeg,.mpg">
           <div class="dp-format-badges">
             <span>DOCX</span><span>PPTX</span><span>XLSX</span><span>ODT</span><span>ODP</span><span>ODS</span>
-            <span>HTML</span><span>MD</span><span>CSV</span><span>EPUB</span><span>PDF*</span><span>PNG*</span>
+            <span>HTML</span><span>MD</span><span>CSV</span><span>EPUB</span>
+          </div>
+          <div class="dp-format-badges" style="margin-top:4px">
+            <span class="dp-badge-ai">PDF*</span><span class="dp-badge-ai">PNG*</span><span class="dp-badge-ai">JPG*</span>
+            <span class="dp-badge-ai">MP4*</span><span class="dp-badge-ai">MP3*</span><span class="dp-badge-ai">WAV*</span>
           </div>
         </div>
 
@@ -639,14 +650,15 @@ details[open] summary svg { transform: rotate(180deg); }
           <div id="pipeline-log"></div>
         </div>
 
-        <!-- AI Settings (for PDF/image parsing) -->
+        <!-- AI Settings -->
         <div class="dp-ai-settings" style="margin-top:16px">
-          <h3>AI Settings (for PDF / Images)</h3>
+          <h3>AI Settings</h3>
+          <p class="dp-note" style="margin-bottom:10px">Unlocks PDF, image, audio, and video parsing. Also describes embedded images in DOCX/PPTX files.</p>
           <label for="api-key-input">Google API Key</label>
           <input type="password" id="api-key-input" placeholder="AIza..." value="">
           <label for="model-select">Model</label>
           <input type="text" id="model-select" value="gemini-2.5-flash" readonly>
-          <div class="dp-note">Your key is stored in localStorage only. Used for AI calls to parse PDFs and images — never sent to our servers.</div>
+          <div class="dp-note">Stored in localStorage only — never sent to our servers. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--dp-blue)">aistudio.google.com</a>.</div>
         </div>
       </div>
 
@@ -680,7 +692,7 @@ details[open] summary svg { transform: rotate(180deg); }
 
     <!-- AI upsell for PDF -->
     <div class="dp-ai-upsell" id="ai-upsell" style="display:none;margin-top:12px">
-      <strong>This format requires AI.</strong> Use the <a href="api.html" style="color:var(--dp-blue)">AILANG Parse API</a> for server-side PDF/image parsing with 60 free requests per day.
+      <strong>This format requires AI.</strong> Add your Google API key in the settings panel below, or use the <a href="api.html" style="color:var(--dp-blue)">AILANG Parse API</a> (60 free requests/day).
     </div>
   </section>
 
@@ -1438,15 +1450,39 @@ details[open] summary svg { transform: rotate(180deg); }
 <script src="vendor/mammoth.browser.min.js"></script>
 <script src="js/wasm-demo.js"></script>
 <script>
-// API key persistence for AI-powered PDF/image parsing
+// API key persistence and AI feature indicator
 (function () {
   var apiKeyInput = document.getElementById('api-key-input');
   if (!apiKeyInput) return;
   var savedKey = localStorage.getItem('gemini-api-key') || '';
   if (savedKey) apiKeyInput.value = savedKey;
+
+  function updateAIIndicator() {
+    var hasKey = !!(apiKeyInput.value || '').trim();
+    // Update AI settings border
+    var settings = apiKeyInput.closest('.dp-ai-settings');
+    if (settings) {
+      settings.style.borderColor = hasKey ? 'rgba(5, 150, 105, 0.3)' : '';
+      settings.style.background = hasKey ? 'rgba(5, 150, 105, 0.03)' : '';
+    }
+    // Toggle AI badge styling
+    document.querySelectorAll('.dp-badge-ai').forEach(function (b) {
+      b.style.opacity = hasKey ? '1' : '0.5';
+    });
+    document.querySelectorAll('.dp-demo-btn.ai').forEach(function (b) {
+      b.style.opacity = hasKey ? '1' : '0.6';
+    });
+  }
+
+  apiKeyInput.addEventListener('input', function () {
+    localStorage.setItem('gemini-api-key', this.value);
+    updateAIIndicator();
+  });
   apiKeyInput.addEventListener('change', function () {
     localStorage.setItem('gemini-api-key', this.value);
+    updateAIIndicator();
   });
+  updateAIIndicator();
 })();
 </script>
 </body>

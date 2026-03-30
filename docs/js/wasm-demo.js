@@ -222,12 +222,18 @@
           parts.push({ text: input });
         }
 
+        // Only force JSON response when the prompt asks for JSON output
+        var promptText = parsed.prompt || input;
+        var wantsJson = promptText.indexOf('JSON') !== -1 && promptText.indexOf('ONLY the JSON') !== -1;
+        var genConfig = { temperature: 0.2, maxOutputTokens: 32768 };
+        if (wantsJson) genConfig.responseMimeType = 'application/json';
+
         var resp = await fetch(GEMINI_URL + '?key=' + apiKey, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: parts }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 32768, responseMimeType: 'application/json' }
+            generationConfig: genConfig
           })
         });
 
@@ -312,7 +318,9 @@
 
     // Determine format
     var zipFormats = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'epub'];
-    var aiFormats = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp'];
+    var aiFormats = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp',
+                     'wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac',
+                     'mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg', 'flv', '3gpp'];
 
     if (textFormats.indexOf(ext) !== -1) {
       pipelineLog('route', 'Text format \u2014 client-side parsing');
@@ -376,6 +384,13 @@
       }
 
       pipelineLog('done', allBlocks.length + ' blocks extracted', 'done');
+
+      // AI post-pass: describe embedded images if API key is present
+      var apiKey = localStorage.getItem('gemini-api-key');
+      if (apiKey && allBlocks.length > 0) {
+        allBlocks = await describeEmbeddedImages(allBlocks, apiKey);
+      }
+
       setDotState('ready');
       setStatus('Parsed ' + allBlocks.length + ' blocks');
       showOutput(allBlocks);
@@ -384,6 +399,47 @@
       showError('Parse error: ' + err.message);
       console.error(err);
     }
+  }
+
+  // ── AI image description for embedded images in Office docs ──
+  async function describeEmbeddedImages(blocks, apiKey) {
+    var imageBlocks = [];
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i].type === 'image' && blocks[i].data) {
+        imageBlocks.push(i);
+      }
+    }
+    if (imageBlocks.length === 0) return blocks;
+
+    pipelineLog('ai', 'Describing ' + imageBlocks.length + ' embedded image(s) with AI...');
+    setStatus('Describing ' + imageBlocks.length + ' image(s) with AI...', false, true);
+
+    // Ensure AI handler is registered
+    if (engine && typeof engine.repl.setAIHandler === 'function') {
+      engine.repl.setAIHandler(createGeminiHandler(apiKey));
+      if (typeof engine.repl.grantCapability === 'function') engine.repl.grantCapability('AI');
+    }
+
+    var described = 0;
+    for (var j = 0; j < imageBlocks.length; j++) {
+      var idx = imageBlocks[j];
+      var block = blocks[idx];
+      try {
+        var mime = block.mime || 'image/png';
+        var r = await engine.callAsync('describeImageBase64', block.data, mime);
+        if (r.success && r.result && r.result.length > 0) {
+          blocks[idx].description = r.result;
+          described++;
+          pipelineLog('ai', 'Image ' + (j + 1) + ': ' + r.result.substring(0, 80) + (r.result.length > 80 ? '...' : ''));
+        }
+      } catch (e) {
+        pipelineLog('ai', 'Image ' + (j + 1) + ' description failed: ' + e.message);
+      }
+    }
+    if (described > 0) {
+      pipelineLog('done', described + ' image(s) described via AI', 'done');
+    }
+    return blocks;
   }
 
   // ── DOCX parsing ──
@@ -547,7 +603,14 @@
     }
     base64 = btoa(base64);
 
-    var mimeMap = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', tiff: 'image/tiff', webp: 'image/webp' };
+    var mimeMap = {
+      pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      gif: 'image/gif', bmp: 'image/bmp', tiff: 'image/tiff', webp: 'image/webp',
+      wav: 'audio/wav', mp3: 'audio/mp3', aiff: 'audio/aiff', aac: 'audio/aac',
+      ogg: 'audio/ogg', flac: 'audio/flac',
+      mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm',
+      wmv: 'video/x-ms-wmv', mpeg: 'video/mpeg', mpg: 'video/mpeg', flv: 'video/x-flv', '3gpp': 'video/3gpp'
+    };
     var mime = mimeMap[ext] || 'application/octet-stream';
 
     pipelineLog('ai', 'Sending to Gemini (' + mime + ')...');
