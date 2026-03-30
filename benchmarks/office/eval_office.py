@@ -32,7 +32,9 @@ from normalize import NormalizedElement, normalize_ailang
 
 REPO_DIR = Path(__file__).parent.parent.parent
 GOLDEN_DIR = Path(__file__).parent / "golden"
+STRESS_GOLDEN_DIR = Path(__file__).parent / "stress"
 TEST_DIR = REPO_DIR / "data" / "test_files"
+STRESS_TEST_DIR = TEST_DIR / "stress"
 OUTPUT_DIR = REPO_DIR / "docparse" / "data"
 
 
@@ -362,22 +364,32 @@ def main():
     parser = argparse.ArgumentParser(description="DocParse Structural Benchmark")
     parser.add_argument("--json", action="store_true", help="Output JSON instead of markdown")
     parser.add_argument("--file", help="Evaluate a single file")
+    parser.add_argument("--stress", action="store_true", help="Run stress tests (large/slow files) instead of standard suite")
     args = parser.parse_args()
 
     os.chdir(REPO_DIR)
 
+    allowed_suffixes = (".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods", ".epub", ".html", ".csv", ".tsv", ".md")
+
     # Collect test files
     if args.file:
         test_files = [TEST_DIR / args.file]
+    elif args.stress:
+        test_files = sorted(
+            p for p in STRESS_TEST_DIR.iterdir()
+            if p.suffix in allowed_suffixes
+        ) if STRESS_TEST_DIR.exists() else []
     else:
         test_files = sorted(
             p for p in TEST_DIR.iterdir()
-            if p.suffix in (".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods", ".epub", ".html", ".csv", ".tsv", ".md")
+            if p.suffix in allowed_suffixes
         )
+
+    golden_dir = STRESS_GOLDEN_DIR if args.stress else GOLDEN_DIR
 
     results = []
     for tf in test_files:
-        golden = GOLDEN_DIR / f"{tf.name}.json"
+        golden = golden_dir / f"{tf.name}.json"
         if not golden.exists():
             print(f"  SKIP {tf.name} (no golden output)", file=sys.stderr)
             continue

@@ -12,26 +12,17 @@ OUTPUT_DIR="$REPO_DIR/docparse/data"
 
 TIMEOUT=${TIMEOUT:-300}  # Timeout for entire batch run in seconds
 
-# Stress test files excluded from day-to-day golden generation.
-# These are large or slow files meant for dedicated performance testing.
-EXCLUDE="poi_many_merges.xlsx"
-
 mkdir -p "$GOLDEN_DIR"
 
 cd "$REPO_DIR"
 
-# Collect all test files, excluding stress tests
+# Collect all test files (stress tests live in data/test_files/stress/ and are excluded by path)
 FILES=()
 for f in "$TEST_DIR"/*.docx "$TEST_DIR"/*.pptx "$TEST_DIR"/*.xlsx \
          "$TEST_DIR"/*.odt "$TEST_DIR"/*.odp "$TEST_DIR"/*.ods \
          "$TEST_DIR"/*.epub "$TEST_DIR"/*.html "$TEST_DIR"/*.csv "$TEST_DIR"/*.tsv "$TEST_DIR"/*.md \
          "$TEST_DIR"/challenge/*.eml "$TEST_DIR"/challenge/*.mbox; do
   [ -f "$f" ] || continue
-  fname="$(basename "$f")"
-  # Skip excluded stress test files
-  case "$EXCLUDE" in
-    *"$fname"*) echo "  $fname ... SKIP (stress test)"; continue ;;
-  esac
   FILES+=("$f")
 done
 
