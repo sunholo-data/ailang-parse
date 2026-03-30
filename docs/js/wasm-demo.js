@@ -769,9 +769,9 @@
     var actionsEl = document.getElementById('output-actions');
     if (actionsEl) actionsEl.style.display = 'flex';
 
-    // Switch to Blocks tab (the "after" parsed view)
-    var blocksTab = document.querySelector('#output-tabs .dp-output-tab[data-tab="blocks"]');
-    if (blocksTab) window.switchOutputTab(blocksTab);
+    // Switch to A2UI tab (streaming rendered document)
+    var a2uiTab = document.querySelector('#output-tabs .dp-output-tab[data-tab="a2ui"]');
+    if (a2uiTab) window.switchOutputTab(a2uiTab);
   }
 
   // ── Preview rendering ──
