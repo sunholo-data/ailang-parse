@@ -718,7 +718,7 @@
   }
 
   // ── Output data (for copy/download) ──
-  var lastOutput = { json: '', markdown: '', a2ui: '', blocks: [] };
+  var lastOutput = { json: '', markdown: '', a2ui: '', a2uiNodes: [], blocks: [] };
 
   // ── Output rendering ──
   function showOutput(blocks, rawContent) {
@@ -748,6 +748,7 @@
       }
     }
     lastOutput.a2ui = JSON.stringify(a2uiNodes, null, 2);
+    lastOutput.a2uiNodes = a2uiNodes;
 
     // Blocks view
     if (panelBlocks) panelBlocks.innerHTML = renderBlocks(blocks);
@@ -758,8 +759,8 @@
     // Markdown view
     if (panelMarkdown) panelMarkdown.innerHTML = '<pre>' + escHtml(lastOutput.markdown) + '</pre>';
 
-    // A2UI view
-    if (panelA2UI) panelA2UI.innerHTML = renderA2UIDemo(a2uiNodes);
+    // A2UI view (DOM-based, streaming triggered on tab switch)
+    if (panelA2UI) buildA2UIDemo(a2uiNodes, panelA2UI);
 
     // Re-render preview (WASM is now ready, so XLSX/PPTX previews will work)
     renderPreview();
@@ -1113,6 +1114,11 @@
       var el = document.getElementById('panel-' + p);
       if (el) el.style.display = which === p ? 'block' : 'none';
     });
+
+    // Trigger A2UI streaming animation when tab becomes visible
+    if (which === 'a2ui' && panelA2UI && panelA2UI._a2uiMeta) {
+      triggerA2UIStream();
+    }
   };
 
   function renderBlocks(blocks) {
@@ -1194,102 +1200,330 @@
     }).join('\n\n');
   }
 
-  // ── A2UI visual renderer ──
+  // ── A2UI visual renderer (streaming/progressive) ──
   // Note: blocksToA2UI conversion is now handled by AILANG via WASM
   // (docparse/services/a2ui_formatter.ail → convertBlocksJsonToA2UI)
   // The JS duplicate was removed to eliminate drift risk.
-  function renderA2UIDemo(nodes) {
-    if (!Array.isArray(nodes) || nodes.length === 0) return '<div class="dp-block-text">No A2UI nodes</div>';
 
-    // Build lookup map
+  function typeClass(t) { return 'a2ui-type-' + t.replace(/[^a-z]/g, ''); }
+
+  // Walk the A2UI tree depth-first from root, collecting nodes with depth metadata
+  function flattenTreeOrder(nodes) {
     var nodeMap = {};
     nodes.forEach(function (n) { nodeMap[n.id] = n; });
+    var root = nodeMap['doc'] || nodes[0];
+    if (!root) return { ordered: [], nodeMap: nodeMap };
 
-    function typeClass(t) { return 'a2ui-type-' + t.replace(/[^a-z]/g, ''); }
-
-    function renderNode(node, depth) {
-      if (!node || depth > 10) return '';
-      var html = '<div class="a2ui-node">';
-      html += '<div class="a2ui-node-header">';
-      html += '<span class="a2ui-node-id">' + escHtml(node.id) + '</span>';
-      html += '<span class="a2ui-node-type ' + typeClass(node.type) + '">' + escHtml(node.type) + '</span>';
-
-      // Show label for containers
-      if (node.props && node.props.label) {
-        html += '<span style="font-size:11px;color:var(--text-muted)">' + escHtml(node.props.label) + '</span>';
-      }
-      html += '</div>';
-
-      // Render content preview based on type
-      if (node.type === 'heading' && node.props) {
-        var lvl = node.props.level || '1';
-        html += '<div class="a2ui-node-content" style="font-weight:700;font-size:' + (20 - parseInt(lvl) * 2) + 'px">' + escHtml(node.props.text || '') + '</div>';
-      } else if (node.type === 'text' && node.props) {
-        var txt = node.props.text || '';
-        html += '<div class="a2ui-node-content">' + escHtml(txt.length > 200 ? txt.substring(0, 200) + '...' : txt) + '</div>';
-      } else if (node.type === 'table' && node.props) {
-        try {
-          var hdrs = JSON.parse(node.props.headers || '[]');
-          var rows = JSON.parse(node.props.rows || '[]');
-          html += '<div class="a2ui-node-content" style="font-family:var(--font-mono);font-size:11px">' +
-            hdrs.length + ' cols, ' + rows.length + ' rows</div>';
-        } catch(e) { html += '<div class="a2ui-node-content">[table]</div>'; }
-      } else if (node.type === 'list' && node.props) {
-        try {
-          var items = JSON.parse(node.props.items || '[]');
-          html += '<div class="a2ui-node-content" style="font-family:var(--font-mono);font-size:11px">' +
-            items.length + ' items (' + (node.props.ordered === 'true' ? 'ordered' : 'unordered') + ')</div>';
-        } catch(e) { html += '<div class="a2ui-node-content">[list]</div>'; }
-      } else if (node.type === 'callout' && node.props) {
-        var cls = node.props.variant === 'delete' ? 'dp-block-change--delete' : 'dp-block-change--insert';
-        html += '<div class="dp-block-change ' + cls + '" style="font-size:12px">' +
-          '<strong>' + escHtml(node.props.variant || '') + '</strong> ' + escHtml(node.props.text || '') + '</div>';
-      } else if (node.type === 'image' && node.props) {
-        html += '<div class="a2ui-node-content" style="color:var(--dp-blue)">[Image: ' + escHtml(node.props.alt || node.props.mime || '') + ']</div>';
-      } else if (node.type === 'media' && node.props) {
-        html += '<div class="a2ui-node-content">[' + escHtml(node.props.mediaType || 'media') + ': ' + escHtml(node.props.description || '') + ']</div>';
-      } else if (node.type === 'key-value' && node.props) {
-        html += '<div class="a2ui-node-content"><strong>' + escHtml(node.props.label || '') + ':</strong> ' + escHtml(node.props.value || '') + '</div>';
-      }
-
-      // Show non-trivial props
-      if (node.props && Object.keys(node.props).length > 0 && node.type !== 'container') {
-        var propKeys = Object.keys(node.props).filter(function(k) { return k !== 'text' && k !== 'label'; });
-        if (propKeys.length > 0) {
-          html += '<div class="a2ui-node-props">';
-          propKeys.forEach(function(k) {
-            var v = node.props[k];
-            if (v.length > 40) v = v.substring(0, 40) + '...';
-            html += '<span>' + escHtml(k) + '=' + escHtml(v) + '</span>';
-          });
-          html += '</div>';
-        }
-      }
-
-      // Render children for containers
+    var ordered = [];
+    function walk(node, depth) {
+      if (!node || depth > 10) return;
+      ordered.push({ node: node, depth: depth });
       if (node.children && node.children.length > 0) {
-        html += '<div class="a2ui-container-children">';
         node.children.forEach(function (childId) {
           var child = nodeMap[childId];
-          if (child) html += renderNode(child, depth + 1);
+          if (child) walk(child, depth + 1);
         });
-        html += '</div>';
       }
-      html += '</div>';
-      return html;
+    }
+    walk(root, 0);
+    return { ordered: ordered, nodeMap: nodeMap };
+  }
+
+  // Compute animation delays: depth-wave cascade
+  function computeDelays(ordered) {
+    var total = ordered.length;
+    var interLevel = total > 80 ? 40 : 80;
+    var intraLevel = total > 80 ? 15 : 30;
+
+    // Group by depth, track index within each depth level
+    var depthCounts = {};
+    var delays = [];
+    ordered.forEach(function (entry) {
+      var d = entry.depth;
+      if (!depthCounts[d]) depthCounts[d] = 0;
+      var delay = (d * interLevel) + (depthCounts[d] * intraLevel);
+      delays.push(delay);
+      depthCounts[d]++;
+    });
+
+    // Cap at 3000ms
+    var maxDelay = Math.max.apply(null, delays);
+    if (maxDelay > 3000) {
+      var scale = 3000 / maxDelay;
+      delays = delays.map(function (d) { return Math.round(d * scale); });
+    }
+    return delays;
+  }
+
+  // Build a single A2UI node DOM element (no animation classes yet — added by container class)
+  function buildNodeEl(node, nodeMap, depth, orderIndex, delay) {
+    var el = document.createElement('div');
+    el.className = 'a2ui-node a2ui-node--hidden';
+    el.style.animationDelay = delay + 'ms';
+    el.setAttribute('data-a2ui-idx', orderIndex);
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'a2ui-node-header';
+    var idSpan = document.createElement('span');
+    idSpan.className = 'a2ui-node-id';
+    idSpan.textContent = node.id;
+    header.appendChild(idSpan);
+    var typeSpan = document.createElement('span');
+    typeSpan.className = 'a2ui-node-type ' + typeClass(node.type);
+    typeSpan.textContent = node.type;
+    header.appendChild(typeSpan);
+    if (node.props && node.props.label) {
+      var labelSpan = document.createElement('span');
+      labelSpan.style.cssText = 'font-size:11px;color:var(--text-muted)';
+      labelSpan.textContent = node.props.label;
+      header.appendChild(labelSpan);
+    }
+    el.appendChild(header);
+
+    // Content preview
+    var content = null;
+    if (node.type === 'heading' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      var lvl = parseInt(node.props.level || '1');
+      content.style.cssText = 'font-weight:700;font-size:' + (20 - lvl * 2) + 'px';
+      content.textContent = node.props.text || '';
+    } else if (node.type === 'text' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      var txt = node.props.text || '';
+      content.textContent = txt.length > 200 ? txt.substring(0, 200) + '...' : txt;
+    } else if (node.type === 'table' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      content.style.cssText = 'font-family:var(--font-mono);font-size:11px';
+      try {
+        var hdrs = JSON.parse(node.props.headers || '[]');
+        var rows = JSON.parse(node.props.rows || '[]');
+        content.textContent = hdrs.length + ' cols, ' + rows.length + ' rows';
+      } catch(e) { content.textContent = '[table]'; }
+    } else if (node.type === 'list' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      content.style.cssText = 'font-family:var(--font-mono);font-size:11px';
+      try {
+        var items = JSON.parse(node.props.items || '[]');
+        content.textContent = items.length + ' items (' + (node.props.ordered === 'true' ? 'ordered' : 'unordered') + ')';
+      } catch(e) { content.textContent = '[list]'; }
+    } else if (node.type === 'callout' && node.props) {
+      content = document.createElement('div');
+      var cls = node.props.variant === 'delete' ? 'dp-block-change--delete' : 'dp-block-change--insert';
+      content.className = 'dp-block-change ' + cls;
+      content.style.fontSize = '12px';
+      content.innerHTML = '<strong>' + escHtml(node.props.variant || '') + '</strong> ' + escHtml(node.props.text || '');
+    } else if (node.type === 'image' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      content.style.color = 'var(--dp-blue)';
+      content.textContent = '[Image: ' + (node.props.alt || node.props.mime || '') + ']';
+    } else if (node.type === 'media' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      content.textContent = '[' + (node.props.mediaType || 'media') + ': ' + (node.props.description || '') + ']';
+    } else if (node.type === 'key-value' && node.props) {
+      content = document.createElement('div');
+      content.className = 'a2ui-node-content';
+      content.innerHTML = '<strong>' + escHtml(node.props.label || '') + ':</strong> ' + escHtml(node.props.value || '');
+    }
+    if (content) el.appendChild(content);
+
+    // Props (non-trivial)
+    if (node.props && Object.keys(node.props).length > 0 && node.type !== 'container') {
+      var propKeys = Object.keys(node.props).filter(function(k) { return k !== 'text' && k !== 'label'; });
+      if (propKeys.length > 0) {
+        var propsDiv = document.createElement('div');
+        propsDiv.className = 'a2ui-node-props';
+        propKeys.forEach(function(k) {
+          var v = node.props[k];
+          if (v.length > 40) v = v.substring(0, 40) + '...';
+          var s = document.createElement('span');
+          s.textContent = k + '=' + v;
+          propsDiv.appendChild(s);
+        });
+        el.appendChild(propsDiv);
+      }
     }
 
-    // Build split view
-    var jsonStr = JSON.stringify(nodes, null, 2);
-    var html = '<div class="a2ui-demo">';
-    html += '<div class="a2ui-json"><div class="a2ui-label">A2UI JSON</div><pre>' + escHtml(jsonStr) + '</pre></div>';
-    html += '<div class="a2ui-preview"><div class="a2ui-label">Component Tree</div>';
-    // Render from root
-    var root = nodeMap['doc'] || nodes[0];
-    if (root) html += renderNode(root, 0);
-    html += '</div></div>';
-    return html;
+    return el;
   }
+
+  // Build the full A2UI demo DOM structure with streaming support
+  function buildA2UIDemo(nodes, container) {
+    // Clear previous
+    container.innerHTML = '';
+    container._a2uiMeta = null;
+    if (container._a2uiTimers) {
+      container._a2uiTimers.forEach(clearTimeout);
+      container._a2uiTimers = [];
+    }
+
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      container.innerHTML = '<div class="dp-block-text">No A2UI nodes</div>';
+      return;
+    }
+
+    var treeData = flattenTreeOrder(nodes);
+    var ordered = treeData.ordered;
+    var nodeMap = treeData.nodeMap;
+    var delays = computeDelays(ordered);
+
+    // Create the split-panel wrapper
+    var demo = document.createElement('div');
+    demo.className = 'a2ui-demo';
+
+    // ── Left: JSON panel ──
+    var jsonPanel = document.createElement('div');
+    jsonPanel.className = 'a2ui-json';
+    var jsonLabel = document.createElement('div');
+    jsonLabel.className = 'a2ui-label';
+    jsonLabel.textContent = 'A2UI JSON';
+    jsonPanel.appendChild(jsonLabel);
+
+    var pre = document.createElement('pre');
+    var jsonSpans = [];
+
+    // Build per-node JSON spans
+    pre.appendChild(document.createTextNode('[\n'));
+    ordered.forEach(function (entry, i) {
+      var span = document.createElement('span');
+      span.className = 'a2ui-json-node a2ui-node--hidden';
+      span.style.animationDelay = delays[i] + 'ms';
+      span.setAttribute('data-a2ui-idx', i);
+      span.textContent = '  ' + JSON.stringify(entry.node, null, 2).split('\n').join('\n  ');
+      if (i < ordered.length - 1) span.textContent += ',';
+      span.textContent += '\n';
+      pre.appendChild(span);
+      jsonSpans.push(span);
+    });
+    pre.appendChild(document.createTextNode(']'));
+    jsonPanel.appendChild(pre);
+    demo.appendChild(jsonPanel);
+
+    // ── Right: Component tree ──
+    var preview = document.createElement('div');
+    preview.className = 'a2ui-preview';
+
+    // Header with replay controls
+    var streamHeader = document.createElement('div');
+    streamHeader.className = 'a2ui-stream-header';
+    var treeLabel = document.createElement('div');
+    treeLabel.className = 'a2ui-label';
+    treeLabel.textContent = 'Component Tree';
+    streamHeader.appendChild(treeLabel);
+
+    var controls = document.createElement('div');
+    controls.className = 'a2ui-stream-controls';
+    var status = document.createElement('span');
+    status.className = 'a2ui-stream-status';
+    status.innerHTML = '<span class="a2ui-stream-counter">0/' + ordered.length + '</span> nodes';
+    controls.appendChild(status);
+    var replayBtn = document.createElement('button');
+    replayBtn.className = 'a2ui-replay-btn';
+    replayBtn.textContent = 'Replay';
+    replayBtn.onclick = function () { window.triggerA2UIStream(); };
+    controls.appendChild(replayBtn);
+    streamHeader.appendChild(controls);
+    preview.appendChild(streamHeader);
+
+    // Build tree DOM recursively, assigning delays from the ordered list
+    var orderLookup = {};
+    ordered.forEach(function (entry, i) {
+      orderLookup[entry.node.id] = { index: i, delay: delays[i], depth: entry.depth };
+    });
+
+    function buildTree(node, depth) {
+      if (!node || depth > 10) return null;
+      var info = orderLookup[node.id];
+      if (!info) return null;
+
+      var el = buildNodeEl(node, nodeMap, info.depth, info.index, info.delay);
+
+      // Recursively build children
+      if (node.children && node.children.length > 0) {
+        var childrenDiv = document.createElement('div');
+        childrenDiv.className = 'a2ui-container-children';
+        var parentDelay = info.delay;
+        childrenDiv.style.animationDelay = parentDelay + 'ms';
+        node.children.forEach(function (childId) {
+          var child = nodeMap[childId];
+          if (child) {
+            var childEl = buildTree(child, depth + 1);
+            if (childEl) childrenDiv.appendChild(childEl);
+          }
+        });
+        el.appendChild(childrenDiv);
+      }
+      return el;
+    }
+
+    var root = nodeMap['doc'] || nodes[0];
+    if (root) {
+      var rootEl = buildTree(root, 0);
+      if (rootEl) preview.appendChild(rootEl);
+    }
+    demo.appendChild(preview);
+    container.appendChild(demo);
+
+    // Store metadata for streaming trigger
+    container._a2uiMeta = {
+      totalNodes: ordered.length,
+      delays: delays,
+      jsonSpans: jsonSpans,
+      demo: demo
+    };
+  }
+
+  // Trigger the streaming animation (called on tab switch + replay)
+  function triggerA2UIStream() {
+    if (!panelA2UI || !panelA2UI._a2uiMeta) return;
+    var meta = panelA2UI._a2uiMeta;
+    var demo = meta.demo;
+    if (!demo) return;
+
+    // Clear previous timers
+    if (panelA2UI._a2uiTimers) {
+      panelA2UI._a2uiTimers.forEach(clearTimeout);
+    }
+    panelA2UI._a2uiTimers = [];
+
+    // Reset: remove streaming class, force reflow
+    demo.classList.remove('a2ui-demo--streaming');
+    // Also reset the status badge
+    var statusEl = demo.querySelector('.a2ui-stream-status');
+    if (statusEl) statusEl.classList.remove('done');
+    var counter = demo.querySelector('.a2ui-stream-counter');
+    if (counter) counter.textContent = '0/' + meta.totalNodes;
+
+    void demo.offsetHeight; // force reflow to reset CSS animations
+
+    // Start streaming
+    demo.classList.add('a2ui-demo--streaming');
+
+    // Schedule counter updates + JSON auto-scroll to match animation timing
+    meta.delays.forEach(function (delay, i) {
+      var t = setTimeout(function () {
+        if (counter) counter.textContent = (i + 1) + '/' + meta.totalNodes;
+        // Auto-scroll JSON panel to current node
+        var jsonSpan = meta.jsonSpans[i];
+        if (jsonSpan && jsonSpan.parentNode && jsonSpan.parentNode.parentNode) {
+          var scrollContainer = jsonSpan.parentNode.parentNode;
+          scrollContainer.scrollTop = jsonSpan.offsetTop - 40;
+        }
+        // Mark done on last node
+        if (i === meta.totalNodes - 1 && statusEl) {
+          statusEl.classList.add('done');
+        }
+      }, delay + 50);
+      panelA2UI._a2uiTimers.push(t);
+    });
+  }
+  window.triggerA2UIStream = triggerA2UIStream;
 
   // ── Helpers ──
   function showError(msg) {
