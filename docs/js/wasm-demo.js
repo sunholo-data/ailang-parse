@@ -1190,6 +1190,21 @@
     });
   });
 
-  // ── Start WASM loading in background ──
-  initWasm();
+  // ── Start WASM loading (desktop auto-loads, mobile defers) ──
+  if (window.innerWidth >= 768) {
+    initWasm();
+  } else {
+    // Mobile: show a load button instead of auto-downloading 35MB
+    if (statusEl) statusEl.textContent = 'Tap to load parser (35 MB)';
+    setDotState('');
+    var mobileLoadBtn = document.createElement('button');
+    mobileLoadBtn.className = 'dp-dropzone-btn';
+    mobileLoadBtn.textContent = 'Load Parser (35 MB)';
+    mobileLoadBtn.style.cssText = 'display:block;margin:12px auto;font-size:13px;padding:10px 24px';
+    mobileLoadBtn.onclick = function () {
+      mobileLoadBtn.remove();
+      initWasm();
+    };
+    if (dropzone) dropzone.parentNode.insertBefore(mobileLoadBtn, dropzone);
+  }
 })();

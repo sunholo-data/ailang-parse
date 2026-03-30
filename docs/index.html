@@ -15,6 +15,295 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/design-system.css">
 <link rel="stylesheet" href="css/docparse.css">
+<style>
+/* ── WASM Demo (ported from try.html) ── */
+.dp-dropzone {
+  background: var(--bg-card);
+  border: 2px dashed var(--dp-blue-border);
+  border-radius: var(--radius);
+  padding: 48px 28px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s;
+  position: relative;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.dp-dropzone:hover, .dp-dropzone.dragover {
+  border-color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.06);
+}
+.dp-dropzone.dragover { transform: scale(1.01); }
+.dp-dropzone-icon {
+  width: 56px; height: 56px;
+  margin: 0 auto 16px;
+  color: var(--dp-blue);
+  opacity: 0.6;
+}
+.dp-dropzone-icon svg {
+  width: 56px; height: 56px;
+  stroke: currentColor; fill: none;
+  stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-dropzone h3 {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.dp-dropzone p {
+  font-size: 13px; color: var(--text-muted);
+  margin-bottom: 16px; line-height: 1.5;
+}
+.dp-dropzone input[type="file"] { display: none; }
+.dp-dropzone-btn {
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 600;
+  padding: 8px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  color: var(--dp-blue);
+  border: 1px solid var(--dp-blue-border);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.dp-dropzone-btn:hover { background: var(--dp-blue); color: #fff; }
+.dp-format-badges {
+  display: flex; flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px; margin-top: 16px;
+}
+.dp-format-badges span {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500;
+  padding: 2px 8px; border-radius: 3px;
+  background: var(--bg-input); color: var(--text-muted);
+}
+.dp-output {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 280px; overflow: hidden;
+}
+.dp-output-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 60px 28px; text-align: center;
+  color: var(--text-muted); font-size: 14px;
+  min-height: 280px;
+}
+.dp-output-empty svg {
+  width: 40px; height: 40px;
+  stroke: var(--border-active); fill: none;
+  stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  margin-bottom: 12px; opacity: 0.5;
+}
+.dp-info-bar {
+  display: none; align-items: center;
+  gap: 10px; padding: 10px 20px;
+  background: var(--dp-blue-faded);
+  border-bottom: 1px solid var(--dp-blue-border);
+  flex-wrap: wrap;
+}
+.dp-info-bar.visible { display: flex; }
+.dp-info-chip {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  padding: 3px 10px; border-radius: 4px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--dp-blue);
+}
+.dp-output .dp-output-tabs {
+  display: none; padding: 0 20px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+.dp-output .dp-output-tabs.visible { display: flex; }
+.dp-output-content {
+  padding: 20px; max-height: 500px;
+  overflow: auto; scrollbar-width: thin;
+}
+.dp-output-content pre {
+  margin: 0; font-family: var(--font-mono);
+  font-size: 12px; line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre-wrap; word-break: break-word;
+}
+.dp-block { margin-bottom: 12px; }
+.dp-block-heading { font-family: var(--font-display); font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.dp-block-heading[data-level="1"] { font-size: 22px; }
+.dp-block-heading[data-level="2"] { font-size: 18px; }
+.dp-block-heading[data-level="3"] { font-size: 15px; }
+.dp-block-text { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+.dp-block-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
+.dp-block-table th, .dp-block-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.dp-block-table th { background: var(--dp-blue-faded); font-weight: 600; }
+.dp-block-change { padding: 6px 10px; border-radius: 4px; font-size: 13px; margin-bottom: 4px; }
+.dp-block-change--insert { background: var(--success-bg); color: var(--success); border-left: 3px solid var(--success); }
+.dp-block-change--delete { background: #fef2f2; color: #ef4444; border-left: 3px solid #ef4444; text-decoration: line-through; }
+.dp-block-section { border-left: 3px solid var(--dp-blue-border); padding-left: 12px; margin-bottom: 8px; }
+.dp-block-section-label { font-family: var(--font-mono); font-size: 10px; color: var(--dp-blue); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+.a2ui-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.a2ui-json { max-height: 460px; overflow: auto; scrollbar-width: thin; }
+.a2ui-json pre { margin: 0; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+.a2ui-preview { max-height: 460px; overflow: auto; scrollbar-width: thin; }
+.a2ui-node { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; background: var(--bg-card); }
+.a2ui-node-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.a2ui-node-id { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.a2ui-node-type { font-family: var(--font-mono); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
+.a2ui-type-container { background: rgba(139,92,246,0.12); color: #7c3aed; }
+.a2ui-type-heading { background: rgba(37,99,235,0.12); color: var(--dp-blue); }
+.a2ui-type-text { background: rgba(107,114,128,0.12); color: #6b7280; }
+.a2ui-type-table { background: rgba(5,150,105,0.12); color: #059669; }
+.a2ui-type-list { background: rgba(245,158,11,0.12); color: #d97706; }
+.a2ui-type-image { background: rgba(236,72,153,0.12); color: #ec4899; }
+.a2ui-type-media { background: rgba(168,85,247,0.12); color: #a855f7; }
+.a2ui-type-callout { background: rgba(239,68,68,0.12); color: #ef4444; }
+.a2ui-type-key-value { background: rgba(107,114,128,0.08); color: #9ca3af; }
+.a2ui-type-divider { background: rgba(107,114,128,0.08); color: #9ca3af; }
+.a2ui-node-content { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.a2ui-node-props { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+.a2ui-node-props span { margin-right: 8px; }
+.a2ui-container-children { margin-left: 16px; border-left: 2px solid var(--border); padding-left: 12px; margin-top: 6px; }
+.a2ui-label { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px; }
+.dp-status-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; margin-bottom: 8px;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.dp-status-left { display: flex; align-items: center; gap: 8px; }
+.dp-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.3s ease; flex-shrink: 0;
+}
+.dp-status-dot.loading { background: #f59e0b; animation: dp-pulse 1s ease infinite; }
+.dp-status-dot.ready { background: #059669; }
+.dp-status-dot.processing { background: var(--dp-blue); animation: dp-pulse 1.2s ease infinite; }
+.dp-status-dot.error { background: #ef4444; }
+@keyframes dp-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.7; }
+}
+.dp-file-info {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-muted); margin-left: auto;
+}
+.dp-pipeline-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px; margin-top: 16px;
+}
+.dp-pipeline-panel h3 {
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 700;
+  color: var(--text-primary); margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.dp-pipeline-panel h3 svg { width: 14px; height: 14px; stroke: var(--dp-blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#pipeline-log {
+  font-family: var(--font-mono); font-size: 11px;
+  line-height: 1.8; color: var(--text-secondary);
+  max-height: 300px; overflow-y: auto; scrollbar-width: thin;
+}
+#pipeline-log:empty::after {
+  content: 'Upload a file to see the parsing pipeline...';
+  color: var(--text-muted); font-style: italic;
+}
+.dp-pipeline-line { padding: 1px 0; animation: dp-fadeInUp 0.15s ease both; }
+.dp-pipeline-stage {
+  display: inline-block; min-width: 48px;
+  font-weight: 600; color: var(--dp-blue);
+  text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px;
+}
+.dp-pipeline-stage.done { color: #059669; }
+.dp-pipeline-stage.error { color: #ef4444; }
+@keyframes dp-fadeInUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.dp-demo-btn {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 600;
+  padding: 4px 12px; border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer; transition: all 0.15s;
+}
+.dp-demo-btn:hover {
+  border-color: var(--dp-blue-border);
+  color: var(--dp-blue); background: var(--dp-blue-faded);
+}
+.dp-demo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dp-ai-upsell {
+  display: none; padding: 20px;
+  background: var(--warning-bg);
+  border: 1px solid rgba(217, 119, 6, 0.15);
+  border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-secondary); line-height: 1.6;
+}
+.dp-ai-upsell.visible { display: block; }
+.dp-ai-upsell strong { color: var(--warning); }
+.office-preview-page {
+  background: #fff; padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 500px; overflow-y: auto;
+  font-size: 14px; line-height: 1.7; color: var(--text-primary);
+}
+.office-preview-page img { max-width: 100%; height: auto; }
+.office-preview-page table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.office-preview-page th, .office-preview-page td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; font-size: 13px; }
+.office-preview-page th { background: var(--dp-blue-faded); font-weight: 600; }
+.office-preview-note { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+.office-preview-fallback { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; }
+.xlsx-sheet-tabs { display: flex; gap: 2px; margin-bottom: 12px; flex-wrap: wrap; }
+.xlsx-sheet-tab {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  padding: 5px 14px; border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer; transition: all 0.15s;
+}
+.xlsx-sheet-tab:hover { border-color: var(--dp-blue-border); color: var(--dp-blue); }
+.xlsx-sheet-tab.active { background: var(--dp-blue-faded); border-color: var(--dp-blue-border); color: var(--dp-blue); }
+.xlsx-sheet-content { display: none; }
+.xlsx-sheet-content.active { display: block; }
+.xlsx-table-wrap { overflow-x: auto; }
+.xlsx-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.xlsx-table th, .xlsx-table td { padding: 5px 10px; border: 1px solid var(--border); text-align: left; }
+.xlsx-table th { background: var(--dp-blue-faded); font-weight: 600; font-size: 11px; }
+.xlsx-table tbody tr:hover { background: rgba(37, 99, 235, 0.02); }
+.xlsx-sheet-name { font-family: var(--font-display); font-size: 14px; font-weight: 700; margin-bottom: 8px; color: var(--text-primary); }
+.pptx-slides { display: flex; flex-direction: column; gap: 16px; }
+.pptx-slide { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.pptx-slide-number {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 6px 14px; background: var(--bg-input);
+  color: var(--text-muted); border-bottom: 1px solid var(--border);
+}
+
+/* ── Details/summary styling ── */
+details summary::-webkit-details-marker { display: none; }
+details[open] summary svg { transform: rotate(180deg); }
+
+/* ── Mobile responsive ── */
+@media (max-width: 768px) {
+  #try-it > div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+  .a2ui-demo { grid-template-columns: 1fr; }
+  #next-steps > div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+</style>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -78,15 +367,7 @@
   <!-- ============ HERO ============ -->
   <section class="hero" id="hero">
     <h1 class="reveal">Stop parsing photos<br>of your <span class="dp-accent">documents</span>.</h1>
-    <p class="subtitle reveal reveal-delay-1">Your DOCX is already structured XML. Converting to PDF first destroys data, then ML spends compute trying to recover it. AILANG Parse reads the XML directly &mdash; full structure preserved, sub-11ms, zero dependencies.</p>
-
-    <div class="reveal reveal-delay-1" style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:16px 0 8px;">
-      <a href="https://github.com/sunholo-data/ailang"><img src="https://img.shields.io/badge/ailang-sunholo%2Failang__parse-blue?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0id2hpdGUiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHRleHQgeD0iMiIgeT0iMTMiIGZvbnQtc2l6ZT0iMTMiPkHwnZC+PC90ZXh0Pjwvc3ZnPg==" alt="AILANG Registry"></a>
-      <a href="https://pypi.org/project/ailang-parse/"><img src="https://img.shields.io/pypi/v/ailang-parse?logo=python&logoColor=white&label=PyPI" alt="PyPI"></a>
-      <a href="https://www.npmjs.com/package/@ailang/parse"><img src="https://img.shields.io/npm/v/@ailang/parse?logo=npm&label=npm" alt="npm"></a>
-      <a href="https://github.com/sunholo-data/ailang-parse-go"><img src="https://img.shields.io/github/v/tag/sunholo-data/ailang-parse-go?logo=go&logoColor=white&label=Go" alt="Go"></a>
-      <a href="https://github.com/sunholo-data/ailang-parse/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/sunholo-data/ailang-parse/ci.yml?logo=github&label=CI" alt="CI"></a>
-    </div>
+    <p class="subtitle reveal reveal-delay-1">Your DOCX is already structured XML. AILANG Parse reads it directly &mdash; full structure preserved, sub-11ms, zero dependencies.</p>
 
     <!-- Path A vs Path B diagram -->
     <div class="dp-hero-paths reveal reveal-delay-2" style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin:28px 0 12px;">
@@ -133,60 +414,205 @@
       </div>
     </div>
 
-    <div class="dp-hero-ctas reveal">
-      <a href="try.html" class="dp-btn dp-btn--primary">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Try in Browser
-      </a>
-      <a href="api.html" class="dp-btn dp-btn--secondary">
-        API &amp; SDKs
-      </a>
+  </section>
+
+  <!-- ============ WASM DEMO ============ -->
+  <section class="section reveal" id="try-it">
+    <div class="section-header">
+      <span class="section-title">Try It Now</span>
+      <span class="section-count">in your browser</span>
     </div>
 
-    <p class="note reveal">
-      Powered by <a href="https://github.com/sunholo-data/ailang" style="color: var(--primary);">AILANG</a>.
-    </p>
+    <!-- Status bar -->
+    <div class="dp-status-bar">
+      <div class="dp-status-left">
+        <div class="dp-status-dot loading" id="status-dot"></div>
+        <span id="wasm-status" style="color:var(--text-secondary)">Loading WASM runtime...</span>
+      </div>
+      <span class="dp-file-info" id="file-info"></span>
+    </div>
+
+    <!-- Privacy notice -->
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:8px;background:rgba(5,150,105,0.06);border:1px solid rgba(5,150,105,0.15);margin-bottom:16px;font-size:12px;color:#059669;font-weight:500">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      All parsing happens locally via WebAssembly. Your files never leave the browser.
+    </div>
+
+    <!-- Demo file buttons -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;align-items:center">
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);font-weight:600">Try a sample:</span>
+      <button class="dp-demo-btn" data-file="assets/sample.docx">Sample DOCX</button>
+      <button class="dp-demo-btn" data-file="assets/tables.docx">Tables</button>
+      <button class="dp-demo-btn" data-file="assets/track_changes_move.docx">Track Changes</button>
+      <button class="dp-demo-btn" data-file="assets/comments.docx">Comments</button>
+      <button class="dp-demo-btn" data-file="assets/pandoc_inline_images.docx">Images</button>
+      <button class="dp-demo-btn" data-file="assets/poi_sampleshow.pptx">Slides PPTX</button>
+      <button class="dp-demo-btn" data-file="assets/pandoc_basic.xlsx">Spreadsheet</button>
+    </div>
+
+    <!-- Main layout: dropzone + output -->
+    <div style="display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start">
+      <!-- Left: Drop zone -->
+      <div>
+        <div class="dp-dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+          <div class="dp-dropzone-icon">
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <h3>Drop a file here</h3>
+          <p>Or click to browse</p>
+          <button class="dp-dropzone-btn" onclick="event.stopPropagation(); document.getElementById('file-input').click()">Choose File</button>
+          <input type="file" id="file-input" accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.epub,.html,.htm,.md,.csv,.tsv,.pdf,.png,.jpg,.jpeg">
+          <div class="dp-format-badges">
+            <span>DOCX</span><span>PPTX</span><span>XLSX</span><span>ODT</span><span>ODP</span><span>ODS</span>
+            <span>HTML</span><span>MD</span><span>CSV</span><span>EPUB</span><span>PDF*</span><span>PNG*</span>
+          </div>
+        </div>
+
+        <!-- Pipeline log -->
+        <div class="dp-pipeline-panel" id="pipeline-panel" style="display:none">
+          <h3><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Parsing Pipeline</h3>
+          <div id="pipeline-log"></div>
+        </div>
+      </div>
+
+      <!-- Right: Output -->
+      <div class="dp-output" id="output-panel">
+        <div class="dp-info-bar" id="info-bar"></div>
+        <div class="dp-output-tabs" id="output-tabs" style="justify-content:space-between">
+          <div style="display:flex;gap:2px">
+            <span class="dp-output-tab active" data-tab="preview" onclick="switchOutputTab(this)">Original</span>
+            <span class="dp-output-tab" data-tab="blocks" onclick="switchOutputTab(this)">Parsed</span>
+            <span class="dp-output-tab" data-tab="json" onclick="switchOutputTab(this)">JSON</span>
+            <span class="dp-output-tab" data-tab="markdown" onclick="switchOutputTab(this)">Markdown</span>
+            <span class="dp-output-tab" data-tab="a2ui" onclick="switchOutputTab(this)">A2UI</span>
+          </div>
+          <div id="output-actions" style="display:none;gap:4px;align-items:center;padding:6px 0">
+            <button id="copy-output-btn" onclick="dpCopyOutput()" style="font-family:var(--font-mono);font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all .15s">Copy</button>
+            <button onclick="dpDownloadOutput()" style="font-family:var(--font-mono);font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all .15s">Download</button>
+          </div>
+        </div>
+        <div class="dp-output-empty" id="output-empty">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Drop a document or try a sample to see it parsed
+        </div>
+        <div class="dp-output-content" id="panel-blocks" style="display:none"></div>
+        <div class="dp-output-content" id="panel-preview" style="display:none"></div>
+        <div class="dp-output-content" id="panel-json" style="display:none"></div>
+        <div class="dp-output-content" id="panel-markdown" style="display:none"></div>
+        <div class="dp-output-content" id="panel-a2ui" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- AI upsell for PDF -->
+    <div class="dp-ai-upsell" id="ai-upsell" style="display:none;margin-top:12px">
+      <strong>This format requires AI.</strong> Use the <a href="api.html" style="color:var(--dp-blue)">AILANG Parse API</a> for server-side PDF/image parsing with 60 free requests per day.
+    </div>
   </section>
 
   <hr class="dp-divider">
 
-  <!-- ============ DEMOS ============ -->
-  <section class="section reveal" id="get-started">
+  <!-- ============ CONVERSION FUNNEL ============ -->
+  <section class="section reveal" id="next-steps">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:800px;margin:0 auto">
+      <div id="funnel-step-1" style="text-align:center;padding:24px 16px;background:var(--bg-card);border:2px solid var(--dp-blue,#2563eb);border-radius:var(--radius);position:relative">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--dp-blue,#2563eb);color:#fff;font-family:var(--font-display);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 10px">1</div>
+        <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:4px">Try it</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5">Parse a document in your browser. No signup, no install.</div>
+      </div>
+      <div style="text-align:center;padding:24px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);color:var(--text-secondary);font-family:var(--font-display);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 10px">2</div>
+        <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:4px">Use the API</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:10px">60 requests/day free. Python, JS, Go SDKs.</div>
+        <a href="api.html" class="dp-btn dp-btn--primary" style="font-size:12px;padding:6px 16px">Get API Key</a>
+      </div>
+      <div style="text-align:center;padding:24px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);color:var(--text-secondary);font-family:var(--font-display);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 10px">3</div>
+        <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:4px">Install locally</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:10px">Unlimited local parsing. Zero dependencies.</div>
+        <a href="selfhost.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:6px 16px">Install CLI</a>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ MARKET COMPARISON ============ -->
+  <section class="section reveal" id="comparison">
     <div class="section-header">
-      <span class="section-title">Get Started</span>
-      <span class="section-count">3 ways</span>
+      <span class="section-title">How Document Parsers Work</span>
     </div>
 
-    <div class="dp-demos-grid">
-      <a href="try.html" class="dp-demo-card dp-demo-card--parse">
-        <span class="dp-demo-arrow">&rarr;</span>
-        <div class="dp-demo-icon"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
-        <div class="dp-demo-name">Try in Browser</div>
-        <div class="dp-demo-desc">Drop a file and see structured output instantly. All parsing runs locally via WebAssembly &mdash; your files never leave the browser.</div>
-        <div class="dp-demo-meta">
-          <span class="dp-demo-badge dp-demo-badge--wasm">WASM</span>
-          <span class="dp-demo-badge dp-demo-badge--wasm">Private</span>
-        </div>
-      </a>
-
-      <a href="api.html" class="dp-demo-card dp-demo-card--extract">
-        <span class="dp-demo-arrow">&rarr;</span>
-        <div class="dp-demo-icon"><svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
-        <div class="dp-demo-name">API &amp; SDKs</div>
-        <div class="dp-demo-desc">REST API with Python, JavaScript, and Go SDKs. Drop-in replacement for Unstructured. Free tier with 20 requests/day.</div>
-        <div class="dp-demo-meta">
-          <span class="dp-demo-badge dp-demo-badge--api">REST</span>
-          <span class="dp-demo-badge dp-demo-badge--provider">Python</span>
-          <span class="dp-demo-badge dp-demo-badge--provider">JS</span>
-          <span class="dp-demo-badge dp-demo-badge--provider">Go</span>
-        </div>
-      </a>
-
+    <div class="dp-table-wrap">
+    <table class="compare-table" style="font-size:13px">
+      <thead>
+        <tr>
+          <th></th>
+          <th class="dp-col" style="min-width:140px">AILANG Parse</th>
+          <th style="min-width:130px">PDF-first parsers</th>
+          <th style="min-width:130px">Wrapper libraries</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Method</strong></td>
+          <td class="win">Direct XML extraction</td>
+          <td>Convert to PDF &rarr; ML reconstruction</td>
+          <td>mammoth / pandas text extraction</td>
+        </tr>
+        <tr>
+          <td><strong>Track changes</strong></td>
+          <td class="win">Full (author, date, type)</td>
+          <td class="no">Lost in PDF conversion</td>
+          <td class="no">Not extracted</td>
+        </tr>
+        <tr>
+          <td><strong>Merged cells</strong></td>
+          <td class="win">Structural (colspan/rowspan)</td>
+          <td class="no">Flattened</td>
+          <td class="no">Flattened</td>
+        </tr>
+        <tr>
+          <td><strong>Comments</strong></td>
+          <td class="win">Author-attributed</td>
+          <td class="no">Dropped</td>
+          <td class="no">Dropped</td>
+        </tr>
+        <tr>
+          <td><strong>Speed</strong></td>
+          <td class="win">&lt;11ms</td>
+          <td>2&ndash;5 seconds</td>
+          <td>~500ms</td>
+        </tr>
+        <tr>
+          <td><strong>Dependencies</strong></td>
+          <td class="win">None</td>
+          <td class="no">Python + ML libs</td>
+          <td class="no">Python + wrappers</td>
+        </tr>
+        <tr>
+          <td><strong>Browser / WASM</strong></td>
+          <td class="win">Yes</td>
+          <td class="no">No</td>
+          <td class="no">No</td>
+        </tr>
+        <tr>
+          <td><strong>Privacy</strong></td>
+          <td class="win">Client-side only</td>
+          <td>Server required</td>
+          <td>Server required</td>
+        </tr>
+        <tr>
+          <td><strong>OfficeDocBench</strong></td>
+          <td class="win">96.6%</td>
+          <td>53&ndash;63%</td>
+          <td>73%</td>
+        </tr>
+      </tbody>
+    </table>
     </div>
-
-    <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-muted)">
-      More interactive demos: <a href="https://sunholo.com/ailang-demos/" style="color:var(--dp-blue)">WASM demos</a> &mdash;
-      document extraction, AI contracts, Z3 verification, voice parsing
+    <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:10px;line-height:1.5">
+      PDF-first: Unstructured, Docling, LlamaParse. Wrappers: MarkItDown.<br>
+      <a href="benchmarks.html" style="color:var(--dp-blue)">Full benchmark methodology and results &rarr;</a>
     </p>
   </section>
 
@@ -730,11 +1156,13 @@
 
   <hr class="dp-divider">
 
-  <!-- ============ HOW IT WORKS ============ -->
-  <section class="section reveal" id="how-it-works">
-    <div class="section-header">
-      <span class="section-title">How It Works</span>
-    </div>
+  <!-- ============ HOW IT WORKS + USAGE (collapsed for focus) ============ -->
+  <details class="section reveal" id="how-it-works" style="cursor:pointer">
+    <summary style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text-primary);padding:12px 0;list-style:none;display:flex;align-items:center;gap:8px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg>
+      How It Works &amp; CLI Usage
+    </summary>
+
     <p class="section-desc">
       A single pipeline handles all formats. The format router detects the file type,
       selects the appropriate parser, and produces a unified Block ADT.
@@ -783,15 +1211,10 @@
       <span class="dp-adt-variant">AudioBlock</span>
       <span class="dp-adt-variant">VideoBlock</span>
     </div>
-  </section>
 
-  <hr class="dp-divider">
+    <hr class="dp-divider" style="margin:24px 0">
 
-  <!-- ============ CODE EXAMPLES ============ -->
-  <section class="section reveal" id="usage">
-    <div class="section-header">
-      <span class="section-title">Usage</span>
-    </div>
+    <h3 style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:4px">Usage</h3>
     <p class="section-desc">One command. Every format. CLI or library.</p>
 
     <div class="dp-code-tabs">
@@ -827,73 +1250,8 @@
 <span class="cmd">docparse</span> <span class="string">report.docx</span> <span class="flag">--summarize</span>        <span class="comment"># AI document summary</span></code></div>
       </div>
     </div>
-  </section>
+  </details>
 
-  <hr class="dp-divider">
-
-  <!-- ============ AI INTEGRATION ============ -->
-  <section class="section reveal" id="ai">
-    <div class="section-header">
-      <span class="section-title">AI-Agnostic</span>
-      <span class="section-count">Any model</span>
-    </div>
-    <p class="section-desc">
-      AILANG Parse uses AILANG's AI effect system. Same code, any backend &mdash; swap <code style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-input); padding: 2px 7px; border-radius: 4px;">--ai</code> to change the model.
-      AI usage is bounded by capability budgets, so costs are predictable.
-    </p>
-
-    <div class="dp-providers">
-      <div class="dp-provider">
-        <div class="dp-provider-name">Google Gemini</div>
-        <div class="dp-provider-models">gemini-2.5-flash, gemini-3-flash-preview</div>
-        <div class="dp-provider-auth">ADC or API key</div>
-        <span class="dp-provider-badge dp-provider-badge--default">Default</span>
-      </div>
-      <div class="dp-provider">
-        <div class="dp-provider-name">Anthropic Claude</div>
-        <div class="dp-provider-models">claude-haiku-4-5, claude-sonnet-4</div>
-        <div class="dp-provider-auth">API key</div>
-      </div>
-      <div class="dp-provider">
-        <div class="dp-provider-name">Ollama (Local)</div>
-        <div class="dp-provider-models">granite-docling, gemma3, llava</div>
-        <div class="dp-provider-auth">No API key &mdash; runs locally</div>
-        <span class="dp-provider-badge dp-provider-badge--free">Free</span>
-      </div>
-    </div>
-  </section>
-
-  <hr class="dp-divider">
-
-  <!-- ============ ROADMAP ============ -->
-  <section class="section reveal" id="roadmap">
-    <div class="section-header">
-      <span class="section-title">Roadmap</span>
-    </div>
-
-    <div class="coming-soon">
-      <div class="coming-soon-item">
-        <span class="coming-soon-badge">v0.2.0</span>
-        <div class="feature-name">Two-Stage PDF Pipeline</div>
-        <div class="feature-detail">Optimized PDF parsing for local Ollama models. Text extraction first, then structured output. Better results from smaller models.</div>
-      </div>
-      <div class="coming-soon-item">
-        <span class="coming-soon-badge">v0.4.0</span>
-        <div class="feature-name">Standalone Binary</div>
-        <div class="feature-detail">Pre-built Go binary. Single executable for macOS, Linux, and Windows. No AILANG CLI installation required.</div>
-      </div>
-      <div class="coming-soon-item">
-        <span class="coming-soon-badge" style="background:var(--success);color:#fff">v0.9.0</span>
-        <div class="feature-name">SDKs &amp; Website</div>
-        <div class="feature-detail">Python, JavaScript/TypeScript, and Go client SDKs. Static website with dashboard for API key management.</div>
-      </div>
-      <div class="coming-soon-item">
-        <span class="coming-soon-badge" style="background:var(--success);color:#fff">v0.10.0</span>
-        <div class="feature-name">Quarto Integration</div>
-        <div class="feature-detail">QMD generator: Block ADT to Quarto Markdown. <strong>Generate &amp; convert to .qmd — done.</strong> Next: server-side Quarto rendering via existing Cloud Run service for publication-quality PDF/HTML/DOCX output.</div>
-      </div>
-    </div>
-  </section>
 
   <!-- ============ FOOTER ============ -->
   <div id="footer-mount"></div>
@@ -901,5 +1259,8 @@
 </div>
 
 <script src="js/components.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/mammoth.browser.min.js"></script>
+<script src="js/wasm-demo.js"></script>
 </body>
 </html>
