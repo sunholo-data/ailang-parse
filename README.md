@@ -1,5 +1,11 @@
 # AILANG Parse
 
+[![AILANG Registry](https://img.shields.io/badge/ailang-sunholo%2Failang__parse-blue?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0id2hpdGUiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHRleHQgeD0iMiIgeT0iMTMiIGZvbnQtc2l6ZT0iMTMiPkHwnZC+PC90ZXh0Pjwvc3ZnPg==)](https://github.com/sunholo-data/ailang)
+[![PyPI](https://img.shields.io/pypi/v/ailang-parse?logo=python&logoColor=white&label=PyPI)](https://pypi.org/project/ailang-parse/)
+[![npm](https://img.shields.io/npm/v/@ailang/parse?logo=npm&label=npm)](https://www.npmjs.com/package/@ailang/parse)
+[![Go](https://img.shields.io/github/v/tag/sunholo-data/ailang-parse-go?logo=go&logoColor=white&label=Go)](https://github.com/sunholo-data/ailang-parse-go)
+[![CI](https://img.shields.io/github/actions/workflow/status/sunholo-data/ailang-parse/ci.yml?logo=github&label=CI)](https://github.com/sunholo-data/ailang-parse/actions/workflows/ci.yml)
+
 Universal document parsing in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown.
 
 **Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs and images** delegate to whatever AI model you plug in (Gemini, Claude, local Ollama). AILANG Parse is AI-agnostic: swap `--ai` to change the backend, zero code changes.
