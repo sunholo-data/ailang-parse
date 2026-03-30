@@ -1050,7 +1050,21 @@
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(function () {
         var btn = document.getElementById('copy-output-btn');
-        if (btn) { var orig = btn.textContent; btn.textContent = 'Copied!'; setTimeout(function () { btn.textContent = orig; }, 1500); }
+        var iconCopy = document.getElementById('copy-icon');
+        var iconDone = document.getElementById('copy-icon-done');
+        var label = document.getElementById('copy-label');
+        if (btn) {
+          btn.classList.add('copied');
+          if (iconCopy) iconCopy.style.display = 'none';
+          if (iconDone) iconDone.style.display = '';
+          if (label) label.textContent = 'Copied!';
+          setTimeout(function () {
+            btn.classList.remove('copied');
+            if (iconCopy) iconCopy.style.display = '';
+            if (iconDone) iconDone.style.display = 'none';
+            if (label) label.textContent = 'Copy';
+          }, 1500);
+        }
       });
     }
   };

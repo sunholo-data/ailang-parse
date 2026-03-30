@@ -105,9 +105,10 @@
   color: var(--dp-blue);
   border: 1px solid var(--dp-blue-border);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.dp-dropzone-btn:hover { background: var(--dp-blue); color: #fff; }
+.dp-dropzone-btn:hover { background: var(--dp-blue); color: #fff; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(37, 99, 235, 0.2); }
+.dp-dropzone-btn:active { transform: translateY(0) scale(0.97); }
 .dp-format-badges {
   display: flex; flex-wrap: wrap;
   justify-content: center;
@@ -293,15 +294,51 @@
   padding: 4px 12px; border-radius: 20px;
   border: 1px solid var(--border);
   background: var(--bg-card); color: var(--text-secondary);
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .dp-demo-btn:hover {
   border-color: var(--dp-blue-border);
   color: var(--dp-blue); background: var(--dp-blue-faded);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.1);
 }
-.dp-demo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dp-demo-btn:active { transform: translateY(0) scale(0.97); }
+.dp-demo-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 .dp-demo-btn.ai { border-color: rgba(245, 158, 11, 0.25); color: #b45309; }
-.dp-demo-btn.ai:hover { border-color: #f59e0b; color: #d97706; background: rgba(245, 158, 11, 0.06); }
+.dp-demo-btn.ai:hover { border-color: #f59e0b; color: #d97706; background: rgba(245, 158, 11, 0.06); box-shadow: 0 2px 6px rgba(245, 158, 11, 0.1); }
+/* Action buttons (copy/download) */
+.dp-action-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.dp-action-btn:hover {
+  border-color: var(--dp-blue-border);
+  color: var(--dp-blue); background: var(--dp-blue-faded);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+}
+.dp-action-btn:active { transform: translateY(0) scale(0.96); }
+.dp-action-btn.copied {
+  border-color: rgba(5, 150, 105, 0.3);
+  color: #059669; background: rgba(5, 150, 105, 0.06);
+}
+.dp-action-icon { width: 14px; height: 14px; flex-shrink: 0; }
+/* Output tab micro-interactions */
+.dp-output .dp-output-tabs span {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.dp-output .dp-output-tabs span:hover {
+  transform: translateY(-1px);
+}
+.dp-output .dp-output-tabs span:active {
+  transform: translateY(0) scale(0.97);
+}
 .dp-ai-upsell {
   display: none; padding: 20px;
   background: var(--warning-bg);
@@ -739,9 +776,16 @@ details[open] summary svg { transform: rotate(180deg); }
             <span class="dp-output-tab" data-tab="markdown" onclick="switchOutputTab(this)">Markdown</span>
             <span class="dp-output-tab" data-tab="a2ui" onclick="switchOutputTab(this)">A2UI</span>
           </div>
-          <div id="output-actions" style="display:none;gap:4px;align-items:center;padding:6px 0">
-            <button id="copy-output-btn" onclick="dpCopyOutput()" style="font-family:var(--font-mono);font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all .15s">Copy</button>
-            <button onclick="dpDownloadOutput()" style="font-family:var(--font-mono);font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;transition:all .15s">Download</button>
+          <div id="output-actions" style="display:none;gap:6px;align-items:center;padding:6px 0">
+            <button id="copy-output-btn" class="dp-action-btn" onclick="dpCopyOutput()" title="Copy to clipboard">
+              <svg class="dp-action-icon" id="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="dp-action-icon" id="copy-icon-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polyline points="20 6 9 17 4 12"/></svg>
+              <span id="copy-label">Copy</span>
+            </button>
+            <button class="dp-action-btn" onclick="dpDownloadOutput()" title="Download file">
+              <svg class="dp-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Download</span>
+            </button>
           </div>
         </div>
         <div class="dp-output-empty" id="output-empty">
