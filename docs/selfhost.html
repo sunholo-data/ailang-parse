@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Self-Host — AILANG Parse</title>
+<title>Install — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Self-host AILANG Parse with Docker, CLI, or build from source. Zero dependencies for Office parsing. Deterministic output, sub-11ms per document. Full control over your document processing pipeline.">
+<meta name="description" content="Install AILANG Parse locally. One command, zero dependencies for Office parsing. Parse 13 formats from the CLI in under 11ms per document. Docker available for API server deployment.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -203,10 +203,10 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I self-host AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "The fastest way is Docker: docker run -p 8080:8080 sunholo/docparse:latest. This gives you the full REST API with all 13 input formats and 9 output formats. For Office-only parsing, there are zero external dependencies. Add a GOOGLE_API_KEY environment variable to enable AI-powered PDF and image parsing."}},
-    {"@type": "Question", "name": "What are the system requirements for self-hosting?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse is a single Go binary with minimal resource requirements. The Docker image runs on any Linux/amd64 or arm64 host. For Office-only parsing, it needs approximately 50MB RAM and no GPU. If you enable AI-powered PDF parsing with a local Ollama model, you will need GPU resources appropriate for the model."}},
-    {"@type": "Question", "name": "Can I use self-hosted AILANG Parse as a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The self-hosted API implements the same /general/v0/general endpoint format as Unstructured. Point your existing Unstructured client at your AILANG Parse instance and Office documents will be parsed with full structural fidelity. PDFs can be routed through AILANG Parse's pluggable AI backend or through your existing Unstructured pipeline."}},
-    {"@type": "Question", "name": "Does self-hosting require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office format parsing (DOCX, PPTX, XLSX, ODF), self-hosting is fully air-gapped — no internet connection needed. If you enable AI-powered PDF parsing, it requires connectivity to the AI provider (Gemini, Claude) unless you use a local Ollama model, which also runs offline."}}
+    {"@type": "Question", "name": "How do I install AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Run curl -fsSL https://ailang.sunholo.com/install.sh | bash to install AILANG, then clone the repo and run ./bin/docparse. For a Docker API server: docker run -p 8080:8080 sunholo/docparse:latest. Office parsing has zero external dependencies."}},
+    {"@type": "Question", "name": "What are the system requirements?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini or Claude, or a local Ollama model."}},
+    {"@type": "Question", "name": "Can I use AILANG Parse as a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Both the hosted API and Docker server implement the same /general/v0/general endpoint format as Unstructured. Point your existing client at AILANG Parse and Office documents will be parsed with full structural fidelity."}},
+    {"@type": "Question", "name": "Does local parsing require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline — no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline."}}
   ]
 }
 </script>
@@ -218,8 +218,8 @@
 <div class="page">
 
   <section class="hero" style="margin-bottom:32px">
-    <h1 class="reveal"><span class="dp-accent">Run</span> AILANG Parse Yourself</h1>
-    <p class="subtitle reveal reveal-delay-1">Single binary, zero dependencies, any cloud. Parse 13 formats locally.</p>
+    <h1 class="reveal"><span class="dp-accent">Install</span> AILANG Parse</h1>
+    <p class="subtitle reveal reveal-delay-1">One command. Zero dependencies. Parse 13 formats from your terminal in under 11ms.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -229,11 +229,10 @@
       <nav>
         <a href="#quickstart" class="active">Quick Start</a>
         <a href="#install">Installation</a>
-        <a href="#docker">Docker</a>
         <a href="#config">Configuration</a>
         <a href="#ai-models">AI Models</a>
         <a href="#formats">Supported Formats</a>
-        <a href="#benchmarks">Benchmarks</a>
+        <a href="#docker">Docker API Server</a>
         <a href="#contact">Enterprise</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -295,29 +294,6 @@ cd docparse
 
 # Run inline tests
 ./bin/docparse --test</code></pre>
-
-      <h2 id="docker">Docker</h2>
-      <p>Run AILANG Parse as an API server with Docker &mdash; no AILANG installation needed:</p>
-      <pre><code class="language-docker"># Pull and run (when published)
-docker run -p 8080:8080 sunholo/docparse:latest
-
-# Or build from source
-docker build -t docparse .
-docker run -p 8080:8080 docparse</code></pre>
-
-      <p>The Docker image includes AILANG and all 31 AILANG Parse modules. The API server starts automatically on port 8080.</p>
-
-      <pre><code class="language-bash"># Test the running container
-curl http://localhost:8080/api/v1/health
-# {"result":"{\"status\":\"healthy\",\"version\":\"0.7.0\",...}"}
-
-curl http://localhost:8080/api/v1/formats
-# Lists all 13 parse and 9 generate formats</code></pre>
-
-      <div class="dp-callout">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>The Docker image builds AILANG from the <code>dev</code> branch for latest features. For production, pin to a specific release tag in the Dockerfile.</div>
-      </div>
 
       <h2 id="config">Configuration</h2>
       <p>AILANG Parse is configured via environment variables and AILANG capability budgets.</p>
@@ -422,35 +398,33 @@ ailang run --entry main --caps IO,FS,Env,AI \
         </tbody>
       </table>
 
-      <h2 id="benchmarks">Benchmarks</h2>
-      <p>AILANG Parse maintains 53 golden benchmark files across all 10 deterministic formats with 100% structural recall.</p>
+      <h2 id="docker">Docker API Server</h2>
+      <p>Need to run AILANG Parse as an API server? Use Docker &mdash; no local AILANG installation needed:</p>
+      <pre><code class="language-docker"># Pull and run (when published)
+docker run -p 8080:8080 sunholo/docparse:latest
 
-      <pre><code class="language-bash"># Quick smoke test (~15 seconds)
-bash benchmarks/quick_check.sh
+# Or build from source
+docker build -t docparse .
+docker run -p 8080:8080 docparse</code></pre>
 
-# Full 53-file structural benchmark (~10 minutes)
-uv run benchmarks/run_benchmarks.py --suite office
+      <p>The Docker image includes AILANG and all 31 modules. The API server starts automatically on port 8080.</p>
 
-# API server tests (32 tests)
-bash tests/test_serve_api.sh</code></pre>
+      <pre><code class="language-bash"># Test the running container
+curl http://localhost:8080/api/v1/health
+curl http://localhost:8080/api/v1/formats</code></pre>
 
-      <p>Key performance numbers (Apple M2):</p>
-      <ul>
-        <li><strong>Sequential DOCX parse:</strong> ~11ms per file</li>
-        <li><strong>Concurrent 5x DOCX:</strong> ~26ms total (near-perfect scaling)</li>
-        <li><strong>53-file benchmark:</strong> 100% structural recall across all formats</li>
-        <li><strong>PDF (Gemini 2.5 Flash):</strong> 92% accuracy on OmniDocBench subset</li>
-      </ul>
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>For most users, the <a href="api.html" style="color:var(--dp-blue);font-weight:600">hosted API</a> (60 free requests/day) is easier than running Docker. Use Docker when you need unlimited local parsing or air-gapped deployment.</div>
+      </div>
 
-      <p>See the <a href="benchmarks.html" style="color:var(--dp-blue)">Benchmarks page</a> for detailed results and parser comparisons.</p>
-
-      <h2 id="contact">Enterprise &amp; Cloud Deployment</h2>
+      <h2 id="contact">Enterprise &amp; Custom Deployment</h2>
 
       <div class="dp-callout dp-callout--contact">
         <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
         <div>
-          <strong>Need managed cloud deployment?</strong><br>
-          Deploy AILANG Parse as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform for enterprise document processing, custom integrations, and dedicated support.
+          <strong>Need Cloud Run, Kubernetes, or managed infrastructure?</strong><br>
+          Contact us for a copy of our production deployment infrastructure, or deploy AILANG Parse as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform for enterprise document processing and dedicated support.
           <br><br>
           <a href="https://www.sunholo.com/contact" style="color:#8b5cf6;font-weight:600;font-family:var(--font-mono);font-size:13px">Contact Sunholo &rarr;</a>
         </div>
@@ -459,20 +433,20 @@ bash tests/test_serve_api.sh</code></pre>
       <div class="dp-faq" id="faq">
         <h2>Frequently Asked Questions</h2>
         <details>
-          <summary>How do I self-host AILANG Parse?</summary>
-          <div class="dp-faq-answer"><p>The fastest way is Docker: <code>docker run -p 8080:8080 sunholo/docparse:latest</code>. This gives you the full REST API with all 13 input formats and 9 output formats. For Office-only parsing, there are zero external dependencies. Add a <code>GOOGLE_API_KEY</code> environment variable to enable AI-powered PDF and image parsing.</p></div>
+          <summary>How do I install AILANG Parse?</summary>
+          <div class="dp-faq-answer"><p>Run <code>curl -fsSL https://ailang.sunholo.com/install.sh | bash</code> to install AILANG, then clone the repo and run <code>./bin/docparse</code>. For a Docker API server: <code>docker run -p 8080:8080 sunholo/docparse:latest</code>. Office parsing has zero external dependencies.</p></div>
         </details>
         <details>
-          <summary>What are the system requirements for self-hosting?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse is a single Go binary with minimal resource requirements. The Docker image runs on any Linux/amd64 or arm64 host. For Office-only parsing, it needs approximately 50MB RAM and no GPU. If you enable AI-powered PDF parsing with a local Ollama model, you will need GPU resources appropriate for the model you choose.</p></div>
+          <summary>What are the system requirements?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini/Claude, or a local Ollama model.</p></div>
         </details>
         <details>
-          <summary>Can I use self-hosted AILANG Parse as a drop-in replacement for Unstructured?</summary>
-          <div class="dp-faq-answer"><p>Yes. The self-hosted API implements the same <code>/general/v0/general</code> endpoint format as Unstructured. Point your existing Unstructured client at your AILANG Parse instance and Office documents will be parsed with full structural fidelity. See the <a href="integrations.html">integrations page</a> for migration guides.</p></div>
+          <summary>Can I use AILANG Parse as a drop-in replacement for Unstructured?</summary>
+          <div class="dp-faq-answer"><p>Yes. Both the hosted API and Docker server implement the same <code>/general/v0/general</code> endpoint format as Unstructured. Point your existing client at AILANG Parse and Office documents will be parsed with full structural fidelity. See the <a href="integrations.html">integrations page</a> for migration guides.</p></div>
         </details>
         <details>
-          <summary>Does self-hosting require an internet connection?</summary>
-          <div class="dp-faq-answer"><p>For Office format parsing (DOCX, PPTX, XLSX, ODF), self-hosting is fully air-gapped &mdash; no internet connection needed. If you enable AI-powered PDF parsing, it requires connectivity to the AI provider (Gemini, Claude) unless you use a local Ollama model, which also runs offline.</p></div>
+          <summary>Does local parsing require an internet connection?</summary>
+          <div class="dp-faq-answer"><p>For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline &mdash; no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline.</p></div>
         </details>
       </div>
 
