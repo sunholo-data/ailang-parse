@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integrations — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Use AILANG Parse alongside Unstructured, Docling, or LlamaParse. Drop-in Unstructured API compatibility. Route Office formats through AILANG Parse, PDFs through your existing pipeline.">
+<meta property="og:title" content="Integrations — AILANG Parse">
+<meta property="og:description" content="Use AILANG Parse alongside Unstructured, Docling, or LlamaParse. Drop-in Unstructured API compatibility. Route Office formats through AILANG Parse, PDFs through your existing pipeline.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/integrations">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Integrations page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--contact {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+.dp-callout--contact svg { stroke: #8b5cf6; }
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I improve DOCX parsing in my Unstructured pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "Route Office formats through AILANG Parse while keeping Unstructured for PDFs. AILANG Parse implements a compatible API, so you can swap the endpoint for Office files with a one-line change. Your pipeline gets full structural fidelity for DOCX/PPTX/XLSX while keeping Unstructured's ML-powered PDF parsing for scanned documents."}},
+    {"@type": "Question", "name": "Is AILANG Parse an alternative to Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats, yes — AILANG Parse provides dramatically higher structural fidelity (96.6% vs 63.4% on OfficeDocBench). For PDFs and scanned documents, Unstructured's ML pipeline is still excellent. The recommended architecture is to use both: AILANG Parse for Office formats, Unstructured for PDFs."}},
+    {"@type": "Question", "name": "Can I use AILANG Parse instead of LlamaParse for Office documents?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. LlamaParse treats Office formats the same as PDFs — uploading them to a cloud API that takes approximately 54 seconds per document. AILANG Parse parses Office formats locally in under 11ms with full structural fidelity. For teams concerned about latency, cost, or data leaving their infrastructure, AILANG Parse is a lightweight alternative for the Office portion of the pipeline."}},
+    {"@type": "Question", "name": "Does AILANG Parse work with LangChain and LlamaIndex?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The REST API and MCP server integrate with any LangChain or LlamaIndex pipeline. You can use AILANG Parse as a custom document loader or register it as a tool in your agent chain. The /api/v1/tools endpoint serves tool definitions in Claude, OpenAI, and MCP formats for automatic agent discovery."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Integrations</span></h1>
+    <p class="subtitle reveal reveal-delay-1">Enhance your existing pipeline &mdash; not replace it.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#unstructured" class="active">Unstructured Compat</a>
+        <a href="#docling">With Docling</a>
+        <a href="#llamaparse">With LlamaParse</a>
+        <a href="#claude-code">Claude Code Skill</a>
+        <a href="#rest-api">REST API</a>
+        <a href="#self-hosting">Self-Hosting</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="unstructured">Unstructured Compatibility</h2>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Enhancer, not competitor.</strong> AILANG Parse is designed to enhance your existing document pipeline, not replace it. Route Office formats through AILANG Parse for structural fidelity. Route PDFs through your existing tools. Merge the results.</div>
+      </div>
+
+      <p>AILANG Parse exposes a drop-in compatible endpoint at <code>POST /general/v0/general</code> that accepts the same multipart file upload format as the Unstructured API. Existing Unstructured clients can point at AILANG Parse with just a URL change.</p>
+
+      <h3>curl</h3>
+      <pre><code class="language-bash"># Same request format as Unstructured API
+curl -X POST http://localhost:8080/general/v0/general \
+  -F "files=@report.docx" \
+  -H "Accept: application/json"</code></pre>
+
+      <h3>Python &mdash; before and after</h3>
+      <pre><code class="language-python"># Before: Unstructured
+from unstructured.partition.auto import partition
+elements = partition(filename="report.docx")
+
+# After: AILANG Parse (same API surface)
+import requests
+resp = requests.post(
+    "http://localhost:8080/general/v0/general",
+    files={"files": open("report.docx", "rb")}
+)
+elements = resp.json()</code></pre>
+
+      <p>The response format follows the Unstructured element schema &mdash; each element has a <code>type</code>, <code>text</code>, and <code>metadata</code> field. For Office formats (DOCX, PPTX, XLSX), AILANG Parse extracts structural features that Unstructured misses: track changes, merged cells, text boxes, comments, and headers/footers.</p>
+
+      <h2 id="docling">With Docling</h2>
+
+      <p>Docling excels at PDF layout analysis with its DocLayNet model. AILANG Parse excels at deterministic Office parsing. Use both &mdash; route by file type:</p>
+
+      <ul>
+        <li><strong>DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB</strong> &rarr; AILANG Parse (free, fast, deterministic)</li>
+        <li><strong>PDF, scanned images</strong> &rarr; Docling (layout analysis, table detection)</li>
+      </ul>
+
+      <h3>Python routing example</h3>
+      <pre><code class="language-python">import requests
+from pathlib import Path
+
+AILANG_PARSE_URL = "http://localhost:8080"
+OFFICE_EXTS = {".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods",
+               ".csv", ".html", ".md", ".epub"}
+
+def parse_document(filepath: str) -> dict:
+    ext = Path(filepath).suffix.lower()
+
+    if ext in OFFICE_EXTS:
+        # AILANG Parse: deterministic, sub-11ms, full structural fidelity
+        resp = requests.post(
+            f"{AILANG_PARSE_URL}/api/v1/parse",
+            files={"file": open(filepath, "rb")}
+        )
+        return resp.json()
+
+    elif ext in {".pdf", ".png", ".jpg", ".jpeg", ".tiff"}:
+        # Docling: layout-aware PDF and image parsing
+        from docling.document_converter import DocumentConverter
+        converter = DocumentConverter()
+        result = converter.convert(filepath)
+        return result.document.export_to_dict()
+
+    else:
+        raise ValueError(f"Unsupported format: {ext}")</code></pre>
+
+      <p>This gives you the best of both worlds: AILANG Parse preserves Office XML structure that Docling would lose (track changes, comments, merged cells), while Docling handles PDFs with its specialized layout model.</p>
+
+      <h2 id="llamaparse">With LlamaParse</h2>
+
+      <p>LlamaParse is a cloud LLM-powered parser &mdash; strong on PDFs, but every file costs API credits. AILANG Parse handles Office formats locally for free, saving your LlamaParse budget for PDFs that actually need LLM analysis.</p>
+
+      <ul>
+        <li><strong>Office formats</strong> &rarr; AILANG Parse (free, local, deterministic, ~11ms)</li>
+        <li><strong>PDFs</strong> &rarr; LlamaParse (cloud, LLM-powered, paid per page)</li>
+      </ul>
+
+      <h3>Python routing example</h3>
+      <pre><code class="language-python">import requests
+from pathlib import Path
+
+AILANG_PARSE_URL = "http://localhost:8080"
+OFFICE_EXTS = {".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods",
+               ".csv", ".html", ".md", ".epub"}
+
+def parse_document(filepath: str) -> dict:
+    ext = Path(filepath).suffix.lower()
+
+    if ext in OFFICE_EXTS:
+        # AILANG Parse: free, local, deterministic
+        resp = requests.post(
+            f"{AILANG_PARSE_URL}/api/v1/parse",
+            files={"file": open(filepath, "rb")}
+        )
+        return resp.json()
+
+    elif ext == ".pdf":
+        # LlamaParse: cloud LLM-powered PDF parsing
+        from llama_parse import LlamaParse
+        parser = LlamaParse(result_type="markdown")
+        documents = parser.load_data(filepath)
+        return {"text": documents[0].text, "metadata": documents[0].metadata}
+
+    else:
+        raise ValueError(f"Unsupported format: {ext}")</code></pre>
+
+      <p>For teams already using LlamaIndex, this routing pattern keeps your existing PDF pipeline intact while adding structural Office parsing at zero marginal cost.</p>
+
+      <h2 id="claude-code">Claude Code Skill</h2>
+
+      <p>AILANG Parse is available as a Claude Code skill for parsing documents directly within your coding workflow. Install it with a single command:</p>
+
+      <pre><code class="language-bash">claude install github:sunholo-data/ailang-parse-skill</code></pre>
+
+      <p>Once installed, Claude Code can parse Office documents, extract tables, and convert between formats as part of your development session.</p>
+
+      <p>See the <a href="claude-code.html" style="color:var(--dp-blue);font-weight:600">Claude Code Skill guide</a> for the full setup walkthrough, usage examples, and supported commands.</p>
+
+      <h2 id="rest-api">REST API</h2>
+
+      <p>AILANG Parse exposes a full REST API for programmatic access. The API is agent-discoverable &mdash; every endpoint is described in the capability manifest with typed errors, cost metadata, and replayability.</p>
+
+      <h3>Key Endpoints</h3>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>/api/v1/parse</td><td>POST</td><td>Parse a document (file upload)</td></tr>
+          <tr><td>/api/v1/capabilities</td><td>GET</td><td>Capability manifest &mdash; formats, limits, costs</td></tr>
+          <tr><td>/api/v1/formats</td><td>GET</td><td>Supported parse and generate formats</td></tr>
+          <tr><td>/api/v1/health</td><td>GET</td><td>Health check with version info</td></tr>
+          <tr><td>/api/v1/estimate</td><td>POST</td><td>Cost and latency estimation before parsing</td></tr>
+          <tr><td>/general/v0/general</td><td>POST</td><td>Unstructured API compatibility endpoint</td></tr>
+        </tbody>
+      </table>
+
+      <pre><code class="language-bash"># Health check
+curl http://localhost:8080/api/v1/health
+
+# List supported formats
+curl http://localhost:8080/api/v1/formats
+
+# Parse a document
+curl -X POST http://localhost:8080/api/v1/parse \
+  -F "file=@report.docx"
+
+# Capability manifest (agent discovery)
+curl http://localhost:8080/api/v1/capabilities</code></pre>
+
+      <p>See the <a href="api.html" style="color:var(--dp-blue);font-weight:600">API Reference</a> for the full endpoint documentation, authentication, and OpenAPI spec.</p>
+
+      <h2 id="self-hosting">Self-Hosting</h2>
+
+      <p>Run AILANG Parse on your own infrastructure with Docker &mdash; one command to start:</p>
+
+      <pre><code class="language-bash">docker run -p 8080:8080 sunholo/docparse:latest</code></pre>
+
+      <p>No external dependencies for Office parsing. The Docker image includes AILANG and all 31 modules. Add a <code>GOOGLE_API_KEY</code> environment variable if you need PDF/image parsing via AI.</p>
+
+      <pre><code class="language-bash"># With AI support for PDFs
+docker run -p 8080:8080 \
+  -e GOOGLE_API_KEY="your-key" \
+  sunholo/docparse:latest</code></pre>
+
+      <p>See the <a href="selfhost.html" style="color:var(--dp-blue);font-weight:600">Self-Host guide</a> for full installation options (CLI, Docker, source), configuration, AI model setup, and capability budgets.</p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I improve DOCX parsing in my Unstructured pipeline?</summary>
+          <div class="dp-faq-answer"><p>Route Office formats through AILANG Parse while keeping Unstructured for PDFs. AILANG Parse implements a <a href="api.html">compatible API</a>, so you can swap the endpoint for Office files with a one-line change. Your pipeline gets full structural fidelity for DOCX/PPTX/XLSX while keeping Unstructured's ML-powered PDF parsing for scanned documents.</p></div>
+        </details>
+        <details>
+          <summary>Is AILANG Parse an alternative to Unstructured?</summary>
+          <div class="dp-faq-answer"><p>For Office formats, yes &mdash; AILANG Parse provides dramatically higher structural fidelity (96.6% vs 63.4% on <a href="benchmarks.html">OfficeDocBench</a>). For PDFs and scanned documents, Unstructured's ML pipeline is still excellent. The recommended architecture is to use both: AILANG Parse for Office formats, Unstructured for PDFs.</p></div>
+        </details>
+        <details>
+          <summary>Can I use AILANG Parse instead of LlamaParse for Office documents?</summary>
+          <div class="dp-faq-answer"><p>Yes. LlamaParse treats Office formats the same as PDFs &mdash; uploading them to a cloud API that takes approximately 54 seconds per document. AILANG Parse parses Office formats locally in under 11ms with full structural fidelity. For teams concerned about latency, cost, or data leaving their infrastructure, AILANG Parse is a lightweight alternative for the Office portion of the pipeline.</p></div>
+        </details>
+        <details>
+          <summary>Does AILANG Parse work with LangChain and LlamaIndex?</summary>
+          <div class="dp-faq-answer"><p>Yes. The REST API and <a href="mcp.html">MCP server</a> integrate with any LangChain or LlamaIndex pipeline. You can use AILANG Parse as a custom document loader or register it as a tool in your agent chain. The <code>/api/v1/tools</code> endpoint serves tool definitions in Claude, OpenAI, and MCP formats for automatic agent discovery.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+156 M.I.H. Helaleh et al. / J. Chromatogr. A 1083 (2005) 153–160
+
+The collected eluant was concentrated by rotary evaporator to 1 ml. The extracts were finally passed through a final column filled with 5 g silica + 3 g $Al_2O_3$ to remove any co-extractive compounds that may cause instrumental interferences during the analysis. The extract was eluted with 120 ml of DCM:n-hexane (1:1), the first 18 ml of eluent was discarded and the rest were collected, which contains the analytes of interest. The extract was exchanged into n-hexane, concentrated to 1 ml to which 1 $\mu$g/ml of internal standard was added.
+
+## 2.9. Removal of sulfur and lipids
+
+The sulfur present in sewage sludges has to be removed before the GC–EI–MS and GC–EI–MS–MS determination to avoid any interference.
+
+Copper bars (0.5 cm) were activated with 30% HCl for 30 s and then cleaned with acetone, n-hexane and the dried bars was added to the extract. Bio-Beads were used to remove the co-extracted lipids and other higher molecular weight substances which may interfere with the determination. Furthermore, adsorption chromatography of large and small mixed silica and alumina columns allow the removal of lipids and other organic compounds from the sewage sludge extract.
+
+## 3. Results and discussion
+
+Concern has been expressed over the transfer of toxic organics from the soil and into human food chain. Sewage sludge is a sink for contaminants present in municipal wastewater. There are four WWTPs in operation in Kuwait. All of these treatment plants receive domestic sewage in major quantities, such as 27,000 $m^2$/day for Reqqa, 70,000 $m^2$/day for Jahra and 27,000 $m^2$/day for Om Al-Haymann). Sewage sludge produces at Ardiya WWTP is disposed of, as liquid sludge without digestion to specific disposal sites. Riqqa and Om Al-Haymann are equipped with aerobic digesters and in Jahra thickened undigested sludge is only dried on sludge drying beds. So, the suitability for land application requires investigation since the likelihood for transfer of pollutants from wastewater to edible parts of the plants exists. Volatilization of organic matters, such as PAHs from sludge, due to the unique and extreme temperature in summer (~55 $^{\circ}$C) may have adverse effect on the environment. At these temperatures, PAHs are likely to volatilize along with other semi-volatile organic compounds and as potential source of chemicals to the environment. It is questionable, however, whether these chemicals are likely to deposit at such temperatures, but may remain in the vapor phase and subjected to long range atmospheric transport. The eventual fate of chemicals in sludge requires a detailed assessment and probably other disposal options needed to be evaluated particularly for Kuwait and other countries in the region that experience such uniquely high temperatures.
+
+Table 3
+Recoveries and relative standard deviations (RSD, %) obtained from spiked sewage sludge samples (0.2 $\mu$g/ml) analysed by GC–EI–MS–MS, using three different extraction techniques

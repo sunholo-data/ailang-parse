@@ -1,0 +1,101 @@
+name: Deploy Docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'docparse/services/docparse_browser.ail'
+      - 'docparse/types/document.ail'
+      - '.github/workflows/pages.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download AILANG WASM runtime
+        run: |
+          set -euo pipefail
+          WASM_DIR="docs/wasm"
+
+          echo "::group::Fetching latest AILANG release"
+          RELEASE_TAG=$(curl -sfL \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/sunholo-data/ailang/releases/latest | \
+            python3 -c "import json,sys; print(json.loads(sys.stdin.read())['tag_name'])")
+          echo "Release: $RELEASE_TAG"
+          echo "::endgroup::"
+
+          echo "::group::Downloading ailang-wasm.tar.gz"
+          curl -sfL --retry 3 --retry-delay 5 \
+            -o ailang-wasm.tar.gz \
+            "https://github.com/sunholo-data/ailang/releases/download/${RELEASE_TAG}/ailang-wasm.tar.gz"
+          echo "::endgroup::"
+
+          echo "::group::Extracting"
+          tar -xzf ailang-wasm.tar.gz
+          mv ailang.wasm "$WASM_DIR/"
+          [ -f wasm_exec.js ] && mv wasm_exec.js "$WASM_DIR/"
+          [ -f ailang-repl.js ] && mv ailang-repl.js "$WASM_DIR/"
+          rm -f ailang-wasm.tar.gz
+          echo "::endgroup::"
+
+      - name: Copy latest AILANG modules
+        run: |
+          # Ensure docs/ailang/ has the latest parser modules from source
+          mkdir -p docs/ailang/docparse/types docs/ailang/docparse/services
+          cp docparse/types/document.ail docs/ailang/docparse/types/
+          cp docparse/services/format_router.ail docs/ailang/docparse/services/
+          cp docparse/services/zip_extract.ail docs/ailang/docparse/services/
+          cp docparse/services/docx_parser.ail docs/ailang/docparse/services/
+          cp docparse/services/pptx_parser.ail docs/ailang/docparse/services/
+          cp docparse/services/xlsx_parser.ail docs/ailang/docparse/services/
+          cp docparse/services/output_formatter.ail docs/ailang/docparse/services/
+          cp docparse/services/docparse_browser.ail docs/ailang/docparse/services/
+          echo "Copied 8 AILANG modules"
+
+      - name: Build site directory
+        run: |
+          # Build a clean _site/ from docs/ (same pattern as ailang-demos)
+          rm -rf _site
+          cp -r docs/ _site/
+          echo "::group::Site contents"
+          ls -lh _site/wasm/
+          echo "Total: $(du -sh _site/ | cut -f1)"
+          echo "::endgroup::"
+
+      - name: Verify WASM
+        run: |
+          WASM_SIZE=$(stat --printf='%s' _site/wasm/ailang.wasm)
+          if [ "$WASM_SIZE" -lt 1000000 ]; then
+            echo "::error::ailang.wasm is only ${WASM_SIZE} bytes (expected >1MB)"
+            exit 1
+          fi
+          echo "ailang.wasm: ${WASM_SIZE} bytes — OK"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

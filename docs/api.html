@@ -1,0 +1,2408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="AILANG Parse REST API with Python, JS, and Go SDKs. Drop-in Unstructured replacement. Parse 13 formats into structured blocks — track changes, merged cells, comments preserved. Free tier available.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- API page specifics ---- */
+.dp-api-section { margin-bottom: 48px; }
+.dp-api-section h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  letter-spacing: -0.3px;
+}
+.dp-api-section p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+
+/* Endpoint cards */
+.dp-endpoint {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.dp-endpoint:hover { border-color: var(--border-active); }
+.dp-endpoint-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  cursor: pointer;
+  user-select: none;
+}
+.dp-endpoint-method {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  min-width: 52px;
+  text-align: center;
+}
+.dp-method-get { background: var(--success-bg); color: var(--success); }
+.dp-method-post { background: var(--dp-blue-faded); color: var(--dp-blue); }
+.dp-endpoint-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.dp-endpoint-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.dp-endpoint-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.dp-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.dp-badge-free { background: var(--success-bg); color: var(--success); }
+.dp-badge-cost { background: var(--dp-blue-faded); color: var(--dp-blue); }
+.dp-badge-auth { background: rgba(234,179,8,0.1); color: #ca8a04; }
+.dp-badge-deterministic { background: rgba(168,85,247,0.1); color: #9333ea; }
+.dp-endpoint-arrow {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.dp-endpoint.open .dp-endpoint-arrow { transform: rotate(90deg); }
+.dp-endpoint-body {
+  display: none;
+  padding: 0 20px 20px;
+  border-top: 1px solid var(--border);
+}
+.dp-endpoint.open .dp-endpoint-body { display: block; }
+.dp-endpoint-body pre {
+  margin: 10px 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-endpoint-body pre code { font-size: 12px; line-height: 1.7; }
+.dp-try-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--dp-blue-border);
+  background: var(--dp-blue-faded);
+  color: var(--dp-blue);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.dp-try-btn:hover { background: var(--dp-blue); color: #fff; }
+.dp-try-result {
+  margin-top: 10px;
+  background: var(--bg-code);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  max-height: 300px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  display: none;
+}
+.dp-try-result.visible { display: block; }
+
+/* Code snippet tabs */
+.dp-lang-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 12px 0 0;
+}
+.dp-lang-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dp-lang-tab:hover { color: var(--text-secondary); }
+.dp-lang-tab.active { color: var(--dp-blue); background: var(--bg-code); border-color: var(--dp-blue-border); font-weight: 600; }
+.dp-lang-panel { display: none; position: relative; }
+.dp-lang-panel.active { display: block; }
+.dp-lang-panel pre { margin-top: 0; border-top-left-radius: 0; }
+.dp-code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s, color 0.2s;
+  z-index: 1;
+}
+.dp-code-copy:hover { opacity: 1; color: var(--dp-blue); border-color: var(--dp-blue-border); }
+.dp-code-copy.copied { color: var(--success); border-color: var(--success); opacity: 1; }
+
+/* SDK cards */
+.dp-sdk-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.dp-sdk-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 20px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s;
+}
+.dp-sdk-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.dp-sdk-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.dp-sdk-install {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-code);
+  color: #e2e8f0;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  display: block;
+}
+.dp-sdk-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+
+/* Tier table */
+.dp-tier-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-tier-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.dp-tier-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.dp-tier-table td:first-child { font-weight: 600; color: var(--text-primary); }
+
+/* Integration cards */
+.dp-integration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.dp-integration-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--dp-blue);
+  border-radius: var(--radius-sm);
+  padding: 22px 20px;
+}
+.dp-integration-card h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+.dp-integration-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 0;
+}
+.dp-integration-card code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+/* Unified API Key Panel */
+.dp-key-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  margin-bottom: 32px;
+}
+.dp-key-panel h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.dp-key-panel p {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+.dp-signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 11px 26px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue);
+  color: #fff;
+  border: 2px solid var(--dp-blue);
+  cursor: pointer;
+  transition: all 0.25s;
+  text-decoration: none;
+}
+.dp-signin-btn:hover { background: var(--dp-blue-dark); box-shadow: 0 4px 14px rgba(37,99,235,0.3); }
+
+/* ---- Playground ---- */
+.dp-playground-bar {
+  background: var(--bg-card);
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: none;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.dp-playground-bar.visible { display: flex; }
+.dp-pg-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dp-pg-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  display: inline-block;
+}
+.dp-pg-key-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 240px;
+}
+.dp-pg-key-field input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+.dp-pg-key-field input:focus { border-color: var(--dp-blue); outline: none; }
+.dp-pg-key-valid { color: var(--success); font-size: 14px; min-width: 18px; text-align: center; }
+.dp-pg-key-invalid { color: var(--text-muted); font-size: 14px; min-width: 18px; text-align: center; }
+.dp-pg-quota {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.dp-pg-banner {
+  background: var(--dp-blue-faded);
+  border: 1px dashed var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 20px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: none;
+  align-items: center;
+  gap: 10px;
+}
+.dp-pg-banner.visible { display: flex; }
+.dp-pg-banner a { color: var(--dp-blue); font-weight: 600; }
+
+.dp-endpoint-playground {
+  display: none;
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px dashed var(--dp-blue-border);
+}
+.dp-endpoint-playground.visible { display: block; }
+.dp-playground-form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.dp-playground-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+.dp-playground-field label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.dp-playground-field select,
+.dp-playground-field input[type="text"] {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+.dp-playground-field select:focus,
+.dp-playground-field input[type="text"]:focus { border-color: var(--dp-blue); outline: none; }
+.dp-playground-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.dp-playground-response {
+  display: none;
+  background: var(--bg-code);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.dp-playground-response.visible { display: block; }
+.dp-response-meta {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #94a3b8;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.dp-response-meta .status-ok { color: #4ade80; }
+.dp-response-meta .status-err { color: #f87171; }
+.dp-response-body {
+  padding: 14px 16px;
+  max-height: 500px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+.dp-custom-path-toggle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dp-blue);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* Copy format buttons */
+.dp-copy-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.dp-copy-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dp-copy-btn:hover { color: var(--dp-blue); border-color: var(--dp-blue-border); }
+.dp-copy-btn.copied { color: var(--success); border-color: var(--success); }
+
+/* Error codes list */
+.dp-error-codes {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.dp-error-code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(239,68,68,0.08);
+  color: #ef4444;
+}
+
+/* Schema properties */
+.dp-schema-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.dp-schema-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.dp-schema-table td:first-child {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  width: 140px;
+}
+.dp-schema-table td:nth-child(2) {
+  font-family: var(--font-mono);
+  color: var(--dp-blue);
+  width: 80px;
+}
+.dp-schema-table td:nth-child(3) {
+  color: var(--text-secondary);
+}
+
+/* Loading state */
+.dp-loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.dp-loading-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--dp-blue);
+  border-radius: 50%;
+  animation: dp-spin 0.6s linear infinite;
+  margin-bottom: 10px;
+}
+@keyframes dp-spin { to { transform: rotate(360deg); } }
+
+/* Format cards (dynamic from /api/v1/formats) */
+.dp-format-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.dp-format-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.dp-format-card-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.dp-format-card-exts {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+/* Device auth panel */
+.dp-device-auth-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--dp-blue);
+  border-radius: var(--radius-sm);
+  padding: 22px 20px;
+  margin-bottom: 20px;
+}
+.dp-device-auth-panel h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.dp-device-auth-panel p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.dp-device-code-display {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--dp-blue);
+  text-align: center;
+  padding: 16px;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  margin: 12px 0;
+}
+.dp-device-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 8px;
+}
+.dp-device-key-result {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--bg-code);
+  color: #4ade80;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  word-break: break-all;
+}
+
+/* Request history */
+.dp-request-history {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+  overflow: hidden;
+  display: none;
+}
+.dp-request-history.visible { display: block; }
+.dp-request-history .dp-endpoint-arrow { transition: transform 0.2s; }
+.dp-request-history.open .dp-endpoint-arrow { transform: rotate(90deg); }
+.dp-request-history #history-mount { display: none; }
+.dp-request-history.open #history-mount { display: block !important; }
+.dp-request-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+.dp-request-history-header h3 {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+.dp-history-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.dp-history-table th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.dp-history-table td {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.dp-history-replay-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--dp-blue-border);
+  background: var(--dp-blue-faded);
+  color: var(--dp-blue);
+  cursor: pointer;
+}
+.dp-history-replay-btn:hover { background: var(--dp-blue); color: #fff; }
+
+@media (max-width: 900px) {
+  .dp-sdk-grid, .dp-integration-grid { grid-template-columns: 1fr; }
+  .dp-endpoint-desc { display: none; }
+  .dp-endpoint-badges { display: none; }
+  .dp-playground-bar { flex-direction: column; align-items: stretch; }
+  .dp-pg-key-field { min-width: 0; }
+  .dp-playground-form { flex-direction: column; }
+  .dp-playground-field { min-width: 0; }
+  .dp-response-body { max-height: 300px; }
+  .dp-format-grid { grid-template-columns: 1fr; }
+  .dp-device-code-display { font-size: 20px; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Is AILANG Parse a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, for Office formats. AILANG Parse implements a compatible REST API at /general/v0/general that accepts the same multipart file upload format as Unstructured. Swap the endpoint URL and get higher-fidelity output with preserved track changes, merged cells, and comments."}},
+    {"@type": "Question", "name": "What output formats does the AILANG Parse API support?", "acceptedAnswer": {"@type": "Answer", "text": "The API supports structured JSON (Block ADT), Markdown, HTML, plain text, Quarto (QMD), A2UI, and the Unstructured-compatible element format. Specify the output format with the output_format parameter. All formats preserve the same structural information."}},
+    {"@type": "Question", "name": "Does the AILANG Parse API require an API key?", "acceptedAnswer": {"@type": "Answer", "text": "The Free tier provides 60 requests/day without an API key for quick testing. For production use, generate an API key via the dashboard or the device auth flow. Pro and Business tiers increase limits to 10,000 and 50,000 pages/month respectively."}},
+    {"@type": "Question", "name": "Can I self-host the AILANG Parse API instead of using the cloud service?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Run docker run -p 8080:8080 sunholo/docparse:latest and you have the full API on your infrastructure with no external dependencies for Office parsing. Add a GOOGLE_API_KEY environment variable for AI-powered PDF parsing."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">Build With AILANG <span class="dp-accent">Parse</span></h1>
+    <p class="subtitle reveal reveal-delay-1">Parse 13 formats, generate 9 &mdash; one API, zero dependencies.</p>
+    <div class="dp-hero-ctas reveal reveal-delay-2">
+      <a href="https://api.parse.sunholo.com/api/_meta/docs" target="_blank" class="dp-btn dp-btn--secondary">Swagger UI &rarr;</a>
+      <a href="https://api.parse.sunholo.com/api/_meta/openapi.json" target="_blank" class="dp-btn dp-btn--ghost">OpenAPI Spec</a>
+    </div>
+  </section>
+
+  <!-- Unified API Key Panel — adapts to auth state -->
+  <div class="dp-key-panel reveal" id="api-key-panel" style="margin-bottom:24px">
+    <!-- State A: Not signed in -->
+    <div id="akp-signin">
+      <h3>Get Your API Key</h3>
+      <p>Sign in with Google to generate an API key and try endpoints live.</p>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <button class="dp-btn dp-btn--primary" onclick="dpSignIn()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          Sign In with Google
+        </button>
+        <span style="font-size:12px;color:var(--text-muted)">Using a CLI or AI agent? <a href="#agent-guide" style="color:var(--dp-blue)">See Device Auth below</a></span>
+      </div>
+    </div>
+    <!-- State B: Signed in, no stored key -->
+    <div id="akp-generate" style="display:none">
+      <h3>Generate Your API Key</h3>
+      <p id="akp-email-line" style="font-size:13px;color:var(--text-secondary);margin-bottom:12px"></p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="akp-label" placeholder="Key label (e.g. my-app)" style="padding:8px 14px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;font-family:var(--font-mono);background:var(--bg-card);color:var(--text-primary);min-width:200px">
+        <button class="dp-btn dp-btn--primary" id="akp-gen-btn" onclick="akpGenerateKey()" style="font-size:13px">Generate Key</button>
+      </div>
+      <div id="akp-key-result" style="display:none;margin-top:16px">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Your API Key (save it — shown only once):</div>
+        <div style="background:var(--bg-code);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-family:var(--font-mono);font-size:13px;user-select:all;word-break:break-all;color:var(--success)" id="akp-key-display"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="dp-btn dp-btn--ghost" onclick="navigator.clipboard.writeText(document.getElementById('akp-key-display').textContent).then(function(){this.textContent='Copied!'}.bind(this))" style="font-size:12px">Copy</button>
+          <button class="dp-btn dp-btn--primary" onclick="document.getElementById('pg-bar').scrollIntoView({behavior:'smooth'})" style="font-size:12px">Try in API Explorer &darr;</button>
+          <a href="dashboard.html" class="dp-btn dp-btn--ghost" style="font-size:12px;text-decoration:none">Open Dashboard</a>
+        </div>
+      </div>
+      <div id="akp-gen-error" style="display:none;margin-top:12px;color:#f87171;font-size:13px"></div>
+    </div>
+    <!-- State C: Has stored key (playground ready) -->
+    <div id="akp-ready" style="display:none">
+      <h3 style="color:var(--success)">&#x2713; API Key Active</h3>
+      <p style="font-size:13px;color:var(--text-secondary)">Your key is stored locally — the API Explorer below is ready to use.</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <a href="dashboard.html" class="dp-btn dp-btn--ghost" style="font-size:12px;text-decoration:none">Manage Keys in Dashboard</a>
+        <button class="dp-btn dp-btn--ghost" onclick="akpShowGenerate()" style="font-size:12px">Generate Another Key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Start -->
+  <section class="dp-api-section reveal">
+    <h2>Quick Start</h2>
+    <pre><code class="language-bash">curl -X POST https://api.parse.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_docx_basic","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
+    <p style="font-size:13px;color:var(--text-muted)">No file to upload — use any of 15 built-in <code>sample_*</code> IDs to test immediately. <a href="#agent-guide" style="color:var(--dp-blue)">See full agent guide below</a>.</p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Supported Formats — rendered from /api/v1/formats -->
+  <section class="dp-api-section reveal">
+    <h2>Supported Formats</h2>
+    <p>The <code>/api/v1/parse</code> endpoint accepts all of these formats. Office and text formats are parsed deterministically; PDF, images, audio, and video use pluggable AI.</p>
+    <div id="formats-mount">
+      <div class="dp-loading"><div class="dp-loading-spinner"></div><div>Loading formats...</div></div>
+    </div>
+    <!-- Fallback if API unreachable -->
+    <noscript>
+      <div class="dp-format-grid">
+        <div class="dp-format-card"><div class="dp-format-card-title">Office (Deterministic)</div><div class="dp-format-card-exts">.docx .pptx .xlsx .odt .odp .ods</div></div>
+        <div class="dp-format-card"><div class="dp-format-card-title">Text (Native)</div><div class="dp-format-card-exts">.csv .md .html .epub</div></div>
+        <div class="dp-format-card"><div class="dp-format-card-title">Images &amp; PDF (AI)</div><div class="dp-format-card-exts">.pdf .png .jpg .webp .gif .tiff</div></div>
+        <div class="dp-format-card"><div class="dp-format-card-title">Audio (AI)</div><div class="dp-format-card-exts">.wav .mp3 .aiff .aac .ogg .flac</div></div>
+        <div class="dp-format-card"><div class="dp-format-card-title">Video (AI)</div><div class="dp-format-card-exts">.mp4 .mov .avi .webm</div></div>
+      </div>
+    </noscript>
+    <p style="font-size:12px;color:var(--text-muted)">Audio parsing returns transcription with speaker detection and language identification. Video parsing extracts visual content (headings, tables, text) plus spoken-word transcription.</p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Device auth moved to Agent Integration Guide section below -->
+
+  <!-- Request History — shown when API key is active -->
+  <div class="dp-request-history" id="request-history">
+    <div class="dp-request-history-header" onclick="this.parentElement.classList.toggle('open')">
+      <h3>Recent Requests</h3>
+      <span class="dp-endpoint-arrow">&rsaquo;</span>
+    </div>
+    <div id="history-mount" style="display:none"></div>
+  </div>
+
+  <!-- API Explorer — rendered dynamically from /api/v1/capabilities -->
+  <section class="dp-api-section reveal">
+    <h2>API Explorer</h2>
+    <p>Endpoint cards, schemas, and badges are generated from the <a href="https://api.parse.sunholo.com/api/v1/capabilities" target="_blank" style="color:var(--dp-blue)">capability manifest</a>. Adding an endpoint to the API automatically adds it here.</p>
+
+    <!-- Playground banner (shown when not signed in or no keys) -->
+    <div class="dp-pg-banner" id="pg-banner-signin">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+      <span><a href="#" onclick="dpSignIn();return false">Sign in</a> to try POST endpoints live with your API key.</span>
+    </div>
+    <div class="dp-pg-banner" id="pg-banner-nokeys" style="display:none">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+      <span><a href="#api-key-panel" onclick="akpShowGenerate()">Generate your first API key</a> above to start using the explorer.</span>
+    </div>
+
+    <!-- Playground bar (shown when signed in + has key) -->
+    <div class="dp-playground-bar" id="pg-bar">
+      <div class="dp-pg-email">
+        <span class="dp-pg-dot"></span>
+        <span id="pg-bar-email"></span>
+      </div>
+      <div class="dp-pg-key-field">
+        <input type="password" id="pg-api-key" placeholder="API key (dp_...)" oninput="pgValidateKey(this)">
+        <span id="pg-key-status" class="dp-pg-key-invalid">&#x25CB;</span>
+      </div>
+      <div class="dp-pg-quota" id="pg-quota" style="display:none"></div>
+      <button class="dp-btn dp-btn--ghost" onclick="pgForgetKey()" style="font-size:11px;padding:4px 10px;white-space:nowrap" title="Remove stored API key">Forget Key</button>
+    </div>
+
+    <!-- Endpoints mount point — populated by JS from capabilities manifest -->
+    <div id="endpoints-mount">
+      <div class="dp-loading">
+        <div class="dp-loading-spinner"></div>
+        <div>Loading endpoints from capability manifest...</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Unstructured Migration -->
+  <section class="dp-api-section reveal">
+    <h2>Migrating from Unstructured</h2>
+    <p>Already using the Unstructured API? AILANG Parse is a drop-in replacement. Change your server URL and you're done:</p>
+    <pre><code class="language-python"># Before (Unstructured)
+from unstructured_client import UnstructuredClient
+client = UnstructuredClient(server_url="https://api.unstructured.io")
+
+# After (AILANG Parse) — one line change
+client = UnstructuredClient(
+    server_url="https://api.parse.sunholo.com"
+)</code></pre>
+    <p>The <code>/general/v0/general</code> endpoint returns identical element JSON. All existing code works unchanged.</p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- AI Integration Guide -->
+  <section class="dp-api-section reveal">
+    <h2>Connect Your AI</h2>
+    <p>Three ways for AI systems to use AILANG Parse:</p>
+
+    <div class="dp-integration-grid">
+      <div class="dp-integration-card">
+        <h3>CLI</h3>
+        <p>Direct invocation from scripts and pipelines. Best for batch processing.</p>
+        <pre style="margin-top:10px"><code class="language-bash">ailang run --entry main \
+  --caps IO,FS,Env \
+  docparse/main.ail myfile.docx</code></pre>
+      </div>
+      <div class="dp-integration-card">
+        <h3>REST API</h3>
+        <p>Standard HTTP with named JSON parameters. API key in request body.</p>
+        <pre style="margin-top:10px"><code class="language-bash">curl -X POST .../api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"file.docx","outputFormat":"blocks","apiKey":"dp_..."}'</code></pre>
+      </div>
+      <div class="dp-integration-card">
+        <h3>MCP Server</h3>
+        <p>AILANG Parse as a tool for AI assistants (Claude, etc.) via Model Context Protocol.</p>
+        <pre style="margin-top:10px"><code class="language-json">{
+  "name": "docparse",
+  "description": "Parse documents",
+  "server": "ailang serve-api ..."
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Claude Code Skill -->
+  <section class="dp-api-section reveal">
+    <h2>Claude Code Skill</h2>
+    <p>Install the AILANG Parse skill in <a href="https://claude.com/claude-code" style="color:var(--dp-blue)">Claude Code</a> to parse documents directly from your terminal.</p>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-left:4px solid var(--dp-blue);border-radius:var(--radius-sm);padding:22px 20px;margin-bottom:20px">
+      <code class="dp-sdk-install" style="margin-bottom:14px">claude install github:sunholo-data/docparse-skill</code>
+      <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px">Once installed, just ask Claude to parse a document. The skill provides scripts for parsing, cost estimation, sample listing, and headless device authentication.</p>
+      <pre style="margin:0"><code class="language-bash"># Set your API key
+export DOCPARSE_API_KEY="dp_your_key_here"
+
+# Or get one via device auth (no browser needed)
+bash skills/docparse/scripts/device-auth.sh
+
+# Parse a document
+bash skills/docparse/scripts/parse.sh document.docx blocks
+
+# Check cost before parsing
+bash skills/docparse/scripts/estimate.sh report.pdf blocks
+
+# List available test files
+bash skills/docparse/scripts/samples.sh</code></pre>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Agent Integration Guide — visible to AI agents in HTML source, collapsible for humans -->
+  <section class="dp-api-section reveal" id="agent-guide">
+    <h2>Agent Integration Guide</h2>
+    <p>Step-by-step workflow for AI agents integrating with AILANG Parse. Expand for the full guide.</p>
+
+    <details class="dp-agent-details">
+      <summary style="cursor:pointer;font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--dp-blue);padding:8px 0;user-select:none">
+        Expand: Complete Agent Workflow (7 steps)
+      </summary>
+
+      <div style="font-size:13px;line-height:1.7;color:var(--text-secondary);margin-top:12px">
+
+      <!-- Step 1 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 1: Discover the API</h3>
+      <pre><code class="language-bash"># Health check — confirms service is up and version
+curl https://api.parse.sunholo.com/api/v1/health
+
+# Full capability manifest — every endpoint, schema, auth, costs
+curl https://api.parse.sunholo.com/api/v1/capabilities
+
+# Supported formats
+curl https://api.parse.sunholo.com/api/v1/formats
+
+# Machine-readable tool definitions (Claude/OpenAI/MCP)
+curl https://api.parse.sunholo.com/api/v1/tools</code></pre>
+
+      <!-- Step 2 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 2: Get an API Key (Device Auth)</h3>
+      <p>Agents use the <a href="https://datatracker.ietf.org/doc/html/rfc8628" target="_blank" style="color:var(--dp-blue)">RFC 8628 Device Authorization</a> flow — no browser session needed after initial approval.</p>
+      <pre><code class="language-bash"># 1. Request a device code
+curl -X POST https://api.parse.sunholo.com/api/v1/auth/device \
+  -H "Content-Type: application/json" \
+  -d '{"args":["my-agent","parse"]}'
+# Returns: device_code, user_code (e.g. ABCD-1234), verification_url
+
+# 2. Display the verification_url to the user. They open it, sign in, click Approve.
+
+# 3. Poll every 5 seconds until approved:
+curl -X POST https://api.parse.sunholo.com/api/v1/auth/device/poll \
+  -H "Content-Type: application/json" \
+  -d '{"args":["DEVICE_CODE_FROM_STEP_1"]}'
+# Returns: {"status":"approved", "api_key":"dp_...", "tier":"free"}</code></pre>
+      <p>Save the <code>api_key</code> — it won't be shown again. The key persists across sessions.</p>
+
+      <!-- Interactive device auth — try it from the browser -->
+      <div class="dp-device-auth-panel" id="device-auth-panel" style="margin:16px 0 24px;padding:16px 20px">
+        <h4 style="font-size:13px;font-weight:600;color:var(--text-primary);margin:0 0 6px">Try It: Request a Device Code</h4>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">For CLI tools and AI agents. The agent requests a code, the user approves in a browser, the agent polls for the key.</p>
+        <div id="device-auth-content">
+          <button class="dp-btn dp-btn--ghost" style="font-size:12px;padding:6px 14px" onclick="deviceAuthStart()">Request Device Code</button>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 3: List Test Samples</h3>
+      <p>Built-in sample files let you test parsing without uploading anything.</p>
+      <pre><code class="language-bash">curl https://api.parse.sunholo.com/api/v1/samples</code></pre>
+      <table style="width:100%;font-size:12px;font-family:var(--font-mono);border-collapse:collapse;margin:12px 0">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Sample ID</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Format</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">AI?</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:4px 8px">sample_docx_basic</td><td style="padding:4px 8px">DOCX</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_docx_tables</td><td style="padding:4px 8px">DOCX (merged cells)</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_docx_comments</td><td style="padding:4px 8px">DOCX (track changes)</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_pptx_show</td><td style="padding:4px 8px">PPTX</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_xlsx_basic</td><td style="padding:4px 8px">XLSX</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_csv</td><td style="padding:4px 8px">CSV</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_markdown</td><td style="padding:4px 8px">Markdown</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_html</td><td style="padding:4px 8px">HTML</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_odt</td><td style="padding:4px 8px">ODT</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_odp</td><td style="padding:4px 8px">ODP</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_ods</td><td style="padding:4px 8px">ODS</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_epub</td><td style="padding:4px 8px">EPUB</td><td style="padding:4px 8px">No</td></tr>
+          <tr><td style="padding:4px 8px">sample_pdf</td><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">Yes</td></tr>
+          <tr><td style="padding:4px 8px">sample_mp3</td><td style="padding:4px 8px">Audio</td><td style="padding:4px 8px">Yes</td></tr>
+          <tr><td style="padding:4px 8px">sample_mp4</td><td style="padding:4px 8px">Video</td><td style="padding:4px 8px">Yes</td></tr>
+        </tbody>
+      </table>
+      <p>Use <code>GET /api/v1/samples</code> to download test files programmatically.</p>
+
+      <!-- Step 4 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 4: Estimate Cost</h3>
+      <pre><code class="language-bash">curl -X POST https://api.parse.sunholo.com/api/v1/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"data/test_files/sample.docx","outputFormat":"markdown"}'
+# Returns: {"estimated_credits":1, "format":"docx", "ai_required":false, "estimated_ms":15}</code></pre>
+
+      <!-- Step 5 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 5: Parse a Document</h3>
+      <pre><code class="language-bash"># Deterministic (Office/Web/Text) — same output every time, &lt;15ms
+curl -X POST https://api.parse.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_docx_basic","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'
+
+# AI-powered (PDF/images/audio/video) — content depends on model
+curl -X POST https://api.parse.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
+      <p><strong>Output formats:</strong> <code>blocks</code> (structured JSON), <code>markdown</code>, <code>html</code>, <code>a2ui</code> (rich UI components).</p>
+      <p>All formats return the same block types: Text, Heading, Table, Image, Audio, Video, List, Section, Change.</p>
+
+      <!-- Step 6 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 6: Handle Errors</h3>
+      <p>All errors include a <code>suggested_fix</code> field — a plain-text instruction you can act on directly.</p>
+      <table style="width:100%;font-size:12px;font-family:var(--font-mono);border-collapse:collapse;margin:12px 0">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Code</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Retryable</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">When</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:4px 8px">INVALID_API_KEY</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">Key missing, malformed, or revoked</td></tr>
+          <tr><td style="padding:4px 8px">QUOTA_EXCEEDED</td><td style="padding:4px 8px">Yes (after reset)</td><td style="padding:4px 8px">Daily or monthly limit hit</td></tr>
+          <tr><td style="padding:4px 8px">INPUT_NOT_FOUND</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">File path doesn't exist</td></tr>
+          <tr><td style="padding:4px 8px">UNSUPPORTED_FORMAT</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">File extension not recognized</td></tr>
+          <tr><td style="padding:4px 8px">PARSE_FAILED</td><td style="padding:4px 8px">Maybe</td><td style="padding:4px 8px">Corrupt or empty file</td></tr>
+          <tr><td style="padding:4px 8px">AI_UNAVAILABLE</td><td style="padding:4px 8px">Yes</td><td style="padding:4px 8px">AI backend down</td></tr>
+          <tr><td style="padding:4px 8px">AUTHORIZATION_PENDING</td><td style="padding:4px 8px">Yes (poll)</td><td style="padding:4px 8px">Device flow: user hasn't approved</td></tr>
+          <tr><td style="padding:4px 8px">DEVICE_CODE_EXPIRED</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">Device code timed out</td></tr>
+        </tbody>
+      </table>
+
+      <!-- Step 7 -->
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 7: Recommended Workflow</h3>
+      <pre><code class="language-text">1. GET  /api/v1/capabilities     → learn the full API contract
+2. POST /api/v1/auth/device      → acquire credentials (one-time)
+3. GET  /api/v1/samples          → find test files to verify integration
+4. POST /api/v1/estimate         → check cost before committing
+5. POST /api/v1/parse            → parse the document
+6. Verify response has request_id in meta (confirms v0.9.0 API)
+7. Monitor meta.quota_remaining between requests</code></pre>
+
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Credit Costs</h3>
+      <table style="width:100%;font-size:12px;font-family:var(--font-mono);border-collapse:collapse;margin:12px 0">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Operation</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Credits</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Speed</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="padding:4px 8px">Office (DOCX, PPTX, XLSX, OD*)</td><td style="padding:4px 8px">1</td><td style="padding:4px 8px">&lt;15ms deterministic</td></tr>
+          <tr><td style="padding:4px 8px">Text (HTML, MD, CSV, EPUB)</td><td style="padding:4px 8px">1</td><td style="padding:4px 8px">&lt;15ms deterministic</td></tr>
+          <tr><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">3</td><td style="padding:4px 8px">~2s (AI)</td></tr>
+          <tr><td style="padding:4px 8px">Image (PNG, JPG, etc.)</td><td style="padding:4px 8px">3</td><td style="padding:4px 8px">~2s (AI)</td></tr>
+          <tr><td style="padding:4px 8px">Audio (MP3, WAV)</td><td style="padding:4px 8px">5</td><td style="padding:4px 8px">~5s (AI)</td></tr>
+          <tr><td style="padding:4px 8px">Video (MP4)</td><td style="padding:4px 8px">10</td><td style="padding:4px 8px">~10s (AI)</td></tr>
+        </tbody>
+      </table>
+      <p>Free tier: 60 requests/day, 500 pages/month. <a href="https://api.parse.sunholo.com/api/v1/pricing" style="color:var(--dp-blue)">GET /api/v1/pricing</a> for full tier details.</p>
+
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Runnable Examples</h3>
+      <pre><code class="language-bash"># Quickstart: auth + first parse in one command
+bash examples/quickstart.sh
+
+# Full 7-step walkthrough
+bash examples/agent_workflow.sh
+
+# With existing key (skip auth)
+DOCPARSE_API_KEY=dp_... bash examples/agent_workflow.sh</code></pre>
+
+      </div>
+    </details>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- SDKs -->
+  <section class="dp-api-section reveal">
+    <h2>Client Libraries</h2>
+    <p>Thin HTTP wrappers for the AILANG Parse API. Compatible with <code>unstructured-client</code> arguments.</p>
+
+    <div class="dp-sdk-grid">
+      <div class="dp-sdk-card">
+        <div class="dp-sdk-name">Python</div>
+        <code class="dp-sdk-install">pip install ailang-parse</code>
+        <div class="dp-sdk-desc">Parse files, manage keys, Unstructured-compatible. Typed dataclasses.</div>
+      </div>
+      <div class="dp-sdk-card">
+        <div class="dp-sdk-name">JavaScript / TypeScript</div>
+        <code class="dp-sdk-install">npm install @ailang/parse</code>
+        <div class="dp-sdk-desc">Browser + Node.js. Native fetch, zero dependencies, full TypeScript types.</div>
+      </div>
+      <div class="dp-sdk-card">
+        <div class="dp-sdk-name">Go</div>
+        <code class="dp-sdk-install">go get github.com/sunholo-data/ailang-parse-go</code>
+        <div class="dp-sdk-desc">Context support, stdlib HTTP only. Typed structs for all 9 block variants.</div>
+      </div>
+    </div>
+
+    <!-- SDK quick start examples -->
+    <div style="margin-top:20px">
+      <div class="dp-lang-tabs">
+        <span class="dp-lang-tab active" onclick="switchLang(this,'sdk')">Python</span>
+        <span class="dp-lang-tab" onclick="switchLang(this,'sdk')">JavaScript</span>
+        <span class="dp-lang-tab" onclick="switchLang(this,'sdk')">Go</span>
+      </div>
+      <div class="dp-lang-panel active" data-group="sdk" data-lang="Python">
+        <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="dp_your_key_here")
+
+result = client.parse("report.docx")
+for block in result.blocks:
+    if block.type == "heading":
+        print(f"H{block.level}: {block.text}")
+    elif block.type == "table":
+        print(f"Table: {len(block.rows)} rows")
+    elif block.type == "change":
+        print(f"{block.change_type} by {block.author}")
+
+# Unstructured migration — one import change:
+from ailang_parse import UnstructuredClient
+client = UnstructuredClient(server_url="https://ailang-dev-docparse-api-...")
+elements = client.general.partition(file="report.docx")</code></pre>
+      </div>
+      <div class="dp-lang-panel" data-group="sdk" data-lang="JavaScript">
+        <pre><code class="language-javascript">import { DocParse } from '@ailang/parse';
+
+const client = new DocParse({ apiKey: 'dp_your_key_here' });
+
+const result = await client.parse('report.docx');
+for (const block of result.blocks) {
+  if (block.type === 'heading') console.log(`H${block.level}: ${block.text}`);
+  if (block.type === 'table') console.log(`Table: ${block.rows?.length} rows`);
+  if (block.type === 'change') console.log(`${block.changeType} by ${block.author}`);
+}
+
+// Unstructured migration — one import change:
+import { UnstructuredClient } from '@ailang/parse';
+const uc = new UnstructuredClient({ serverUrl: 'https://ailang-dev-docparse-api-...' });
+const elements = await uc.general.partition({ file: 'report.docx' });</code></pre>
+      </div>
+      <div class="dp-lang-panel" data-group="sdk" data-lang="Go">
+        <pre><code class="language-go">client := docparse.New("dp_your_key_here")
+
+result, err := client.Parse(ctx, "report.docx")
+for _, block := range result.Blocks {
+    switch block.Type {
+    case "heading":
+        fmt.Printf("H%d: %s\n", block.Level, block.Text)
+    case "table":
+        fmt.Printf("Table: %d rows\n", len(block.Rows))
+    case "change":
+        fmt.Printf("%s by %s\n", block.ChangeType, block.Author)
+    }
+}
+
+// Unstructured migration:
+uc := docparse.NewUnstructuredClient("https://ailang-dev-docparse-api-...")
+elements, _ := uc.Partition(ctx, "report.docx")</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Tier Comparison — rendered from /api/v1/pricing -->
+  <section class="dp-api-section reveal">
+    <h2>Pricing Tiers</h2>
+    <div id="pricing-mount">
+      <div class="dp-loading"><div class="dp-loading-spinner"></div><div>Loading pricing...</div></div>
+    </div>
+    <!-- Fallback pricing table -->
+    <div id="pricing-fallback" style="display:none">
+      <table class="dp-tier-table">
+        <thead>
+          <tr><th></th><th>Free</th><th>Pro &mdash; &euro;29/mo</th><th>Business &mdash; &euro;99/mo</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Requests / day</td><td>60</td><td>5,000</td><td>Unlimited</td></tr>
+          <tr><td>Pages / month</td><td>500</td><td>10,000</td><td>50,000</td></tr>
+          <tr><td>Max file size</td><td>10 MB</td><td>50 MB</td><td>200 MB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted)">Capability budgets (AI/FS limits) are enforced at the type level by AILANG &mdash; a hard guarantee, not middleware rate limiting.</p>
+    <div style="margin-top:20px;padding:16px 20px;border:1px solid var(--border);border-radius:8px;background:var(--surface)">
+      <p style="margin:0 0 6px;font-weight:700;font-size:14px;color:var(--text-primary)">Self-Host Option</p>
+      <p style="margin:0;font-size:13px;color:var(--text-secondary);line-height:1.6">
+        Want to run AILANG Parse on your own infrastructure? We offer self-hosted deployments for teams that need full control over data residency and processing.
+        <a href="mailto:info@sunholo.com" style="color:var(--dp-blue);font-weight:600">Get in touch</a> to discuss self-hosting options.
+      </p>
+    </div>
+  </section>
+
+  <div class="dp-faq" id="faq" style="max-width:800px;margin:48px auto 0;padding-top:24px;border-top:2px solid var(--border)">
+    <h2>Frequently Asked Questions</h2>
+    <details>
+      <summary>Is AILANG Parse a drop-in replacement for Unstructured?</summary>
+      <div class="dp-faq-answer"><p>Yes, for Office formats. AILANG Parse implements a compatible REST API at <code>/general/v0/general</code> that accepts the same multipart file upload format as Unstructured. Swap the endpoint URL and get higher-fidelity output with preserved <a href="track-changes.html">track changes</a>, <a href="tables.html">merged cells</a>, and <a href="comments.html">comments</a>. See the <a href="integrations.html">integrations page</a> for migration guides.</p></div>
+    </details>
+    <details>
+      <summary>What output formats does the AILANG Parse API support?</summary>
+      <div class="dp-faq-answer"><p>The API supports structured JSON (Block ADT), Markdown, HTML, plain text, Quarto (QMD), A2UI, and the Unstructured-compatible element format. Specify the output format with the <code>output_format</code> parameter. All formats preserve the same structural information.</p></div>
+    </details>
+    <details>
+      <summary>Does the AILANG Parse API require an API key?</summary>
+      <div class="dp-faq-answer"><p>The Free tier provides 60 requests/day without an API key for quick testing. For production use, generate an API key via the <a href="dashboard.html">dashboard</a> or the device auth flow (<code>/api/v1/auth/device</code>). Pro and Business tiers increase limits to 10,000 and 50,000 pages/month respectively.</p></div>
+    </details>
+    <details>
+      <summary>Can I self-host the AILANG Parse API instead of using the cloud service?</summary>
+      <div class="dp-faq-answer"><p>Yes. Run <code>docker run -p 8080:8080 sunholo/docparse:latest</code> and you have the full API on your infrastructure with no external dependencies for Office parsing. Add a <code>GOOGLE_API_KEY</code> environment variable for AI-powered PDF parsing. See the <a href="selfhost.html">self-host guide</a> for details.</p></div>
+    </details>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script>window.Prism = window.Prism || {}; Prism.manual = true;</script>
+<script src="js/prism.min.js"></script>
+<script>
+// Highlight ALL code blocks (including hidden panels)
+document.querySelectorAll('pre code[class*="language-"]').forEach(function(el) {
+  Prism.highlightElement(el);
+});
+
+var API_BASE = 'https://api.parse.sunholo.com';
+
+// ── Global caches ──
+var dpSamples = [];
+var dpCapabilities = null;
+var dpEndpointMap = {}; // ep.id → ep object, for playground lookups
+
+// Client-side parameter hints for endpoints where the capabilities manifest
+// has incomplete input_schema.  'auto' values are resolved at send time:
+//   'api_key'      → stored dp_ key from localStorage
+//   'firebase_uid' → currentUser.uid from Firebase auth
+var PARAM_HINTS = {
+  keys_usage: [
+    { name: 'keyId', type: 'string', description: 'API key (dp_…)', auto: 'api_key' },
+    { name: 'userId', type: 'string', description: 'User ID (auto-filled when signed in)', auto: 'firebase_uid' }
+  ],
+  requests_history: [
+    { name: 'userId', type: 'string', description: 'User ID (auto-filled when signed in)', auto: 'firebase_uid' }
+  ]
+};
+
+// ── Helpers ──
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function copyCodeBlock(btn) {
+  var panel = btn.closest('.dp-lang-panel') || btn.parentElement;
+  var code = panel.querySelector('code');
+  if (code) {
+    navigator.clipboard.writeText(code.textContent).then(function() {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    });
+  }
+}
+
+function unwrapEnvelope(data) {
+  if (data && typeof data.result === 'string') {
+    try { return JSON.parse(data.result); } catch(e) { return data; }
+  }
+  return data;
+}
+
+function switchLang(tab, group) {
+  var tabs = tab.parentElement.querySelectorAll('.dp-lang-tab');
+  tabs.forEach(function(t) { t.classList.remove('active'); });
+  tab.classList.add('active');
+  var lang = tab.textContent;
+  var panels = tab.parentElement.parentElement.querySelectorAll('.dp-lang-panel[data-group="' + group + '"]');
+  panels.forEach(function(p) {
+    p.classList.toggle('active', p.getAttribute('data-lang') === lang);
+  });
+  if (typeof Prism !== 'undefined') Prism.highlightAll();
+}
+
+// ── Phase 1: Format grid from /api/v1/formats ──
+
+function renderFormats(data) {
+  var mount = document.getElementById('formats-mount');
+  if (!mount) return;
+  if (!data || !data.parse) {
+    mount.innerHTML = '<p style="color:var(--text-muted)">Could not load formats.</p>';
+    return;
+  }
+
+  var aiRequired = data.ai_required || [];
+  // Categorize parse formats
+  var office = [], text = [], aiFormats = [], audio = [], video = [];
+  var audioExts = ['wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac'];
+  var videoExts = ['mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg', 'flv', '3gpp'];
+  (data.parse || []).forEach(function(ext) {
+    if (audioExts.indexOf(ext) >= 0) audio.push(ext);
+    else if (videoExts.indexOf(ext) >= 0) video.push(ext);
+    else if (aiRequired.indexOf(ext) >= 0) aiFormats.push(ext);
+    else if (['docx','pptx','xlsx','odt','odp','ods'].indexOf(ext) >= 0) office.push(ext);
+    else text.push(ext);
+  });
+
+  var groups = [
+    { title: 'Office (Deterministic)', exts: office },
+    { title: 'Text (Native)', exts: text },
+    { title: 'Images & PDF (AI)', exts: aiFormats },
+    { title: 'Audio (AI)', exts: audio },
+    { title: 'Video (AI)', exts: video }
+  ];
+  // Add generation formats
+  if (data.generate && data.generate.length > 0) {
+    groups.push({ title: 'Generation Output', exts: data.generate });
+  }
+
+  var html = '<div class="dp-format-grid">';
+  groups.forEach(function(g) {
+    if (g.exts.length === 0) return;
+    html += '<div class="dp-format-card">';
+    html += '<div class="dp-format-card-title">' + escapeHtml(g.title) + '</div>';
+    html += '<div class="dp-format-card-exts">.' + g.exts.join(' .') + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  mount.innerHTML = html;
+}
+
+// ── Phase 2: Pricing table from /api/v1/pricing ──
+
+var PRICING_LABELS = {
+  price_eur: 'Price',
+  requests_per_day: 'Requests / day',
+  pages_per_month: 'Pages / month',
+  max_file_size_mb: 'Max file size (MB)',
+  ai_limit_per_request: 'AI pages / request'
+};
+
+function renderPricing(data) {
+  var mount = document.getElementById('pricing-mount');
+  if (!mount) return;
+  if (!data || !data.tiers) {
+    var fallback = document.getElementById('pricing-fallback');
+    if (fallback) fallback.style.display = 'block';
+    mount.innerHTML = '';
+    return;
+  }
+
+  var tierNames = Object.keys(data.tiers);
+  var html = '<table class="dp-tier-table"><thead><tr><th></th>';
+  tierNames.forEach(function(name) {
+    var tier = data.tiers[name];
+    var label = name.charAt(0).toUpperCase() + name.slice(1);
+    if (tier.price_eur > 0) label += ' \u2014 \u20AC' + Math.round(tier.price_eur) + '/mo';
+    html += '<th>' + escapeHtml(label) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  var limitKeys = Object.keys(PRICING_LABELS);
+  limitKeys.forEach(function(key) {
+    if (key === 'price_eur') return; // Already in header
+    html += '<tr><td>' + PRICING_LABELS[key] + '</td>';
+    tierNames.forEach(function(name) {
+      var val = data.tiers[name][key];
+      var display = val >= 1000000 ? 'Unlimited' : (val >= 1000 ? Math.round(val).toLocaleString() : val);
+      html += '<td>' + display + '</td>';
+    });
+    html += '</tr>';
+  });
+
+  // Credits section
+  if (data.credits) {
+    html += '<tr><td colspan="' + (tierNames.length + 1) + '" style="font-weight:700;padding-top:16px">Credits per Operation</td></tr>';
+    for (var op in data.credits) {
+      var label = op.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      html += '<tr><td>' + escapeHtml(label) + '</td>';
+      tierNames.forEach(function() {
+        html += '<td>' + data.credits[op] + '</td>';
+      });
+      html += '</tr>';
+    }
+  }
+
+  html += '</tbody></table>';
+  mount.innerHTML = html;
+}
+
+// ── Manifest-driven endpoint rendering ──
+
+function renderBadges(ep) {
+  var html = '<div class="dp-endpoint-badges">';
+  if (ep.auth && ep.auth.required) {
+    html += '<span class="dp-badge dp-badge-auth">' + (ep.auth.scheme || 'auth') + '</span>';
+  }
+  if (ep.cost) {
+    if (ep.cost.unit === 'none') {
+      html += '<span class="dp-badge dp-badge-free">free</span>';
+    } else {
+      html += '<span class="dp-badge dp-badge-cost">credits</span>';
+    }
+  }
+  if (ep.determinism && ep.determinism.replayable) {
+    var variance = ep.determinism.sources_of_variance || [];
+    html += '<span class="dp-badge dp-badge-deterministic">' + (variance.length === 0 ? 'deterministic' : 'replayable') + '</span>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderInputSchema(schema, epId) {
+  // Show hints as parameters when schema is empty
+  if ((!schema || !schema.properties || Object.keys(schema.properties).length === 0) && PARAM_HINTS[epId]) {
+    var html = '<div style="margin-top:10px"><div style="font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px">Parameters</div>';
+    html += '<table class="dp-schema-table">';
+    PARAM_HINTS[epId].forEach(function(hint) {
+      var autoNote = hint.auto ? ' (auto-filled)' : '';
+      html += '<tr><td>' + escapeHtml(hint.name) + ' *</td><td>' + escapeHtml(hint.type) + '</td><td>' + escapeHtml(hint.description) + autoNote + '</td></tr>';
+    });
+    html += '</table></div>';
+    return html;
+  }
+  if (!schema || !schema.properties) return '';
+  var html = '<div style="margin-top:10px"><div style="font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px">Parameters</div>';
+  html += '<table class="dp-schema-table">';
+  var props = schema.properties;
+  var required = schema.required || [];
+  // Also check oneOf for required fields
+  if (schema.oneOf) {
+    schema.oneOf.forEach(function(alt) {
+      if (alt.required) alt.required.forEach(function(r) {
+        if (required.indexOf(r) < 0) required.push(r);
+      });
+    });
+  }
+  for (var name in props) {
+    var prop = props[name];
+    var type = prop.type || '';
+    if (prop.enum) type = prop.enum.join(' | ');
+    var desc = prop.description || '';
+    if (prop.default) desc += (desc ? ' ' : '') + '(default: ' + prop.default + ')';
+    var req = required.indexOf(name) >= 0 ? ' *' : '';
+    html += '<tr><td>' + escapeHtml(name) + req + '</td><td>' + escapeHtml(type) + '</td><td>' + escapeHtml(desc) + '</td></tr>';
+  }
+  html += '</table></div>';
+  return html;
+}
+
+function renderErrorCodes(codes) {
+  if (!codes || codes.length === 0) return '';
+  var html = '<div class="dp-error-codes">';
+  codes.forEach(function(c) {
+    html += '<span class="dp-error-code">' + escapeHtml(c) + '</span>';
+  });
+  html += '</div>';
+  return html;
+}
+
+// ── Phase 4: Code examples from schema for all endpoints ──
+
+function buildExampleBody(ep) {
+  // Use golden example if available
+  if (ep.examples && ep.examples.length > 0 && ep.examples[0].request) {
+    return ep.examples[0].request;
+  }
+  // Generate from schema defaults — use hints if schema is empty
+  if (!ep.input_schema || !ep.input_schema.properties || Object.keys(ep.input_schema.properties).length === 0) {
+    if (PARAM_HINTS[ep.id]) {
+      var hintBody = {};
+      PARAM_HINTS[ep.id].forEach(function(hint) {
+        if (hint.auto === 'api_key') hintBody[hint.name] = 'dp_YOUR_KEY_ID';
+        else if (hint.auto === 'firebase_uid') hintBody[hint.name] = 'YOUR_USER_ID';
+        else hintBody[hint.name] = 'example';
+      });
+      return hintBody;
+    }
+    return {};
+  }
+  var body = {};
+  var props = ep.input_schema.properties;
+  // Use sample_id instead of filepath if both exist
+  var hasSampleId = !!props.sample_id;
+  for (var name in props) {
+    var prop = props[name];
+    // Skip filepath when sample_id is available
+    if ((name === 'filepath' || name === 'path') && hasSampleId) continue;
+    if (prop.default) body[name] = prop.default;
+    else if (prop.enum && prop.enum.length > 0) body[name] = prop.enum[0];
+    else if (name === 'sample_id' || name === 'filepath' || name === 'path') body[name] = 'sample_docx_basic';
+    else if (name === 'label') body[name] = 'my-app';
+    else if (name === 'device_code' || name === 'request_id') body[name] = 'YOUR_' + name.toUpperCase();
+    else if (prop.type === 'string') body[name] = 'example';
+    else if (prop.type === 'boolean') body[name] = false;
+    else if (prop.type === 'integer' || prop.type === 'number') body[name] = 0;
+  }
+  return body;
+}
+
+function getAuthHeader(ep) {
+  if (!ep.auth || !ep.auth.required) return null;
+  if (ep.auth.scheme === 'firebase_bearer') return { name: 'Authorization', value: 'Bearer YOUR_TOKEN' };
+  if (ep.id === 'unstructured') return { name: 'unstructured-api-key', value: 'YOUR_KEY' };
+  return { name: 'x-api-key', value: 'YOUR_KEY' };
+}
+
+function renderCodeExamples(ep) {
+  var base = API_BASE;
+  var group = 'ep-' + ep.id;
+
+  if (ep.method === 'GET') {
+    // GET endpoints: simple curl with copy button
+    return '<div class="dp-lang-panel active" style="margin-top:10px"><button class="dp-code-copy" onclick="copyCodeBlock(this)">Copy</button><pre><code class="language-bash">curl ' + base + escapeHtml(ep.path) + '</code></pre></div>';
+  }
+
+  var body = buildExampleBody(ep);
+  var bodyStr = JSON.stringify(body, null, 2);
+  var bodyCompact = JSON.stringify(body);
+  var auth = getAuthHeader(ep);
+  var authCurl = auth ? '  -H "' + auth.name + ': ' + auth.value + '" \\\n' : '';
+  var authPy = auth ? '"' + auth.name + '": "' + auth.value + '", ' : '';
+  var authJs = auth ? '"' + auth.name + '": "' + auth.value + '", ' : '';
+
+  return '<div class="dp-lang-tabs">' +
+    '<span class="dp-lang-tab active" onclick="switchLang(this,\'' + group + '\')">curl</span>' +
+    '<span class="dp-lang-tab" onclick="switchLang(this,\'' + group + '\')">Python</span>' +
+    '<span class="dp-lang-tab" onclick="switchLang(this,\'' + group + '\')">JavaScript</span>' +
+    '</div>' +
+    '<div class="dp-lang-panel active" data-group="' + group + '" data-lang="curl">' +
+    '<button class="dp-code-copy" onclick="copyCodeBlock(this)">Copy</button>' +
+    '<pre><code class="language-bash">curl -X POST ' + base + escapeHtml(ep.path) + ' \\\n' +
+    '  -H "Content-Type: application/json" \\\n' +
+    authCurl +
+    "  -d '" + escapeHtml(bodyCompact) + "'</code></pre></div>" +
+    '<div class="dp-lang-panel" data-group="' + group + '" data-lang="Python">' +
+    '<button class="dp-code-copy" onclick="copyCodeBlock(this)">Copy</button>' +
+    '<pre><code class="language-python">import requests\n\nresp = requests.post(\n' +
+    '    "' + base + escapeHtml(ep.path) + '",\n' +
+    '    headers={' + authPy + '"Content-Type": "application/json"},\n' +
+    '    json=' + bodyStr + '\n' +
+    ')\nresult = resp.json()</code></pre></div>' +
+    '<div class="dp-lang-panel" data-group="' + group + '" data-lang="JavaScript">' +
+    '<button class="dp-code-copy" onclick="copyCodeBlock(this)">Copy</button>' +
+    '<pre><code class="language-javascript">const resp = await fetch(\n' +
+    '  "' + base + escapeHtml(ep.path) + '",\n' +
+    '  {\n    method: "POST",\n' +
+    '    headers: { ' + authJs + '"Content-Type": "application/json" },\n' +
+    '    body: JSON.stringify(' + bodyStr + ')\n' +
+    '  }\n);\nconst data = await resp.json();</code></pre></div>';
+}
+
+// ── Phase 3: Generic playground forms from input_schema ──
+
+function buildSampleDropdown(epId) {
+  if (dpSamples.length === 0) return '';
+  var html = '<div class="dp-playground-field"><label>Sample File</label><select id="pg-' + epId + '-sample_id">';
+  dpSamples.forEach(function(s) {
+    var label = s.label || s.id;
+    var fmt = s.format || s.media_type || '';
+    html += '<option value="' + escapeHtml(s.id) + '">' + escapeHtml(label) + (fmt ? ' (' + escapeHtml(fmt) + ')' : '') + '</option>';
+  });
+  html += '</select></div>';
+  return html;
+}
+
+function renderPlayground(ep) {
+  if (ep.method === 'GET') {
+    return '<button class="dp-try-btn" onclick="tryGetEndpoint(\'' + escapeHtml(ep.path) + '\', this)">Try It</button>' +
+      '<div class="dp-try-result"></div>';
+  }
+
+  // Schema-driven form for POST endpoints
+  var schema = ep.input_schema || {};
+  var hasProps = schema.properties && Object.keys(schema.properties).length > 0;
+
+  var needsApiKey = ep.auth && ep.auth.required && ep.auth.scheme !== 'firebase_bearer';
+  var cssClass = needsApiKey ? 'dp-endpoint-playground pg-authed' : 'dp-endpoint-playground visible';
+  var html = '<div class="' + cssClass + '" id="pg-' + ep.id + '" data-path="' + escapeHtml(ep.path) + '" data-ep-id="' + escapeHtml(ep.id) + '">';
+
+  if (hasProps) {
+    html += '<div class="dp-playground-form">';
+    var props = schema.properties;
+    for (var name in props) {
+      var prop = props[name];
+
+      if (name === 'path' || name === 'filepath' || name === 'sample_id') {
+        // File/sample field: dropdown + custom input
+        html += buildSampleDropdown(ep.id);
+        html += '<div class="dp-playground-field"><label>Custom Path</label>' +
+          '<input type="text" id="pg-' + ep.id + '-' + name + '" placeholder="path/to/file or sample_id"></div>';
+      } else if (prop.enum) {
+        // Enum field: <select>
+        html += '<div class="dp-playground-field"><label>' + escapeHtml(name) + '</label>';
+        html += '<select id="pg-' + ep.id + '-' + name + '">';
+        prop.enum.forEach(function(val) {
+          var selected = (prop.default && prop.default === val) ? ' selected' : '';
+          html += '<option value="' + escapeHtml(val) + '"' + selected + '>' + escapeHtml(val) + '</option>';
+        });
+        html += '</select></div>';
+      } else if (prop.type === 'boolean') {
+        html += '<div class="dp-playground-field"><label>' + escapeHtml(name) + '</label>' +
+          '<select id="pg-' + ep.id + '-' + name + '"><option value="false">false</option><option value="true">true</option></select></div>';
+      } else {
+        // String/other field: text input
+        html += '<div class="dp-playground-field"><label>' + escapeHtml(name) + '</label>' +
+          '<input type="text" id="pg-' + ep.id + '-' + name + '" placeholder="' + escapeHtml(prop.description || name) + '"></div>';
+      }
+    }
+    html += '</div>';
+  } else if (PARAM_HINTS[ep.id]) {
+    // Render form fields from client-side hints
+    html += '<div class="dp-playground-form">';
+    PARAM_HINTS[ep.id].forEach(function(hint) {
+      var autoLabel = hint.auto ? ' (auto-filled)' : '';
+      html += '<div class="dp-playground-field"><label>' + escapeHtml(hint.name) + autoLabel + '</label>' +
+        '<input type="text" id="pg-' + ep.id + '-' + hint.name + '" placeholder="' + escapeHtml(hint.description) + '"></div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">No input parameters — sends empty body.</div>';
+  }
+  html += '<div class="dp-playground-actions">';
+  html += '<button class="dp-btn dp-btn--primary" style="font-size:12px;padding:8px 18px" onclick="pgSendGeneric(\'' + escapeHtml(ep.id) + '\')">Send Request</button>';
+  html += '<div class="dp-copy-group">';
+  html += '<button class="dp-copy-btn" onclick="pgCopyGeneric(\'' + escapeHtml(ep.id) + '\',\'curl\',this)">Copy curl</button>';
+  html += '<button class="dp-copy-btn" onclick="pgCopyGeneric(\'' + escapeHtml(ep.id) + '\',\'python\',this)">Copy Python</button>';
+  html += '<button class="dp-copy-btn" onclick="pgCopyGeneric(\'' + escapeHtml(ep.id) + '\',\'typescript\',this)">Copy TypeScript</button>';
+  html += '</div></div>';
+  html += '<div class="dp-playground-response" id="pg-' + ep.id + '-response"></div>';
+  html += '</div>';
+  return html;
+}
+
+function renderEndpointCard(ep) {
+  dpEndpointMap[ep.id] = ep; // Cache for playground lookups
+  var methodClass = ep.method === 'GET' ? 'dp-method-get' : 'dp-method-post';
+  var html = '<div class="dp-endpoint" id="ep-' + ep.id + '">';
+  html += '<div class="dp-endpoint-header" onclick="this.parentElement.classList.toggle(\'open\')">';
+  html += '<span class="dp-endpoint-method ' + methodClass + '">' + ep.method + '</span>';
+  html += '<span class="dp-endpoint-path">' + escapeHtml(ep.path) + '</span>';
+  html += '<span class="dp-endpoint-desc">' + escapeHtml(ep.description) + '</span>';
+  html += renderBadges(ep);
+  html += '<span class="dp-endpoint-arrow">&rsaquo;</span>';
+  html += '</div>';
+  html += '<div class="dp-endpoint-body">';
+  html += '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">' + escapeHtml(ep.description) + '</p>';
+  html += renderCodeExamples(ep);
+  html += renderInputSchema(ep.input_schema, ep.id);
+  html += renderErrorCodes(ep.error_codes);
+  html += renderPlayground(ep);
+  html += '</div></div>';
+  return html;
+}
+
+function renderEndpoints(capabilities) {
+  var mount = document.getElementById('endpoints-mount');
+  if (!capabilities || !capabilities.endpoints) {
+    mount.innerHTML = '<p style="color:var(--text-muted)">Failed to load capability manifest. <a href="' + API_BASE + '/api/v1/capabilities" target="_blank" style="color:var(--dp-blue)">View raw manifest</a></p>';
+    return;
+  }
+  var html = '';
+  capabilities.endpoints.forEach(function(ep) {
+    html += renderEndpointCard(ep);
+  });
+  mount.innerHTML = html;
+  if (typeof Prism !== 'undefined') {
+    mount.querySelectorAll('pre code[class*="language-"]').forEach(function(el) {
+      Prism.highlightElement(el);
+    });
+  }
+}
+
+// ── Playground: GET endpoints ──
+
+function tryGetEndpoint(path, btn) {
+  var resultEl = btn.parentElement.querySelector('.dp-try-result');
+  resultEl.textContent = 'Loading...';
+  resultEl.classList.add('visible');
+  fetch(API_BASE + path, { method: 'GET' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var inner = unwrapEnvelope(data);
+      resultEl.textContent = JSON.stringify(inner, null, 2);
+    })
+    .catch(function(err) {
+      resultEl.textContent = 'Error: ' + err.message;
+    });
+}
+
+// ── Playground: Generic POST endpoints ──
+
+var pgKeyValid = false;
+
+// Store API key in localStorage and activate playground
+function pgSetApiKey(rawKey) {
+  localStorage.setItem('dp_api_key', rawKey);
+  var keyInput = document.getElementById('pg-api-key');
+  if (keyInput) {
+    keyInput.value = rawKey;
+    pgValidateKey(keyInput);
+  }
+  var bar = document.getElementById('pg-bar');
+  if (bar) bar.classList.add('visible');
+  var bannerNokeys = document.getElementById('pg-banner-nokeys');
+  if (bannerNokeys) bannerNokeys.classList.remove('visible');
+  var bannerSignin = document.getElementById('pg-banner-signin');
+  if (bannerSignin) bannerSignin.classList.remove('visible');
+}
+
+// Clear stored key and deactivate playground
+function pgForgetKey() {
+  localStorage.removeItem('dp_api_key');
+  var keyInput = document.getElementById('pg-api-key');
+  if (keyInput) {
+    keyInput.value = '';
+    pgValidateKey(keyInput);
+  }
+  // Update unified panel state
+  updateApiKeyPanel();
+}
+
+function pgValidateKey(input) {
+  var val = input.value.trim();
+  var status = document.getElementById('pg-key-status');
+  pgKeyValid = /^dp_[0-9a-f]{32}$/.test(val);
+  if (pgKeyValid) {
+    status.className = 'dp-pg-key-valid';
+    status.innerHTML = '&#x2713;';
+    localStorage.setItem('dp_api_key', val);
+    pgFetchQuota(val);
+    loadHistory(val);
+    document.querySelectorAll('.pg-authed').forEach(function(el) { el.classList.add('visible'); });
+  } else {
+    status.className = 'dp-pg-key-invalid';
+    status.innerHTML = '&#x25CB;';
+    document.getElementById('pg-quota').style.display = 'none';
+    var historyEl = document.getElementById('request-history');
+    if (historyEl) historyEl.classList.remove('visible');
+  }
+}
+
+function pgFetchQuota(apiKey) {
+  // keys/usage requires firebase_bearer auth + keyId + userId
+  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+  if (!user) return;
+  window.dpGetIdToken().then(function(token) {
+    return fetch(API_BASE + '/api/v1/keys/usage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ keyId: apiKey, userId: user.uid })
+    });
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var result = unwrapEnvelope(data);
+    if (result.usage && result.quota) {
+      var el = document.getElementById('pg-quota');
+      el.textContent = result.usage.requestsToday + '/' + result.quota.requestsPerDay + ' requests today';
+      el.style.display = 'block';
+    }
+  })
+  .catch(function() { /* optional */ });
+}
+
+function pgGetApiKey() {
+  var input = document.getElementById('pg-api-key');
+  return input ? input.value.trim() : localStorage.getItem('dp_api_key') || '';
+}
+
+// Resolve auto-fill value for a PARAM_HINTS entry
+function resolveAutoValue(auto) {
+  if (auto === 'api_key') return localStorage.getItem('dp_api_key') || '';
+  if (auto === 'firebase_uid') {
+    var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+    return user ? user.uid : '';
+  }
+  return '';
+}
+
+// Generic: read form values from schema-driven fields
+function pgBuildBody(epId) {
+  var ep = dpEndpointMap[epId];
+
+  // Fall back to PARAM_HINTS when schema has no properties
+  if (PARAM_HINTS[epId] && (!ep || !ep.input_schema || !ep.input_schema.properties || Object.keys(ep.input_schema.properties).length === 0)) {
+    var body = {};
+    PARAM_HINTS[epId].forEach(function(hint) {
+      var el = document.getElementById('pg-' + epId + '-' + hint.name);
+      var val = el ? el.value.trim() : '';
+      // Auto-fill if empty and hint has auto
+      if (!val && hint.auto) val = resolveAutoValue(hint.auto);
+      if (val) body[hint.name] = val;
+    });
+    return body;
+  }
+
+  if (!ep || !ep.input_schema || !ep.input_schema.properties) return {};
+  var body = {};
+  var props = ep.input_schema.properties;
+
+  for (var name in props) {
+    // For file fields, check sample dropdown first, then custom input
+    if (name === 'path' || name === 'filepath' || name === 'sample_id') {
+      var customEl = document.getElementById('pg-' + epId + '-' + name);
+      var sampleEl = document.getElementById('pg-' + epId + '-sample_id');
+      if (customEl && customEl.value.trim()) {
+        body[name] = customEl.value.trim();
+      } else if (sampleEl && sampleEl.value) {
+        // Use sample_id if schema has it, otherwise use path
+        if (props.sample_id) body.sample_id = sampleEl.value;
+        else body[name] = sampleEl.value;
+      }
+    } else {
+      var el = document.getElementById('pg-' + epId + '-' + name);
+      if (el) {
+        var val = el.value;
+        if (props[name].type === 'boolean') val = (val === 'true');
+        if (val !== '' && val !== null) body[name] = val;
+      }
+    }
+  }
+  return body;
+}
+
+function pgGetPath(epId) {
+  var form = document.getElementById('pg-' + epId);
+  if (form) return form.getAttribute('data-path') || '/api/v1/' + epId;
+  var ep = dpEndpointMap[epId];
+  return ep ? ep.path : '/api/v1/' + epId;
+}
+
+function pgRenderResponse(container, status, data, clientMs) {
+  var serverMs = data.elapsed_ms || '?';
+  var json = JSON.stringify(data, null, 2);
+  var statusClass = (status >= 200 && status < 300) ? 'status-ok' : 'status-err';
+  var sizeKb = (new Blob([json]).size / 1024).toFixed(1);
+  container.innerHTML =
+    '<div class="dp-response-meta">' +
+      '<span class="' + statusClass + '">' + status + '</span>' +
+      '<span>server: ' + serverMs + 'ms</span>' +
+      '<span>round-trip: ' + clientMs + 'ms</span>' +
+      '<span>' + sizeKb + ' KB</span>' +
+    '</div>' +
+    '<div class="dp-response-body">' + escapeHtml(json) + '</div>';
+  container.classList.add('visible');
+}
+
+function pgSendGeneric(epId) {
+  var ep = dpEndpointMap[epId];
+  var apiKey = pgGetApiKey();
+  var needsKey = ep && ep.auth && ep.auth.required && ep.auth.scheme !== 'firebase_bearer';
+  var needsBearer = ep && ep.auth && ep.auth.scheme === 'firebase_bearer';
+
+  if (needsKey && !pgKeyValid) {
+    alert('Please paste a valid API key (dp_ + 32 hex chars)');
+    return;
+  }
+  if (needsBearer && (!window.dpGetCurrentUser || !window.dpGetCurrentUser())) {
+    alert('Sign in with Google to use this endpoint.');
+    return;
+  }
+
+  var path = pgGetPath(epId);
+  var body = pgBuildBody(epId);
+  var container = document.getElementById('pg-' + epId + '-response');
+  container.innerHTML = '<div class="dp-response-meta"><span>Sending...</span></div>';
+  container.classList.add('visible');
+
+  var headers = { 'Content-Type': 'application/json' };
+  if (needsKey) {
+    if (epId === 'unstructured') headers['unstructured-api-key'] = apiKey;
+    else headers['x-api-key'] = apiKey;
+  }
+
+  // For Bearer token endpoints, get Firebase ID token first
+  var tokenPromise = needsBearer ? window.dpGetIdToken() : Promise.resolve(null);
+
+  var start = performance.now();
+  tokenPromise.then(function(token) {
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(API_BASE + path, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    });
+  })
+  .then(function(r) {
+    var clientMs = Math.round(performance.now() - start);
+    var httpStatus = r.status;
+    return r.json().then(function(data) {
+      pgRenderResponse(container, httpStatus, data, clientMs);
+    });
+  })
+  .catch(function(err) {
+    container.innerHTML =
+      '<div class="dp-response-meta"><span class="status-err">Error</span></div>' +
+      '<div class="dp-response-body">' + escapeHtml(err.message) + '</div>';
+    container.classList.add('visible');
+  });
+}
+
+// ── Copy format generators (generic) ──
+
+function pgCopyGeneric(epId, format, btn) {
+  var apiKey = pgGetApiKey() || 'YOUR_API_KEY';
+  var path = pgGetPath(epId);
+  var body = pgBuildBody(epId);
+  var url = API_BASE + path;
+  var ep = dpEndpointMap[epId];
+  var auth = ep ? getAuthHeader(ep) : { name: 'x-api-key', value: apiKey };
+  if (auth) auth.value = apiKey;
+  var text = '';
+
+  if (format === 'curl') {
+    text = 'curl -X POST ' + url + ' \\\n' +
+      '  -H "Content-Type: application/json" \\\n' +
+      (auth ? '  -H "' + auth.name + ': ' + auth.value + '" \\\n' : '') +
+      "  -d '" + JSON.stringify(body) + "'";
+  } else if (format === 'python') {
+    var hdrs = auth ? '{"' + auth.name + '": "' + auth.value + '", "Content-Type": "application/json"}' : '{"Content-Type": "application/json"}';
+    text = 'import requests\n\nresp = requests.post(\n' +
+      '    "' + url + '",\n' +
+      '    headers=' + hdrs + ',\n' +
+      '    json=' + JSON.stringify(body, null, 2) + '\n' +
+      ')\nresult = resp.json()';
+  } else if (format === 'typescript') {
+    var jsHdrs = auth ? '{ "' + auth.name + '": "' + auth.value + '", "Content-Type": "application/json" }' : '{ "Content-Type": "application/json" }';
+    text = 'const resp = await fetch("' + url + '", {\n' +
+      '  method: "POST",\n' +
+      '  headers: ' + jsHdrs + ',\n' +
+      '  body: JSON.stringify(' + JSON.stringify(body, null, 2) + ')\n' +
+      '});\nconst data = await resp.json();';
+  }
+
+  navigator.clipboard.writeText(text).then(function() {
+    btn.classList.add('copied');
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+// ── Phase 5: Device Auth Flow UI ──
+
+var devicePollTimer = null;
+
+function deviceAuthStart() {
+  var content = document.getElementById('device-auth-content');
+  content.innerHTML = '<div class="dp-device-status">Requesting device code...</div>';
+
+  fetch(API_BASE + '/api/v1/auth/device', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: 'browser', scope: 'parse' })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var result = unwrapEnvelope(data);
+    if (result.error) {
+      content.innerHTML = '<div class="dp-device-status" style="color:#f87171">Error: ' + escapeHtml(result.error.message || JSON.stringify(result.error)) + '</div>' +
+        '<button class="dp-btn dp-btn--primary" style="font-size:12px;padding:8px 18px;margin-top:12px" onclick="deviceAuthStart()">Try Again</button>';
+      return;
+    }
+
+    var deviceCode = result.device_code;
+    var userCode = result.user_code;
+    var verifyUrl = result.verification_url;
+    var interval = (result.interval || 5) * 1000;
+
+    content.innerHTML =
+      '<div class="dp-device-code-display">' + escapeHtml(userCode) + '</div>' +
+      '<div class="dp-device-status">Open <a href="' + escapeHtml(verifyUrl) + '" target="_blank" style="color:var(--dp-blue);font-weight:600">' + escapeHtml(verifyUrl) + '</a> and enter this code to approve.</div>' +
+      '<div class="dp-device-status" id="device-poll-status"><div class="dp-loading-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:8px"></div>Waiting for approval...</div>';
+
+    // Start polling
+    if (devicePollTimer) clearInterval(devicePollTimer);
+    devicePollTimer = setInterval(function() {
+      deviceAuthPoll(deviceCode);
+    }, interval);
+  })
+  .catch(function(err) {
+    content.innerHTML = '<div class="dp-device-status" style="color:#f87171">Network error: ' + escapeHtml(err.message) + '</div>' +
+      '<button class="dp-btn dp-btn--primary" style="font-size:12px;padding:8px 18px;margin-top:12px" onclick="deviceAuthStart()">Try Again</button>';
+  });
+}
+
+function deviceAuthPoll(deviceCode) {
+  fetch(API_BASE + '/api/v1/auth/device/poll', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceCode: deviceCode })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var result = unwrapEnvelope(data);
+
+    if (result.status === 'approved') {
+      clearInterval(devicePollTimer);
+      devicePollTimer = null;
+      var statusEl = document.getElementById('device-poll-status');
+      if (statusEl) {
+        statusEl.innerHTML = '<span style="color:#4ade80;font-weight:600">Approved!</span>';
+      }
+      var content = document.getElementById('device-auth-content');
+      content.innerHTML +=
+        '<div class="dp-device-key-result">' +
+        '<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Your API Key (save it — shown only once):</div>' +
+        '<div style="user-select:all">' + escapeHtml(result.api_key) + '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px">' +
+        '<button class="dp-copy-btn" onclick="navigator.clipboard.writeText(\'' + escapeHtml(result.api_key) + '\');this.textContent=\'Copied!\'">Copy Key</button>' +
+        '<button class="dp-btn dp-btn--primary" style="font-size:12px;padding:6px 14px" onclick="pgSetApiKey(\'' + escapeHtml(result.api_key) + '\');document.getElementById(\'pg-bar\').scrollIntoView({behavior:\'smooth\'})">Use in API Explorer</button>' +
+        '</div>';
+      // Also auto-populate playground
+      pgSetApiKey(result.api_key);
+    } else if (result.error && result.error.code === 'DEVICE_CODE_EXPIRED') {
+      clearInterval(devicePollTimer);
+      devicePollTimer = null;
+      var statusEl2 = document.getElementById('device-poll-status');
+      if (statusEl2) {
+        statusEl2.innerHTML = '<span style="color:#f87171">Device code expired.</span> ' +
+          '<button class="dp-btn dp-btn--primary" style="font-size:12px;padding:6px 14px" onclick="deviceAuthStart()">Try Again</button>';
+      }
+    }
+    // AUTHORIZATION_PENDING: keep polling (do nothing)
+  })
+  .catch(function() {
+    // Network error during poll: keep trying
+  });
+}
+
+// ── Phase 6: Request History ──
+
+function loadHistory(apiKey) {
+  var historyEl = document.getElementById('request-history');
+  if (!historyEl) return;
+  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+  var userId = user ? user.uid : '';
+
+  fetch(API_BASE + '/api/v1/requests/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify({ userId: userId })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var result = unwrapEnvelope(data);
+    var history = result.history || [];
+    if (history.length === 0) return;
+
+    historyEl.classList.add('visible');
+    var mount = document.getElementById('history-mount');
+
+    var html = '<table class="dp-history-table"><thead><tr>' +
+      '<th>Time</th><th>File</th><th>Format</th><th>Elapsed</th><th></th>' +
+      '</tr></thead><tbody>';
+    history.forEach(function(req) {
+      var ts = req.timestamp ? new Date(parseInt(req.timestamp)).toLocaleString() : '?';
+      var file = req.filepath || '?';
+      if (file.length > 30) file = '...' + file.slice(-27);
+      html += '<tr>' +
+        '<td>' + escapeHtml(ts) + '</td>' +
+        '<td>' + escapeHtml(file) + '</td>' +
+        '<td>' + escapeHtml(req.format || '?') + '</td>' +
+        '<td>' + escapeHtml(req.elapsed_ms ? req.elapsed_ms + 'ms' : '?') + '</td>' +
+        '<td><button class="dp-history-replay-btn" onclick="replayRequest(\'' + escapeHtml(req.request_id || '') + '\')">Replay</button></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    mount.innerHTML = html;
+    mount.style.display = 'block';
+  })
+  .catch(function() { /* history is optional */ });
+}
+
+function replayRequest(requestId) {
+  if (!requestId) return;
+  var apiKey = pgGetApiKey();
+  var container = document.getElementById('pg-parse-response') || document.getElementById('pg-requests_replay-response');
+
+  fetch(API_BASE + '/api/v1/requests/replay', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify({ request_id: requestId })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (container) {
+      pgRenderResponse(container, 200, data, 0);
+      // Scroll to response
+      container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      alert('Replay response:\n' + JSON.stringify(data, null, 2).slice(0, 500));
+    }
+  })
+  .catch(function(err) {
+    alert('Replay error: ' + err.message);
+  });
+}
+
+// ── Key management playground (Bearer token auth) ──
+
+function pgSendKeygen() {
+  var label = document.getElementById('pg-keygen-label');
+  var labelVal = label ? label.value.trim() || 'default' : 'default';
+  var container = document.getElementById('pg-keygen-response');
+  if (!container) return;
+  container.innerHTML = '<div class="dp-response-meta"><span>Sending...</span></div>';
+  container.classList.add('visible');
+
+  var start = performance.now();
+  // Use the shared async key generation
+  window.dpGenerateKeyAsync(labelVal).then(function(result) {
+    var clientMs = Math.round(performance.now() - start);
+    var responseData = { status: 'approved', api_key: result.api_key, key_id: result.key_id, tier: result.tier };
+    pgRenderResponse(container, 200, { result: JSON.stringify(responseData) }, clientMs);
+    // Auto-populate playground with the new key
+    pgSetApiKey(result.api_key);
+    updateApiKeyPanel();
+  }).catch(function(err) {
+    container.innerHTML =
+      '<div class="dp-response-meta"><span class="status-err">Error</span></div>' +
+      '<div class="dp-response-body">' + escapeHtml(err.message) + '</div>';
+  });
+}
+
+function pgSendUsage() {
+  var keyId = document.getElementById('pg-usage-keyid');
+  if (!keyId || !keyId.value) { alert('Select a key ID'); return; }
+  var container = document.getElementById('pg-usage-response');
+  if (!container) return;
+  container.innerHTML = '<div class="dp-response-meta"><span>Sending...</span></div>';
+  container.classList.add('visible');
+
+  var start = performance.now();
+  window.dpGetIdToken().then(function(token) {
+    return fetch(API_BASE + '/api/v1/keys/usage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ args: [keyId.value] })
+    });
+  }).then(function(r) {
+    var clientMs = Math.round(performance.now() - start);
+    return r.json().then(function(data) { pgRenderResponse(container, r.status, data, clientMs); });
+  }).catch(function(err) {
+    container.innerHTML =
+      '<div class="dp-response-meta"><span class="status-err">Error</span></div>' +
+      '<div class="dp-response-body">' + escapeHtml(err.message) + '</div>';
+  });
+}
+
+// ── Unified API Key Panel state management ──
+
+function updateApiKeyPanel() {
+  var panelSignin = document.getElementById('akp-signin');
+  var panelGenerate = document.getElementById('akp-generate');
+  var panelReady = document.getElementById('akp-ready');
+  if (!panelSignin) return; // not on api.html
+
+  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+  var storedKey = localStorage.getItem('dp_api_key');
+
+  panelSignin.style.display = 'none';
+  panelGenerate.style.display = 'none';
+  panelReady.style.display = 'none';
+
+  if (!user) {
+    panelSignin.style.display = 'block';
+    return;
+  }
+
+  // If we have a stored key, show ready state immediately
+  if (storedKey && /^dp_[0-9a-f]{32}$/.test(storedKey)) {
+    panelReady.style.display = 'block';
+    return;
+  }
+
+  // No stored key — check server for existing active keys
+  if (typeof window.dpListKeysAsync === 'function') {
+    window.dpListKeysAsync().then(function(keys) {
+      var activeKeys = keys.filter(function(k) { return k.active === true || k.active === 'true'; });
+      if (activeKeys.length > 0) {
+        // User has keys but none stored locally — show ready-ish state with hint
+        panelReady.style.display = 'block';
+        var readyText = document.querySelector('#akp-ready p');
+        if (readyText) readyText.innerHTML = 'You have ' + activeKeys.length + ' active key(s). Paste one in the API Explorer below, or generate a new one.';
+      } else {
+        panelGenerate.style.display = 'block';
+        var emailLine = document.getElementById('akp-email-line');
+        if (emailLine) emailLine.textContent = 'Signed in as ' + (user.email || '') + '.';
+      }
+    }).catch(function() {
+      // Can't reach server — show generate form as fallback
+      panelGenerate.style.display = 'block';
+      var emailLine = document.getElementById('akp-email-line');
+      if (emailLine) emailLine.textContent = 'Signed in as ' + (user.email || '') + '.';
+    });
+  } else {
+    panelGenerate.style.display = 'block';
+    var emailLine = document.getElementById('akp-email-line');
+    if (emailLine) emailLine.textContent = 'Signed in as ' + (user.email || '') + '.';
+  }
+}
+
+function akpShowGenerate() {
+  document.getElementById('akp-ready').style.display = 'none';
+  document.getElementById('akp-generate').style.display = 'block';
+  document.getElementById('akp-key-result').style.display = 'none';
+  document.getElementById('akp-gen-error').style.display = 'none';
+  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+  var emailLine = document.getElementById('akp-email-line');
+  if (emailLine && user) emailLine.textContent = 'Signed in as ' + (user.email || '') + '.';
+}
+
+function akpGenerateKey() {
+  var labelInput = document.getElementById('akp-label');
+  var label = labelInput ? labelInput.value.trim() : 'default';
+  if (!label) label = 'default';
+  var btn = document.getElementById('akp-gen-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  window.dpGenerateKeyAsync(label).then(function(result) {
+    btn.disabled = false;
+    btn.textContent = 'Generate Key';
+    if (labelInput) labelInput.value = '';
+    // Show key inline
+    document.getElementById('akp-key-display').textContent = result.api_key;
+    document.getElementById('akp-key-result').style.display = 'block';
+    document.getElementById('akp-gen-error').style.display = 'none';
+    // Auto-populate playground
+    pgSetApiKey(result.api_key);
+  }).catch(function(err) {
+    btn.disabled = false;
+    btn.textContent = 'Generate Key';
+    var errEl = document.getElementById('akp-gen-error');
+    errEl.textContent = 'Error: ' + err.message;
+    errEl.style.display = 'block';
+  });
+}
+
+// ── Playground init — react to auth state changes ──
+
+function initPlayground(user) {
+  var bannerSignin = document.getElementById('pg-banner-signin');
+  var bannerNokeys = document.getElementById('pg-banner-nokeys');
+  var bar = document.getElementById('pg-bar');
+  var playgrounds = document.querySelectorAll('.pg-authed');
+
+  // Update the unified key panel
+  updateApiKeyPanel();
+
+  if (!user) {
+    if (bannerSignin) bannerSignin.classList.add('visible');
+    if (bannerNokeys) bannerNokeys.classList.remove('visible');
+    if (bar) bar.classList.remove('visible');
+    playgrounds.forEach(function(el) { el.classList.remove('visible'); });
+    return;
+  }
+
+  if (bannerSignin) bannerSignin.classList.remove('visible');
+  document.getElementById('pg-bar-email').textContent = user.email || '';
+
+  // Auto-fill PARAM_HINTS fields with resolved values
+  for (var epId in PARAM_HINTS) {
+    PARAM_HINTS[epId].forEach(function(hint) {
+      if (hint.auto) {
+        var el = document.getElementById('pg-' + epId + '-' + hint.name);
+        if (el && !el.value) el.value = resolveAutoValue(hint.auto);
+      }
+    });
+  }
+
+  // Check localStorage for stored key first
+  var storedKey = localStorage.getItem('dp_api_key');
+  if (storedKey && /^dp_[0-9a-f]{32}$/.test(storedKey)) {
+    if (bannerNokeys) bannerNokeys.classList.remove('visible');
+    if (bar) bar.classList.add('visible');
+    var keyInput = document.getElementById('pg-api-key');
+    if (keyInput) {
+      keyInput.value = storedKey;
+      pgValidateKey(keyInput);
+    }
+  }
+
+  // Also fetch key list for usage select dropdown
+  if (typeof window.dpListKeysAsync === 'function') {
+    window.dpListKeysAsync().then(function(keys) {
+      var activeKeys = keys.filter(function(k) { return k.active === true || k.active === 'true'; });
+
+      var usageSelect = document.getElementById('pg-usage-keyid');
+      if (usageSelect && activeKeys.length > 0) {
+        usageSelect.innerHTML = activeKeys.map(function(k) {
+          return '<option value="' + k.keyId + '">' + (k.label || 'key') + ' (' + k.keyId.substring(0, 8) + '...)</option>';
+        }).join('');
+      }
+
+      // If no stored key and no active keys, show the "no keys" banner
+      if (!storedKey && activeKeys.length === 0) {
+        if (bannerNokeys) bannerNokeys.classList.add('visible');
+        if (bar) bar.classList.remove('visible');
+        playgrounds.forEach(function(el) { el.classList.remove('visible'); });
+      } else if (!storedKey && activeKeys.length > 0) {
+        // Has keys but none stored — show bar for manual paste
+        if (bannerNokeys) bannerNokeys.classList.remove('visible');
+        if (bar) bar.classList.add('visible');
+      }
+    }).catch(function() {
+      // If key list fails but we have a stored key, playground still works
+      if (storedKey) {
+        if (bar) bar.classList.add('visible');
+        if (bannerNokeys) bannerNokeys.classList.remove('visible');
+      }
+    });
+  }
+}
+
+window.addEventListener('dp-auth-change', function(e) {
+  initPlayground(e.detail.user);
+});
+
+// ── Phase 7: Boot — parallel fetch all manifest endpoints ──
+
+function showFallbacks() {
+  // Show static fallbacks when API is unreachable
+  document.getElementById('endpoints-mount').innerHTML =
+    '<p style="color:var(--text-muted)">Could not reach API server. ' +
+    '<a href="' + API_BASE + '/api/v1/capabilities" target="_blank" style="color:var(--dp-blue)">Try direct link</a></p>';
+  document.getElementById('formats-mount').innerHTML = '';
+  var pf = document.getElementById('pricing-fallback');
+  if (pf) pf.style.display = 'block';
+  document.getElementById('pricing-mount').innerHTML = '';
+}
+
+(function boot() {
+  var fetchJson = function(path) {
+    return fetch(API_BASE + path).then(function(r) { return r.json(); }).then(unwrapEnvelope);
+  };
+
+  Promise.all([
+    fetchJson('/api/v1/capabilities'),
+    fetchJson('/api/v1/samples'),
+    fetchJson('/api/v1/formats'),
+    fetchJson('/api/v1/pricing')
+  ]).then(function(results) {
+    var caps = results[0];
+    var samples = results[1];
+    var formats = results[2];
+    var pricing = results[3];
+
+    dpCapabilities = caps;
+    dpSamples = (samples && samples.samples) ? samples.samples : [];
+
+    renderFormats(formats);
+    renderEndpoints(caps);
+    renderPricing(pricing);
+  }).catch(function(err) {
+    console.error('Boot failed:', err);
+    showFallbacks();
+  });
+})();
+</script>
+</body>
+</html>

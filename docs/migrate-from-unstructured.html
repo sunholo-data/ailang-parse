@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Migrate from Unstructured — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 96.6% structural fidelity vs 63.4%, sub-11ms latency. Keep Unstructured for PDFs.">
+<meta property="og:title" content="Migrate from Unstructured — AILANG Parse">
+<meta property="og:description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 96.6% structural fidelity vs 63.4%, sub-11ms latency. Keep Unstructured for PDFs.">
+<meta property="og:type" content="article">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Migration page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--contact {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+.dp-callout--contact svg { stroke: #8b5cf6; }
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Change the URL in your API call from the Unstructured endpoint to the AILANG Parse endpoint. AILANG Parse implements the same /general/v0/general route with the same multipart file upload format, so existing client code works with a one-line URL change. For Office documents (DOCX, PPTX, XLSX), you get 96.6% structural fidelity compared to Unstructured's 63.4%."}},
+    {"@type": "Question", "name": "Is AILANG Parse a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office document parsing, yes. AILANG Parse implements the same /general/v0/general endpoint format that Unstructured uses, so you can switch by changing the URL. The response format is compatible. For PDFs and scanned documents, keep using Unstructured — its ML pipeline is purpose-built for those formats."}},
+    {"@type": "Question", "name": "Can I use both Unstructured and AILANG Parse together?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and this is the recommended pattern. Route Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB) through AILANG Parse for deterministic structural parsing, and route PDFs and scanned images through Unstructured where its ML pipeline excels. A simple file-extension check in your routing layer is all you need."}},
+    {"@type": "Question", "name": "What Office formats does AILANG Parse support that Unstructured doesn't parse well?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse deterministically parses DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB with full structural fidelity. It preserves track changes, merged cells, comments with author attribution, headers and footers, text boxes, footnotes, and endnotes — all features that Unstructured loses because it converts Office files to PDF before parsing."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Migrate</span> from Unstructured</h1>
+    <p class="subtitle reveal reveal-delay-1">One line of code. Full structural fidelity for Office documents.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#why-migrate" class="active">Why Migrate</a>
+        <a href="#one-line-change">One-Line Change</a>
+        <a href="#routing-pattern">Routing Pattern</a>
+        <a href="#what-you-gain">What You Gain</a>
+        <a href="#self-hosting">Self-Hosting</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="why-migrate">Why Migrate</h2>
+      <p>Unstructured is a capable document processing platform, but its Office parsing has a fundamental architectural limitation: it <strong>converts Office documents to PDF first</strong>, then applies its ML extraction pipeline to the rendered output. This intermediate conversion destroys structural information that exists in the source XML.</p>
+
+      <p>Track changes, merged cells, comments with author attribution, headers and footers, text boxes, footnotes &mdash; all of this is present in the OOXML and ODF source formats, but lost once the document is flattened to a rendered PDF page.</p>
+
+      <p>AILANG Parse reads the source XML directly. No intermediate conversion, no rendering step, no ML inference. The result is deterministic, structural, and fast.</p>
+
+      <p>On the OfficeDocBench structural benchmark, AILANG Parse scores <strong>96.6%</strong> compared to Unstructured's <strong>63.4%</strong> across DOCX, PPTX, and XLSX test files.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>This is not a replacement &mdash; it's an upgrade for the Office portion of your pipeline. Keep Unstructured for PDFs and scanned documents where its ML pipeline excels.</div>
+      </div>
+
+      <h2 id="one-line-change">One-Line Change</h2>
+      <p>AILANG Parse implements the same <code>/general/v0/general</code> endpoint that Unstructured uses. Switch by changing the URL.</p>
+
+      <h3>curl</h3>
+      <pre><code class="language-bash"># Before: Unstructured
+curl -X POST "https://api.unstructured.io/general/v0/general" \
+  -H "unstructured-api-key: $UNSTRUCTURED_KEY" \
+  -F "files=@report.docx"
+
+# After: AILANG Parse (same API format)
+curl -X POST "https://api.parse.sunholo.com/general/v0/general" \
+  -F "files=@report.docx"</code></pre>
+
+      <h3>Python</h3>
+      <pre><code class="language-python"># Before: Unstructured
+resp = requests.post(
+    "https://api.unstructured.io/general/v0/general",
+    headers={"unstructured-api-key": UNSTRUCTURED_KEY},
+    files={"files": open("report.docx", "rb")}
+)
+
+# After: AILANG Parse (same API format)
+resp = requests.post(
+    "https://api.parse.sunholo.com/general/v0/general",
+    files={"files": open("report.docx", "rb")}
+)</code></pre>
+
+      <p>No SDK changes, no new dependencies, no schema migration. The response format is compatible with existing Unstructured client code.</p>
+
+      <h2 id="routing-pattern">Routing Pattern</h2>
+      <p>For mixed-format pipelines, the recommended approach is to route Office formats through AILANG Parse and PDFs through Unstructured. A simple file-extension check is all you need:</p>
+
+      <pre><code class="language-python">import requests
+from pathlib import Path
+
+AILANG_PARSE_URL = "https://api.parse.sunholo.com"
+UNSTRUCTURED_URL = "https://api.unstructured.io"
+
+OFFICE_EXTENSIONS = {
+    ".docx", ".pptx", ".xlsx",
+    ".odt", ".odp", ".ods",
+    ".csv", ".html", ".md", ".epub"
+}
+
+def parse_document(filepath: str) -> dict:
+    """Route documents to the best parser for their format."""
+    ext = Path(filepath).suffix.lower()
+
+    if ext in OFFICE_EXTENSIONS:
+        # Deterministic structural parsing — 11ms, no AI needed
+        resp = requests.post(
+            f"{AILANG_PARSE_URL}/general/v0/general",
+            files={"files": open(filepath, "rb")}
+        )
+    else:
+        # PDFs, scanned images — Unstructured ML pipeline
+        resp = requests.post(
+            f"{UNSTRUCTURED_URL}/general/v0/general",
+            headers={"unstructured-api-key": UNSTRUCTURED_KEY},
+            files={"files": open(filepath, "rb")}
+        )
+
+    return resp.json()</code></pre>
+
+      <p>This gives you the best of both worlds: structural fidelity for Office documents and ML-powered extraction for PDFs and scans.</p>
+
+      <h2 id="what-you-gain">What You Gain</h2>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Feature</th><th>Unstructured</th><th>AILANG Parse</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Track Changes</td><td>None (lost in PDF conversion)</td><td>Full &mdash; insertions, deletions, author, date</td></tr>
+          <tr><td>Merged Cells</td><td>Flattened to text</td><td>Structural &mdash; row/column spans preserved</td></tr>
+          <tr><td>Comments</td><td>Dropped</td><td>Author-attributed with anchor positions</td></tr>
+          <tr><td>Headers / Footers</td><td>Dropped or mixed into body</td><td>Separate blocks with page context</td></tr>
+          <tr><td>Text Boxes</td><td>Dropped</td><td>Extracted as positioned blocks</td></tr>
+          <tr><td>Footnotes / Endnotes</td><td>Dropped</td><td>Preserved with reference markers</td></tr>
+          <tr><td>Parse Speed</td><td>2&ndash;10 seconds</td><td>11 milliseconds</td></tr>
+          <tr><td>Dependencies</td><td>Python + heavy libraries</td><td>Zero &mdash; single binary, no runtime deps</td></tr>
+          <tr><td>Determinism</td><td>Non-deterministic (ML inference)</td><td>Deterministic &mdash; same input always gives same output</td></tr>
+          <tr><td>OfficeDocBench Score</td><td>63.4%</td><td>96.6%</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="self-hosting">Self-Hosting</h2>
+      <p>Run AILANG Parse locally with Docker &mdash; no external dependencies for Office formats:</p>
+
+      <pre><code class="language-bash"># Pull and run
+docker run -p 8080:8080 sunholo/docparse:latest
+
+# Verify it's running
+curl http://localhost:8080/api/v1/health
+
+# Parse a document
+curl -X POST http://localhost:8080/general/v0/general \
+  -F "files=@report.docx"</code></pre>
+
+      <p>The Docker image includes the full AILANG runtime and all 31 parser modules. Office parsing works immediately with zero configuration. Add a <code>GOOGLE_API_KEY</code> environment variable to enable AI-powered PDF and image parsing.</p>
+
+      <p>For detailed configuration options, capability budgets, and AI model setup, see the <a href="selfhost.html" style="color:var(--dp-blue)">Self-Host Guide</a>.</p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I migrate from Unstructured to AILANG Parse?</summary>
+          <div class="dp-faq-answer"><p>Change the URL in your API call from the Unstructured endpoint to the AILANG Parse endpoint. AILANG Parse implements the same <code>/general/v0/general</code> route with the same multipart file upload format, so existing client code works with a one-line URL change. For Office documents (DOCX, PPTX, XLSX), you get 96.6% structural fidelity compared to Unstructured's 63.4%.</p></div>
+        </details>
+        <details>
+          <summary>Is AILANG Parse a drop-in replacement for Unstructured?</summary>
+          <div class="dp-faq-answer"><p>For Office document parsing, yes. AILANG Parse implements the same <code>/general/v0/general</code> endpoint format that Unstructured uses, so you can switch by changing the URL. The response format is compatible. For PDFs and scanned documents, keep using Unstructured &mdash; its ML pipeline is purpose-built for those formats.</p></div>
+        </details>
+        <details>
+          <summary>Can I use both Unstructured and AILANG Parse together?</summary>
+          <div class="dp-faq-answer"><p>Yes, and this is the recommended pattern. Route Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB) through AILANG Parse for deterministic structural parsing, and route PDFs and scanned images through Unstructured where its ML pipeline excels. A simple file-extension check in your routing layer is all you need. See the <a href="#routing-pattern">Routing Pattern</a> section for a complete example.</p></div>
+        </details>
+        <details>
+          <summary>What Office formats does AILANG Parse support that Unstructured doesn't parse well?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse deterministically parses DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB with full structural fidelity. It preserves track changes, merged cells, comments with author attribution, headers and footers, text boxes, footnotes, and endnotes &mdash; all features that Unstructured loses because it converts Office files to PDF before parsing.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

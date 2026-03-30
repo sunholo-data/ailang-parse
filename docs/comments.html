@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comment Extraction — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Extract comments from DOCX, PPTX, and XLSX with author attribution, timestamps, and anchor positions. AILANG Parse reads comment XML directly — no PDF conversion drops them.">
+<meta property="og:title" content="Comment Extraction — AILANG Parse">
+<meta property="og:description" content="Extract comments from DOCX, PPTX, and XLSX with author attribution, timestamps, and anchor positions. AILANG Parse reads comment XML directly — no PDF conversion drops them.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Comments page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--contact {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+.dp-callout--contact svg { stroke: #8b5cf6; }
+/* Preserved / Lost badges */
+.dp-preserved {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #16a34a;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+.dp-lost {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+/* Use case cards */
+.dp-usecase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.dp-usecase-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-usecase-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-usecase-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+  .dp-usecase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I extract comments with author names from a DOCX file?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the comments.xml part of the DOCX package and matches each comment to its anchor position in the document body using w:commentRangeStart/w:commentRangeEnd markers. The output includes the comment text, author name, date, and the exact text range it references."}},
+    {"@type": "Question", "name": "Do PDF-based document parsers preserve DOCX comments?", "acceptedAnswer": {"@type": "Answer", "text": "No. When a DOCX is converted to PDF, comments are either rendered as margin annotations (which ML parsers struggle to associate with the correct text) or dropped entirely. AILANG Parse reads comments from the dedicated XML part where they are stored with full metadata — author, date, and anchored position."}},
+    {"@type": "Question", "name": "Can I extract both comments and track changes from the same document?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts all metadata in a single pass: track changes, comments, headers/footers, footnotes/endnotes, and text formatting. Each element type appears as a distinct structured type in the Block ADT output, so you can filter or process them independently."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Comment</span> Extraction</h1>
+    <p class="subtitle reveal reveal-delay-1">Author-attributed, timestamped, anchored to their source text.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#pptx-xlsx">PPTX &amp; XLSX</a>
+        <a href="#example-output">Example Output</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="problem">The Problem</h2>
+      <p>Comments are the collaboration layer of Office documents. They carry the context that matters most: who raised a concern, when they raised it, what specific text they were responding to, and the threaded conversation that followed.</p>
+      <p>Every major document processing pipeline starts the same way: convert to PDF, then extract. But PDF has no concept of comments. The conversion step silently erases the entire review history &mdash; the legal objections, the compliance flags, the editorial feedback, the approval chain. Gone.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Comments are the collaboration layer of Office documents. When you convert to PDF, you erase the conversation &mdash; who raised the concern, when they raised it, and what specific text they were responding to.</div>
+      </div>
+
+      <p>Comments exist only in the Office XML. They are stored in dedicated XML parts (<code>word/comments.xml</code>, <code>xl/comments1.xml</code>, <code>ppt/comments/comment1.xml</code>) with range markers linking them to the exact content they annotate. No PDF-based parser can access them because they never survive the conversion.</p>
+
+      <p>No other parser in the market extracts Office comments with full attribution. Unstructured, Docling, LlamaParse, and MarkItDown all drop comments entirely.</p>
+
+      <table class="dp-config-table" style="margin-top:16px">
+        <thead>
+          <tr><th>Parser</th><th>Comments</th><th>Author</th><th>Timestamp</th><th>Anchor Text</th><th>Threading</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>AILANG Parse</td><td><span class="dp-preserved">Extracted</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td>Unstructured</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
+          <tr><td>Docling</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
+          <tr><td>LlamaParse</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
+          <tr><td>MarkItDown</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="how-it-works">How It Works</h2>
+      <p>AILANG Parse reads the Office XML directly &mdash; no intermediate conversion, no rendering, no PDF step. It opens the OOXML ZIP archive and extracts comment data from the native XML parts.</p>
+
+      <h3>DOCX (Word)</h3>
+      <p>Word stores comments in <code>word/comments.xml</code> as <code>w:comment</code> elements, each with an <code>w:id</code>, <code>w:author</code>, and <code>w:date</code> attribute. In the document body (<code>word/document.xml</code>), <code>w:commentRangeStart</code> and <code>w:commentRangeEnd</code> markers bracket the exact text the comment is attached to. AILANG Parse correlates these ranges with the comment content to produce fully anchored output.</p>
+      <p>Threaded replies use <code>w:commentReference</code> linking back to a parent comment ID, preserving the full conversation chain.</p>
+
+      <h3>PPTX (PowerPoint)</h3>
+      <p>PowerPoint stores comments in per-slide XML files (<code>ppt/comments/comment1.xml</code>) with author references resolved from <code>ppt/commentAuthors.xml</code>. Each comment includes <code>pos</code> coordinates indicating where on the slide it was placed. AILANG Parse extracts the comment text, author, date, and associates it with the slide number.</p>
+
+      <h3>XLSX (Excel)</h3>
+      <p>Excel comments (formerly "notes") live in per-sheet files (<code>xl/comments1.xml</code>) keyed to cell references. Each <code>comment</code> element has a <code>ref</code> attribute (e.g., <code>B5</code>) and an <code>authorId</code> resolved from the <code>authors</code> list. The comment text is in <code>r/t</code> sub-elements, often with rich formatting spans. AILANG Parse extracts the comment text, author, and cell reference.</p>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Field</th><th>Description</th><th>DOCX</th><th>PPTX</th><th>XLSX</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Comment Text</td><td>The full text content of the comment</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td></tr>
+          <tr><td>Author Name</td><td>Who wrote the comment</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td></tr>
+          <tr><td>Timestamp</td><td>When the comment was created (ISO 8601)</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td></tr>
+          <tr><td>Anchor Text</td><td>The document text the comment is attached to</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td>Cell Reference</td><td>The cell a comment is attached to (e.g., B5)</td><td>&mdash;</td><td>&mdash;</td><td><span class="dp-preserved">Yes</span></td></tr>
+          <tr><td>Slide Number</td><td>Which slide the comment appears on</td><td>&mdash;</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td></tr>
+          <tr><td>Comment ID</td><td>Unique identifier for cross-referencing</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td></tr>
+          <tr><td>Reply Threading</td><td>Parent-child relationships between comments</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="pptx-xlsx">PPTX &amp; XLSX Comments</h2>
+      <p>Comments work differently in each Office format, but AILANG Parse normalizes them into the same block structure.</p>
+
+      <h3>PowerPoint Comments</h3>
+      <p>PowerPoint comments are positional &mdash; placed at x/y coordinates on a slide rather than anchored to a text range. They are commonly used during presentation review ("Move this chart to slide 3", "Font too small for projection"). AILANG Parse extracts the comment and associates it with the slide where it appears.</p>
+
+      <h3>Excel Comments</h3>
+      <p>Excel comments (called "Notes" in modern Excel) are anchored to specific cells. They often contain data validation notes, formula explanations, or review feedback on specific values. AILANG Parse extracts the comment text, the author, and the cell reference so you know exactly which data point the comment refers to.</p>
+
+      <p>Modern Excel also has "Threaded Comments" (introduced in Office 365), which are stored in a separate <code>xl/threadedComments/</code> part with richer metadata including timestamps and reply chains.</p>
+
+      <h2 id="example-output">Example Output</h2>
+      <p>A DOCX with three review comments produces output like this:</p>
+      <pre><code class="language-json">{
+  "blocks": [
+    {
+      "type": "Text",
+      "content": "The quarterly revenue target of $4.2M was met."
+    },
+    {
+      "type": "Text",
+      "content": "[Comment by Sarah Chen on 2026-01-15T09:32:00Z] on 'quarterly revenue target of $4.2M': Should we break this down by region? The EMEA numbers look flat."
+    },
+    {
+      "type": "Text",
+      "content": "[Comment by James Park on 2026-01-15T10:14:00Z] (reply to Sarah Chen): Good call. EMEA was $1.1M vs $1.3M target. Adding a regional breakdown table."
+    },
+    {
+      "type": "Text",
+      "content": "Operating expenses remained within the approved budget."
+    },
+    {
+      "type": "Text",
+      "content": "[Comment by Legal Review on 2026-01-16T14:02:00Z] on 'approved budget': Need to clarify which board approval this refers to. Add the resolution number."
+    }
+  ]
+}</code></pre>
+      <p>Each comment preserves the author, timestamp, the specific text it was anchored to, and reply threading. This is the raw collaboration history that PDF conversion destroys.</p>
+
+      <h3>XLSX Example</h3>
+      <pre><code class="language-json">{
+  "blocks": [
+    {
+      "type": "Table",
+      "content": "| Region | Q1 Revenue | Q1 Target | ... |",
+      "metadata": { "sheet": "Revenue" }
+    },
+    {
+      "type": "Text",
+      "content": "[Comment by Audit Team on cell D7]: This figure doesn't match the GL export. Verify against SAP report #4821."
+    }
+  ]
+}</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Legal Review</h4>
+          <p>Extract who raised which concern and when. Build an audit trail of legal review comments across contract drafts without manual review of each document version.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Compliance Audit</h4>
+          <p>Prove that documents went through proper review. Extract the full comment chain to show reviewers, timestamps, and responses for regulatory compliance.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Collaborative Editing</h4>
+          <p>Extract all feedback from a reviewed document in one pass. No more clicking through comment bubbles &mdash; get every comment as structured data for triage and tracking.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Document Intelligence</h4>
+          <p>Feed comments into an LLM for sentiment analysis on specific passages. Know not just what the document says, but what reviewers thought about each section.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+      <p>Extract comments from any Office document:</p>
+      <pre><code class="language-bash"># Parse a DOCX with comments
+./bin/docparse contract_reviewed.docx
+
+# Parse via the API
+curl -X POST https://api.parse.sunholo.com/api/v1/parse \
+  -H "Authorization: Bearer dp_YOUR_KEY" \
+  -F "file=@contract_reviewed.docx"
+
+# Parse an XLSX with cell comments
+./bin/docparse budget_annotated.xlsx</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="try.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Try the Live Demo</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I extract comments with author names from a DOCX file?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse reads the <code>comments.xml</code> part of the DOCX package and matches each comment to its anchor position in the document body using <code>w:commentRangeStart</code>/<code>w:commentRangeEnd</code> markers. The output includes the comment text, author name, date, and the exact text range it references.</p></div>
+        </details>
+        <details>
+          <summary>Do PDF-based document parsers preserve DOCX comments?</summary>
+          <div class="dp-faq-answer"><p>No. When a DOCX is converted to PDF, comments are either rendered as margin annotations (which ML parsers struggle to associate with the correct text) or dropped entirely. AILANG Parse reads comments from the dedicated XML part where they are stored with full metadata &mdash; author, date, and anchored position. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
+        </details>
+        <details>
+          <summary>Can I extract both comments and track changes from the same document?</summary>
+          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts all metadata in a single pass: <a href="track-changes.html">track changes</a>, comments, headers/footers, footnotes/endnotes, and text formatting. Each element type appears as a distinct structured type in the Block ADT output, so you can filter or process them independently.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

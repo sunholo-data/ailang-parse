@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why AILANG Parse? Stop Parsing Photos of Your Documents</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Every document parser converts DOCX to PDF before extracting text — destroying structured data, then spending compute to recover it. AILANG Parse reads Office XML directly. Here's why that matters.">
+<meta property="og:title" content="Why AILANG Parse? Stop Parsing Photos of Your Documents">
+<meta property="og:description" content="Your DOCX is already structured XML. Why are you destroying it? AILANG Parse reads Office XML directly — track changes, merged cells, comments preserved. Sub-11ms, zero dependencies.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Why page layout (matches selfhost.html) ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* Comparison table */
+.dp-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-compare-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-compare-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-compare-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.dp-compare-table .dp-preserved {
+  color: var(--success);
+  font-weight: 600;
+}
+.dp-compare-table .dp-lost {
+  color: #ef4444;
+  font-weight: 500;
+}
+
+/* Benchmark score bars */
+.dp-score-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 60px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dp-score-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-align: right;
+}
+.dp-score-bar-bg {
+  height: 28px;
+  background: var(--bg-input);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.dp-score-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dp-score-bar--ailang {
+  background: linear-gradient(90deg, var(--dp-blue), var(--dp-blue-light));
+}
+.dp-score-bar--competitor {
+  background: var(--text-muted);
+}
+.dp-score-val {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Analogy callout */
+.dp-analogy {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.04), rgba(37, 99, 235, 0.08));
+  border: 1px solid var(--dp-blue-border);
+  margin: 20px 0 24px;
+  font-size: 15px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  font-weight: 500;
+  font-style: italic;
+}
+.dp-analogy svg {
+  width: 24px; height: 24px; min-width: 24px;
+  margin-top: 2px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* CTA section */
+.dp-why-ctas {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 32px 0 16px;
+}
+
+/* Enhancer grid */
+.dp-enhance-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0 20px;
+}
+.dp-enhance-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.dp-enhance-card:hover {
+  border-color: var(--dp-blue-border);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08);
+}
+.dp-enhance-card h4 {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dp-blue);
+  margin-bottom: 6px;
+}
+.dp-enhance-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+  .dp-score-row {
+    grid-template-columns: 100px 1fr 50px;
+    gap: 8px;
+  }
+  .dp-score-label { font-size: 11px; }
+  .dp-enhance-grid { grid-template-columns: 1fr; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Why does converting DOCX to PDF lose data?", "acceptedAnswer": {"@type": "Answer", "text": "A DOCX file is a ZIP archive of structured XML — tables have explicit merge attributes, track changes carry author metadata, and comments reference specific text ranges. When you convert to PDF, all of this becomes flat visual rendering. The structure is destroyed and no ML model can reliably recover it. AILANG Parse avoids this entirely by reading the XML directly."}},
+    {"@type": "Question", "name": "How should I parse Office documents for a RAG pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "For RAG, structural fidelity matters — your retriever needs to distinguish table cells from body text, and your chunks should preserve heading hierarchy. AILANG Parse extracts a typed Block ADT from DOCX/PPTX/XLSX that preserves this structure, producing cleaner chunks than PDF-first parsers that flatten everything into paragraphs."}},
+    {"@type": "Question", "name": "Is DOCX or PDF better for AI ingestion?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX is dramatically better when the source document was authored in Word or Google Docs. The DOCX XML already contains the structure that PDF-first parsers spend compute trying to reconstruct. AILANG Parse reads DOCX XML directly in under 11ms, while PDF conversion followed by ML reconstruction typically takes seconds and loses track changes, merged cells, and comments."}},
+    {"@type": "Question", "name": "What problems does PDF conversion cause for LLM document processing?", "acceptedAnswer": {"@type": "Answer", "text": "PDF conversion introduces three classes of errors: table structures are flattened into visual rows (merged cells become ambiguous), revision metadata is dropped entirely (track changes, comments, author attribution), and reading order becomes unreliable for multi-column layouts. AILANG Parse eliminates all three by reading Office XML directly."}},
+    {"@type": "Question", "name": "What is structural document extraction?", "acceptedAnswer": {"@type": "Answer", "text": "Structural extraction means preserving the semantic structure of a document — not just the text, but which text is a heading, which is a table cell, which cells are merged, and which text has tracked changes or comments. AILANG Parse produces a typed Block ADT where each element is a distinct structured type, not a flat string."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Stop</span> Parsing Photos of Your Documents</h1>
+    <p class="subtitle reveal reveal-delay-1">Your DOCX is already structured XML. Why are you destroying it?</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#assumption" class="active">The Assumption</a>
+        <a href="#what-gets-lost">What Gets Lost</a>
+        <a href="#why-nobody">Why Nobody Did This</a>
+        <a href="#numbers">The Numbers</a>
+        <a href="#enhancer">Not a Competitor</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="assumption">The Invisible Assumption</h2>
+
+      <p>The entire document processing market anchored on PDF as the starting format. <a href="https://docs.unstructured.io/" style="color:var(--dp-blue)">Unstructured</a>'s docs lead with PDF examples. <a href="https://ds4sd.github.io/docling/" style="color:var(--dp-blue)">Docling</a>'s homepage shows PDF parsing. <a href="https://www.llamaindex.ai/llamaparse" style="color:var(--dp-blue)">LlamaParse</a> says "given a PDF file." Even when the source is a DOCX in SharePoint, the default instinct is: export to PDF, then parse.</p>
+
+      <p>This made sense when documents meant scanned paper. But today, most business documents originate as <strong>Office files</strong> &mdash; DOCX, PPTX, XLSX. They're created in Word, shared in Teams, stored in SharePoint and Google Drive. The PDF is a downstream artifact, not the source of truth.</p>
+
+      <p>Converting DOCX to PDF before parsing is <strong>destroying structured data and then spending compute trying to recover it.</strong></p>
+
+      <div class="dp-analogy">
+        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <div>It's like taking a photograph of a spreadsheet and then using computer vision to read the numbers &mdash; when you could just open the file.</div>
+      </div>
+
+      <p>A DOCX file is not opaque binary. It's a ZIP archive containing well-structured XML, governed by the ECMA-376 standard. Track changes have author attribution and timestamps. Tables have explicit merge spans. Comments are threaded. Headers and footers are section-scoped. <em>All of this information is right there in the XML.</em></p>
+
+      <p>When you convert to PDF first, you flatten that structure into a visual rendering. Then you deploy layout analysis, OCR, and LLMs to guess at what the structure <em>was</em>. You pay for the compute. You accept the errors. And you lose the features that made Office formats useful in the first place.</p>
+
+      <h2 id="what-gets-lost">What Gets Lost</h2>
+
+      <p>Here is what happens to your document data when you convert to PDF before parsing, compared to reading the Office XML directly:</p>
+
+      <table class="dp-compare-table">
+        <thead>
+          <tr><th>Feature</th><th>Direct XML Parsing</th><th>After PDF Conversion</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Track changes</td>
+            <td class="dp-preserved">Author, date, and change type preserved</td>
+            <td class="dp-lost">Completely lost &mdash; either accepted or rejected view only</td>
+          </tr>
+          <tr>
+            <td>Merged cells</td>
+            <td class="dp-preserved">Structural colspan/rowspan from XML</td>
+            <td class="dp-lost">Flattened or mangled by layout detection</td>
+          </tr>
+          <tr>
+            <td>Comments</td>
+            <td class="dp-preserved">Author-attributed, threaded, with anchors</td>
+            <td class="dp-lost">Dropped entirely in PDF rendering</td>
+          </tr>
+          <tr>
+            <td>Headers / footers</td>
+            <td class="dp-preserved">Per-section, first/even/odd distinct</td>
+            <td class="dp-lost">Mixed into body text or ignored</td>
+          </tr>
+          <tr>
+            <td>Text boxes</td>
+            <td class="dp-preserved">Position, content, and z-order preserved</td>
+            <td class="dp-lost">Lost or garbled by spatial analysis</td>
+          </tr>
+          <tr>
+            <td>Metadata</td>
+            <td class="dp-preserved">Title, author, dates, keywords, revision count</td>
+            <td class="dp-lost">Stripped or partially preserved</td>
+          </tr>
+          <tr>
+            <td>Footnotes</td>
+            <td class="dp-preserved">Numbered, linked to reference points</td>
+            <td class="dp-lost">Detached from context, misattributed</td>
+          </tr>
+          <tr>
+            <td>Hyperlinks</td>
+            <td class="dp-preserved">URL targets from relationship XML</td>
+            <td class="dp-lost">Visual blue text &mdash; URL lost</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Every row in this table represents real-world data that legal, compliance, and audit teams rely on. Track changes in a contract are not cosmetic &mdash; they are the negotiation history. Losing them is not a quality tradeoff; it is data destruction.</div>
+      </div>
+
+      <h2 id="why-nobody">Why Nobody Did This Before</h2>
+
+      <p>If reading Office XML directly is so obviously better, why did the entire industry default to the PDF path?</p>
+
+      <p>Because the OOXML specification is <strong>over 5,000 pages</strong>. Track changes alone involve multiple XML namespaces with move tracking and range markers that span paragraph boundaries. Merged cells in DOCX tables use a different model than HTML colspan &mdash; they use <code>vMerge</code> and <code>gridSpan</code> attributes that reference a separate grid definition. Numbered lists resolve through a chain of abstract numbering definitions, numbering instances, and style overrides.</p>
+
+      <p>Nobody wanted to write a correct parser from scratch. The rational economic choice was: convert to PDF (which LibreOffice already handles) and parse the PDF (which has a mature ecosystem). The structured data loss was the price of tractability.</p>
+
+      <h3>What changed</h3>
+
+      <p>AILANG made it tractable. AI agents write the extraction logic from the ECMA-376 spec, and <strong>Z3 formal verification</strong> catches edge cases that manual testing would miss. The result: 63 verified contracts across 31 modules, covering filter bounds, structural invariants, and 1:1 mapper preservation.</p>
+
+      <p>The moat is not the parser itself &mdash; it is the <strong>parser-building system</strong>. When a new OOXML edge case appears, an AI agent reads the relevant spec section, writes the extraction logic, and Z3 proves it correct for all inputs. The gap between "discovered" and "fixed" collapses from weeks to hours.</p>
+
+      <h2 id="numbers">The Numbers</h2>
+
+      <p>We built <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> &mdash; the first structural benchmark specifically for Office document parsing. It tests track changes, merged cells, comments, headers/footers, text boxes, images, and metadata across 53 test files in 10 formats.</p>
+
+      <p>Here is how parsers compare on the 4-way competitive subset:</p>
+
+      <div style="margin: 24px 0 28px">
+        <div class="dp-score-row">
+          <span class="dp-score-label">AILANG Parse</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--ailang" style="width: 96.6%"></div>
+          </div>
+          <span class="dp-score-val" style="color:var(--dp-blue)">96.6%</span>
+        </div>
+        <div class="dp-score-row">
+          <span class="dp-score-label">MarkItDown</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--competitor" style="width: 73.3%"></div>
+          </div>
+          <span class="dp-score-val">73.3%</span>
+        </div>
+        <div class="dp-score-row">
+          <span class="dp-score-label">Unstructured</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--competitor" style="width: 63.4%"></div>
+          </div>
+          <span class="dp-score-val">63.4%</span>
+        </div>
+        <div class="dp-score-row">
+          <span class="dp-score-label">Docling</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--competitor" style="width: 63.4%"></div>
+          </div>
+          <span class="dp-score-val">63.4%</span>
+        </div>
+        <div class="dp-score-row">
+          <span class="dp-score-label">LlamaParse</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--competitor" style="width: 53.6%"></div>
+          </div>
+          <span class="dp-score-val">53.6%</span>
+        </div>
+      </div>
+
+      <p>The gap is not marginal. AILANG Parse recovers structural features that competitors do not attempt &mdash; because those features do not survive the PDF conversion step. The 33-point gap between AILANG Parse and the next-best competitor (MarkItDown) comes almost entirely from track changes, merged cells, and comments.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Performance:</strong> Sub-11ms per DOCX on Apple M2. Zero AI calls, zero network requests, zero dependencies. Deterministic output &mdash; same input always produces the same blocks. <a href="benchmarks.html" style="color:var(--dp-blue)">Full methodology and results &rarr;</a></div>
+      </div>
+
+      <h2 id="enhancer">Not a Competitor &mdash; An Enhancer</h2>
+
+      <p>AILANG Parse is not competing with Unstructured, Docling, or LlamaParse. It is <strong>enhancing them</strong>.</p>
+
+      <p>Those tools are excellent at what they were built for: extracting content from PDFs, scanned documents, and images. They have mature OCR pipelines, layout analysis, and LLM-powered extraction. For PDF-native documents, they are the right choice.</p>
+
+      <p>The problem is what happens when they encounter Office formats. The typical path is one of:</p>
+
+      <ul>
+        <li>Convert to PDF first, then run the normal PDF pipeline (losing structural data)</li>
+        <li>Use python-docx or a basic text extractor (missing track changes, merged cells, comments)</li>
+        <li>Skip Office formats entirely and require users to export to PDF manually</li>
+      </ul>
+
+      <p>AILANG Parse fills this gap. It handles Office formats with full structural fidelity, then your existing pipeline handles the rest.</p>
+
+      <div class="dp-enhance-grid">
+        <div class="dp-enhance-card">
+          <h4>With Unstructured</h4>
+          <p>Route DOCX/PPTX/XLSX through AILANG Parse for structural extraction. Route PDFs through Unstructured's layout analysis. Merge into a unified block stream.</p>
+        </div>
+        <div class="dp-enhance-card">
+          <h4>With Docling</h4>
+          <p>Use AILANG Parse for Office formats where Docling converts to PDF internally. Use Docling for scientific papers and PDF-native documents where its table detection excels.</p>
+        </div>
+        <div class="dp-enhance-card">
+          <h4>With LlamaParse</h4>
+          <p>AILANG Parse handles deterministic Office parsing locally &mdash; no API calls. Send only PDFs and images to LlamaParse's cloud API to reduce cost and latency.</p>
+        </div>
+        <div class="dp-enhance-card">
+          <h4>Standalone</h4>
+          <p>AILANG Parse includes its own AI-backed PDF parsing via any model (Gemini, Claude, Ollama). One tool, every format, pluggable AI.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">See for Yourself</h2>
+
+      <p>Upload a DOCX with track changes, or an XLSX with merged cells, or a PPTX with speaker notes. Compare the output to what your current parser returns. The structural data is either there or it is not.</p>
+
+      <div class="dp-why-ctas">
+        <a href="try.html" class="dp-btn dp-btn--primary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Try in Browser
+        </a>
+        <a href="benchmarks.html" class="dp-btn dp-btn--secondary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          See Benchmarks
+        </a>
+        <a href="selfhost.html" class="dp-btn dp-btn--ghost">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          Self-Host
+        </a>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>Why does converting DOCX to PDF lose data?</summary>
+          <div class="dp-faq-answer"><p>A DOCX file is a ZIP archive of structured XML &mdash; tables have explicit merge attributes, track changes carry author metadata, and comments reference specific text ranges. When you convert to PDF, all of this becomes flat visual rendering. The structure is destroyed and no ML model can reliably recover it. AILANG Parse avoids this entirely by reading the XML directly.</p></div>
+        </details>
+        <details>
+          <summary>How should I parse Office documents for a RAG pipeline?</summary>
+          <div class="dp-faq-answer"><p>For RAG (Retrieval Augmented Generation), structural fidelity matters &mdash; your retriever needs to distinguish table cells from body text, and your chunks should preserve heading hierarchy. AILANG Parse extracts a typed <a href="api.html">Block ADT</a> from DOCX/PPTX/XLSX that preserves this structure, producing cleaner chunks than PDF-first parsers that flatten everything into paragraphs.</p></div>
+        </details>
+        <details>
+          <summary>Is DOCX or PDF better for AI ingestion?</summary>
+          <div class="dp-faq-answer"><p>DOCX is dramatically better when the source document was authored in Word or Google Docs. The DOCX XML already contains the structure that PDF-first parsers spend compute trying to reconstruct. AILANG Parse reads DOCX XML directly in under 11ms, while PDF conversion followed by ML reconstruction typically takes seconds and loses track changes, merged cells, and comments.</p></div>
+        </details>
+        <details>
+          <summary>What problems does PDF conversion cause for LLM document processing?</summary>
+          <div class="dp-faq-answer"><p>PDF conversion introduces three classes of errors: table structures are flattened into visual rows (merged cells become ambiguous), revision metadata is dropped entirely (track changes, comments, author attribution), and reading order becomes unreliable for multi-column layouts. AILANG Parse eliminates all three by reading Office XML directly.</p></div>
+        </details>
+        <details>
+          <summary>What is structural document extraction?</summary>
+          <div class="dp-faq-answer"><p>Structural extraction means preserving the semantic structure of a document &mdash; not just the text, but which text is a heading, which is a table cell, which cells are merged, and which text has tracked changes or comments. AILANG Parse produces a typed Block ADT where each element (Text, Heading, Table, Change, Image) is a distinct structured type, not a flat string.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

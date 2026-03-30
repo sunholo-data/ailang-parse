@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AILANG Parse + SuperDoc — Legal AI Document Workflow</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Complete legal AI workflow: AILANG Parse reads contracts with full track changes and comments, SuperDoc writes changes back with native redlining. Read side + write side for OOXML-native document intelligence.">
+<meta property="og:title" content="AILANG Parse + SuperDoc — Legal AI Document Workflow">
+<meta property="og:description" content="Complete legal AI workflow: AILANG Parse reads contracts with full track changes and comments, SuperDoc writes changes back with native redlining. Read side + write side for OOXML-native document intelligence.">
+<meta property="og:type" content="article">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- SuperDoc integration page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--contact {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+.dp-callout--contact svg { stroke: #8b5cf6; }
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "What is the AILANG Parse and SuperDoc integration?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse and SuperDoc together form a complete legal AI document workflow. AILANG Parse is the read side — it extracts structured content from DOCX files including track changes, comments, and clause boundaries. SuperDoc is the write side — its Document Engine applies tracked changes, comments, and formatting programmatically back into native DOCX files. Combined, they enable AI-powered contract review with full redlining fidelity, preserving the negotiation audit trail that legal teams require."}},
+    {"@type": "Question", "name": "Can AI tools preserve track changes when editing Word documents?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. With the AILANG Parse and SuperDoc workflow, AI-suggested edits are applied as native OOXML tracked changes — not as clean overwrites. AILANG Parse reads the original document with full track change history intact, an LLM analyzes the content and generates revision suggestions, and SuperDoc's Document Engine writes those suggestions back as proper tracked changes. Legal reviewers see familiar redlines in Word, not AI-generated blobs."}},
+    {"@type": "Question", "name": "How does AILANG Parse help with contract review?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse extracts structured content from contracts as a typed Block ADT with 9 variants including Text, Heading, Table, List, Section, and Change blocks. Track changes are preserved as Change blocks with author, date, and content. Comments are extracted with their anchored text ranges. This structured output lets LLMs reason about specific clauses, flag risky terms, identify missing protections, and generate targeted revision suggestions — all while maintaining the document's structural context."}},
+    {"@type": "Question", "name": "Does SuperDoc support programmatic document editing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. SuperDoc provides a Document Engine that can apply tracked changes, insert comments, and modify formatting programmatically in DOCX files with full OOXML fidelity. SuperDoc also offers a Claude MCP integration for AI-powered document editing. Visit superdoc.dev to learn more about their open-source DOCX editor and Document Engine API."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">AILANG Parse <span class="dp-accent">+</span> SuperDoc</h1>
+    <p class="subtitle reveal reveal-delay-1">Read side + write side. Complete OOXML-native document intelligence.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#vision" class="active">The Vision</a>
+        <a href="#superdoc">What is SuperDoc?</a>
+        <a href="#workflow">The Workflow</a>
+        <a href="#why">Why This Matters</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#getting-started">Getting Started</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="vision">The Vision</h2>
+      <p>Legal AI needs to both <strong>read</strong> and <strong>write</strong> documents with full fidelity. Most tools do one or the other &mdash; they can extract text from a contract, or they can generate a new document, but they cannot round-trip through AI analysis while preserving the structural integrity that legal teams depend on.</p>
+      <p>AILANG Parse is the <strong>read side</strong>. It extracts structured content from DOCX files &mdash; track changes, comments, tables, clauses, headers, footers &mdash; as a typed Block ADT that LLMs can reason about.</p>
+      <p><a href="https://superdoc.dev" style="color:var(--dp-blue);font-weight:600">SuperDoc</a> is the <strong>write side</strong>. Its Document Engine applies tracked changes, comments, and formatting programmatically back into native DOCX files with full OOXML fidelity.</p>
+      <p>Together: read a contract, reason about it with AI, write changes back with native tracked changes. The complete legal AI document workflow.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>This integration is designed for legal technology teams building AI-powered contract review, compliance analysis, and document intelligence workflows. Both tools operate on native OOXML &mdash; no PDF conversion, no data loss.</div>
+      </div>
+
+      <h2 id="superdoc">What is SuperDoc?</h2>
+      <p><a href="https://superdoc.dev" style="color:var(--dp-blue);font-weight:600">SuperDoc</a> is an open-source DOCX editor with full OOXML fidelity. Unlike browser-based editors that convert documents to an internal representation and lose formatting, SuperDoc operates directly on the OOXML structure.</p>
+      <p>Key capabilities:</p>
+      <ul>
+        <li><strong>Document Engine</strong> &mdash; apply tracked changes, comments, and formatting programmatically via API</li>
+        <li><strong>OOXML fidelity</strong> &mdash; no format conversion, no data loss, round-trip safe</li>
+        <li><strong>Claude MCP integration</strong> &mdash; connect AI models directly to document editing</li>
+        <li><strong>Open source</strong> &mdash; inspect, extend, and self-host the full stack</li>
+      </ul>
+      <p>Learn more at <a href="https://superdoc.dev" style="color:var(--dp-blue);font-weight:600">superdoc.dev</a>.</p>
+
+      <h2 id="workflow">The Workflow</h2>
+      <p>The integration follows a five-step pipeline from contract intake to legal review:</p>
+      <ol>
+        <li><strong>Parse the contract with AILANG Parse.</strong> The DOCX parser extracts a Block ADT with full structural fidelity &mdash; track changes with author and date, comments anchored to text ranges, table structures with merged cells, headings, lists, and section boundaries.</li>
+        <li><strong>Send blocks to an LLM for analysis.</strong> The structured output lets the model reason about specific clauses rather than raw text. Flag risky terms, identify missing protections, detect non-standard language, compare against playbook templates.</li>
+        <li><strong>Generate revision suggestions as tracked changes.</strong> The LLM produces structured edit instructions &mdash; insertions, deletions, and modifications &mdash; each tied to specific block locations in the document.</li>
+        <li><strong>Apply changes via SuperDoc Document Engine.</strong> SuperDoc writes the AI-suggested revisions back into the DOCX as native OOXML tracked changes with proper redlining. Comments are inserted as native Word comments, not annotations.</li>
+        <li><strong>Return to the legal team for review.</strong> Lawyers see clean tracked changes in Microsoft Word &mdash; the same redlines they use in every negotiation. They accept, reject, or modify each change. The audit trail is intact.</li>
+      </ol>
+
+      <h2 id="why">Why This Matters</h2>
+      <p>Legal teams reject AI tools that produce "clean" documents without audit trails. A contract that has been through three rounds of negotiation carries history in its tracked changes &mdash; who changed what, when, and why. That history is the negotiation record.</p>
+      <p>Most AI document tools destroy this history. They extract plain text, process it, and generate a new "clean" document. The legal team cannot see what changed. They cannot accept or reject individual edits. They cannot trace the provenance of a clause modification.</p>
+      <p>This integration preserves the audit trail end-to-end:</p>
+      <ul>
+        <li><strong>AILANG Parse</strong> preserves track changes on the <strong>read side</strong> &mdash; every insertion, deletion, and format change is extracted with its author, timestamp, and original text</li>
+        <li><strong>SuperDoc</strong> preserves track changes on the <strong>write side</strong> &mdash; AI-suggested edits are written as native OOXML revisions, indistinguishable from human edits in Word</li>
+        <li>The legal team reviews AI suggestions using the same Accept/Reject workflow they already know</li>
+      </ul>
+
+      <h2 id="architecture">Architecture</h2>
+      <h3>Pipeline Overview</h3>
+      <pre><code class="language-text">                        AILANG Parse + SuperDoc Pipeline
+
+  DOCX Input              Read Side                AI Analysis
+ +-----------+     +------------------+     +-------------------+
+ | Contract  | --> | AILANG Parse     | --> | LLM               |
+ | with      |     |                  |     |                   |
+ | existing  |     | - Track changes  |     | - Flag risks      |
+ | tracked   |     | - Comments       |     | - Missing clauses |
+ | changes   |     | - Tables         |     | - Non-standard    |
+ |           |     | - Clause bounds  |     |   terms           |
+ +-----------+     +------------------+     +-------------------+
+                          |                         |
+                          v                         v
+                   Block ADT              Revision Instructions
+                   (9 variants)           (insert/delete/modify)
+                                                    |
+                                                    v
+                        Write Side              DOCX Output
+                   +------------------+     +--------------+
+                   | SuperDoc         | --> | Contract     |
+                   | Document Engine  |     | with native  |
+                   |                  |     | tracked      |
+                   | - Apply changes  |     | changes from |
+                   | - Insert comments|     | AI review    |
+                   | - OOXML fidelity |     |              |
+                   +------------------+     +--------------+
+                                                    |
+                                                    v
+                                            Legal Team Review
+                                            (Accept / Reject)</code></pre>
+
+      <h3>Data Flow</h3>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Stage</th><th>Tool</th><th>Input</th><th>Output</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1. Parse</td><td>AILANG Parse</td><td>DOCX file</td><td>Block ADT (JSON)</td></tr>
+          <tr><td>2. Analyze</td><td>LLM (any provider)</td><td>Block ADT</td><td>Risk assessment + suggestions</td></tr>
+          <tr><td>3. Generate</td><td>LLM (any provider)</td><td>Assessment</td><td>Revision instructions</td></tr>
+          <tr><td>4. Apply</td><td>SuperDoc Engine</td><td>Revision instructions</td><td>DOCX with tracked changes</td></tr>
+          <tr><td>5. Review</td><td>Microsoft Word</td><td>Modified DOCX</td><td>Accepted/rejected changes</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="getting-started">Getting Started</h2>
+
+      <h3>1. Install AILANG Parse</h3>
+      <p>Follow the <a href="selfhost.html" style="color:var(--dp-blue);font-weight:600">self-hosting guide</a> to set up AILANG Parse. The quickest path:</p>
+      <pre><code class="language-bash"># Install AILANG
+curl -fsSL https://ailang.sunholo.com/install.sh | bash
+
+# Clone AILANG Parse
+git clone https://github.com/sunholo-data/docparse.git
+cd docparse
+
+# Parse a contract with track changes
+./bin/docparse contract.docx</code></pre>
+
+      <h3>2. Set Up SuperDoc</h3>
+      <p>Visit <a href="https://superdoc.dev" style="color:var(--dp-blue);font-weight:600">superdoc.dev</a> to set up the SuperDoc Document Engine. SuperDoc provides SDKs and a REST API for programmatic document editing.</p>
+
+      <h3>3. Connect via API</h3>
+      <p>Use the AILANG Parse REST API to parse contracts, then pipe the Block ADT output to your LLM for analysis. Send the resulting revision instructions to SuperDoc's Document Engine to apply changes.</p>
+      <pre><code class="language-bash"># Parse a contract via the AILANG Parse API
+curl -X POST http://localhost:8080/api/v1/parse \
+  -H "X-API-Key: your-key" \
+  -F "file=@contract.docx"
+
+# The response contains structured blocks with track changes,
+# comments, tables, and clause boundaries — ready for LLM analysis</code></pre>
+
+      <p>The Block ADT output includes <code>Change</code> blocks for every tracked change (with author, date, and type), <code>Text</code> blocks with comment annotations, and full structural context for clause-level reasoning.</p>
+
+      <div class="dp-callout dp-callout--contact">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <div>
+          <strong>Building a legal AI product?</strong><br>
+          Deploy AILANG Parse as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform with managed AILANG Parse, billing, and enterprise support. Pair it with SuperDoc for a production-grade legal AI stack.
+          <br><br>
+          <a href="https://www.sunholo.com/contact" style="color:#8b5cf6;font-weight:600;font-family:var(--font-mono);font-size:13px">Contact Sunholo &rarr;</a>
+        </div>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>What is the AILANG Parse and SuperDoc integration?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse and SuperDoc together form a complete legal AI document workflow. AILANG Parse is the read side &mdash; it extracts structured content from DOCX files including track changes, comments, and clause boundaries. SuperDoc is the write side &mdash; its Document Engine applies tracked changes, comments, and formatting programmatically back into native DOCX files. Combined, they enable AI-powered contract review with full redlining fidelity, preserving the negotiation audit trail that legal teams require.</p></div>
+        </details>
+        <details>
+          <summary>Can AI tools preserve track changes when editing Word documents?</summary>
+          <div class="dp-faq-answer"><p>Yes. With the AILANG Parse and SuperDoc workflow, AI-suggested edits are applied as native OOXML tracked changes &mdash; not as clean overwrites. AILANG Parse reads the original document with full track change history intact, an LLM analyzes the content and generates revision suggestions, and SuperDoc's Document Engine writes those suggestions back as proper tracked changes. Legal reviewers see familiar redlines in Word, not AI-generated blobs.</p></div>
+        </details>
+        <details>
+          <summary>How does AILANG Parse help with contract review?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse extracts structured content from contracts as a typed Block ADT with 9 variants including Text, Heading, Table, List, Section, and Change blocks. Track changes are preserved as Change blocks with author, date, and content. Comments are extracted with their anchored text ranges. This structured output lets LLMs reason about specific clauses, flag risky terms, identify missing protections, and generate targeted revision suggestions &mdash; all while maintaining the document's structural context.</p></div>
+        </details>
+        <details>
+          <summary>Does SuperDoc support programmatic document editing?</summary>
+          <div class="dp-faq-answer"><p>Yes. SuperDoc provides a Document Engine that can apply tracked changes, insert comments, and modify formatting programmatically in DOCX files with full OOXML fidelity. SuperDoc also offers a Claude MCP integration for AI-powered document editing. Visit <a href="https://superdoc.dev" style="color:var(--dp-blue)">superdoc.dev</a> to learn more about their open-source DOCX editor and Document Engine API.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

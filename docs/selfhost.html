@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self-Host — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Self-host AILANG Parse with Docker, CLI, or build from source. Zero dependencies for Office parsing. Deterministic output, sub-11ms per document. Full control over your document processing pipeline.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Self-Host page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--contact {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+.dp-callout--contact svg { stroke: #8b5cf6; }
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I self-host AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "The fastest way is Docker: docker run -p 8080:8080 sunholo/docparse:latest. This gives you the full REST API with all 13 input formats and 9 output formats. For Office-only parsing, there are zero external dependencies. Add a GOOGLE_API_KEY environment variable to enable AI-powered PDF and image parsing."}},
+    {"@type": "Question", "name": "What are the system requirements for self-hosting?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse is a single Go binary with minimal resource requirements. The Docker image runs on any Linux/amd64 or arm64 host. For Office-only parsing, it needs approximately 50MB RAM and no GPU. If you enable AI-powered PDF parsing with a local Ollama model, you will need GPU resources appropriate for the model."}},
+    {"@type": "Question", "name": "Can I use self-hosted AILANG Parse as a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The self-hosted API implements the same /general/v0/general endpoint format as Unstructured. Point your existing Unstructured client at your AILANG Parse instance and Office documents will be parsed with full structural fidelity. PDFs can be routed through AILANG Parse's pluggable AI backend or through your existing Unstructured pipeline."}},
+    {"@type": "Question", "name": "Does self-hosting require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office format parsing (DOCX, PPTX, XLSX, ODF), self-hosting is fully air-gapped — no internet connection needed. If you enable AI-powered PDF parsing, it requires connectivity to the AI provider (Gemini, Claude) unless you use a local Ollama model, which also runs offline."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Run</span> AILANG Parse Yourself</h1>
+    <p class="subtitle reveal reveal-delay-1">Single binary, zero dependencies, any cloud. Parse 13 formats locally.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#quickstart" class="active">Quick Start</a>
+        <a href="#install">Installation</a>
+        <a href="#docker">Docker</a>
+        <a href="#config">Configuration</a>
+        <a href="#ai-models">AI Models</a>
+        <a href="#formats">Supported Formats</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a href="#contact">Enterprise</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="quickstart">Quick Start</h2>
+      <p>Parse a document in three commands:</p>
+      <pre><code class="language-bash"># Install AILANG
+curl -fsSL https://ailang.sunholo.com/install.sh | bash
+
+# Clone AILANG Parse
+git clone https://github.com/sunholo-data/docparse.git
+cd docparse
+
+# Parse a document
+./bin/docparse data/test_files/sample.docx</code></pre>
+
+      <p>Convert between formats:</p>
+      <pre><code class="language-bash"># DOCX to HTML
+./bin/docparse input.docx --convert output.html
+
+# CSV to DOCX report
+./bin/docparse data.csv --convert report.docx
+
+# Markdown to PowerPoint slides
+./bin/docparse notes.md --convert slides.pptx
+
+# Any format to Quarto Markdown (for Quarto rendering)
+./bin/docparse report.docx --convert report.qmd</code></pre>
+
+      <p>Generate documents with AI:</p>
+      <pre><code class="language-bash"># Generate a DOCX report from a prompt
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+  docparse/main.ail --generate report.docx --prompt "Q1 sales report with revenue table"</code></pre>
+
+      <h2 id="install">Installation</h2>
+
+      <h3>AILANG CLI</h3>
+      <p>AILANG Parse runs on the AILANG runtime. Install it for your platform:</p>
+      <pre><code class="language-bash"># macOS / Linux
+curl -fsSL https://ailang.sunholo.com/install.sh | bash
+
+# Or download directly from GitHub releases
+# https://github.com/sunholo-data/ailang/releases</code></pre>
+
+      <p>Verify the installation:</p>
+      <pre><code class="language-bash">ailang --version
+# ailang v0.9.2 (or later)</code></pre>
+
+      <h3>AILANG Parse Source</h3>
+      <pre><code class="language-bash">git clone https://github.com/sunholo-data/docparse.git
+cd docparse
+
+# Type-check all 31 modules
+./bin/docparse --check
+
+# Run inline tests
+./bin/docparse --test</code></pre>
+
+      <h2 id="docker">Docker</h2>
+      <p>Run AILANG Parse as an API server with Docker &mdash; no AILANG installation needed:</p>
+      <pre><code class="language-docker"># Pull and run (when published)
+docker run -p 8080:8080 sunholo/docparse:latest
+
+# Or build from source
+docker build -t docparse .
+docker run -p 8080:8080 docparse</code></pre>
+
+      <p>The Docker image includes AILANG and all 31 AILANG Parse modules. The API server starts automatically on port 8080.</p>
+
+      <pre><code class="language-bash"># Test the running container
+curl http://localhost:8080/api/v1/health
+# {"result":"{\"status\":\"healthy\",\"version\":\"0.7.0\",...}"}
+
+curl http://localhost:8080/api/v1/formats
+# Lists all 13 parse and 9 generate formats</code></pre>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>The Docker image builds AILANG from the <code>dev</code> branch for latest features. For production, pin to a specific release tag in the Dockerfile.</div>
+      </div>
+
+      <h2 id="config">Configuration</h2>
+      <p>AILANG Parse is configured via environment variables and AILANG capability budgets.</p>
+
+      <h3>Environment Variables</h3>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PORT</td><td>8080</td><td>API server port</td></tr>
+          <tr><td>GOOGLE_API_KEY</td><td>(empty)</td><td>Google AI Studio API key. Set to <code>""</code> for ADC on Cloud Run.</td></tr>
+          <tr><td>GOOGLE_CLOUD_PROJECT</td><td>(empty)</td><td>GCP project ID for Firestore + Vertex AI</td></tr>
+          <tr><td>FIRESTORE_DATABASE</td><td>docparse</td><td>Dedicated Firestore database name</td></tr>
+          <tr><td>FIRESTORE_COLLECTION</td><td>api_keys</td><td>Firestore collection for API keys</td></tr>
+          <tr><td>FIRESTORE_STUB</td><td>false</td><td>Use local filesystem instead of Firestore (for testing)</td></tr>
+          <tr><td>DOCPARSE_OUTPUT_DIR</td><td>docparse/data</td><td>Output directory for parsed results</td></tr>
+          <tr><td>ANTHROPIC_API_KEY</td><td>(empty)</td><td>Anthropic API key for Claude models</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Capability Budgets</h3>
+      <p>AILANG enforces hard limits on what each request can do. These are compile-time guarantees &mdash; exceed them and the runtime halts deterministically.</p>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Capability</th><th>Budget</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>IO @limit</td><td>50,000</td><td>Console output operations</td></tr>
+          <tr><td>FS @limit</td><td>5,000</td><td>File system reads (ZIP entries, output writes)</td></tr>
+          <tr><td>AI @limit</td><td>30</td><td>AI model calls (PDF pages, image descriptions)</td></tr>
+          <tr><td>Net</td><td>unlimited</td><td>HTTP requests (Firestore, metadata server)</td></tr>
+          <tr><td>Rand</td><td>unlimited</td><td>Random number generation (API key generation)</td></tr>
+          <tr><td>Clock</td><td>unlimited</td><td>Timestamp access</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="ai-models">AI Models</h2>
+      <p>AILANG Parse uses AI for PDFs, images, audio, and video. Office formats (DOCX, PPTX, XLSX, etc.) are parsed deterministically with zero AI calls.</p>
+
+      <h3>Google (Vertex AI / AI Studio)</h3>
+      <pre><code class="language-bash"># Via Application Default Credentials (Cloud Run, GKE)
+GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI \
+  --ai gemini-2.5-flash docparse/main.ail document.pdf
+
+# Via API key (local development)
+GOOGLE_API_KEY="your-key" ailang run --entry main --caps IO,FS,Env,AI \
+  --ai gemini-2.5-flash docparse/main.ail document.pdf</code></pre>
+
+      <h3>Anthropic (Claude)</h3>
+      <pre><code class="language-bash">ANTHROPIC_API_KEY="sk-ant-..." ailang run --entry main --caps IO,FS,Env,AI \
+  --ai claude-haiku-4-5 docparse/main.ail document.pdf</code></pre>
+
+      <h3>Ollama (Local, Free)</h3>
+      <pre><code class="language-bash"># Start Ollama and pull a model
+ollama pull granite3.2-vision
+
+# Run AILANG Parse with local model (no API key needed)
+ailang run --entry main --caps IO,FS,Env,AI \
+  --ai granite-docling docparse/main.ail document.pdf</code></pre>
+
+      <h3>Audio &amp; Video</h3>
+      <pre><code class="language-bash"># Transcribe audio — returns transcription, speaker count, language
+./bin/docparse recording.mp3 --ai gemini-2.5-flash
+
+# Extract video content — visual scenes, tables, transcription
+./bin/docparse presentation.mp4 --ai gemini-2.5-flash
+
+# Convert audio transcription to DOCX
+./bin/docparse interview.wav --ai gemini-2.5-flash --convert transcript.docx
+
+# Convert video content to HTML report
+./bin/docparse tutorial.mp4 --ai gemini-2.5-flash --convert report.html</code></pre>
+      <p style="font-size:13px;color:var(--text-secondary)">Audio formats: WAV, MP3, AIFF, AAC, OGG, FLAC. Video formats: MP4, MOV, AVI, WebM, WMV, MPEG, MPG, FLV, 3GPP.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Recommended model:</strong> <code>gemini-2.5-flash</code> &mdash; best balance of accuracy (92% on PDF benchmark) and speed. Ollama models score lower (0-3%) due to structured JSON output limitations.</div>
+      </div>
+
+      <h2 id="formats">Supported Formats</h2>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Format</th><th>Strategy</th><th>Features</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>DOCX</td><td>Deterministic</td><td>Track changes, merged cells, text boxes, comments, headers/footers, footnotes, endnotes, images</td></tr>
+          <tr><td>PPTX</td><td>Deterministic</td><td>Slides, tables, images, metadata</td></tr>
+          <tr><td>XLSX</td><td>Deterministic</td><td>Shared strings, multiple sheets, merged cells</td></tr>
+          <tr><td>ODT</td><td>Deterministic</td><td>ODF text, headers/footers, images</td></tr>
+          <tr><td>ODP</td><td>Deterministic</td><td>ODF presentation slides</td></tr>
+          <tr><td>ODS</td><td>Deterministic</td><td>ODF spreadsheet sheets</td></tr>
+          <tr><td>HTML</td><td>Deterministic</td><td>XHTML via std/xml, AI fallback for dirty HTML</td></tr>
+          <tr><td>Markdown</td><td>Deterministic</td><td>Headings, lists, tables, code blocks, links</td></tr>
+          <tr><td>CSV / TSV</td><td>Deterministic</td><td>Delimiter detection, quoted fields</td></tr>
+          <tr><td>EPUB</td><td>Deterministic</td><td>ZIP + XHTML chapters, images, metadata</td></tr>
+          <tr><td>PDF</td><td>AI Required</td><td>Page-by-page extraction via pluggable AI model</td></tr>
+          <tr><td>PNG / JPG</td><td>AI Required</td><td>Document image extraction or description</td></tr>
+          <tr><td>Audio<br><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">.wav .mp3 .aiff .aac .ogg .flac</span></td><td>AI Required</td><td>Full transcription, speaker detection, language identification, content summary</td></tr>
+          <tr><td>Video<br><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">.mp4 .mov .avi .webm .wmv .mpeg .mpg .flv .3gpp</span></td><td>AI Required</td><td>Visual content extraction (headings, tables, text, images), spoken-word transcription</td></tr>
+          <tr><td>QMD (Quarto)</td><td>Generate only</td><td>Quarto Markdown with YAML front matter, CriticMarkup for track changes, pipe/grid tables</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="benchmarks">Benchmarks</h2>
+      <p>AILANG Parse maintains 53 golden benchmark files across all 10 deterministic formats with 100% structural recall.</p>
+
+      <pre><code class="language-bash"># Quick smoke test (~15 seconds)
+bash benchmarks/quick_check.sh
+
+# Full 53-file structural benchmark (~10 minutes)
+uv run benchmarks/run_benchmarks.py --suite office
+
+# API server tests (32 tests)
+bash tests/test_serve_api.sh</code></pre>
+
+      <p>Key performance numbers (Apple M2):</p>
+      <ul>
+        <li><strong>Sequential DOCX parse:</strong> ~11ms per file</li>
+        <li><strong>Concurrent 5x DOCX:</strong> ~26ms total (near-perfect scaling)</li>
+        <li><strong>53-file benchmark:</strong> 100% structural recall across all formats</li>
+        <li><strong>PDF (Gemini 2.5 Flash):</strong> 92% accuracy on OmniDocBench subset</li>
+      </ul>
+
+      <p>See the <a href="benchmarks.html" style="color:var(--dp-blue)">Benchmarks page</a> for detailed results and competitor comparisons.</p>
+
+      <h2 id="contact">Enterprise &amp; Cloud Deployment</h2>
+
+      <div class="dp-callout dp-callout--contact">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <div>
+          <strong>Need managed cloud deployment?</strong><br>
+          Deploy AILANG Parse as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform for enterprise document processing, custom integrations, and dedicated support.
+          <br><br>
+          <a href="https://www.sunholo.com/contact" style="color:#8b5cf6;font-weight:600;font-family:var(--font-mono);font-size:13px">Contact Sunholo &rarr;</a>
+        </div>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I self-host AILANG Parse?</summary>
+          <div class="dp-faq-answer"><p>The fastest way is Docker: <code>docker run -p 8080:8080 sunholo/docparse:latest</code>. This gives you the full REST API with all 13 input formats and 9 output formats. For Office-only parsing, there are zero external dependencies. Add a <code>GOOGLE_API_KEY</code> environment variable to enable AI-powered PDF and image parsing.</p></div>
+        </details>
+        <details>
+          <summary>What are the system requirements for self-hosting?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse is a single Go binary with minimal resource requirements. The Docker image runs on any Linux/amd64 or arm64 host. For Office-only parsing, it needs approximately 50MB RAM and no GPU. If you enable AI-powered PDF parsing with a local Ollama model, you will need GPU resources appropriate for the model you choose.</p></div>
+        </details>
+        <details>
+          <summary>Can I use self-hosted AILANG Parse as a drop-in replacement for Unstructured?</summary>
+          <div class="dp-faq-answer"><p>Yes. The self-hosted API implements the same <code>/general/v0/general</code> endpoint format as Unstructured. Point your existing Unstructured client at your AILANG Parse instance and Office documents will be parsed with full structural fidelity. See the <a href="integrations.html">integrations page</a> for migration guides.</p></div>
+        </details>
+        <details>
+          <summary>Does self-hosting require an internet connection?</summary>
+          <div class="dp-faq-answer"><p>For Office format parsing (DOCX, PPTX, XLSX, ODF), self-hosting is fully air-gapped &mdash; no internet connection needed. If you enable AI-powered PDF parsing, it requires connectivity to the AI provider (Gemini, Claude) unless you use a local Ollama model, which also runs offline.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

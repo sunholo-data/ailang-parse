@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AILANG Parse — Universal Document Parsing</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Stop parsing photos of your documents. AILANG Parse reads DOCX/PPTX/XLSX XML directly — track changes, merged cells, comments preserved. Sub-11ms, zero dependencies. 96.6% on OfficeDocBench vs Unstructured 63%, Docling 63%.">
+<meta property="og:title" content="AILANG Parse — Stop Parsing Photos of Your Documents">
+<meta property="og:description" content="Your DOCX is already structured data. Why destroy it by converting to PDF? AILANG Parse reads Office XML directly — full structural fidelity in under 11ms. Enhances Unstructured, Docling, and LlamaParse for Office formats.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "AILANG Parse",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Any",
+  "description": "Structural document parsing that reads Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) directly from XML. Deterministic, sub-11ms, zero dependencies. Pluggable AI for PDFs and images.",
+  "url": "https://www.sunholo.com/ailang-parse/",
+  "author": {
+    "@type": "Organization",
+    "name": "Sunholo ApS",
+    "url": "https://sunholo.com"
+  },
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Free",
+      "price": "0",
+      "priceCurrency": "EUR",
+      "description": "60 requests/day, 500 pages/month"
+    },
+    {
+      "@type": "Offer",
+      "name": "Pro",
+      "price": "29",
+      "priceCurrency": "EUR",
+      "billingDuration": "P1M",
+      "description": "2,000 requests/day, 10,000 pages/month"
+    },
+    {
+      "@type": "Offer",
+      "name": "Business",
+      "price": "99",
+      "priceCurrency": "EUR",
+      "billingDuration": "P1M",
+      "description": "Unlimited requests, 50,000 pages/month"
+    }
+  ],
+  "featureList": [
+    "Deterministic Office parsing (DOCX, PPTX, XLSX, ODT, ODP, ODS)",
+    "Track changes extraction with author attribution",
+    "Merged cell preservation (colspan/rowspan)",
+    "Comments with author and date",
+    "Headers, footers, footnotes, endnotes",
+    "AI-powered PDF and image parsing",
+    "Browser WASM — parse locally, no server",
+    "13 input formats, 9 output formats",
+    "Zero runtime dependencies for Office",
+    "Sub-11ms per document"
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="hero">
+    <h1 class="reveal">Stop parsing photos<br>of your <span class="dp-accent">documents</span>.</h1>
+    <p class="subtitle reveal reveal-delay-1">Your DOCX is already structured XML. Converting to PDF first destroys data, then ML spends compute trying to recover it. AILANG Parse reads the XML directly &mdash; full structure preserved, sub-11ms, zero dependencies.</p>
+
+    <!-- Path A vs Path B diagram -->
+    <div class="dp-hero-paths reveal reveal-delay-2" style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin:28px 0 12px;">
+      <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:16px 20px;max-width:340px;flex:1;min-width:260px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px;">Everyone else</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:var(--text-secondary);">
+          DOCX <span style="color:var(--text-muted)">(structured XML)</span><br>
+          &darr; convert to PDF <span style="color:#e74c3c">&larr; data destroyed</span><br>
+          &darr; ML reconstruction <span style="color:#e74c3c">&larr; approximate</span><br>
+          &darr; flat text output
+        </div>
+      </div>
+      <div style="background:var(--card-bg);border:2px solid var(--primary);border-radius:10px;padding:16px 20px;max-width:340px;flex:1;min-width:260px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--primary);margin-bottom:8px;">AILANG Parse</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:var(--text-secondary);">
+          DOCX <span style="color:var(--text-muted)">(structured XML)</span><br>
+          &darr; direct extraction <span style="color:var(--primary)">&larr; 11ms</span><br>
+          &darr; Block ADT <span style="color:var(--primary)">&larr; full structure</span><br>
+          &darr; track changes, merged cells, comments
+        </div>
+      </div>
+    </div>
+
+    <div class="dp-stats-strip reveal reveal-delay-3">
+      <div class="dp-stat-chip">
+        <span class="dp-stat-val">13</span>
+        <span class="dp-stat-lbl">parse formats</span>
+      </div>
+      <div class="dp-stat-chip">
+        <span class="dp-stat-val">9</span>
+        <span class="dp-stat-lbl">generate formats</span>
+      </div>
+      <div class="dp-stat-chip">
+        <span class="dp-stat-val">96.6%</span>
+        <span class="dp-stat-lbl">OfficeDocBench</span>
+      </div>
+      <div class="dp-stat-chip">
+        <span class="dp-stat-val">0</span>
+        <span class="dp-stat-lbl">dependencies</span>
+      </div>
+      <div class="dp-stat-chip">
+        <span class="dp-stat-val">&lt;11ms</span>
+        <span class="dp-stat-lbl">per document</span>
+      </div>
+    </div>
+
+    <div class="dp-hero-ctas reveal">
+      <a href="try.html" class="dp-btn dp-btn--primary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Try in Browser
+      </a>
+      <a href="api.html" class="dp-btn dp-btn--secondary">
+        API &amp; SDKs
+      </a>
+    </div>
+
+    <p class="note reveal">
+      Not a competitor to Unstructured, Docling, or LlamaParse &mdash; an <strong>enhancer</strong>. Handle Office formats with structural fidelity, route PDFs through your existing pipeline. Powered by <a href="https://github.com/sunholo-data/ailang" style="color: var(--primary);">AILANG</a>.
+    </p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ DEMOS ============ -->
+  <section class="section reveal" id="get-started">
+    <div class="section-header">
+      <span class="section-title">Get Started</span>
+      <span class="section-count">3 ways</span>
+    </div>
+
+    <div class="dp-demos-grid">
+      <a href="try.html" class="dp-demo-card dp-demo-card--parse">
+        <span class="dp-demo-arrow">&rarr;</span>
+        <div class="dp-demo-icon"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+        <div class="dp-demo-name">Try in Browser</div>
+        <div class="dp-demo-desc">Drop a file and see structured output instantly. All parsing runs locally via WebAssembly &mdash; your files never leave the browser.</div>
+        <div class="dp-demo-meta">
+          <span class="dp-demo-badge dp-demo-badge--wasm">WASM</span>
+          <span class="dp-demo-badge dp-demo-badge--wasm">Private</span>
+        </div>
+      </a>
+
+      <a href="api.html" class="dp-demo-card dp-demo-card--extract">
+        <span class="dp-demo-arrow">&rarr;</span>
+        <div class="dp-demo-icon"><svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+        <div class="dp-demo-name">API &amp; SDKs</div>
+        <div class="dp-demo-desc">REST API with Python, JavaScript, and Go SDKs. Drop-in replacement for Unstructured. Free tier with 20 requests/day.</div>
+        <div class="dp-demo-meta">
+          <span class="dp-demo-badge dp-demo-badge--api">REST</span>
+          <span class="dp-demo-badge dp-demo-badge--provider">Python</span>
+          <span class="dp-demo-badge dp-demo-badge--provider">JS</span>
+          <span class="dp-demo-badge dp-demo-badge--provider">Go</span>
+        </div>
+      </a>
+
+    </div>
+
+    <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-muted)">
+      More interactive demos: <a href="https://sunholo.com/ailang-demos/" style="color:var(--dp-blue)">WASM demos</a> &mdash;
+      document extraction, AI contracts, Z3 verification, voice parsing
+    </p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ FORMATS ============ -->
+  <section class="section reveal" id="formats">
+    <div class="section-header">
+      <span class="section-title">Supported Formats</span>
+      <span class="section-count">15+ formats</span>
+    </div>
+    <p class="section-desc">
+      Office formats parsed deterministically from XML. PDFs and images use pluggable AI.
+      Plain text formats parsed natively. No external dependencies.
+    </p>
+
+    <div class="dp-format-grid">
+      <!-- Office / Deterministic -->
+      <div class="dp-format-card dp-format--office">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+        <div class="dp-format-ext">.docx</div>
+        <div class="dp-format-method">Deterministic</div>
+      </div>
+      <div class="dp-format-card dp-format--office">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg></div>
+        <div class="dp-format-ext">.pptx</div>
+        <div class="dp-format-method">Deterministic</div>
+      </div>
+      <div class="dp-format-card dp-format--office">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></div>
+        <div class="dp-format-ext">.xlsx</div>
+        <div class="dp-format-method">Deterministic</div>
+      </div>
+      <div class="dp-format-card dp-format--office">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/></svg></div>
+        <div class="dp-format-ext">.odt</div>
+        <div class="dp-format-method">Deterministic</div>
+      </div>
+      <div class="dp-format-card dp-format--office">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+        <div class="dp-format-ext">.odp</div>
+        <div class="dp-format-method">Deterministic</div>
+      </div>
+      <div class="dp-format-card dp-format--office">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg></div>
+        <div class="dp-format-ext">.ods</div>
+        <div class="dp-format-method">Deterministic</div>
+      </div>
+
+      <!-- Native text -->
+      <div class="dp-format-card dp-format--text">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/></svg></div>
+        <div class="dp-format-ext">.csv / .tsv</div>
+        <div class="dp-format-method">Native</div>
+      </div>
+      <div class="dp-format-card dp-format--text">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="11" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></svg></div>
+        <div class="dp-format-ext">.md</div>
+        <div class="dp-format-method">Native</div>
+      </div>
+      <div class="dp-format-card dp-format--text">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><line x1="14" y1="4" x2="10" y2="20"/></svg></div>
+        <div class="dp-format-ext">.html</div>
+        <div class="dp-format-method">Native</div>
+      </div>
+      <div class="dp-format-card dp-format--text">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
+        <div class="dp-format-ext">.epub</div>
+        <div class="dp-format-method">Native</div>
+      </div>
+      <div class="dp-format-card dp-format--text">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="12" cy="14" r="3"/></svg></div>
+        <div class="dp-format-ext">.qmd</div>
+        <div class="dp-format-method">Generate only</div>
+      </div>
+
+      <!-- AI-powered -->
+      <div class="dp-format-card dp-format--ai">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+        <div class="dp-format-ext">.pdf</div>
+        <div class="dp-format-method">AI-powered</div>
+      </div>
+      <div class="dp-format-card dp-format--ai">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>
+        <div class="dp-format-ext">.png / .jpg</div>
+        <div class="dp-format-method">AI-powered</div>
+      </div>
+      <div class="dp-format-card dp-format--ai">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+        <div class="dp-format-ext">.wav / .mp3</div>
+        <div class="dp-format-method">AI-powered</div>
+      </div>
+      <div class="dp-format-card dp-format--ai">
+        <div class="dp-format-icon"><svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+        <div class="dp-format-ext">.mp4 / .mov</div>
+        <div class="dp-format-method">AI-powered</div>
+      </div>
+    </div>
+
+    <div class="dp-format-legend">
+      <span class="dp-legend-item"><span class="dp-legend-dot dp-legend--office"></span> Deterministic (XML parsing)</span>
+      <span class="dp-legend-item"><span class="dp-legend-dot dp-legend--text"></span> Native (text parsing)</span>
+      <span class="dp-legend-item"><span class="dp-legend-dot dp-legend--ai"></span> AI-powered (pluggable model)</span>
+      <span class="dp-legend-item"><span class="dp-legend-dot dp-legend--text"></span> Generate only (output format)</span>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ CAPABILITIES ============ -->
+  <section class="section reveal" id="capabilities">
+    <div class="section-header">
+      <span class="section-title">Structural Extraction</span>
+      <span class="section-count">Our moat</span>
+    </div>
+    <p class="section-desc">
+      Most parsers convert Office files to PDF first, losing structure. AILANG Parse reads the XML directly.
+      These are the features competitors miss entirely.
+    </p>
+
+    <div class="dp-capabilities">
+      <div class="dp-cap-card">
+        <div class="dp-cap-icon"><svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
+        <div class="dp-cap-name">Track Changes</div>
+        <div class="dp-cap-detail">Insert, delete, and move blocks with author attribution and timestamps. Structured ChangeBlock data, not rendered accept/reject text.</div>
+        <span class="dp-cap-badge dp-cap-badge--exclusive">Exclusive</span>
+      </div>
+      <div class="dp-cap-card">
+        <div class="dp-cap-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg></div>
+        <div class="dp-cap-name">Merged Cells</div>
+        <div class="dp-cap-detail">Table headers, rows, and cells with colspan/rowspan merge info preserved. Not atomized into individual cell elements.</div>
+        <span class="dp-cap-badge dp-cap-badge--exclusive">Exclusive</span>
+      </div>
+      <div class="dp-cap-card">
+        <div class="dp-cap-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><path d="M4 3v3"/><path d="M4 18v3"/></svg></div>
+        <div class="dp-cap-name">Headers &amp; Footers</div>
+        <div class="dp-cap-detail">Extracted as semantic SectionBlocks with typed sub-blocks. Not flattened into body text like competitors.</div>
+        <span class="dp-cap-badge dp-cap-badge--better">Better</span>
+      </div>
+      <div class="dp-cap-card">
+        <div class="dp-cap-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h4v4H7z"/><line x1="15" y1="7" x2="17" y2="7"/><line x1="15" y1="11" x2="17" y2="11"/><line x1="7" y1="15" x2="17" y2="15"/></svg></div>
+        <div class="dp-cap-name">Text Boxes &amp; Shapes</div>
+        <div class="dp-cap-detail">Content extracted from DrawingML and VML shapes, including legacy VML images that competitors silently drop.</div>
+        <span class="dp-cap-badge dp-cap-badge--exclusive">Exclusive</span>
+      </div>
+      <div class="dp-cap-card">
+        <div class="dp-cap-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>
+        <div class="dp-cap-name">Embedded Images</div>
+        <div class="dp-cap-detail">Images detected with base64 data and MIME type. Optional AI descriptions via Gemini, Claude, or Ollama multimodal.</div>
+        <span class="dp-cap-badge dp-cap-badge--better">Better</span>
+      </div>
+      <div class="dp-cap-card">
+        <div class="dp-cap-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div>
+        <div class="dp-cap-name">Contract Verified</div>
+        <div class="dp-cap-detail">63 ensures contracts across all modules. Filter bounds, 1:1 mapper preservation, structural invariants. Z3-verifiable at compile time.</div>
+        <span class="dp-cap-badge dp-cap-badge--unique">Unique</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ OUTPUT EXAMPLES ============ -->
+  <section class="section reveal" id="output-examples">
+    <div class="section-header">
+      <span class="section-title">Parsed Output</span>
+      <span class="section-count">Block ADT → JSON</span>
+    </div>
+    <p class="section-desc">
+      Every format produces the same structured Block ADT. Here's real output from actual documents &mdash; no AI needed for Office formats.
+    </p>
+
+    <div class="dp-output-tabs">
+      <button class="dp-output-tab active" data-tab="track-changes">Track Changes</button>
+      <button class="dp-output-tab" data-tab="merged-cells">Merged Cells</button>
+      <button class="dp-output-tab" data-tab="tables">Tables</button>
+      <button class="dp-output-tab" data-tab="comments">Comments</button>
+      <button class="dp-output-tab" data-tab="audio">Audio</button>
+      <button class="dp-output-tab" data-tab="video">Video</button>
+    </div>
+
+    <!-- Track Changes -->
+    <div class="dp-output-panel active" id="panel-track-changes">
+      <div class="dp-output-header">
+        <span class="dp-output-file">track_changes_move.docx</span>
+        <span class="dp-output-badge dp-output-badge--exclusive">Exclusive</span>
+        <span class="dp-output-desc">Moved paragraphs preserved with author &amp; timestamp</span>
+      </div>
+      <div class="dp-output-json">
+        <pre>{
+  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
+  <span class="json-key">"metadata"</span>: {
+    <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
+    <span class="json-key">"created"</span>: <span class="json-str">"2016-04-16T12:18:00Z"</span>
+  },
+  <span class="json-key">"blocks"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Here is some text."</span> },
+
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span> },
+
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"change"</span>,
+      <span class="json-key">"changeType"</span>: <span class="json-str">"move-to"</span>,
+      <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
+      <span class="json-key">"date"</span>: <span class="json-str">"2016-04-16T08:20:00Z"</span>,
+      <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span>
+    }</span>,
+
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Here is some more text."</span> },
+
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"change"</span>,
+      <span class="json-key">"changeType"</span>: <span class="json-str">"move-from"</span>,
+      <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
+      <span class="json-key">"date"</span>: <span class="json-str">"2016-04-16T08:20:00Z"</span>,
+      <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span>
+    }</span>
+  ],
+  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">11</span>, <span class="json-key">"changes"</span>: <span class="json-num">2</span> }
+}</pre>
+      </div>
+    </div>
+
+    <!-- Merged Cells -->
+    <div class="dp-output-panel" id="panel-merged-cells">
+      <div class="dp-output-header">
+        <span class="dp-output-file">merged_cells.docx</span>
+        <span class="dp-output-badge dp-output-badge--exclusive">Exclusive</span>
+        <span class="dp-output-desc">Column spans &amp; merged cells preserved structurally</span>
+      </div>
+      <div class="dp-output-json">
+        <pre>{
+  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
+  <span class="json-key">"metadata"</span>: {
+    <span class="json-key">"author"</span>: <span class="json-str">"Shay Hill"</span>,
+    <span class="json-key">"created"</span>: <span class="json-str">"2023-01-23T17:59:00Z"</span>
+  },
+  <span class="json-key">"blocks"</span>: [
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
+      <span class="json-key">"headers"</span>: [
+        <span class="json-str">"0-0"</span>,
+        <span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">"0-12"</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">2</span>, <span class="json-key">"merged"</span>: <span class="json-bool">false</span> }</span>,
+        <span class="json-str">"0-3"</span>
+      ],
+      <span class="json-key">"rows"</span>: [
+        [<span class="json-str">"12-0"</span>, <span class="json-str">"1-1"</span>, <span class="json-str">"1-2"</span>, <span class="json-str">"1-3"</span>],
+        [<span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">""</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">1</span>, <span class="json-key">"merged"</span>: <span class="json-bool">true</span> }</span>, <span class="json-str">"2-1"</span>, <span class="json-str">"2-2"</span>, <span class="json-str">"2-3"</span>],
+        [<span class="json-str">"3-0"</span>, <span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">"34-123"</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">3</span>, <span class="json-key">"merged"</span>: <span class="json-bool">false</span> }</span>],
+        [<span class="json-str">"4-0"</span>, <span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">""</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">3</span>, <span class="json-key">"merged"</span>: <span class="json-bool">true</span> }</span>]
+      ]
+    }
+  ],
+  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">2</span>, <span class="json-key">"tables"</span>: <span class="json-num">1</span> }
+}</pre>
+      </div>
+    </div>
+
+    <!-- Tables -->
+    <div class="dp-output-panel" id="panel-tables">
+      <div class="dp-output-header">
+        <span class="dp-output-file">tables.docx</span>
+        <span class="dp-output-badge dp-output-badge--structural">Structural</span>
+        <span class="dp-output-desc">Headers, rows, and multi-paragraph cells</span>
+      </div>
+      <div class="dp-output-json">
+        <pre>{
+  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
+  <span class="json-key">"blocks"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"heading"</span>, <span class="json-key">"text"</span>: <span class="json-str">"A table, with and without a header row"</span>, <span class="json-key">"level"</span>: <span class="json-num">2</span> },
+
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
+      <span class="json-key">"headers"</span>: [<span class="json-str">"Name"</span>, <span class="json-str">"Game"</span>, <span class="json-str">"Fame"</span>, <span class="json-str">"Blame"</span>],
+      <span class="json-key">"rows"</span>: [
+        <span class="json-highlight">[<span class="json-str">"Lebron James"</span>,  <span class="json-str">"Basketball"</span>, <span class="json-str">"Very High"</span>, <span class="json-str">"Leaving Cleveland"</span>]</span>,
+        [<span class="json-str">"Ryan Braun"</span>,     <span class="json-str">"Baseball"</span>,   <span class="json-str">"Moderate"</span>,  <span class="json-str">"Steroids"</span>],
+        [<span class="json-str">"Russell Wilson"</span>, <span class="json-str">"Football"</span>,   <span class="json-str">"High"</span>,     <span class="json-str">"Tacky uniform"</span>]
+      ]
+    },
+
+    { <span class="json-key">"type"</span>: <span class="json-str">"table"</span>, <span class="json-key">"headers"</span>: [<span class="json-str">"Sinple"</span>, <span class="json-str">"Table"</span>], <span class="json-key">"rows"</span>: [[<span class="json-str">"Without"</span>, <span class="json-str">"Header"</span>]] },
+
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
+      <span class="json-key">"headers"</span>: [<span class="json-str">"Simple\n\nMultiparagraph"</span>, <span class="json-str">"Table\n\nFull"</span>],
+      <span class="json-key">"rows"</span>: [[<span class="json-str">"Of\n\nParagraphs"</span>, <span class="json-str">"In each\n\nCell."</span>]]
+    }
+  ],
+  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">8</span>, <span class="json-key">"headings"</span>: <span class="json-num">1</span>, <span class="json-key">"tables"</span>: <span class="json-num">3</span> }
+}</pre>
+      </div>
+    </div>
+
+    <!-- Comments -->
+    <div class="dp-output-panel" id="panel-comments">
+      <div class="dp-output-header">
+        <span class="dp-output-file">comments.docx</span>
+        <span class="dp-output-badge dp-output-badge--exclusive">Exclusive</span>
+        <span class="dp-output-desc">Comments as nested SectionBlocks with author attribution</span>
+      </div>
+      <div class="dp-output-json">
+        <pre>{
+  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
+  <span class="json-key">"metadata"</span>: {
+    <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
+    <span class="json-key">"created"</span>: <span class="json-str">"2016-05-09T20:15:00Z"</span>
+  },
+  <span class="json-key">"blocks"</span>: [
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"I want some text to have a comment on it."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"This is a new paragraph."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"And so is this."</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"One more. And this is one with a comment in a comment."</span> },
+
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
+      <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
+      <span class="json-key">"blocks"</span>: [
+        { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] I left a comment."</span> }
+      ]
+    }</span>,
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
+      <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
+      <span class="json-key">"blocks"</span>: [
+        { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] A comment across paragraphs."</span> }
+      ]
+    }</span>,
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
+      <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
+      <span class="json-key">"blocks"</span>: [
+        { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] This one has multiple paragraphs. See?"</span> }
+      ]
+    }</span>,
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>, <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
+      <span class="json-key">"blocks"</span>: [{ <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] Do something."</span> }]
+    },
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>, <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
+      <span class="json-key">"blocks"</span>: [{ <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] Do something else."</span> }]
+    }
+  ],
+  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">9</span>, <span class="json-key">"changes"</span>: <span class="json-num">0</span> }
+}</pre>
+      </div>
+    </div>
+
+    <!-- Audio Transcription -->
+    <div class="dp-output-panel" id="panel-audio">
+      <div class="dp-output-header">
+        <span class="dp-output-file">interview.mp3</span>
+        <span class="dp-output-badge dp-output-badge--ai">AI-powered</span>
+        <span class="dp-output-desc">Transcription with speaker detection &amp; language ID</span>
+      </div>
+      <div class="dp-output-json">
+        <pre>{
+  <span class="json-key">"format"</span>: <span class="json-str">"mp3"</span>,
+  <span class="json-key">"blocks"</span>: [
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"audio"</span>,
+      <span class="json-key">"transcription"</span>: <span class="json-str">"Welcome to the show. Today we're discussing document parsing and why structure matters more than text extraction..."</span>,
+      <span class="json-key">"mime"</span>: <span class="json-str">"audio/mp3"</span>
+    }</span>,
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Summary: Discussion about document parsing approaches"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Speakers: 2"</span> },
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Language: en"</span> }
+  ],
+  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">4</span> }
+}</pre>
+      </div>
+    </div>
+
+    <!-- Video Extraction -->
+    <div class="dp-output-panel" id="panel-video">
+      <div class="dp-output-header">
+        <span class="dp-output-file">tutorial.mp4</span>
+        <span class="dp-output-badge dp-output-badge--ai">AI-powered</span>
+        <span class="dp-output-desc">Visual + audio extraction with structured content blocks</span>
+      </div>
+      <div class="dp-output-json">
+        <pre>{
+  <span class="json-key">"format"</span>: <span class="json-str">"mp4"</span>,
+  <span class="json-key">"blocks"</span>: [
+    <span class="json-highlight">{
+      <span class="json-key">"type"</span>: <span class="json-str">"video"</span>,
+      <span class="json-key">"description"</span>: <span class="json-str">"Technical tutorial showing a spreadsheet with quarterly sales data, followed by a presenter explaining trends"</span>,
+      <span class="json-key">"mime"</span>: <span class="json-str">"video/mp4"</span>
+    }</span>,
+    { <span class="json-key">"type"</span>: <span class="json-str">"heading"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Q1 Sales Review"</span>, <span class="json-key">"level"</span>: <span class="json-num">1</span> },
+    {
+      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
+      <span class="json-key">"headers"</span>: [<span class="json-str">"Region"</span>, <span class="json-str">"Revenue"</span>, <span class="json-str">"Growth"</span>],
+      <span class="json-key">"rows"</span>: [
+        [<span class="json-str">"North America"</span>, <span class="json-str">"$2.4M"</span>, <span class="json-str">"+12%"</span>],
+        [<span class="json-str">"EMEA"</span>, <span class="json-str">"$1.8M"</span>, <span class="json-str">"+8%"</span>]
+      ]
+    },
+    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"[Transcription] As you can see from the data, North America led growth this quarter..."</span> }
+  ],
+  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">4</span>, <span class="json-key">"headings"</span>: <span class="json-num">1</span>, <span class="json-key">"tables"</span>: <span class="json-num">1</span> }
+}</pre>
+      </div>
+    </div>
+
+    <div class="dp-output-callout">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      <span>These are real outputs from <strong>actual test documents</strong>, not mock data. The highlighted blocks show features that competing parsers miss entirely. Track changes, merged cell spans, and comments are preserved structurally &mdash; not flattened to plain text. Audio and video parsing uses pluggable AI &mdash; Gemini, Claude, or local Ollama.</span>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ BENCHMARKS ============ -->
+  <section class="section reveal" id="benchmarks">
+    <div class="section-header">
+      <span class="section-title">Benchmarks</span>
+      <span class="section-count">vs competitors</span>
+    </div>
+
+    <div class="benchmark">
+      <div class="stats-row">
+        <div class="stat">
+          <div class="stat-value dp-blue">96.6%</div>
+          <div class="stat-label">AILANG Parse composite</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value muted">72.6%</div>
+          <div class="stat-label">MarkItDown</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value muted">63.4%</div>
+          <div class="stat-label">Unstructured</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value muted">63.4%</div>
+          <div class="stat-label">Docling</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value muted">53.6%</div>
+          <div class="stat-label">LlamaParse</div>
+        </div>
+      </div>
+
+      <div class="dp-table-wrap">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th class="dp-col">AILANG Parse <span style="font-weight:400;font-size:10px">v0.3.0</span></th>
+            <th>MarkItDown <span style="font-weight:400;font-size:10px">v0.1.5</span></th>
+            <th>Unstructured <span style="font-weight:400;font-size:10px">v0.21.5</span></th>
+            <th>Docling <span style="font-weight:400;font-size:10px">v2.80.0</span></th>
+            <th>LlamaParse <span style="font-weight:400;font-size:10px">v0.6.94</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Composite score</td>
+            <td class="win">96.6%</td>
+            <td>72.6%</td>
+            <td>63.4%</td>
+            <td>63.4%</td>
+            <td>53.6%</td>
+          </tr>
+          <tr>
+            <td>Track changes</td>
+            <td class="win">3/3</td>
+            <td class="no">0/3</td>
+            <td class="no">0/3</td>
+            <td class="no">0/3</td>
+            <td class="no">0/3</td>
+          </tr>
+          <tr>
+            <td>Comments</td>
+            <td class="win">1/1</td>
+            <td class="no">0/1</td>
+            <td class="no">0/1</td>
+            <td class="no">0/1</td>
+            <td class="no">0/1</td>
+          </tr>
+          <tr>
+            <td>Headers &amp; footers</td>
+            <td class="win">3/3</td>
+            <td class="no">0/2</td>
+            <td class="partial">1/2</td>
+            <td class="no">0/2</td>
+            <td class="no">0/2</td>
+          </tr>
+          <tr>
+            <td>Text boxes</td>
+            <td class="win">2/2</td>
+            <td class="no">0/2</td>
+            <td class="no">0/2</td>
+            <td class="no">0/2</td>
+            <td class="no">0/2</td>
+          </tr>
+          <tr>
+            <td>Tables</td>
+            <td class="win">35/36</td>
+            <td>15/15</td>
+            <td>12/15</td>
+            <td>11/14</td>
+            <td>12/15</td>
+          </tr>
+          <tr>
+            <td>Images</td>
+            <td class="win">8/9</td>
+            <td class="partial">2/4</td>
+            <td class="no">0/4</td>
+            <td class="partial">2/4</td>
+            <td class="no">0/4</td>
+          </tr>
+          <tr>
+            <td>Formats supported</td>
+            <td class="win">10</td>
+            <td>7</td>
+            <td>3</td>
+            <td>3</td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td>Runtime dependencies</td>
+            <td class="win">None</td>
+            <td class="no">Python + libs</td>
+            <td class="no">Python + libs</td>
+            <td class="no">Python + PyTorch</td>
+            <td class="no">Cloud API</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <p style="font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 10px; line-height: 1.6;">
+      <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a>: 59 test files, 10 formats, 5 scoring metrics. Run date: 2026-03-28.<br>
+      MarkItDown supports 7 formats (42 files). Other competitors evaluated on DOCX/PPTX/XLSX only (33 files).
+    </p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="section reveal" id="how-it-works">
+    <div class="section-header">
+      <span class="section-title">How It Works</span>
+    </div>
+    <p class="section-desc">
+      A single pipeline handles all formats. The format router detects the file type,
+      selects the appropriate parser, and produces a unified Block ADT.
+    </p>
+
+    <div class="dp-pipeline">
+      <div class="dp-pipeline-step">
+        <div class="dp-pipeline-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+        <div class="dp-pipeline-label">Document</div>
+        <div class="dp-pipeline-sub">.docx .pdf .epub ...</div>
+      </div>
+      <div class="dp-pipeline-arrow">&rarr;</div>
+      <div class="dp-pipeline-step">
+        <div class="dp-pipeline-icon"><svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></div>
+        <div class="dp-pipeline-label">Format Router</div>
+        <div class="dp-pipeline-sub">Extension detection</div>
+      </div>
+      <div class="dp-pipeline-arrow">&rarr;</div>
+      <div class="dp-pipeline-step dp-pipeline-step--highlight">
+        <div class="dp-pipeline-icon"><svg viewBox="0 0 24 24"><path d="M16 18l2-2-2-2"/><path d="M8 18l-2-2 2-2"/><line x1="12" y1="10" x2="12" y2="22"/><path d="M20 6H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2z"/></svg></div>
+        <div class="dp-pipeline-label">Parser</div>
+        <div class="dp-pipeline-sub">16 AILANG modules</div>
+      </div>
+      <div class="dp-pipeline-arrow">&rarr;</div>
+      <div class="dp-pipeline-step dp-pipeline-step--highlight">
+        <div class="dp-pipeline-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+        <div class="dp-pipeline-label">Block ADT</div>
+        <div class="dp-pipeline-sub">9 typed variants</div>
+      </div>
+      <div class="dp-pipeline-arrow">&rarr;</div>
+      <div class="dp-pipeline-step">
+        <div class="dp-pipeline-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="12" y1="12" x2="12" y2="18"/></svg></div>
+        <div class="dp-pipeline-label">Output</div>
+        <div class="dp-pipeline-sub">JSON + Markdown</div>
+      </div>
+    </div>
+
+    <div class="dp-adt-row">
+      <span class="dp-adt-variant">TextBlock</span>
+      <span class="dp-adt-variant">HeadingBlock</span>
+      <span class="dp-adt-variant">TableBlock</span>
+      <span class="dp-adt-variant">ImageBlock</span>
+      <span class="dp-adt-variant">ListBlock</span>
+      <span class="dp-adt-variant">SectionBlock</span>
+      <span class="dp-adt-variant">ChangeBlock</span>
+      <span class="dp-adt-variant">AudioBlock</span>
+      <span class="dp-adt-variant">VideoBlock</span>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ CODE EXAMPLES ============ -->
+  <section class="section reveal" id="usage">
+    <div class="section-header">
+      <span class="section-title">Usage</span>
+    </div>
+    <p class="section-desc">One command. Every format. CLI or library.</p>
+
+    <div class="dp-code-tabs">
+      <div class="dp-code-panel">
+        <div class="dp-code-title">Office Documents (no AI needed)</div>
+        <div class="cli-block"><code><span class="comment"># Parse any document (Office formats — instant, no AI)</span>
+<span class="cmd">docparse</span> <span class="string">report.docx</span>
+<span class="cmd">docparse</span> <span class="string">slides.pptx</span>
+<span class="cmd">docparse</span> <span class="string">data.xlsx</span>
+<span class="cmd">docparse</span> <span class="string">document.odt</span>
+<span class="cmd">docparse</span> <span class="string">book.epub</span></code></div>
+      </div>
+
+      <div class="dp-code-panel">
+        <div class="dp-code-title">PDFs and Images (AI-powered)</div>
+        <div class="cli-block"><code><span class="comment"># PDF and image extraction (auto-selects AI backend)</span>
+<span class="cmd">docparse</span> <span class="string">invoice.pdf</span>
+<span class="cmd">docparse</span> <span class="string">scan.png</span>
+
+<span class="comment"># Choose your AI backend</span>
+<span class="cmd">docparse</span> <span class="string">doc.pdf</span> <span class="flag">--ai gemini-2.5-flash</span>       <span class="comment"># Google (default)</span>
+<span class="cmd">docparse</span> <span class="string">doc.pdf</span> <span class="flag">--ai claude-haiku-4-5</span>       <span class="comment"># Anthropic</span>
+<span class="cmd">docparse</span> <span class="string">doc.pdf</span> <span class="flag">--ai granite-docling</span>        <span class="comment"># Local Ollama (free)</span></code></div>
+      </div>
+
+      <div class="dp-code-panel">
+        <div class="dp-code-title">Dev Tools</div>
+        <div class="cli-block"><code><span class="cmd">docparse</span> <span class="flag">--check</span>                         <span class="comment"># Type-check all 18 modules</span>
+<span class="cmd">docparse</span> <span class="flag">--test</span>                          <span class="comment"># Run 51 inline tests</span>
+<span class="cmd">docparse</span> <span class="flag">--prove</span>                         <span class="comment"># Z3 contract verification</span>
+<span class="cmd">docparse</span> <span class="string">report.docx</span> <span class="flag">--verify</span>           <span class="comment"># Runtime contract checks</span>
+<span class="cmd">docparse</span> <span class="string">report.docx</span> <span class="flag">--describe</span>         <span class="comment"># AI image descriptions</span>
+<span class="cmd">docparse</span> <span class="string">report.docx</span> <span class="flag">--summarize</span>        <span class="comment"># AI document summary</span></code></div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ AI INTEGRATION ============ -->
+  <section class="section reveal" id="ai">
+    <div class="section-header">
+      <span class="section-title">AI-Agnostic</span>
+      <span class="section-count">Any model</span>
+    </div>
+    <p class="section-desc">
+      AILANG Parse uses AILANG's AI effect system. Same code, any backend &mdash; swap <code style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-input); padding: 2px 7px; border-radius: 4px;">--ai</code> to change the model.
+      AI usage is bounded by capability budgets, so costs are predictable.
+    </p>
+
+    <div class="dp-providers">
+      <div class="dp-provider">
+        <div class="dp-provider-name">Google Gemini</div>
+        <div class="dp-provider-models">gemini-2.5-flash, gemini-3-flash-preview</div>
+        <div class="dp-provider-auth">ADC or API key</div>
+        <span class="dp-provider-badge dp-provider-badge--default">Default</span>
+      </div>
+      <div class="dp-provider">
+        <div class="dp-provider-name">Anthropic Claude</div>
+        <div class="dp-provider-models">claude-haiku-4-5, claude-sonnet-4</div>
+        <div class="dp-provider-auth">API key</div>
+      </div>
+      <div class="dp-provider">
+        <div class="dp-provider-name">Ollama (Local)</div>
+        <div class="dp-provider-models">granite-docling, gemma3, llava</div>
+        <div class="dp-provider-auth">No API key &mdash; runs locally</div>
+        <span class="dp-provider-badge dp-provider-badge--free">Free</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- ============ ROADMAP ============ -->
+  <section class="section reveal" id="roadmap">
+    <div class="section-header">
+      <span class="section-title">Roadmap</span>
+    </div>
+
+    <div class="coming-soon">
+      <div class="coming-soon-item">
+        <span class="coming-soon-badge">v0.2.0</span>
+        <div class="feature-name">Two-Stage PDF Pipeline</div>
+        <div class="feature-detail">Optimized PDF parsing for local Ollama models. Text extraction first, then structured output. Better results from smaller models.</div>
+      </div>
+      <div class="coming-soon-item">
+        <span class="coming-soon-badge">v0.4.0</span>
+        <div class="feature-name">Standalone Binary</div>
+        <div class="feature-detail">Pre-built Go binary. Single executable for macOS, Linux, and Windows. No AILANG CLI installation required.</div>
+      </div>
+      <div class="coming-soon-item">
+        <span class="coming-soon-badge" style="background:var(--success);color:#fff">v0.9.0</span>
+        <div class="feature-name">SDKs &amp; Website</div>
+        <div class="feature-detail">Python, JavaScript/TypeScript, and Go client SDKs. Static website with dashboard for API key management.</div>
+      </div>
+      <div class="coming-soon-item">
+        <span class="coming-soon-badge" style="background:var(--success);color:#fff">v0.10.0</span>
+        <div class="feature-name">Quarto Integration</div>
+        <div class="feature-detail">QMD generator: Block ADT to Quarto Markdown. <strong>Generate &amp; convert to .qmd — done.</strong> Next: server-side Quarto rendering via existing Cloud Run service for publication-quality PDF/HTML/DOCX output.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+module docparse/services/samples
+
+import std/json (encode, jo, kv, js, ja, jb)
+import std/list (map)
+
+-- Sample Listing Endpoint
+--
+-- Returns inventory of available sample documents for testing.
+-- Sample IDs are stable identifiers that agents can enumerate and reference.
+
+@nowrap
+@route("GET", "/api/v1/samples")
+export pure func samples() -> string {
+  encode(jo([
+    kv("samples", ja([
+      sampleEntry("sample_docx_basic", "data/test_files/sample.docx", "DOCX: Basic document",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ["docx", "basic", "deterministic"], false),
+      sampleEntry("sample_docx_tables", "data/test_files/tables.docx", "DOCX: Tables with merged cells",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ["docx", "tables", "merged-cells", "deterministic"], false),
+      sampleEntry("sample_docx_comments", "data/test_files/comments.docx", "DOCX: Comments & Track Changes",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ["docx", "comments", "track-changes", "deterministic"], false),
+      sampleEntry("sample_pptx_show", "data/test_files/poi_sampleshow.pptx", "PPTX: Presentation with slides",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ["pptx", "deterministic"], false),
+      sampleEntry("sample_xlsx_basic", "data/test_files/pandoc_basic.xlsx", "XLSX: Spreadsheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ["xlsx", "deterministic"], false),
+      sampleEntry("sample_csv", "data/test_files/test.csv", "CSV: Basic",
+        "text/csv", ["csv", "deterministic"], false),
+      sampleEntry("sample_markdown", "data/test_files/pandoc_planets.md", "Markdown: Planets table",
+        "text/markdown", ["markdown", "tables", "deterministic"], false),
+      sampleEntry("sample_html", "data/test_files/test.html", "HTML: Basic",
+        "text/html", ["html", "deterministic"], false),
+      sampleEntry("sample_odt", "data/test_files/test.odt", "ODT: OpenDocument Text",
+        "application/vnd.oasis.opendocument.text", ["odt", "deterministic"], false),
+      sampleEntry("sample_odp", "data/test_files/test.odp", "ODP: OpenDocument Presentation",
+        "application/vnd.oasis.opendocument.presentation", ["odp", "deterministic"], false),
+      sampleEntry("sample_ods", "data/test_files/test.ods", "ODS: OpenDocument Spreadsheet",
+        "application/vnd.oasis.opendocument.spreadsheet", ["ods", "deterministic"], false),
+      sampleEntry("sample_epub", "data/test_files/test.epub", "EPUB: Basic ebook",
+        "application/epub+zip", ["epub", "deterministic"], false),
+      sampleEntry("sample_pdf", "data/test_files/simple_text.pdf", "PDF: Simple text",
+        "application/pdf", ["pdf", "ai-required"], true),
+      sampleEntry("sample_mp3", "data/test_files/sample.mp3", "MP3: Audio sample",
+        "audio/mpeg", ["audio", "ai-required"], true),
+      sampleEntry("sample_mp4", "data/test_files/sample.mp4", "MP4: Video sample",
+        "video/mp4", ["video", "ai-required"], true)
+    ]))
+  ]))
+}
+
+-- Build a single sample entry JSON object.
+pure func sampleEntry(id: string, path: string, label: string, mediaType: string, tags: [string], aiRequired: bool) -> Json =
+  jo([
+    kv("id", js(id)),
+    kv("path", js(path)),
+    kv("label", js(label)),
+    kv("media_type", js(mediaType)),
+    kv("tags", ja(map(js, tags))),
+    kv("expected_formats", ja(map(js, ["blocks", "markdown", "html", "a2ui"]))),
+    kv("ai_required", jb(aiRequired))
+  ])
+
+-- Resolve a sample ID to its file path.
+-- Returns empty string if sample ID not found.
+export pure func sampleResolvePath(sampleId: string) -> string =
+  if sampleId == "sample_docx_basic" then "data/test_files/sample.docx"
+  else if sampleId == "sample_docx_tables" then "data/test_files/tables.docx"
+  else if sampleId == "sample_docx_comments" then "data/test_files/comments.docx"
+  else if sampleId == "sample_pptx_show" then "data/test_files/poi_sampleshow.pptx"
+  else if sampleId == "sample_xlsx_basic" then "data/test_files/pandoc_basic.xlsx"
+  else if sampleId == "sample_csv" then "data/test_files/test.csv"
+  else if sampleId == "sample_markdown" then "data/test_files/pandoc_planets.md"
+  else if sampleId == "sample_html" then "data/test_files/test.html"
+  else if sampleId == "sample_odt" then "data/test_files/test.odt"
+  else if sampleId == "sample_odp" then "data/test_files/test.odp"
+  else if sampleId == "sample_ods" then "data/test_files/test.ods"
+  else if sampleId == "sample_epub" then "data/test_files/test.epub"
+  else if sampleId == "sample_pdf" then "data/test_files/simple_text.pdf"
+  else if sampleId == "sample_mp3" then "data/test_files/sample.mp3"
+  else if sampleId == "sample_mp4" then "data/test_files/sample.mp4"
+  else ""

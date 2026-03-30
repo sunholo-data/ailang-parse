@@ -1,0 +1,132 @@
+# AILANG Parse
+
+Universal document parsing in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown.
+
+**Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs and images** delegate to whatever AI model you plug in (Gemini, Claude, local Ollama). AILANG Parse is AI-agnostic: swap `--ai` to change the backend, zero code changes.
+
+## Install
+
+Requires [AILANG](https://github.com/sunholo-data/ailang) CLI.
+
+```bash
+# Clone and symlink
+git clone https://github.com/sunholo-data/ailang-parse.git
+ln -s "$(pwd)/ailang-parse/bin/docparse" /usr/local/bin/docparse
+```
+
+## SDKs
+
+Use AILANG Parse from your language of choice:
+
+```bash
+pip install ailang-parse          # Python
+npm install @ailang/parse         # JavaScript/TypeScript
+go get github.com/sunholo-data/ailang-parse-go  # Go
+```
+
+## Quick Start
+
+```bash
+# Office documents (deterministic, no AI needed)
+docparse report.docx
+docparse slides.pptx
+docparse spreadsheet.xlsx
+
+# PDF and images (AI auto-enabled)
+docparse document.pdf
+docparse photo.png
+
+# Options
+docparse report.docx describe        # AI image descriptions
+docparse report.docx summarize       # AI document summary
+docparse scan.pdf --ai gemini-3-flash-preview  # Choose AI backend
+
+# Format conversion
+docparse report.docx --convert output.html
+docparse data.csv --convert report.docx
+docparse notes.md --convert slides.pptx
+
+# AI document generation
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+  docparse/main.ail --generate report.docx --prompt "Q1 sales report with tables"
+```
+
+## Output
+
+Every run produces:
+- `docparse/data/output.json` — Structured JSON with typed blocks
+- `docparse/data/output.md` — LLM-ready markdown
+
+## What AILANG Parse Extracts
+
+| Feature | DOCX | PPTX | XLSX | Competitors |
+|---------|------|------|------|-------------|
+| Tables with merged cells | Yes | Yes | Yes | Buggy or missing |
+| Track changes (redlining) | Yes | — | — | No |
+| Comments (interleaved) | Yes | — | — | No |
+| Headers/footers | Yes | — | — | Limited |
+| Text boxes / VML shapes | Yes | Yes | — | Dropped silently |
+| Speaker notes | — | Yes | — | Dropped |
+| Multi-sheet extraction | — | — | Yes | Yes |
+
+Competitors (MarkItDown, Unstructured, Docling, LlamaParse) either convert Office files to Markdown/PDF (losing structure) or use heuristics. AILANG Parse reads the XML directly.
+
+## Supported Formats
+
+**Parsing (13 formats):** DOCX, PPTX, XLSX, ODT, ODP, ODS, PDF, HTML, Markdown, CSV, EPUB, EML, MBOX
+
+**Generation (9 formats):** DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto)
+
+## Architecture
+
+```
+docparse/
+├── types/document.ail           # Block ADT (9 variants)
+├── services/
+│   ├── format_router.ail        # Format detection (36 inline tests)
+│   ├── zip_extract.ail          # ZIP layer (9 inline tests)
+│   ├── docx_parser.ail          # DOCX XML → Blocks (6 inline tests)
+│   ├── pptx_parser.ail          # PPTX slides → Blocks
+│   ├── xlsx_parser.ail          # XLSX worksheets → Blocks
+│   ├── direct_ai_parser.ail     # PDF/image → Blocks (AI)
+│   ├── layout_ai.ail            # AI self-healing (optional)
+│   ├── output_formatter.ail     # JSON + markdown output
+│   └── docparse_browser.ail     # WASM browser adapter
+└── main.ail                     # CLI entry point
+```
+
+28+ contracts, 50+ inline tests.
+
+## AI Configuration
+
+AILANG Parse uses AILANG's AI effect — any model AILANG supports works:
+
+```bash
+docparse scan.pdf --ai gemini-3-flash-preview   # Google Cloud (ADC)
+docparse scan.pdf --ai granite-docling           # Local Ollama (free)
+docparse scan.pdf --ai claude-haiku-4-5          # Anthropic
+```
+
+AI usage is bounded by capability budgets (`AI @limit=30`), so costs are predictable.
+
+## Dev Commands
+
+```bash
+docparse --check       # Type-check all modules
+docparse --test        # Run inline tests
+docparse --prove       # Static Z3 contract verification
+```
+
+## Benchmarks
+
+```bash
+uv run benchmarks/run_benchmarks.py --suite office     # Structural (no API, instant)
+uv run benchmarks/run_benchmarks.py --suite pdf         # PDF extraction (needs AI)
+uv run benchmarks/run_benchmarks.py --competitors       # Compare to Docling etc.
+```
+
+See [benchmarks/](benchmarks/) for details.
+
+## License
+
+Apache 2.0

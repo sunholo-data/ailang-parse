@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Table & Merged Cell Extraction — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Extract tables with merged cells from DOCX, PPTX, and XLSX. AILANG Parse reads gridSpan and vMerge attributes directly from Office XML — structurally correct colspan and rowspan, not layout guessing.">
+<meta property="og:title" content="Table & Merged Cell Extraction — AILANG Parse">
+<meta property="og:description" content="Extract tables with merged cells from DOCX, PPTX, and XLSX. AILANG Parse reads gridSpan and vMerge attributes directly from Office XML — structurally correct colspan and rowspan, not layout guessing.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Tables page layout (matches selfhost.html) ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Comparison table (from why.html) */
+.dp-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-compare-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-compare-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-compare-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.dp-compare-table .dp-preserved {
+  color: var(--success);
+  font-weight: 600;
+}
+.dp-compare-table .dp-lost {
+  color: #ef4444;
+  font-weight: 500;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--warn {
+  background: rgba(234, 179, 8, 0.06);
+  border-color: rgba(234, 179, 8, 0.2);
+}
+.dp-callout--warn svg { stroke: #eab308; }
+.dp-callout--contact {
+  background: rgba(139, 92, 246, 0.06);
+  border-color: rgba(139, 92, 246, 0.2);
+}
+.dp-callout--contact svg { stroke: #8b5cf6; }
+
+/* Visual merge diagram */
+.dp-merge-diagram {
+  display: grid;
+  gap: 0;
+  margin: 16px 0 20px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 400px;
+}
+.dp-merge-diagram .cell {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  text-align: center;
+}
+.dp-merge-diagram .cell--merged {
+  background: var(--dp-blue-faded);
+  color: var(--dp-blue);
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse DOCX tables and preserve merged cells?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the w:gridSpan (horizontal merge) and w:vMerge (vertical merge) attributes directly from DOCX XML. The output uses standard colspan and rowspan semantics, so the table structure is structurally correct — not guessed from visual layout like PDF-first parsers."}},
+    {"@type": "Question", "name": "Why do most document parsers break table structures from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "Most parsers convert DOCX to PDF first, which renders tables as positioned text blocks. ML models then try to reconstruct the table grid from visual coordinates, but merged cells, nested tables, and cells with multiple paragraphs create ambiguity that heuristics cannot resolve. AILANG Parse bypasses this entirely by reading the table XML directly."}},
+    {"@type": "Question", "name": "How does AILANG Parse handle complex tables with nested content?", "acceptedAnswer": {"@type": "Answer", "text": "Each table cell in AILANG Parse's Block ADT can contain any block type — paragraphs, lists, nested tables, or even images. The parser reads the cell's XML subtree recursively, preserving the full content hierarchy. No flattening, no one-paragraph-per-cell limitation."}},
+    {"@type": "Question", "name": "How does AILANG Parse compare to Docling for DOCX table extraction?", "acceptedAnswer": {"@type": "Answer", "text": "On the OfficeDocBench benchmark, AILANG Parse scores 96.6% overall versus Docling's 63.4%. The gap is largest on tables with merged cells: Docling converts DOCX to PDF and then uses its Heron model for table detection, which cannot recover the merge attributes lost in conversion. AILANG Parse reads those attributes directly from the XML."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Tables</span> & Merged Cells</h1>
+    <p class="subtitle reveal reveal-delay-1">Structural colspan and rowspan from Office XML &mdash; not layout guessing.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#docx-tables">DOCX Tables</a>
+        <a href="#xlsx-tables">XLSX Tables</a>
+        <a href="#pptx-tables">PPTX Tables</a>
+        <a href="#example-output">Example Output</a>
+        <a href="#competitors">Competitors</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="problem">The Problem</h2>
+      <p>Tables are the hardest part of document parsing. Cells contain nested content, columns vary in width, and headers span multiple rows. But the real challenge is <strong>merged cells</strong> &mdash; a single cell that spans two columns, three rows, or both. Get the merge wrong and the data shifts: a revenue figure lands under the wrong quarter, a compliance field maps to the wrong entity.</p>
+
+      <p>Most document parsers convert Office files to PDF first, then use spatial analysis to guess where table borders are. This works for simple grids but fails on complex merges. A cell spanning columns 2&ndash;4 looks like three separate cells in the rendered image. A vertically merged cell that extends across five rows has no visible border to detect.</p>
+
+      <p>AILANG Parse takes a different approach: it reads the merge attributes directly from the Office XML. No guessing, no spatial analysis, no image processing. The structure is already there &mdash; encoded in <code>gridSpan</code>, <code>vMerge</code>, and <code>mergeCells</code> elements. We just read it.</p>
+
+      <div class="dp-callout dp-callout--warn">
+        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div><strong>Why this matters for financial and compliance documents:</strong> Merged cells in balance sheets, income statements, and regulatory filings carry semantic meaning. A wrong merge span changes which column a number belongs to &mdash; turning a quarterly figure into an annual total, or attributing a liability to the wrong subsidiary. Deterministic extraction is not a nice-to-have here; it is a correctness requirement.</div>
+      </div>
+
+      <h2 id="docx-tables">DOCX Tables</h2>
+      <p>DOCX files use the OOXML standard (ECMA-376). Tables are defined by a grid model: the <code>&lt;w:tblGrid&gt;</code> element declares the column structure, and each cell references its position within that grid.</p>
+
+      <h3>Horizontal Merges (gridSpan)</h3>
+      <p>When a cell spans multiple columns, it carries a <code>&lt;w:gridSpan w:val="3"/&gt;</code> attribute. AILANG Parse reads this directly from the XML and emits it as a <code>colspan</code> value on the cell. No heuristics, no guessing from rendered width.</p>
+      <pre><code class="language-xml">&lt;!-- OOXML: cell spanning 3 columns --&gt;
+&lt;w:tc&gt;
+  &lt;w:tcPr&gt;
+    &lt;w:gridSpan w:val="3"/&gt;
+  &lt;/w:tcPr&gt;
+  &lt;w:p&gt;&lt;w:r&gt;&lt;w:t&gt;Total Revenue&lt;/w:t&gt;&lt;/w:r&gt;&lt;/w:p&gt;
+&lt;/w:tc&gt;</code></pre>
+
+      <h3>Vertical Merges (vMerge)</h3>
+      <p>Vertical merges use a two-part mechanism. The first cell in a vertical span has <code>&lt;w:vMerge w:val="restart"/&gt;</code>, and subsequent cells in the same column carry <code>&lt;w:vMerge/&gt;</code> (with no <code>val</code> attribute, meaning "continue"). AILANG Parse tracks the merge state across rows and computes the final <code>rowspan</code>.</p>
+      <pre><code class="language-xml">&lt;!-- Row 1: start of vertical merge --&gt;
+&lt;w:tc&gt;
+  &lt;w:tcPr&gt;&lt;w:vMerge w:val="restart"/&gt;&lt;/w:tcPr&gt;
+  &lt;w:p&gt;&lt;w:r&gt;&lt;w:t&gt;Category A&lt;/w:t&gt;&lt;/w:r&gt;&lt;/w:p&gt;
+&lt;/w:tc&gt;
+
+&lt;!-- Row 2: continuation (empty vMerge = continue) --&gt;
+&lt;w:tc&gt;
+  &lt;w:tcPr&gt;&lt;w:vMerge/&gt;&lt;/w:tcPr&gt;
+  &lt;w:p/&gt;
+&lt;/w:tc&gt;
+
+&lt;!-- Row 3: continuation --&gt;
+&lt;w:tc&gt;
+  &lt;w:tcPr&gt;&lt;w:vMerge/&gt;&lt;/w:tcPr&gt;
+  &lt;w:p/&gt;
+&lt;/w:tc&gt;</code></pre>
+      <p>This produces a cell with <code>rowspan: 3</code> in the parsed output. The continuation cells are omitted &mdash; they carry no content.</p>
+
+      <h3>Combined Merges</h3>
+      <p>A cell can have both <code>gridSpan</code> and <code>vMerge</code>, creating a rectangular region that spans multiple rows and columns simultaneously. AILANG Parse handles this correctly because it reads both attributes from the same <code>&lt;w:tcPr&gt;</code> element.</p>
+
+      <h2 id="xlsx-tables">XLSX Tables</h2>
+      <p>Excel spreadsheets store merge information in a dedicated <code>&lt;mergeCells&gt;</code> element within each sheet's XML. Each merge is defined as a range like <code>B2:D4</code>, meaning columns B through D and rows 2 through 4 are merged into a single cell.</p>
+
+      <pre><code class="language-xml">&lt;!-- XLSX: sheet1.xml merge declarations --&gt;
+&lt;mergeCells count="2"&gt;
+  &lt;mergeCell ref="B2:D4"/&gt;
+  &lt;mergeCell ref="A1:C1"/&gt;
+&lt;/mergeCells&gt;</code></pre>
+
+      <p>AILANG Parse reads these ranges, resolves the row/column coordinates, and applies them to the cell data from <code>sharedStrings.xml</code>. The result is a table block where each merged region is represented by a single cell with the correct <code>colspan</code> and <code>rowspan</code> values.</p>
+
+      <h3>Shared Strings</h3>
+      <p>XLSX files store string values in a shared string table (<code>sharedStrings.xml</code>) and reference them by index in the cell data. AILANG Parse resolves these references transparently, so the output contains the actual text, not numeric indices.</p>
+
+      <h2 id="pptx-tables">PPTX Tables</h2>
+      <p>PowerPoint tables use the DrawingML namespace (<code>a:</code>) rather than WordprocessingML (<code>w:</code>). The grid is declared via <code>&lt;a:tblGrid&gt;</code> with <code>&lt;a:gridCol&gt;</code> elements, and horizontal merges use the <code>gridSpan</code> attribute directly on <code>&lt;a:tc&gt;</code> cells.</p>
+
+      <pre><code class="language-xml">&lt;!-- PPTX: table cell spanning 2 columns --&gt;
+&lt;a:tc gridSpan="2"&gt;
+  &lt;a:txBody&gt;
+    &lt;a:p&gt;&lt;a:r&gt;&lt;a:t&gt;Merged Header&lt;/a:t&gt;&lt;/a:r&gt;&lt;/a:p&gt;
+  &lt;/a:txBody&gt;
+&lt;/a:tc&gt;</code></pre>
+
+      <p>Vertical merges in PPTX use the <code>rowSpan</code> attribute on the starting cell and <code>vMerge="1"</code> on continuation cells. AILANG Parse reads both and computes the correct span.</p>
+
+      <h2 id="example-output">Example Output</h2>
+      <p>Given a DOCX file with a table where "Total Revenue" spans columns 2&ndash;4 and "Category A" spans rows 1&ndash;3, AILANG Parse produces:</p>
+
+      <pre><code class="language-json">{
+  "type": "Table",
+  "rows": [
+    {
+      "cells": [
+        { "text": "Category A", "rowspan": 3 },
+        { "text": "Total Revenue", "colspan": 3 }
+      ]
+    },
+    {
+      "cells": [
+        { "text": "Q1", "colspan": 1 },
+        { "text": "Q2", "colspan": 1 },
+        { "text": "Q3", "colspan": 1 }
+      ]
+    },
+    {
+      "cells": [
+        { "text": "$1.2M", "colspan": 1 },
+        { "text": "$1.5M", "colspan": 1 },
+        { "text": "$1.8M", "colspan": 1 }
+      ]
+    }
+  ]
+}</code></pre>
+
+      <p>The <code>rowspan: 3</code> on "Category A" is computed from the three consecutive <code>vMerge</code> elements in the source XML. The <code>colspan: 3</code> on "Total Revenue" comes directly from <code>gridSpan="3"</code>. No AI, no layout detection, no guessing.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>This output is a Table block in the AILANG Parse Block ADT. The same structure is produced regardless of whether the source is DOCX, XLSX, or PPTX &mdash; all three formats normalize to the same representation with <code>colspan</code> and <code>rowspan</code> on each cell.</div>
+      </div>
+
+      <h2 id="competitors">How Competitors Handle This</h2>
+      <p>Every major document parsing tool handles tables differently. Here is how they compare on merged cell extraction:</p>
+
+      <table class="dp-compare-table">
+        <thead>
+          <tr><th>Tool</th><th>Approach</th><th>Merged Cell Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>AILANG Parse</td>
+            <td class="dp-preserved">Reads gridSpan, vMerge, mergeCells directly from Office XML</td>
+            <td class="dp-preserved">Structurally correct colspan/rowspan on every cell</td>
+          </tr>
+          <tr>
+            <td>Unstructured</td>
+            <td class="dp-lost">Converts DOCX to PDF via LibreOffice, then uses layout analysis</td>
+            <td class="dp-lost">Merged cells become separate cells or get mangled &mdash; merge semantics lost</td>
+          </tr>
+          <tr>
+            <td>Docling</td>
+            <td class="dp-lost">Converts to PDF, runs table detection model (TableFormer)</td>
+            <td class="dp-lost">Table detection sometimes works, but merge semantics are not recovered from the PDF render</td>
+          </tr>
+          <tr>
+            <td>LlamaParse</td>
+            <td class="dp-lost">Sends document to cloud API; LLM reconstructs table structure</td>
+            <td class="dp-lost">Non-deterministic &mdash; same document can produce different merge results on different runs</td>
+          </tr>
+          <tr>
+            <td>MarkItDown</td>
+            <td class="dp-lost">Uses python-docx to extract cells</td>
+            <td class="dp-lost">Partial gridSpan support, but misses vMerge entirely &mdash; vertical merges become empty rows</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Why PDF Conversion Destroys Merge Information</h3>
+      <p>When a DOCX is rendered to PDF, the table becomes a visual layout: lines on a page. The <code>gridSpan</code> and <code>vMerge</code> attributes are consumed by the rendering engine to draw the table, then discarded. The PDF contains no record that cells were merged &mdash; only the visual result.</p>
+      <p>Tools that work from the PDF must then reverse-engineer the table structure from line positions and text coordinates. This works for simple tables with visible borders but fails when:</p>
+      <ul>
+        <li>Cells are merged across columns (the interior border is removed, so the detection model sees one wide cell but cannot determine how many columns it spans)</li>
+        <li>Cells are merged vertically (no horizontal border means the rows blend together)</li>
+        <li>Tables have no visible borders at all (common in financial statements)</li>
+        <li>Nested tables or cells contain complex content like lists or images</li>
+      </ul>
+
+      <p>AILANG Parse avoids all of these failure modes by never converting to PDF in the first place. The merge information is right there in the XML. We just read it.</p>
+
+      <h2 id="try-it">Try It</h2>
+      <p>Parse a document with tables and see the structural output:</p>
+
+      <pre><code class="language-bash"># Parse a DOCX with merged cells
+./bin/docparse data/test_files/sample.docx
+
+# Parse an XLSX spreadsheet
+./bin/docparse data/test_files/sample.xlsx
+
+# Parse a PPTX with tables
+./bin/docparse data/test_files/sample.pptx
+
+# Convert a table-heavy DOCX to HTML (preserves colspan/rowspan)
+./bin/docparse report.docx --convert output.html</code></pre>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px">
+        <a href="try.html" class="dp-btn" style="text-decoration:none">Try in Browser</a>
+        <a href="selfhost.html" class="dp-btn dp-btn--outline" style="text-decoration:none">Self-Host Guide</a>
+        <a href="api.html" class="dp-btn dp-btn--outline" style="text-decoration:none">API Reference</a>
+      </div>
+
+      <div class="dp-callout dp-callout--contact" style="margin-top:24px">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <div>
+          <strong>Need help with complex table extraction?</strong><br>
+          Deploy AILANG Parse as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform for enterprise document processing with dedicated support for financial and compliance workflows.
+          <br><br>
+          <a href="https://www.sunholo.com/contact" style="color:#8b5cf6;font-weight:600;font-family:var(--font-mono);font-size:13px">Contact Sunholo &rarr;</a>
+        </div>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse DOCX tables and preserve merged cells?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse reads the <code>w:gridSpan</code> (horizontal merge) and <code>w:vMerge</code> (vertical merge) attributes directly from DOCX XML. The output uses standard <code>colspan</code> and <code>rowspan</code> semantics, so the table structure is structurally correct &mdash; not guessed from visual layout like PDF-first parsers.</p></div>
+        </details>
+        <details>
+          <summary>Why do most document parsers break table structures from DOCX files?</summary>
+          <div class="dp-faq-answer"><p>Most parsers convert DOCX to PDF first, which renders tables as positioned text blocks. ML models then try to reconstruct the table grid from visual coordinates, but merged cells, nested tables, and cells with multiple paragraphs create ambiguity that heuristics cannot resolve. AILANG Parse bypasses this entirely by reading the table XML directly.</p></div>
+        </details>
+        <details>
+          <summary>How does AILANG Parse handle complex tables with nested content?</summary>
+          <div class="dp-faq-answer"><p>Each table cell in AILANG Parse's Block ADT can contain any block type &mdash; paragraphs, lists, nested tables, or even images. The parser reads the cell's XML subtree recursively, preserving the full content hierarchy. No flattening, no one-paragraph-per-cell limitation.</p></div>
+        </details>
+        <details>
+          <summary>How does AILANG Parse compare to Docling for DOCX table extraction?</summary>
+          <div class="dp-faq-answer"><p>On the <a href="benchmarks.html">OfficeDocBench benchmark</a>, AILANG Parse scores 96.6% overall versus Docling's 63.4%. The gap is largest on tables with merged cells: Docling converts DOCX to PDF and then uses its Heron model for table detection, which cannot recover the merge attributes lost in conversion. AILANG Parse reads those attributes directly from the XML.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

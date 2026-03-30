@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Server — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Run AILANG Parse as an MCP server for Claude, ChatGPT, and any MCP-compatible AI agent. Parse documents, extract structured data, and convert formats via the Model Context Protocol.">
+<meta property="og:title" content="MCP Server — AILANG Parse">
+<meta property="og:description" content="Run AILANG Parse as an MCP server for Claude, ChatGPT, and any MCP-compatible AI agent. Parse documents, extract structured data, and convert formats via the Model Context Protocol.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- MCP page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-callout--warning {
+  background: rgba(234, 179, 8, 0.06);
+  border-color: rgba(234, 179, 8, 0.2);
+}
+.dp-callout--warning svg { stroke: #ca8a04; }
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "What is the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse exposes its document parsing capabilities as an MCP (Model Context Protocol) server, allowing Claude, ChatGPT, and any MCP-compatible AI agent to parse documents as a tool call. The agent sends a file, AILANG Parse returns structured blocks, and the agent can reason over the document's actual structure — not a flat text dump."}},
+    {"@type": "Question", "name": "How do AI agents discover AILANG Parse as a tool?", "acceptedAnswer": {"@type": "Answer", "text": "The /api/v1/tools endpoint returns machine-readable tool definitions in Claude, OpenAI, and MCP formats. An MCP-compatible agent automatically discovers the parse, convert, and list_formats tools. No manual configuration needed — the agent reads the tool schema and knows how to call AILANG Parse."}},
+    {"@type": "Question", "name": "Which AI agents work with the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Any MCP-compatible agent works: Claude (via Claude Code or Claude Desktop), ChatGPT (via the Actions/tool-use protocol), custom LangChain agents, and LlamaIndex agent pipelines. The MCP server also works with Cursor, Windsurf, and other IDE-integrated AI tools that support MCP."}},
+    {"@type": "Question", "name": "Why is structured document parsing better for AI agents than flat text extraction?", "acceptedAnswer": {"@type": "Answer", "text": "When an AI agent receives flat text, it loses the ability to reference specific table cells, identify which text was inserted versus deleted (track changes), or attribute comments to specific reviewers. AILANG Parse gives agents a typed Block ADT where each element has semantic meaning, enabling precise reasoning about document structure."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">MCP</span> Server</h1>
+    <p class="subtitle reveal reveal-delay-1">Document parsing as a tool for any AI agent.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#what-is-mcp" class="active">What is MCP?</a>
+        <a href="#quick-start">Quick Start</a>
+        <a href="#available-tools">Available Tools</a>
+        <a href="#tool-discovery">Tool Discovery</a>
+        <a href="#claude-code">With Claude Code</a>
+        <a href="#other-agents">With Other Agents</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="what-is-mcp">What is MCP?</h2>
+      <p>The <strong>Model Context Protocol</strong> (MCP) is an open standard for connecting AI assistants to external tools and data sources. Instead of hardcoding integrations, agents discover what tools are available, what parameters they accept, and how to call them &mdash; all at runtime.</p>
+      <p>AILANG Parse exposes its parsing capabilities as MCP tools that Claude, ChatGPT, and other MCP-compatible agents can discover and use. Any agent that speaks MCP can parse documents, convert between formats, and estimate costs without custom integration code.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>MCP tools are auto-discovered from the <code>/api/v1/tools</code> endpoint. No manual configuration of tool schemas required &mdash; agents read the manifest and know what AILANG Parse can do.</div>
+      </div>
+
+      <div class="dp-callout dp-callout--warning">
+        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div><strong>Preview feature.</strong> The MCP server interface is stabilizing. Tool names and parameters may change before the 1.0 release. Pin to a specific API version in production integrations.</div>
+      </div>
+
+      <h2 id="quick-start">Quick Start</h2>
+      <p>AILANG Parse's API server already speaks MCP. The tool definitions endpoint at <code>GET /api/v1/tools</code> returns schemas in Claude, OpenAI, and MCP formats. Point your agent at the server and it discovers available tools automatically.</p>
+
+      <h3>Start the Server</h3>
+      <pre><code class="language-bash"># Start AILANG Parse as an API server
+ailang serve-api --caps IO,FS,Env,AI,Net,Rand,Clock \
+  --ai gemini-2.5-flash --routes-only --port 8080 docparse/</code></pre>
+
+      <p>Or use the hosted version:</p>
+      <pre><code class="language-bash"># Cloud Run endpoint (no setup required)
+curl https://api.parse.sunholo.com/api/v1/tools</code></pre>
+
+      <h3>Claude Desktop</h3>
+      <p>Add AILANG Parse to Claude Desktop by editing your <code>claude_desktop_config.json</code>:</p>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "url": "http://localhost:8080/api/v1/tools",
+      "apiKey": "dp_your_api_key_here"
+    }
+  }
+}</code></pre>
+
+      <h3>Generic MCP Client</h3>
+      <p>Any MCP-compatible client can connect to AILANG Parse. Fetch tool definitions and call tools via the REST API:</p>
+      <pre><code class="language-bash"># Discover available tools
+curl -s http://localhost:8080/api/v1/tools | jq '.tools'
+
+# Parse a document (example tool call)
+curl -X POST http://localhost:8080/api/v1/parse \
+  -H "Authorization: Bearer dp_your_api_key_here" \
+  -F "file=@report.docx"
+
+# Estimate cost before parsing
+curl -X POST http://localhost:8080/api/v1/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "report.docx", "size_bytes": 245000}'</code></pre>
+
+      <h2 id="available-tools">Available Tools</h2>
+      <p>AILANG Parse exposes the following tools via MCP:</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>ailang_parse</td>
+            <td>Parse a document file and return structured blocks (headings, tables, images, text, lists, changes). Accepts a file path or base64-encoded content.</td>
+            <td><code>file</code> (path or base64), <code>format</code> (optional, auto-detected)</td>
+          </tr>
+          <tr>
+            <td>ailang_convert</td>
+            <td>Convert a document from one format to another. Supports all 13 input formats and 9 output formats including Quarto Markdown.</td>
+            <td><code>input</code> (path or base64), <code>output_format</code> (e.g. <code>html</code>, <code>docx</code>, <code>pptx</code>)</td>
+          </tr>
+          <tr>
+            <td>ailang_formats</td>
+            <td>List all supported input and output formats with their capabilities (deterministic vs AI-required, features).</td>
+            <td>None</td>
+          </tr>
+          <tr>
+            <td>ailang_estimate</td>
+            <td>Estimate the cost and latency for parsing a document before committing to the operation.</td>
+            <td><code>filename</code>, <code>size_bytes</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>Each tool includes full JSON Schema parameter definitions, examples, and error types. Agents receive all of this from the <code>/api/v1/tools</code> endpoint &mdash; no hardcoding required.</p>
+
+      <h2 id="tool-discovery">Tool Discovery</h2>
+      <p>AILANG Parse follows an <strong>agent-first design</strong> philosophy. Two endpoints power automatic discovery:</p>
+
+      <h3>Capability Manifest</h3>
+      <p>The <code>GET /api/v1/capabilities</code> endpoint returns a machine-readable manifest describing everything AILANG Parse can do &mdash; supported formats, determinism flags, cost metadata, and rate limits.</p>
+      <pre><code class="language-bash">curl -s http://localhost:8080/api/v1/capabilities | jq '.'</code></pre>
+      <p>Agents use this to decide <em>whether</em> AILANG Parse can handle a task before making a tool call.</p>
+
+      <h3>Tool Definitions</h3>
+      <p>The <code>GET /api/v1/tools</code> endpoint returns tool schemas in three formats:</p>
+      <ul>
+        <li><strong>Claude format</strong> &mdash; <code>input_schema</code> with JSON Schema parameters</li>
+        <li><strong>OpenAI format</strong> &mdash; function-calling compatible <code>parameters</code> object</li>
+        <li><strong>MCP format</strong> &mdash; Model Context Protocol standard tool definitions</li>
+      </ul>
+      <p>Agents use this to know <em>how</em> to call each tool, what parameters are required, and what response shapes to expect.</p>
+
+      <pre><code class="language-bash"># Get tool definitions in MCP format
+curl -s http://localhost:8080/api/v1/tools?format=mcp | jq '.tools[0]'
+
+# Example response (abbreviated)
+# {
+#   "name": "ailang_parse",
+#   "description": "Parse a document file into structured blocks",
+#   "inputSchema": {
+#     "type": "object",
+#     "properties": {
+#       "file": { "type": "string", "description": "File path or base64 content" },
+#       "format": { "type": "string", "description": "File format (auto-detected if omitted)" }
+#     },
+#     "required": ["file"]
+#   }
+# }</code></pre>
+
+      <h2 id="claude-code">With Claude Code</h2>
+      <p>If you use <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code</a>, you have two options for document parsing:</p>
+
+      <h3>Option 1: MCP Server</h3>
+      <p>Configure AILANG Parse as an MCP server in your Claude Code settings. Claude will discover the tools automatically and use them when you ask it to parse or convert documents.</p>
+
+      <h3>Option 2: Claude Code Skill</h3>
+      <p>Install the AILANG Parse skill directly into Claude Code. This gives Claude native access to document parsing without running a separate server. See the <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code integration page</a> for installation instructions.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Which to choose?</strong> Use the MCP server if you need document parsing across multiple agents or want a shared service. Use the Claude Code skill if you only use Claude Code and want zero-config local parsing.</div>
+      </div>
+
+      <h2 id="other-agents">With Other Agents</h2>
+
+      <h3>ChatGPT</h3>
+      <p>ChatGPT supports MCP via plugins. Point your MCP plugin configuration at the AILANG Parse <code>/api/v1/tools</code> endpoint. ChatGPT will discover the available tools and present them as actions in the conversation.</p>
+
+      <h3>Custom Agents</h3>
+      <p>Any agent framework can use AILANG Parse via the REST API directly. The <code>/api/v1/parse</code> and <code>/api/v1/estimate</code> endpoints accept standard HTTP requests &mdash; no MCP client library required.</p>
+      <pre><code class="language-python"># Python example — call AILANG Parse from any agent
+import requests
+
+# Parse a document
+with open("report.docx", "rb") as f:
+    response = requests.post(
+        "http://localhost:8080/api/v1/parse",
+        headers={"Authorization": "Bearer dp_your_api_key_here"},
+        files={"file": f}
+    )
+blocks = response.json()</code></pre>
+
+      <h3>LangChain / LlamaIndex</h3>
+      <p>AILANG Parse works as a document loader in LangChain and LlamaIndex pipelines. Wrap the REST API in a custom loader or use the MCP tool definitions to register AILANG Parse as a tool in your agent chain.</p>
+      <pre><code class="language-python"># LangChain custom tool example
+from langchain.tools import StructuredTool
+
+ailang_parse = StructuredTool.from_function(
+    func=lambda file_path: requests.post(
+        "http://localhost:8080/api/v1/parse",
+        headers={"Authorization": "Bearer dp_your_api_key_here"},
+        files={"file": open(file_path, "rb")}
+    ).json(),
+    name="ailang_parse",
+    description="Parse a document into structured blocks"
+)</code></pre>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>What is the AILANG Parse MCP server?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse exposes its document parsing capabilities as an MCP (Model Context Protocol) server, allowing Claude, ChatGPT, and any MCP-compatible AI agent to parse documents as a tool call. The agent sends a file, AILANG Parse returns structured blocks, and the agent can reason over the document's actual structure &mdash; not a flat text dump.</p></div>
+        </details>
+        <details>
+          <summary>How do AI agents discover AILANG Parse as a tool?</summary>
+          <div class="dp-faq-answer"><p>The <code>/api/v1/tools</code> endpoint returns machine-readable tool definitions in Claude, OpenAI, and MCP formats. An MCP-compatible agent automatically discovers the <code>ailang_parse</code>, <code>ailang_convert</code>, and <code>ailang_formats</code> tools. No manual configuration needed &mdash; the agent reads the tool schema and knows how to call AILANG Parse.</p></div>
+        </details>
+        <details>
+          <summary>Which AI agents work with the AILANG Parse MCP server?</summary>
+          <div class="dp-faq-answer"><p>Any MCP-compatible agent works: Claude (via <a href="claude-code.html">Claude Code</a> or Claude Desktop), ChatGPT (via the Actions/tool-use protocol), custom LangChain agents, and LlamaIndex agent pipelines. The MCP server also works with Cursor, Windsurf, and other IDE-integrated AI tools that support MCP.</p></div>
+        </details>
+        <details>
+          <summary>Why is structured document parsing better for AI agents than flat text extraction?</summary>
+          <div class="dp-faq-answer"><p>When an AI agent receives flat text, it loses the ability to reference specific <a href="tables.html">table cells</a>, identify which text was inserted versus deleted (<a href="track-changes.html">track changes</a>), or attribute <a href="comments.html">comments</a> to specific reviewers. AILANG Parse gives agents a typed Block ADT where each element has semantic meaning, enabling precise reasoning about document structure.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

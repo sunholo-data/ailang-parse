@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code Integration — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Install the AILANG Parse skill for Claude Code. Parse documents, extract structured data, and convert formats directly from your terminal. One command to install.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Claude Code page layout ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Example conversation blocks */
+.dp-example {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-example .dp-prompt {
+  color: var(--dp-blue);
+  font-weight: 600;
+}
+/* Callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+/* Endpoint table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Auth flow steps */
+.dp-steps {
+  counter-reset: step;
+  list-style: none;
+  margin: 0 0 20px 0;
+  padding: 0;
+}
+.dp-steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 36px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--dp-blue);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I install the AILANG Parse skill for Claude Code?", "acceptedAnswer": {"@type": "Answer", "text": "Run claude install github:sunholo-data/ailang-parse-skill in your terminal. Once installed, Claude Code can parse documents directly during your coding session — extract tables, track changes, comments, and convert between formats without leaving the terminal."}},
+    {"@type": "Question", "name": "What can the AILANG Parse Claude Code skill do?", "acceptedAnswer": {"@type": "Answer", "text": "The skill gives Claude Code the ability to parse DOCX, PPTX, XLSX, and other Office formats into structured data. You can ask Claude to extract a specific table, list all tracked changes with authors, pull out comments, or convert a document to Markdown. It uses the same parsing engine as the API with full structural fidelity."}},
+    {"@type": "Question", "name": "Does the Claude Code skill send my documents to external servers?", "acceptedAnswer": {"@type": "Answer", "text": "By default, the skill calls the AILANG Parse cloud API. If you need full privacy, you can point the skill at a self-hosted instance by setting the AILANG_PARSE_URL environment variable. With a local Docker instance, your documents never leave your machine."}},
+    {"@type": "Question", "name": "Can I use AILANG Parse with other AI coding assistants besides Claude Code?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse also runs as an MCP server that works with Cursor, Windsurf, and any MCP-compatible IDE tool. Additionally, the REST API can be called from any custom agent or script. See the MCP page and API documentation for integration options beyond Claude Code."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">Parse documents from <span class="dp-accent">Claude Code</span></h1>
+    <p class="subtitle reveal reveal-delay-1">One install command. Ask Claude to parse any document &mdash; DOCX, PPTX, XLSX, PDF, and more.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#install" class="active">Install</a>
+        <a href="#usage">Usage Examples</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#auth">Authentication</a>
+        <a href="#endpoints">API Endpoints</a>
+        <a href="#mcp">MCP Server</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="install">Install the Skill</h2>
+      <p>Run one command inside Claude Code to add AILANG Parse:</p>
+      <pre><code class="language-bash">claude install github:sunholo-data/ailang-parse-skill</code></pre>
+
+      <p>This registers the AILANG Parse skill in your Claude Code environment. Once installed, Claude automatically invokes it whenever you ask about document parsing, extraction, or conversion. No configuration files to edit.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>The skill ships with helper scripts for health checks, parsing, cost estimation, and device auth. Claude uses these automatically &mdash; you just ask in plain English.</div>
+      </div>
+
+      <h2 id="usage">Usage Examples</h2>
+      <p>After installing, just tell Claude what you need. The skill triggers on any document parsing task:</p>
+
+      <div class="dp-example">
+        <span class="dp-prompt">&gt;</span> Parse this contract and extract all track changes
+      </div>
+      <div class="dp-example">
+        <span class="dp-prompt">&gt;</span> What tables are in quarterly_report.xlsx?
+      </div>
+      <div class="dp-example">
+        <span class="dp-prompt">&gt;</span> Convert presentation.pptx to markdown
+      </div>
+      <div class="dp-example">
+        <span class="dp-prompt">&gt;</span> Extract comments from legal_draft.docx with authors
+      </div>
+      <div class="dp-example">
+        <span class="dp-prompt">&gt;</span> Parse invoice.pdf and return structured JSON
+      </div>
+
+      <p>Claude handles file upload, format detection, output formatting, and error recovery. You get structured blocks back &mdash; ready to use in your code or pipe into another tool.</p>
+
+      <h2 id="capabilities">What the Skill Can Do</h2>
+
+      <h3>13 Input Formats</h3>
+      <ul>
+        <li><strong>Office:</strong> DOCX, PPTX, XLSX, ODT, ODP, ODS</li>
+        <li><strong>Text:</strong> CSV, Markdown, HTML, EPUB</li>
+        <li><strong>AI-powered:</strong> PDF, PNG, JPG</li>
+      </ul>
+
+      <h3>4 Output Formats</h3>
+      <ul>
+        <li><code>blocks</code> &mdash; structured JSON with typed block ADT (Text, Heading, Table, Image, List, Section, Change, Audio, Video)</li>
+        <li><code>markdown</code> &mdash; clean Markdown rendering</li>
+        <li><code>html</code> &mdash; semantic HTML</li>
+        <li><code>a2ui</code> &mdash; A2UI protocol for agent UIs</li>
+      </ul>
+
+      <h3>Key Features</h3>
+      <ul>
+        <li><strong>Deterministic Office parsing</strong> &mdash; no AI needed, instant results, sub-11ms per file</li>
+        <li><strong>AI-powered PDF/image parsing</strong> &mdash; pluggable models (Gemini, Claude, Ollama)</li>
+        <li><strong>Track changes, comments, merged cells</strong> &mdash; structural features competitors miss</li>
+        <li><strong>Cost estimation before parsing</strong> &mdash; check credits and latency before committing</li>
+        <li><strong>Device auth flow</strong> &mdash; seamless API key management from the terminal</li>
+      </ul>
+
+      <h2 id="auth">Authentication</h2>
+      <p>The skill uses an RFC 8628 device authorization flow &mdash; no API keys to copy-paste:</p>
+
+      <ol class="dp-steps">
+        <li>Your first parse request triggers the auth flow automatically</li>
+        <li>Claude shows you a URL and a short code to enter</li>
+        <li>Open the URL, sign in, and click <strong>Approve</strong></li>
+        <li>Your API key is stored locally &mdash; all subsequent requests are instant</li>
+      </ol>
+
+      <p>Keys use the <code>dp_</code> prefix and are stored as <code>DOCPARSE_API_KEY</code> in your environment. Free tier gives you 60 requests/day to start.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Already have a key? Set <code>DOCPARSE_API_KEY</code> in your shell environment and the skill will use it directly, skipping the device flow.</div>
+      </div>
+
+      <h2 id="endpoints">API Endpoints Available</h2>
+      <p>The skill can access these endpoints on your behalf:</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Endpoint</th><th>Method</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>/api/v1/parse</td><td>POST</td><td>Parse any document into structured blocks</td></tr>
+          <tr><td>/api/v1/estimate</td><td>POST</td><td>Check cost and latency before parsing</td></tr>
+          <tr><td>/api/v1/formats</td><td>GET</td><td>List all supported input/output formats</td></tr>
+          <tr><td>/api/v1/samples</td><td>GET</td><td>Test with built-in sample files</td></tr>
+          <tr><td>/api/v1/capabilities</td><td>GET</td><td>Full capability manifest for agent discovery</td></tr>
+          <tr><td>/api/v1/health</td><td>GET</td><td>Service status and version</td></tr>
+        </tbody>
+      </table>
+
+      <p>All responses include typed error codes with <code>suggested_fix</code> fields that Claude can act on directly. If a parse fails, Claude reads the fix and retries automatically.</p>
+
+      <h2 id="mcp">MCP Server</h2>
+      <p>AILANG Parse also works as an MCP (Model Context Protocol) server, exposing its parsing tools to any MCP-compatible AI agent:</p>
+
+      <pre><code class="language-bash"># Coming soon
+ailang-parse --mcp</code></pre>
+
+      <p>The <code>/api/v1/tools</code> endpoint already serves tool definitions in Claude, OpenAI, and MCP formats. Any agent that speaks MCP can discover and call AILANG Parse without custom integration.</p>
+
+      <div style="margin-top:48px;padding-top:24px;border-top:2px solid var(--border);display:flex;gap:12px;flex-wrap:wrap">
+        <a href="try.html" class="dp-btn dp-btn--primary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Try in Browser
+        </a>
+        <a href="api.html" class="dp-btn dp-btn--secondary">
+          API &amp; SDKs
+        </a>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I install the AILANG Parse skill for Claude Code?</summary>
+          <div class="dp-faq-answer"><p>Run <code>claude install github:sunholo-data/ailang-parse-skill</code> in your terminal. Once installed, Claude Code can parse documents directly during your coding session &mdash; extract tables, track changes, comments, and convert between formats without leaving the terminal.</p></div>
+        </details>
+        <details>
+          <summary>What can the AILANG Parse Claude Code skill do?</summary>
+          <div class="dp-faq-answer"><p>The skill gives Claude Code the ability to parse DOCX, PPTX, XLSX, and other Office formats into structured data. You can ask Claude to extract a specific table, list all tracked changes with authors, pull out comments, or convert a document to Markdown. It uses the same parsing engine as the <a href="api.html">API</a> with full structural fidelity.</p></div>
+        </details>
+        <details>
+          <summary>Does the Claude Code skill send my documents to external servers?</summary>
+          <div class="dp-faq-answer"><p>By default, the skill calls the AILANG Parse cloud API. If you need full privacy, you can point the skill at a <a href="selfhost.html">self-hosted instance</a> by setting the <code>AILANG_PARSE_URL</code> environment variable. With a local Docker instance, your documents never leave your machine.</p></div>
+        </details>
+        <details>
+          <summary>Can I use AILANG Parse with other AI coding assistants besides Claude Code?</summary>
+          <div class="dp-faq-answer"><p>Yes. AILANG Parse also runs as an <a href="mcp.html">MCP server</a> that works with Cursor, Windsurf, and any MCP-compatible IDE tool. Additionally, the <a href="api.html">REST API</a> can be called from any custom agent or script.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

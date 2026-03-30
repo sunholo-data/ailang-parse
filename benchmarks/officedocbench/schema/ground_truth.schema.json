@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.sunholo.com/docparse/officedocbench/ground_truth.schema.json",
+  "title": "OfficeDocBench Ground Truth",
+  "description": "Parser-independent ground truth annotation for Office structural parsing evaluation",
+  "type": "object",
+  "required": ["file", "format", "features"],
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "Source filename (e.g., comments.docx)"
+    },
+    "format": {
+      "type": "string",
+      "enum": ["docx", "pptx", "xlsx", "odt", "odp", "ods", "epub", "html", "csv", "tsv", "md"]
+    },
+    "source": {
+      "type": "string",
+      "description": "Attribution for the test file (e.g., 'pandoc test suite')"
+    },
+    "verified": {
+      "type": "boolean",
+      "description": "Whether this ground truth has been human-verified",
+      "default": false
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "object",
+          "properties": {
+            "paragraph_count": { "type": "integer", "minimum": 0 },
+            "key_phrases": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Representative phrases that must appear in output"
+            },
+            "total_words": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["paragraph_count", "total_words"]
+        },
+        "headings": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 },
+                "by_level": {
+                  "type": "object",
+                  "additionalProperties": { "type": "integer" },
+                  "description": "Count per level, e.g. {\"1\": 2, \"2\": 3}"
+                }
+              },
+              "required": ["present", "count"]
+            }
+          ]
+        },
+        "tables": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 },
+                "total_rows": { "type": "integer", "minimum": 0 },
+                "has_merged_cells": { "type": "boolean" }
+              },
+              "required": ["present", "count"]
+            }
+          ]
+        },
+        "track_changes": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 },
+                "types": {
+                  "type": "object",
+                  "additionalProperties": { "type": "integer" },
+                  "description": "Count per change type: insertion, deletion, move"
+                },
+                "authors": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "comments": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 },
+                "authors": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "texts": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "headers_footers": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "header_count": { "type": "integer", "minimum": 0 },
+                "footer_count": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "footnotes_endnotes": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "speaker_notes": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "text_boxes": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "images": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "lists": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "count": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["present"]
+            }
+          ]
+        },
+        "metadata": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "title": { "type": "string" },
+                "author": { "type": "string" },
+                "created": { "type": "string" },
+                "modified": { "type": "string" }
+              }
+            }
+          ]
+        },
+        "sheets": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "names": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["present"]
+            }
+          ]
+        }
+      },
+      "required": ["text"]
+    },
+    "full_text_words": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "All words from the document for text Jaccard comparison"
+    }
+  }
+}

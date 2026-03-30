@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Track Changes Extraction — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Extract track changes from DOCX with full author attribution, timestamps, and change types. AILANG Parse reads revision markup directly from Office XML — no PDF conversion, no data loss.">
+<meta property="og:title" content="Track Changes Extraction — AILANG Parse">
+<meta property="og:description" content="Extract track changes from DOCX with full author attribution, timestamps, and change types. AILANG Parse reads revision markup directly from Office XML — no PDF conversion, no data loss.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<style>
+/* ---- Track Changes page layout (matches selfhost.html) ---- */
+.dp-docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+.dp-docs-sidebar {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.dp-docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dp-docs-sidebar a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.dp-docs-sidebar a:hover {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue-border);
+}
+.dp-docs-sidebar a.active {
+  color: var(--dp-blue);
+  background: var(--dp-blue-faded);
+  border-left-color: var(--dp-blue);
+  font-weight: 600;
+}
+.dp-docs-content {
+  min-width: 0;
+}
+.dp-docs-content h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 48px 0 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+  letter-spacing: -0.5px;
+}
+.dp-docs-content h2:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.dp-docs-content h3 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 28px 0 10px;
+  letter-spacing: -0.2px;
+}
+.dp-docs-content p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.dp-docs-content ul, .dp-docs-content ol {
+  margin: 0 0 16px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.dp-docs-content li { margin-bottom: 4px; }
+.dp-docs-content code:not([class*="language-"]) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--dp-blue);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dp-docs-content pre {
+  margin: 0 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+.dp-docs-content pre code {
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* Config table */
+.dp-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-config-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-config-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-config-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Comparison table */
+.dp-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.dp-compare-table th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--dp-blue-faded);
+}
+.dp-compare-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.dp-compare-table td:first-child {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.dp-compare-table .dp-preserved {
+  color: var(--success);
+  font-weight: 600;
+}
+.dp-compare-table .dp-lost {
+  color: #ef4444;
+  font-weight: 500;
+}
+/* Info callout */
+.dp-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--dp-blue-faded);
+  border: 1px solid var(--dp-blue-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: var(--dp-blue); fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+/* CTA section */
+.dp-why-ctas {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 32px 0 16px;
+}
+
+@media (max-width: 900px) {
+  .dp-docs-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dp-docs-sidebar {
+    position: static;
+    max-height: none;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .dp-docs-sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .dp-docs-sidebar a {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .dp-docs-sidebar a.active {
+    border-left: none;
+    border-bottom-color: var(--dp-blue);
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I extract track changes from a DOCX file programmatically?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the w:ins, w:del, and w:moveTo/w:moveFrom revision markup directly from the DOCX XML. Each revision includes the author name, ISO 8601 timestamp, and change type. A single API call or CLI command returns all tracked changes as structured data."}},
+    {"@type": "Question", "name": "Do other document parsers preserve track changes from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "No. Unstructured, Docling, LlamaParse, and MarkItDown all either convert DOCX to PDF first (which strips revision markup entirely) or use wrapper libraries like mammoth that ignore revision elements. AILANG Parse is the only parser that extracts track changes with full author attribution and timestamps."}},
+    {"@type": "Question", "name": "Can I get track change author and date information from a DOCX?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts the w:author and w:date attributes from every revision element in the DOCX XML. The output includes the author name as a string and the timestamp in ISO 8601 format, so you can filter by reviewer, sort by date, or build audit trails programmatically."}},
+    {"@type": "Question", "name": "What does deterministic document parsing mean?", "acceptedAnswer": {"@type": "Answer", "text": "Deterministic parsing means the same input always produces the exact same output, with no model inference variability. AILANG Parse reads Office XML using rule-based extraction verified by 63 Z3 formal contracts — no ML models, no probabilistic guessing. This makes it suitable for compliance workflows, regression testing, and reproducible data pipelines."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Track Changes</span> Extraction</h1>
+    <p class="subtitle reveal reveal-delay-1">Author attribution, timestamps, and change types &mdash; directly from the XML.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#the-problem" class="active">The Problem</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#example-output">Example Output</a>
+        <a href="#competitors">Competitors</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="the-problem">The Problem</h2>
+
+      <p>Track changes are the negotiation history of a document. In legal contract review, every insertion and deletion carries meaning: who changed what, when, and why. In compliance workflows, the revision trail is the audit trail. In collaborative editing, track changes are the source of truth for what happened between drafts.</p>
+
+      <p>Yet every document parser on the market throws them away.</p>
+
+      <p>The moment you convert a DOCX to PDF &mdash; whether for parsing, archiving, or sharing &mdash; track changes vanish. The PDF renderer must choose: show the accepted version or the rejected version. Either way, the revision history is gone. The author attributions are gone. The timestamps are gone. The distinction between an insertion and a deletion is gone.</p>
+
+      <p>For legal teams, this is not a minor inconvenience. A contract with 47 tracked changes from three authors contains critical information about the negotiation process: which party proposed which clause, when counterproposals were made, and which terms survived. Flattening that into a single accepted view destroys evidence that may be required for dispute resolution, regulatory compliance, or internal audit.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Track changes are critical for legal document review, contract negotiation, and audit trails.</strong> Losing them is not a quality tradeoff &mdash; it is data destruction. Any document processing pipeline that handles contracts, policies, or regulated documents must preserve revision markup or risk losing legally significant information.</div>
+      </div>
+
+      <h2 id="how-it-works">How It Works</h2>
+
+      <p>A DOCX file is a ZIP archive containing XML files governed by the ECMA-376 (Office Open XML) standard. Track changes are stored as inline revision markup within the document body XML (<code>word/document.xml</code>).</p>
+
+      <p>AILANG Parse reads these XML elements directly:</p>
+
+      <ul>
+        <li><code>w:ins</code> &mdash; Insertions. The element wraps the inserted content and carries <code>w:author</code> and <code>w:date</code> attributes.</li>
+        <li><code>w:del</code> &mdash; Deletions. Wraps the deleted content (which Word preserves in the XML even though it is struck through in the UI).</li>
+        <li><code>w:rPrChange</code> &mdash; Run property changes. Records formatting modifications (bold, italic, font size, color) with before/after state.</li>
+      </ul>
+
+      <p>Each revision element includes the author name and an ISO 8601 timestamp, both extracted verbatim. AILANG Parse does not interpret or resolve the changes &mdash; it preserves them as structured data so downstream consumers can decide how to handle them.</p>
+
+      <h3>The Block ADT</h3>
+
+      <p>AILANG Parse represents all document content as a flat list of typed blocks. The Block ADT has 9 variants: <code>Text</code>, <code>Heading</code>, <code>Table</code>, <code>Image</code>, <code>Audio</code>, <code>Video</code>, <code>List</code>, <code>Section</code>, and <code>Change</code>.</p>
+
+      <p>Track changes map to the <code>Change</code> variant, which carries:</p>
+      <ul>
+        <li><strong>type</strong> &mdash; <code>"insertion"</code>, <code>"deletion"</code>, or <code>"formatChange"</code></li>
+        <li><strong>author</strong> &mdash; the author name from the revision markup</li>
+        <li><strong>date</strong> &mdash; the ISO 8601 timestamp</li>
+        <li><strong>content</strong> &mdash; the affected text</li>
+      </ul>
+
+      <p>This means track changes are first-class citizens in the output, not annotations or metadata bolted onto text blocks. They flow through the same pipeline as every other block type &mdash; into JSON, into format conversion, into Quarto Markdown (which renders them as CriticMarkup).</p>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Change Type</th><th>OOXML Element</th><th>Extracted Data</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Insertions</td><td>w:ins</td><td>Author, date, inserted text content</td></tr>
+          <tr><td>Deletions</td><td>w:del</td><td>Author, date, deleted text content (preserved from XML)</td></tr>
+          <tr><td>Formatting</td><td>w:rPrChange</td><td>Author, date, property change description</td></tr>
+          <tr><td>Move from</td><td>w:moveFrom</td><td>Author, date, original location content</td></tr>
+          <tr><td>Move to</td><td>w:moveTo</td><td>Author, date, destination content</td></tr>
+          <tr><td>Section props</td><td>w:sectPrChange</td><td>Author, date, section property modification</td></tr>
+          <tr><td>Paragraph props</td><td>w:pPrChange</td><td>Author, date, paragraph formatting change</td></tr>
+        </tbody>
+      </table>
+
+      <p>All change types preserve the full author string and ISO 8601 date from the XML. Nothing is inferred, approximated, or dropped.</p>
+
+      <h2 id="example-output">Example Output</h2>
+
+      <p>Given a DOCX contract with tracked edits from two authors, AILANG Parse produces output like this:</p>
+
+      <pre><code class="language-json">[
+  {
+    "type": "Heading",
+    "level": 1,
+    "content": "Service Agreement"
+  },
+  {
+    "type": "Text",
+    "content": "This agreement is entered into between Party A and Party B."
+  },
+  {
+    "type": "Change",
+    "changeType": "deletion",
+    "author": "Sarah Chen",
+    "date": "2026-03-15T14:32:00Z",
+    "content": "30 calendar days"
+  },
+  {
+    "type": "Change",
+    "changeType": "insertion",
+    "author": "Sarah Chen",
+    "date": "2026-03-15T14:32:00Z",
+    "content": "45 business days"
+  },
+  {
+    "type": "Text",
+    "content": "written notice to the other party."
+  },
+  {
+    "type": "Change",
+    "changeType": "insertion",
+    "author": "James Park",
+    "date": "2026-03-17T09:15:00Z",
+    "content": "Termination for cause requires documented breach with a 15-day cure period."
+  },
+  {
+    "type": "Change",
+    "changeType": "formatChange",
+    "author": "James Park",
+    "date": "2026-03-17T09:16:00Z",
+    "content": "Indemnification clause modified (bold applied)"
+  }
+]</code></pre>
+
+      <p>Every change is a discrete block with its own author and timestamp. Downstream consumers can filter by author, reconstruct the document at any point in its revision history, or render the changes visually (as AILANG Parse does when converting to Quarto Markdown with CriticMarkup).</p>
+
+      <h2 id="competitors">Competitors</h2>
+
+      <p>No other document parser extracts track changes from DOCX files. This is not a matter of degree &mdash; the feature is entirely absent from every competitor we tested.</p>
+
+      <table class="dp-compare-table">
+        <thead>
+          <tr><th>Parser</th><th>Track Changes</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>AILANG Parse</td>
+            <td class="dp-preserved">Full extraction &mdash; author, date, type, content</td>
+            <td>Reads w:ins, w:del, w:rPrChange directly from OOXML</td>
+          </tr>
+          <tr>
+            <td>Unstructured</td>
+            <td class="dp-lost">Not extracted</td>
+            <td>Converts DOCX to text; revision markup is discarded</td>
+          </tr>
+          <tr>
+            <td>Docling</td>
+            <td class="dp-lost">Not extracted</td>
+            <td>Converts DOCX to PDF internally; track changes lost in conversion</td>
+          </tr>
+          <tr>
+            <td>LlamaParse</td>
+            <td class="dp-lost">Not extracted</td>
+            <td>Cloud API returns accepted-view text only</td>
+          </tr>
+          <tr>
+            <td>MarkItDown</td>
+            <td class="dp-lost">Not extracted</td>
+            <td>Converts DOCX to Markdown; revision markup is stripped</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>The reason is architectural. Every competitor either converts to PDF before parsing (losing track changes in the rendering step) or uses a basic text extraction library (python-docx, pandoc) that does not handle revision markup. AILANG Parse is the only parser that reads the OOXML revision elements directly.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>This is a structural advantage, not an incremental one.</strong> Track changes cannot be recovered from a PDF or a plain-text extraction. If your pipeline handles contracts, regulatory filings, or any document where revision history matters, the data is either preserved at parse time or it is gone.</div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <p>Upload a DOCX with track changes and see the Change blocks appear in the output. Compare it to what your current parser returns &mdash; the revision data is either there or it is not.</p>
+
+      <div class="dp-why-ctas">
+        <a href="try.html" class="dp-btn dp-btn--primary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Try in Browser
+        </a>
+        <a href="selfhost.html" class="dp-btn dp-btn--ghost">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          Self-Host
+        </a>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I extract track changes from a DOCX file programmatically?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse reads the <code>w:ins</code>, <code>w:del</code>, and <code>w:moveTo</code>/<code>w:moveFrom</code> revision markup directly from the DOCX XML. Each revision includes the author name, ISO 8601 timestamp, and change type (insertion, deletion, move, format change). A single <a href="api.html">API call</a> or CLI command returns all tracked changes as structured data.</p></div>
+        </details>
+        <details>
+          <summary>Do other document parsers preserve track changes from DOCX files?</summary>
+          <div class="dp-faq-answer"><p>No. Unstructured, Docling, LlamaParse, and MarkItDown all either convert DOCX to PDF first (which strips revision markup entirely) or use wrapper libraries like mammoth that ignore revision elements. AILANG Parse is the only parser that extracts track changes with full author attribution and timestamps. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
+        </details>
+        <details>
+          <summary>Can I get track change author and date information from a DOCX?</summary>
+          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts the <code>w:author</code> and <code>w:date</code> attributes from every revision element in the DOCX XML. The output includes the author name as a string and the timestamp in ISO 8601 format, so you can filter by reviewer, sort by date, or build audit trails programmatically.</p></div>
+        </details>
+        <details>
+          <summary>What does deterministic document parsing mean?</summary>
+          <div class="dp-faq-answer"><p>Deterministic parsing means the same input always produces the exact same output, with no model inference variability. AILANG Parse reads Office XML using rule-based extraction verified by 63 Z3 formal contracts &mdash; no ML models, no probabilistic guessing. This makes it suitable for compliance workflows, regression testing, and reproducible data pipelines.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
