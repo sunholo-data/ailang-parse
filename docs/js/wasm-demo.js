@@ -730,24 +730,18 @@
     lastOutput.markdown = blocksToMarkdown(blocks);
 
     // A2UI conversion via AILANG WASM (same code path as the server)
+    // Note: engine.call() already prepends DOCPARSE_MODULE, so just pass function name
     var a2uiNodes = [];
     if (engine) {
       try {
-        // Try module-qualified call first, then unqualified fallback
-        var a2uiResult = engine.call(DOCPARSE_MODULE, 'convertBlocksToA2UI', lastOutput.json);
-        if (!a2uiResult || !a2uiResult.success) {
-          console.warn('A2UI module-qualified call failed:', a2uiResult ? a2uiResult.error || a2uiResult : 'null result');
-          a2uiResult = engine.call('convertBlocksToA2UI', lastOutput.json);
-        }
+        var a2uiResult = engine.call('convertBlocksToA2UI', lastOutput.json);
         if (a2uiResult && a2uiResult.success) {
           var parsed = JSON.parse(a2uiResult.result);
           if (Array.isArray(parsed) && parsed.length > 0) {
             a2uiNodes = parsed;
-          } else {
-            console.warn('A2UI returned empty array, result was:', a2uiResult.result.substring(0, 200));
           }
         } else {
-          console.warn('A2UI conversion failed:', a2uiResult ? a2uiResult.error || JSON.stringify(a2uiResult) : 'null');
+          console.warn('A2UI conversion failed:', a2uiResult ? a2uiResult.error : 'null');
         }
       } catch (e) {
         console.warn('A2UI WASM conversion error:', e);
