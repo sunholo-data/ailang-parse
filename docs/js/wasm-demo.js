@@ -149,7 +149,8 @@
     var line = document.createElement('div');
     line.className = 'dp-pipeline-line';
     var cls = stageClass ? ' ' + stageClass : '';
-    line.innerHTML = '<span class="dp-pipeline-stage' + cls + '">' + escHtml(stage) + '</span> ' + escHtml(detail);
+    var elapsed = parseTimerStart ? ' <span style="color:var(--text-muted);font-size:10px">' + formatElapsed(performance.now() - parseTimerStart) + '</span>' : '';
+    line.innerHTML = '<span class="dp-pipeline-stage' + cls + '">' + escHtml(stage) + '</span> ' + escHtml(detail) + elapsed;
     log.appendChild(line);
     log.scrollTop = log.scrollHeight;
   }
@@ -232,8 +233,8 @@
       wasmLoading = false;
       setDotState('ready');
       setStatus('Ready \u2014 drop a file to parse');
-      // Enable file input
-      if (fileInput) fileInput.disabled = false;
+      // Enable UI
+      setUIEnabled(true);
     } catch (err) {
       wasmError = err.message;
       wasmLoading = false;
@@ -1369,6 +1370,17 @@
         });
     });
   });
+
+  // ── Disable UI until WASM is ready ──
+  function setUIEnabled(enabled) {
+    if (dropzone) {
+      dropzone.style.pointerEvents = enabled ? '' : 'none';
+      dropzone.style.opacity = enabled ? '' : '0.5';
+    }
+    if (fileInput) fileInput.disabled = !enabled;
+    document.querySelectorAll('.dp-demo-btn').forEach(function (b) { b.disabled = !enabled; });
+  }
+  setUIEnabled(false);
 
   // ── Start WASM loading (desktop auto-loads, mobile defers) ──
   if (window.innerWidth >= 768) {
