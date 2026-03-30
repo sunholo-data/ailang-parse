@@ -3,16 +3,10 @@ module docparse/services/docx_parser
 import std/xml (parse, findAll, findAllTexts, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, startsWith)
+import std/string (contains, length, trim, stringToInt, join)
 import std/list (map, flatMap, any, concat, length as listLength)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments)
-
--- Style-to-heading-level mapping from word/styles.xml (§17.7)
-type DocxStyleMapping = { id: string, level: int }
-
--- Relationship entry from word/_rels/document.xml.rels (§17.16.22)
-type DocxRel = { id: string, target: string }
 
 -- DOCX Parser
 -- Parses Word document XML into a list of content Blocks.
@@ -43,14 +37,10 @@ type DocxRel = { id: string, target: string }
 -- Run: ailang run --entry main --caps IO,FS docparse/main.ail
 
 -- Parse a DOCX file into content blocks
--- Reads word/styles.xml for custom heading styles (§17.7)
--- Reads word/_rels/document.xml.rels for hyperlink URLs (§17.16.22)
 export func parseDocx(filepath: string) -> [Block] ! {FS} {
   let xml = readDocxContent(filepath);
-  let styleMap = docxLoadStyleMap(filepath);
-  let rels = docxLoadRels(filepath);
   match parse(xml) {
-    Ok(root) => docxExtractBodyWithData(root, styleMap, rels),
+    Ok(root) => extractBodyBlocks(root),
     Err(e) => [TextBlock({text: "XML parse error: " ++ e, style: "error", level: 0})]
   }
 }
@@ -151,46 +141,6 @@ export pure func extractBodyBlocks(root: XmlNode) -> [Block] {
   }
 }
 
--- Navigate to w:body with style mapping and relationship data
-pure func docxExtractBodyWithData(root: XmlNode, styleMap: [DocxStyleMapping], rels: [DocxRel]) -> [Block] {
-  match findFirst(root, "w:body") {
-    Some(body) =>
-      flatMap(\node. docxProcessNodeWithData(node, styleMap, rels), getChildren(body)),
-    None => []
-  }
-}
-
--- Process a body node with style + rels awareness
-pure func docxProcessNodeWithData(node: XmlNode, styleMap: [DocxStyleMapping], rels: [DocxRel]) -> [Block] {
-  let tag = getTag(node);
-  if tag == "w:p" then {
-    let mainBlock = docxParseParagraphWithData(node, styleMap, rels);
-    let changeBlocks = extractParagraphChanges(node);
-    let textBoxBlocks = extractTextBoxes(node);
-    let sectionBreak = docxDetectSectionBreak(node);
-    let bookmarkBlocks = docxExtractBookmarks(node);
-    concat(bookmarkBlocks, concat(mainBlock :: concat(changeBlocks, textBoxBlocks), sectionBreak))
-  }
-  else if tag == "w:tbl" then [parseTable(node)]
-  else if tag == "w:sectPr" then
-    [SectionBlock({kind: "section-break", blocks: []})]
-  else []
-}
-
--- Parse paragraph with style-aware headings, list detection, and hyperlink URLs
-pure func docxParseParagraphWithData(p: XmlNode, styleMap: [DocxStyleMapping], rels: [DocxRel]) -> Block {
-  let text = docxExtractTextWithRels(p, rels);
-  let style = extractParagraphStyle(p);
-  let headingLevel = docxHeadingLevelWithStyles(style, styleMap);
-  if headingLevel > 0
-  then HeadingBlock({text: text, level: headingLevel})
-  else if isListParagraph(p)
-  then ListBlock({items: [text], ordered: isOrderedList(p)})
-  else if docxIsListStyle(style)
-  then ListBlock({items: [text], ordered: docxIsOrderedListStyle(style)})
-  else TextBlock({text: text, style: style, level: 0})
-}
-
 -- Process children of w:body (paragraphs and tables)
 pure func processBodyChildren(nodes: [XmlNode]) -> [Block] =
   flatMap(processBodyNode, nodes)
@@ -232,8 +182,6 @@ pure func parseParagraph(p: XmlNode) -> Block {
   then HeadingBlock({text: text, level: headingLevel})
   else if isListParagraph(p)
   then ListBlock({items: [text], ordered: isOrderedList(p)})
-  else if docxIsListStyle(style)
-  then ListBlock({items: [text], ordered: docxIsOrderedListStyle(style)})
   else TextBlock({text: text, style: style, level: 0})
 }
 
@@ -260,18 +208,7 @@ pure func childNodeText(node: XmlNode) -> string {
   else if tag == "w:smartTag" then extractNestedRunText(node)
   else if tag == "w:hyperlink" then extractNestedRunText(node)
   else if tag == "w:sdt" then extractSdtText(node)
-  else if tag == "w:fldSimple" then extractNestedRunText(node)
-  else if tag == "m:oMath" then docxExtractMathText(node)
-  else if tag == "m:oMathPara" then docxExtractMathText(node)
   else ""
-}
-
--- Extract text from Office Math elements (m:oMath, m:oMathPara)
--- Recursively finds all m:t text nodes within the math structure
--- Spec: ECMA-376 §22.1
-pure func docxExtractMathText(mathNode: XmlNode) -> string {
-  let texts = findAllTexts(mathNode, "m:t");
-  join("", texts)
 }
 
 -- Extract text from runs nested inside ins/moveTo/smartTag/hyperlink elements
@@ -359,9 +296,6 @@ pure func extractParagraphStyle(p: XmlNode) -> string =
 
 -- Determine heading level from style name
 -- Heading1 -> 1, Heading2 -> 2, etc.
--- Determine heading level from style name
--- Handles built-in heading styles (Heading1-6) and common derived styles
--- (Title, Subtitle) per ECMA-376 §17.7
 pure func headingLevelFromStyle(style: string) -> int
   ensures { result >= 0 && result <= 6 }
   tests [
@@ -370,8 +304,7 @@ pure func headingLevelFromStyle(style: string) -> int
     ("Heading3", 3),
     ("Normal", 0),
     ("BodyText", 0),
-    ("Title", 1),
-    ("Subtitle", 2)
+    ("Title", 0)
   ]
 {
   if style == "Heading1" then 1
@@ -380,244 +313,7 @@ pure func headingLevelFromStyle(style: string) -> int
   else if style == "Heading4" then 4
   else if style == "Heading5" then 5
   else if style == "Heading6" then 6
-  else if style == "Title" then 1
-  else if style == "Subtitle" then 2
   else 0
-}
-
--- ============================================================
--- Custom heading style detection via word/styles.xml (§17.7)
--- ============================================================
-
--- Heading level using both built-in names and styles.xml map
-pure func docxHeadingLevelWithStyles(style: string, styleMap: [DocxStyleMapping]) -> int
-  ensures { result >= 0 && result <= 9 }
-{
-  let builtinLevel = headingLevelFromStyle(style);
-  if builtinLevel > 0 then builtinLevel
-  else docxLookupStyleLevel(style, styleMap)
-}
-
--- Search style map for a heading level by styleId
-pure func docxLookupStyleLevel(style: string, styleMap: [DocxStyleMapping]) -> int
-  ensures { result >= 0 }
-{
-  match styleMap {
-    [] => 0,
-    m :: rest =>
-      if m.id == style then m.level
-      else docxLookupStyleLevel(style, rest)
-  }
-}
-
--- Load custom heading style map from word/styles.xml
-func docxLoadStyleMap(filepath: string) -> [DocxStyleMapping] ! {FS} {
-  let xml = readZipEntry(filepath, "word/styles.xml");
-  if length(xml) == 0 then []
-  else match parse(xml) {
-    Ok(root) => docxParseStyleDefs(root),
-    Err(_) => []
-  }
-}
-
--- Parse style definitions to find custom styles that map to heading levels
--- Checks: basedOn heading styles, and outlineLvl in style's own pPr
-pure func docxParseStyleDefs(root: XmlNode) -> [DocxStyleMapping] {
-  let styles = findAll(root, "w:style");
-  flatMap(docxExtractStyleMapping, styles)
-}
-
--- Extract heading mapping from a single w:style element
--- Returns 0 or 1 mappings (for flatMap)
-pure func docxExtractStyleMapping(style: XmlNode) -> [DocxStyleMapping] {
-  let styleId = getOrElse(getAttr(style, "w:styleId"), "");
-  -- Skip if this is a built-in heading (already handled by headingLevelFromStyle)
-  let builtinLevel = headingLevelFromStyle(styleId);
-  if builtinLevel > 0 then []
-  else {
-    -- Check basedOn: if based on a heading style, inherit its level
-    let basedOnVal = getOrElse(
-      optFlatMap(\b. getAttr(b, "w:val"), findFirst(style, "w:basedOn")),
-      "");
-    let basedOnLevel = headingLevelFromStyle(basedOnVal);
-    if basedOnLevel > 0 then [{ id: styleId, level: basedOnLevel }]
-    else {
-      -- Check outlineLvl in style's own pPr (val 0-8 → heading 1-9)
-      let outlineLevel = docxGetOutlineLevel(style);
-      if outlineLevel > 0 then [{ id: styleId, level: outlineLevel }]
-      else []
-    }
-  }
-}
-
--- Extract outline level from a style's w:pPr/w:outlineLvl
--- outlineLvl val=0 → heading level 1, val=8 → heading level 9
-pure func docxGetOutlineLevel(style: XmlNode) -> int
-  ensures { result >= 0 && result <= 9 }
-{
-  match findFirst(style, "w:pPr") {
-    Some(pPr) => match findFirst(pPr, "w:outlineLvl") {
-      Some(olNode) => {
-        let val = getOrElse(getAttr(olNode, "w:val"), "");
-        match stringToInt(val) {
-          Some(n) =>
-            if n >= 0 then
-              if n <= 8 then n + 1
-              else 0
-            else 0,
-          None => 0
-        }
-      },
-      None => 0
-    },
-    None => 0
-  }
-}
-
--- ============================================================
--- Hyperlink URL resolution via rels file (§17.16.22)
--- ============================================================
-
--- Load hyperlink relationships from word/_rels/document.xml.rels
-func docxLoadRels(filepath: string) -> [DocxRel] ! {FS} {
-  let xml = readDocxRelationships(filepath);
-  if length(xml) == 0 then []
-  else match parse(xml) {
-    Ok(root) => docxParseRels(root),
-    Err(_) => []
-  }
-}
-
--- Parse rels XML to extract hyperlink entries
-pure func docxParseRels(root: XmlNode) -> [DocxRel] {
-  let rels = findAll(root, "Relationship");
-  flatMap(docxExtractHyperlinkRel, rels)
-}
-
--- Extract a hyperlink rel entry (skip non-hyperlink relationships)
-pure func docxExtractHyperlinkRel(rel: XmlNode) -> [DocxRel] {
-  let relType = getOrElse(getAttr(rel, "Type"), "");
-  if contains(relType, "hyperlink") then {
-    let id = getOrElse(getAttr(rel, "Id"), "");
-    let target = getOrElse(getAttr(rel, "Target"), "");
-    [{ id: id, target: target }]
-  }
-  else []
-}
-
--- Look up a relationship target by rId
-pure func docxLookupRel(rid: string, rels: [DocxRel]) -> string =
-  match rels {
-    [] => "",
-    r :: rest => if r.id == rid then r.target else docxLookupRel(rid, rest)
-  }
-
--- Extract paragraph text with hyperlink URL resolution
-pure func docxExtractTextWithRels(p: XmlNode, rels: [DocxRel]) -> string {
-  let children = getChildren(p);
-  join("", map(\node. docxChildNodeTextWithRels(node, rels), children))
-}
-
--- Text from a child node, resolving hyperlink URLs and preserving formatting
-pure func docxChildNodeTextWithRels(node: XmlNode, rels: [DocxRel]) -> string {
-  let tag = getTag(node);
-  if tag == "w:r" then docxExtractRunFormatted(node)
-  else if tag == "w:hyperlink" then {
-    let text = extractNestedRunText(node);
-    let rid = getOrElse(getAttr(node, "r:id"), "");
-    let url = docxLookupRel(rid, rels);
-    if length(url) > 0 then text ++ " (" ++ url ++ ")"
-    else text
-  }
-  else childNodeText(node)
-}
-
--- ============================================================
--- Run formatting preservation (§17.3.2)
--- ============================================================
-
--- Extract run text with markdown-style bold/italic markers
--- **bold**, *italic*, ***bold+italic***
-pure func docxExtractRunFormatted(run: XmlNode) -> string {
-  let text = match findFirst(run, "w:t") {
-    Some(t) => getText(t),
-    None => ""
-  };
-  if length(text) == 0 then ""
-  else {
-    let bold = docxRunIsBold(run);
-    let italic = docxRunIsItalic(run);
-    if bold then
-      if italic then "***" ++ text ++ "***"
-      else "**" ++ text ++ "**"
-    else if italic then "*" ++ text ++ "*"
-    else text
-  }
-}
-
--- Check if a run has bold formatting (w:rPr/w:b)
--- Respects w:val="false" and w:val="0" to turn off bold
-pure func docxRunIsBold(run: XmlNode) -> bool =
-  getOrElse(
-    optFlatMap(\rPr.
-      optMap(\b.
-        let val = getOrElse(getAttr(b, "w:val"), "true") in
-        if val == "false" then false
-        else if val == "0" then false
-        else true,
-        findFirst(rPr, "w:b")),
-      findFirst(run, "w:rPr")),
-    false)
-
--- Check if a run has italic formatting (w:rPr/w:i)
-pure func docxRunIsItalic(run: XmlNode) -> bool =
-  getOrElse(
-    optFlatMap(\rPr.
-      optMap(\i.
-        let val = getOrElse(getAttr(i, "w:val"), "true") in
-        if val == "false" then false
-        else if val == "0" then false
-        else true,
-        findFirst(rPr, "w:i")),
-      findFirst(run, "w:rPr")),
-    false)
-
--- ============================================================
--- Section break detection (§17.6)
--- ============================================================
-
--- Detect section break inside paragraph properties (w:pPr/w:sectPr)
--- Returns a SectionBlock if present, empty list otherwise
-pure func docxDetectSectionBreak(p: XmlNode) -> [Block] {
-  let hasSectPr = getOrElse(
-    optFlatMap(\pPr.
-      optMap(\sectPr. true,
-        findFirst(pPr, "w:sectPr")),
-      findFirst(p, "w:pPr")),
-    false);
-  if hasSectPr then [SectionBlock({kind: "section-break", blocks: []})]
-  else []
-}
-
--- ============================================================
--- List style detection by style name (§17.9)
--- ============================================================
-
--- Check if a style name indicates a list paragraph
--- Handles: ListNumber, ListNumber2, ListNumber3, ListBullet, ListBullet2, ListBullet3
-pure func docxIsListStyle(style: string) -> bool
-  tests [("ListNumber", true), ("ListBullet2", true), ("Normal", false), ("Heading1", false)]
-{
-  if startsWith(style, "ListNumber") then true
-  else if startsWith(style, "ListBullet") then true
-  else false
-}
-
--- Check if a list style is ordered (numbered) vs unordered (bullet)
-pure func docxIsOrderedListStyle(style: string) -> bool
-  tests [("ListNumber", true), ("ListNumber2", true), ("ListBullet", false), ("ListBullet3", false)]
-{
-  startsWith(style, "ListNumber")
 }
 
 -- Check if paragraph is a list item (has w:numPr)
@@ -746,137 +442,35 @@ func extractImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
     }
   }
 
--- ============================================================
--- Bookmark extraction (§17.13.6)
--- ============================================================
-
--- Extract bookmark definitions from a paragraph
--- Each w:bookmarkStart with a non-internal name becomes a SectionBlock(kind: "bookmark")
-pure func docxExtractBookmarks(p: XmlNode) -> [Block] {
-  let bookmarkStarts = findAll(p, "w:bookmarkStart");
-  flatMap(docxBookmarkToBlock, bookmarkStarts)
-}
-
--- Convert a w:bookmarkStart to a SectionBlock (skip internal names starting with "_")
-pure func docxBookmarkToBlock(bm: XmlNode) -> [Block] {
-  let name = getOrElse(getAttr(bm, "w:name"), "");
-  if length(name) == 0 then []
-  else if startsWith(name, "_") then []
-  else [SectionBlock({kind: "bookmark", blocks: [TextBlock({text: name, style: "BookmarkStart", level: 0})]})]
-}
-
--- ============================================================
--- Comment range tracking (§17.13.1)
--- ============================================================
-
--- An annotated text range associated with a comment by id
-type DocxCommentRange = { id: string, text: string }
-
--- Extract all comment ranges from body XML
--- Scans paragraphs for w:commentRangeStart/End and collects the text between them
-pure func docxExtractAllCommentRanges(bodyXml: string) -> [DocxCommentRange] {
-  match parse(bodyXml) {
-    Ok(root) => match findFirst(root, "w:body") {
-      Some(body) => flatMap(docxExtractParagraphCommentRanges, getChildren(body)),
-      None => []
+-- Extract comments from a DOCX file (word/comments.xml)
+-- Each w:comment becomes a SectionBlock(kind: "comment") with author-prefixed text
+export func parseDocxComments(filepath: string) -> [Block] ! {FS} {
+  let xml = readComments(filepath);
+  if length(xml) == 0 then []
+  else match parse(xml) {
+    Ok(root) => {
+      let commentNodes = findAll(root, "w:comment");
+      docxParseCommentNodes(commentNodes)
     },
     Err(_) => []
   }
 }
 
--- Extract comment ranges from a single paragraph
-pure func docxExtractParagraphCommentRanges(node: XmlNode) -> [DocxCommentRange] {
-  if getTag(node) == "w:p" then
-    docxCollectCommentRanges(getChildren(node))
-  else []
-}
-
--- Walk paragraph children, emitting a DocxCommentRange for each commentRangeStart/End pair
-pure func docxCollectCommentRanges(children: [XmlNode]) -> [DocxCommentRange] =
-  match children {
-    [] => [],
-    node :: rest => {
-      let tag = getTag(node);
-      if tag == "w:commentRangeStart" then {
-        let id = getOrElse(getAttr(node, "w:id"), "");
-        let rangeText = docxCollectTextUntilEnd(rest, id);
-        {id: id, text: rangeText} :: docxCollectCommentRanges(rest)
-      }
-      else docxCollectCommentRanges(rest)
-    }
-  }
-
--- Collect run text from children until w:commentRangeEnd with matching id
-pure func docxCollectTextUntilEnd(children: [XmlNode], targetId: string) -> string =
-  match children {
-    [] => "",
-    node :: rest => {
-      let tag = getTag(node);
-      if tag == "w:commentRangeEnd" then {
-        let id = getOrElse(getAttr(node, "w:id"), "");
-        if id == targetId then ""
-        else docxCollectTextUntilEnd(rest, targetId)
-      }
-      else if tag == "w:r" then {
-        let text = extractRunText(node);
-        text ++ docxCollectTextUntilEnd(rest, targetId)
-      }
-      else docxCollectTextUntilEnd(rest, targetId)
-    }
-  }
-
--- Look up annotated text for a comment id
-pure func docxLookupCommentRange(id: string, ranges: [DocxCommentRange]) -> string =
-  match ranges {
-    [] => "",
-    r :: rest => if r.id == id then r.text else docxLookupCommentRange(id, rest)
-  }
-
--- Extract comments from a DOCX file (word/comments.xml)
--- Enriches each comment with its annotated text range from document.xml (§17.13.1)
--- Each w:comment becomes a SectionBlock(kind: "comment") with author-prefixed text
-export func parseDocxComments(filepath: string) -> [Block] ! {FS} {
-  let xml = readComments(filepath);
-  if length(xml) == 0 then []
-  else {
-    -- Extract comment range annotations from body XML
-    let bodyXml = readDocxContent(filepath);
-    let ranges = docxExtractAllCommentRanges(bodyXml);
-    match parse(xml) {
-      Ok(root) => {
-        let commentNodes = findAll(root, "w:comment");
-        docxParseCommentNodesWithRanges(commentNodes, ranges)
-      },
-      Err(_) => []
-    }
-  }
-}
-
--- Parse a list of w:comment nodes into SectionBlocks (no range info)
+-- Parse a list of w:comment nodes into SectionBlocks
 -- Prefixed with docx to avoid module scoping collision
 pure func docxParseCommentNodes(nodes: [XmlNode]) -> [Block] =
-  docxParseCommentNodesWithRanges(nodes, [])
-
--- Parse comment nodes enriched with annotated text ranges (§17.13.1)
--- Format: "[Author @ "annotated text"] comment text" when range exists
--- Falls back to "[Author] comment text" when no range found
-pure func docxParseCommentNodesWithRanges(nodes: [XmlNode], ranges: [DocxCommentRange]) -> [Block] =
   match nodes {
     [] => [],
     node :: rest => {
-      let id = getOrElse(getAttr(node, "w:id"), "");
       let author = getOrElse(getAttr(node, "w:author"), "Unknown");
+      let date = getOrElse(getAttr(node, "w:date"), "");
       let paragraphs = findAll(node, "w:p");
       let texts = docxExtractCommentTexts(paragraphs);
       let commentText = join(" ", texts);
-      let annotatedText = docxLookupCommentRange(id, ranges);
-      let prefix = if length(annotatedText) > 0
-        then "[" ++ author ++ " @ \"" ++ annotatedText ++ "\"] "
-        else "[" ++ author ++ "] ";
       let block = SectionBlock({kind: "comment", blocks: [
-        TextBlock({text: prefix ++ commentText, style: "CommentText", level: 0})
+        TextBlock({text: "[" ++ author ++ "] " ++ commentText, style: "CommentText", level: 0})
       ]});
-      block :: docxParseCommentNodesWithRanges(rest, ranges)
+      block :: docxParseCommentNodes(rest)
     }
   }
 

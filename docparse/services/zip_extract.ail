@@ -105,17 +105,6 @@ export func readComments(path: string) -> string ! {FS} {
   }
 }
 
--- Read XLSX comments XML (tries both common paths)
-export func readXlsxComments(path: string) -> string ! {FS} {
-  match readEntry(path, "xl/comments1.xml") {
-    Ok(content) => content,
-    Err(_) => match readEntry(path, "xl/comments/comment1.xml") {
-      Ok(content2) => content2,
-      Err(_) => ""
-    }
-  }
-}
-
 -- Find footnotes.xml if present
 export func findFootnoteEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
@@ -163,30 +152,6 @@ pure func filterSlides(entries: [string]) -> [string] =
 -- Check if an entry is a slide XML
 pure func isSlideEntry(entry: string) -> bool {
   startsWith(entry, "ppt/slides/slide") &&
-  endsWith(entry, ".xml")
-}
-
--- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml)
-export func findNotesSlideEntries(path: string) -> [string] ! {FS} {
-  match listEntries(path) {
-    Ok(entries) => filterNotesSlides(entries),
-    Err(_) => []
-  }
-}
-
--- Filter entries to find notes slide XMLs
-pure func filterNotesSlides(entries: [string]) -> [string] =
-  match entries {
-    [] => [],
-    e :: rest =>
-      if isNotesSlideEntry(e)
-      then e :: filterNotesSlides(rest)
-      else filterNotesSlides(rest)
-  }
-
--- Check if an entry is a notes slide XML
-pure func isNotesSlideEntry(entry: string) -> bool {
-  startsWith(entry, "ppt/notesSlides/notesSlide") &&
   endsWith(entry, ".xml")
 }
 

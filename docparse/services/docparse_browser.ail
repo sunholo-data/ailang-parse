@@ -11,7 +11,7 @@ module docparse/services/docparse_browser
 -- to be loaded in the WASM REPL first (in dependency order).
 
 import std/xml (parse, findAll, findAllTexts, findFirst, getText, getAttr, getChildren)
-import std/json (encode, decode, jo, kv, js, jb, ja, jnum, asArray)
+import std/json (encode, decode, jo, kv, js, jb, ja, jnum, asArray, getString, getInt, getBool, getArray, asString, getStringArrayOrEmpty)
 import std/string (length, join)
 import std/ai (callJsonSimple)
 import std/math (intToFloat)
@@ -27,6 +27,7 @@ import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml,
 import docparse/services/pptx_parser (extractSlideBlocks)
 import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
+import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert, documentToA2UI, a2ui_jsonToBlockList)
 
 -- Parse DOCX body XML (word/document.xml) -> JSON array of blocks
 export pure func parseDocxBody(xml: string) -> string {
@@ -153,6 +154,12 @@ export func describeImageBase64(base64Data: string, mimeType: string) -> string 
     callJsonSimple(request)
   }
 }
+
+-- Convert block JSON (from parseDocxBody etc.) to A2UI component JSON.
+-- Bridge: decodes JSON → Block ADT → A2UI nodes → JSON string.
+-- Eliminates the duplicate JS blocksToA2UI() implementation.
+export pure func convertBlocksToA2UI(blocksJson: string) -> string =
+  a2uiConvert(blocksJson)
 
 -- Parse a list of w:comment nodes into SectionBlocks
 pure func parseCommentNodes(nodes: [XmlNode]) -> [Block] =

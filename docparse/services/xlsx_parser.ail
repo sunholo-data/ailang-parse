@@ -3,18 +3,10 @@ module docparse/services/xlsx_parser
 import std/xml (parse, parseElements, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, startsWith, substring, split)
+import std/string (contains, length, trim, stringToInt, join, startsWith, substring)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell)
-import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, readXlsxComments)
-
--- Merge region from <mergeCell ref="A1:D1"> (§18.3.1.55)
-type XlsxMerge = {
-  startCol: int,
-  endCol: int,
-  startRow: int,
-  endRow: int
-}
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry)
 
 -- XLSX Parser
 -- Parses Excel worksheets into content Blocks.
@@ -41,10 +33,7 @@ export func parseXlsx(filepath: string) -> [Block] ! {FS} {
   let sheetNames = readWorkbookSheetNames(filepath);
   -- Find and parse each sheet
   let sheetEntries = findSheetEntries(filepath);
-  let sheetBlocks = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames, 0);
-  -- Load comments (§18.7)
-  let commentBlocks = xlsxLoadComments(filepath);
-  concat(sheetBlocks, commentBlocks)
+  parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames, 0)
 }
 
 -- Parse metadata from XLSX (same core.xml format)
@@ -129,22 +118,13 @@ func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: [s
 
 -- Parse a single worksheet's XML into blocks
 -- Emits a HeadingBlock with the sheet name followed by the table data.
--- When <mergeCells> are present, fills column gaps and sets colSpan on origin cells.
 export pure func parseSheetXml(xml: string, sharedStrings: [string], sheetName: string) -> [Block] {
   if length(xml) == 0 then []
   else {
-    -- Parse merge regions (§18.3.1.55)
-    let merges = match parseElements(xml, "mergeCell", 200) {
-      Ok(nodes) => xlsxParseMergeNodes(nodes),
-      Err(_) => []
-    };
     -- Use parseElements for streaming: only builds subtrees for <row> elements
     -- O(largest row) memory instead of O(entire document)
     let parsedRows = match parseElements(xml, "row", 5000) {
-      Ok(rowNodes) =>
-        if listLength(merges) > 0
-        then xlsxParseRowsWithMerges(rowNodes, sharedStrings, merges)
-        else parseXlsxRows(rowNodes, sharedStrings),
+      Ok(rowNodes) => parseXlsxRows(rowNodes, sharedStrings),
       Err(_) => []
     };
     let heading = HeadingBlock({text: xlsxCleanSheetName(sheetName), level: 1});
@@ -198,199 +178,6 @@ pure func xlsxFormatSheetName(name: string) -> string {
   }
   else name
 }
-
--- ============================================================
--- Merged cell support (§18.3.1.55)
--- ============================================================
-
--- Convert single column letter to 0-based index: "A"→0, "B"→1, ..., "Z"→25
-pure func xlsxSingleColIndex(c: string) -> int
-  ensures { result >= 0 && result <= 25 }
-  tests [("A", 0), ("B", 1), ("D", 3), ("Z", 25)]
-{
-  if c == "A" then 0 else if c == "B" then 1 else if c == "C" then 2
-  else if c == "D" then 3 else if c == "E" then 4 else if c == "F" then 5
-  else if c == "G" then 6 else if c == "H" then 7 else if c == "I" then 8
-  else if c == "J" then 9 else if c == "K" then 10 else if c == "L" then 11
-  else if c == "M" then 12 else if c == "N" then 13 else if c == "O" then 14
-  else if c == "P" then 15 else if c == "Q" then 16 else if c == "R" then 17
-  else if c == "S" then 18 else if c == "T" then 19 else if c == "U" then 20
-  else if c == "V" then 21 else if c == "W" then 22 else if c == "X" then 23
-  else if c == "Y" then 24 else if c == "Z" then 25 else 0
-}
-
--- Column letters to 0-based index: "A"→0, "Z"→25, "AA"→26, "AB"→27
-pure func xlsxColToIndex(col: string) -> int
-  ensures { result >= 0 }
-  tests [("A", 0), ("B", 1), ("Z", 25), ("AA", 26), ("AB", 27)]
-{
-  if length(col) == 1 then xlsxSingleColIndex(col)
-  else if length(col) == 2 then {
-    let hi = xlsxSingleColIndex(substring(col, 0, 1));
-    let lo = xlsxSingleColIndex(substring(col, 1, 2));
-    (hi + 1) * 26 + lo
-  }
-  else 0
-}
-
--- Extract column letters from cell ref: "B3"→"B", "AB12"→"AB"
-pure func xlsxCellRefColStr(ref: string) -> string
-  tests [("A1", "A"), ("B3", "B"), ("D12", "D"), ("AA5", "AA")]
-{
-  if length(ref) >= 2 then {
-    match stringToInt(substring(ref, 1, length(ref))) {
-      Some(_) => substring(ref, 0, 1),
-      None => if length(ref) >= 3 then {
-        match stringToInt(substring(ref, 2, length(ref))) {
-          Some(_) => substring(ref, 0, 2),
-          None => if length(ref) >= 4 then {
-            match stringToInt(substring(ref, 3, length(ref))) {
-              Some(_) => substring(ref, 0, 3),
-              None => "A"
-            }
-          } else "A"
-        }
-      } else "A"
-    }
-  } else "A"
-}
-
--- Get column index from cell ref: "A1"→0, "B3"→1, "D1"→3
-pure func xlsxCellRefCol(ref: string) -> int
-  tests [("A1", 0), ("B3", 1), ("D1", 3), ("E2", 4)]
-{
-  xlsxColToIndex(xlsxCellRefColStr(ref))
-}
-
--- Get row number from cell ref: "B3"→3, "A1"→1
-pure func xlsxCellRefRow(ref: string) -> int
-  tests [("A1", 1), ("B3", 3), ("D12", 12)]
-{
-  let colStr = xlsxCellRefColStr(ref);
-  let rowStr = substring(ref, length(colStr), length(ref));
-  getOrElse(stringToInt(rowStr), 0)
-}
-
--- Parse merge ref "A1:D1" → XlsxMerge
--- Single cell refs like "A9" produce a 1x1 region
-pure func xlsxParseMergeRef(ref: string) -> XlsxMerge {
-  let parts = split(ref, ":");
-  let startRef = getOrElse(nth(parts, 0), "A1");
-  let endRef = getOrElse(nth(parts, 1), startRef);
-  { startCol: xlsxCellRefCol(startRef), endCol: xlsxCellRefCol(endRef),
-    startRow: xlsxCellRefRow(startRef), endRow: xlsxCellRefRow(endRef) }
-}
-
--- Parse all <mergeCell> nodes into merge regions
-pure func xlsxParseMergeNodes(nodes: [XmlNode]) -> [XlsxMerge] =
-  map(\n. xlsxParseMergeRef(getOrElse(getAttr(n, "ref"), "")), nodes)
-
--- Find colSpan for a merge starting at (col, row), or 1 if none
-pure func xlsxGetColSpan(merges: [XlsxMerge], col: int, row: int) -> int
-  ensures { result >= 1 }
-{
-  match merges {
-    [] => 1,
-    m :: rest =>
-      if m.startCol == col then
-        if m.startRow == row then {
-          let span = m.endCol - m.startCol + 1;
-          if span >= 1 then span else 1
-        }
-        else xlsxGetColSpan(rest, col, row)
-      else xlsxGetColSpan(rest, col, row)
-  }
-}
-
--- Check if (col, row) is inside a merge region but NOT at its origin
-pure func xlsxIsInMergeNotOrigin(m: XlsxMerge, col: int, row: int) -> bool {
-  if col < m.startCol then false
-  else if col > m.endCol then false
-  else if row < m.startRow then false
-  else if row > m.endRow then false
-  else if col == m.startCol then
-    if row == m.startRow then false
-    else true
-  else true
-}
-
--- Check if (col, row) is a merge continuation cell (not the origin)
-pure func xlsxIsMergedAt(merges: [XlsxMerge], col: int, row: int) -> bool =
-  match merges {
-    [] => false,
-    m :: rest =>
-      if xlsxIsInMergeNotOrigin(m, col, row) then true
-      else xlsxIsMergedAt(rest, col, row)
-  }
-
--- Max column needed for a row (from merge regions affecting this row)
-pure func xlsxMaxColForRow(merges: [XlsxMerge], rowNum: int) -> int
-  ensures { result >= 0 }
-{
-  match merges {
-    [] => 0,
-    m :: rest => {
-      let restMax = xlsxMaxColForRow(rest, rowNum);
-      if rowNum >= m.startRow then
-        if rowNum <= m.endRow then
-          if m.endCol > restMax then m.endCol else restMax
-        else restMax
-      else restMax
-    }
-  }
-}
-
--- Fill gap columns from 'from' to 'to' (exclusive) with merged or empty cells
-pure func xlsxFillGap(merges: [XlsxMerge], rowNum: int, from: int, to: int) -> [TableCell] {
-  if from >= to then []
-  else {
-    let cell = if xlsxIsMergedAt(merges, from, rowNum) then mergedCell() else simpleCell("");
-    cell :: xlsxFillGap(merges, rowNum, from + 1, to)
-  }
-}
-
--- Parse cell text (reuses existing cell type dispatch)
-pure func xlsxParseCellText(c: XmlNode, sharedStrings: [string]) -> string {
-  let cellType = getCellType(c);
-  if cellType == "s" then resolveSharedString(c, sharedStrings)
-  else if cellType == "inlineStr" then getInlineString(c)
-  else if cellType == "b" then getBooleanValue(c)
-  else if cellType == "e" then getErrorValue(c)
-  else getNumericValue(c)
-}
-
--- Build a row with gap filling and merge colSpans applied
--- Walks XML cells in order, filling gaps between them and trailing after last cell
-pure func xlsxBuildRowWithMerges(cells: [XmlNode], sharedStrings: [string], merges: [XlsxMerge], rowNum: int, nextCol: int) -> [TableCell] =
-  match cells {
-    [] => {
-      let maxCol = xlsxMaxColForRow(merges, rowNum);
-      xlsxFillGap(merges, rowNum, nextCol, maxCol + 1)
-    },
-    c :: rest => {
-      let ref = getOrElse(getAttr(c, "r"), "A1");
-      let cellCol = xlsxCellRefCol(ref);
-      let gapCells = xlsxFillGap(merges, rowNum, nextCol, cellCol);
-      let text = xlsxParseCellText(c, sharedStrings);
-      let cs = xlsxGetColSpan(merges, cellCol, rowNum);
-      let cell = if cs > 1 then spanCell(text, cs) else simpleCell(text);
-      concat(concat(gapCells, [cell]), xlsxBuildRowWithMerges(rest, sharedStrings, merges, rowNum, cellCol + 1))
-    }
-  }
-
--- Parse a single row with merge awareness
-pure func xlsxParseRowWithMerges(row: XmlNode, sharedStrings: [string], merges: [XlsxMerge]) -> [TableCell] {
-  let cells = findAll(row, "c");
-  let rowNum = getOrElse(stringToInt(getOrElse(getAttr(row, "r"), "0")), 0);
-  xlsxBuildRowWithMerges(cells, sharedStrings, merges, rowNum, 0)
-}
-
--- Parse all rows with merge info
-pure func xlsxParseRowsWithMerges(rows: [XmlNode], sharedStrings: [string], merges: [XlsxMerge]) -> [[TableCell]] =
-  flatMap(\row.
-    let cells = xlsxParseRowWithMerges(row, sharedStrings, merges) in
-    if listLength(cells) > 0 then [cells] else [],
-    rows)
 
 -- Row cap per sheet: 5000 (inlined in parseSheetXml to work around Go codegen bug
 -- where module-level let bindings used as function args kill codegen)
@@ -459,18 +246,9 @@ pure func getBooleanValue(c: XmlNode) -> string =
 pure func getErrorValue(c: XmlNode) -> string =
   getOrElse(optMap(getText, findFirst(c, "v")), "")
 
--- Get numeric value, falling back to formula text when value is empty (§18.3)
-pure func getNumericValue(c: XmlNode) -> string {
-  let v = getOrElse(optMap(getText, findFirst(c, "v")), "");
-  if length(v) > 0 then v
-  else xlsxGetFormulaText(c)
-}
-
--- Extract formula text as fallback: <f>B2+C2</f> → "=B2+C2"
-pure func xlsxGetFormulaText(c: XmlNode) -> string {
-  let f = getOrElse(optMap(getText, findFirst(c, "f")), "");
-  if length(f) > 0 then "=" ++ f else ""
-}
+-- Get numeric value
+pure func getNumericValue(c: XmlNode) -> string =
+  getOrElse(optMap(getText, findFirst(c, "v")), "")
 
 -- Extract metadata from core.xml
 pure func extractXlsxMeta(root: XmlNode) -> DocMetadata {
@@ -483,49 +261,3 @@ pure func extractXlsxMeta(root: XmlNode) -> DocMetadata {
 
 pure func getXlsxMetaField(root: XmlNode, tagName: string) -> string =
   getOrElse(optMap(getText, findFirst(root, tagName)), "")
-
--- ============================================================
--- XLSX Comment extraction (§18.7)
--- ============================================================
-
--- Load and parse XLSX comments from xl/comments1.xml
-func xlsxLoadComments(filepath: string) -> [Block] ! {FS} {
-  let xml = readXlsxComments(filepath);
-  if length(xml) == 0 then []
-  else match parse(xml) {
-    Ok(root) => xlsxParseComments(root),
-    Err(_) => []
-  }
-}
-
--- Parse comments XML into SectionBlock(kind: "comment") blocks
--- Structure: <comments><authors><author>...</author></authors>
---            <commentList><comment ref="A1" authorId="0"><text><t>...</t></text></comment></commentList>
-pure func xlsxParseComments(root: XmlNode) -> [Block] {
-  let authors = xlsxExtractAuthors(root);
-  let comments = findAll(root, "comment");
-  flatMap(\c. xlsxExtractComment(c, authors), comments)
-}
-
--- Extract author names from <authors> element
-pure func xlsxExtractAuthors(root: XmlNode) -> [string] =
-  map(getText, findAll(root, "author"))
-
--- Extract a single comment into a SectionBlock
-pure func xlsxExtractComment(comment: XmlNode, authors: [string]) -> [Block] {
-  let ref = getOrElse(getAttr(comment, "ref"), "");
-  let authorIdx = getOrElse(optFlatMap(stringToInt, getAttr(comment, "authorId")), 0);
-  let author = getOrElse(nth(authors, authorIdx), "");
-  let textNodes = findAll(comment, "t");
-  let text = join(" ", map(getText, textNodes));
-  if length(trim(text)) > 0 then
-    [SectionBlock({
-      kind: "comment",
-      blocks: [TextBlock({
-        text: "[" ++ author ++ " @ " ++ ref ++ "] " ++ text,
-        style: "CommentText",
-        level: 0
-      })]
-    })]
-  else []
-}

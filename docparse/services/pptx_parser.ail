@@ -4,9 +4,9 @@ import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join)
-import std/list (map, flatMap, any, length as listLength, concat)
+import std/list (map, flatMap, any, length as listLength)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata)
-import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
+import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
 
 -- PPTX Parser
 -- Parses PowerPoint slides into content Blocks.
@@ -45,13 +45,10 @@ import docparse/services/zip_extract (readCoreProperties, findSlideEntries, find
 --     </p:cSld>
 --   </p:sld>
 
--- Parse all slides from a PPTX file (includes speaker notes)
+-- Parse all slides from a PPTX file
 export func parsePptx(filepath: string) -> [Block] ! {FS} {
   let slideEntries = findSlideEntries(filepath);
-  let slideBlocks = parseSlides(filepath, slideEntries);
-  let notesEntries = findNotesSlideEntries(filepath);
-  let notesBlocks = pptxParseNotesSlides(filepath, notesEntries);
-  concat(slideBlocks, notesBlocks)
+  parseSlides(filepath, slideEntries)
 }
 
 -- Parse metadata from PPTX (same core.xml format as DOCX)
@@ -176,38 +173,9 @@ pure func drawingMLNodeText(node: XmlNode) -> string {
   else ""
 }
 
--- Extract text from a single a:r run with formatting markers
-pure func extractDrawingMLRunText(run: XmlNode) -> string {
-  let text = getOrElse(optMap(getText, findFirst(run, "a:t")), "");
-  if length(text) == 0 then ""
-  else {
-    let bold = pptxRunIsBold(run);
-    let italic = pptxRunIsItalic(run);
-    if bold then
-      if italic then "***" ++ text ++ "***"
-      else "**" ++ text ++ "**"
-    else if italic then "*" ++ text ++ "*"
-    else text
-  }
-}
-
--- Check if a DrawingML run has bold formatting (a:rPr@b="1")
-pure func pptxRunIsBold(run: XmlNode) -> bool =
-  getOrElse(
-    optFlatMap(\rPr.
-      optMap(\val. val == "1" || val == "true",
-        getAttr(rPr, "b")),
-      findFirst(run, "a:rPr")),
-    false)
-
--- Check if a DrawingML run has italic formatting (a:rPr@i="1")
-pure func pptxRunIsItalic(run: XmlNode) -> bool =
-  getOrElse(
-    optFlatMap(\rPr.
-      optMap(\val. val == "1" || val == "true",
-        getAttr(rPr, "i")),
-      findFirst(run, "a:rPr")),
-    false)
+-- Extract text from a single a:r run
+pure func extractDrawingMLRunText(run: XmlNode) -> string =
+  getOrElse(optMap(getText, findFirst(run, "a:t")), "")
 
 -- Parse a graphic frame (contains tables or charts)
 pure func parseGraphicFrame(gf: XmlNode) -> [Block] {
@@ -344,69 +312,3 @@ pure func pptxBlockHasContent(b: Block) -> bool =
 
 pure func pptxParseIntOrDefault(s: string, default: int) -> int =
   getOrElse(stringToInt(s), default)
-
--- ============================================================
--- Speaker notes extraction (§19.3)
--- ============================================================
-
--- Parse all notes slide entries
-func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
-  match entries {
-    [] => [],
-    entry :: rest => {
-      let xml = readZipEntry(filepath, entry);
-      let noteText = pptxExtractNoteText(xml);
-      let moreBlocks = pptxParseNotesSlides(filepath, rest);
-      if length(trim(noteText)) > 0
-      then {
-        let noteBlock = SectionBlock({
-          kind: "notes",
-          blocks: [TextBlock({text: noteText, style: "speaker-notes", level: 0})]
-        });
-        noteBlock :: moreBlocks
-      }
-      else moreBlocks
-    }
-  }
-
--- Extract speaker note text from a notesSlide XML
--- Notes text lives in: p:notes/p:cSld/p:spTree/p:sp[ph@type="body"]/p:txBody
-pure func pptxExtractNoteText(xml: string) -> string {
-  if length(xml) == 0 then ""
-  else match parse(xml) {
-    Ok(root) => pptxFindNotesBodyText(root),
-    Err(_) => ""
-  }
-}
-
--- Find the body placeholder in the notes shape tree and extract its text
-pure func pptxFindNotesBodyText(root: XmlNode) -> string =
-  getOrElse(
-    optFlatMap(\csld.
-      optFlatMap(\spTree.
-        pptxFindNotesTextInShapes(getChildren(spTree)),
-        findFirst(csld, "p:spTree")),
-      findFirst(root, "p:cSld")),
-    "")
-
--- Search shapes for the body placeholder (type="body") and extract text
-pure func pptxFindNotesTextInShapes(nodes: [XmlNode]) -> Option[string] =
-  match nodes {
-    [] => None,
-    sp :: rest => {
-      let tag = getTag(sp);
-      if tag == "p:sp" then {
-        let phType = getPlaceholderType(sp);
-        if phType == "body" then
-          match findFirst(sp, "p:txBody") {
-            Some(txBody) => {
-              let text = join("\n", map(extractDrawingMLText, findAll(txBody, "a:p")));
-              if length(trim(text)) > 0 then Some(text) else pptxFindNotesTextInShapes(rest)
-            },
-            None => pptxFindNotesTextInShapes(rest)
-          }
-        else pptxFindNotesTextInShapes(rest)
-      }
-      else pptxFindNotesTextInShapes(rest)
-    }
-  }
