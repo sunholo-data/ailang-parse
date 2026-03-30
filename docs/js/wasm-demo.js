@@ -21,7 +21,7 @@
   'use strict';
 
   // ── Configuration ──
-  var WASM_BINARY_URL = 'wasm/ailang.wasm';
+  var WASM_BINARY_URL = 'wasm/ailang.wasm?v=20260330';
   var MODULE_BASE = 'ailang/';
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
   var MAX_XML_SIZE = 5 * 1024 * 1024;
@@ -729,19 +729,18 @@
     lastOutput.json = JSON.stringify(blocks, null, 2);
     lastOutput.markdown = blocksToMarkdown(blocks);
 
-    // A2UI conversion via AILANG WASM (same code path as the server)
-    // Note: this calls repl.call() directly to avoid engine.call()'s module prefix
+    // A2UI conversion via AILANG WASM
     var a2uiNodes = [];
-    if (engine && engine.repl) {
+    if (engine) {
       try {
-        var a2uiRaw = engine.repl.call(DOCPARSE_MODULE, 'convertBlocksToA2UI', lastOutput.json);
-        if (a2uiRaw && a2uiRaw.success) {
-          var parsed = JSON.parse(parseWasmResult(a2uiRaw.result));
+        var a2uiResult = engine.call('convertBlocksToA2UI', lastOutput.json);
+        if (a2uiResult && a2uiResult.success) {
+          var parsed = JSON.parse(a2uiResult.result);
           if (Array.isArray(parsed) && parsed.length > 0) {
             a2uiNodes = parsed;
           }
         } else {
-          console.warn('A2UI conversion failed:', a2uiRaw ? a2uiRaw.error : 'null');
+          console.warn('A2UI conversion failed:', a2uiResult ? a2uiResult.error : 'null');
         }
       } catch (e) {
         console.warn('A2UI WASM conversion error:', e);
