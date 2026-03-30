@@ -249,6 +249,36 @@
 }
 .dp-ai-upsell.visible { display: block; }
 .dp-ai-upsell strong { color: var(--warning); }
+.dp-ai-settings {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.dp-ai-settings h3 {
+  font-family: var(--font-display);
+  font-size: 14px; font-weight: 700;
+  margin-bottom: 10px; color: var(--text-primary);
+}
+.dp-ai-settings label {
+  display: block; font-family: var(--font-mono);
+  font-size: 11px; color: var(--text-muted); margin-bottom: 4px;
+}
+.dp-ai-settings input {
+  width: 100%; font-family: var(--font-mono);
+  font-size: 12px; padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input); color: var(--text-primary);
+  margin-bottom: 10px; box-sizing: border-box;
+}
+.dp-ai-settings input:focus {
+  outline: none; border-color: var(--dp-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.dp-ai-settings .dp-note {
+  font-size: 11px; color: var(--text-muted); line-height: 1.5;
+}
 .office-preview-page {
   background: #fff; padding: 32px;
   border: 1px solid var(--border);
@@ -604,6 +634,16 @@ details[open] summary svg { transform: rotate(180deg); }
         <div class="dp-pipeline-panel" id="pipeline-panel" style="display:none">
           <h3><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Parsing Pipeline</h3>
           <div id="pipeline-log"></div>
+        </div>
+
+        <!-- AI Settings (for PDF/image parsing) -->
+        <div class="dp-ai-settings" style="margin-top:16px">
+          <h3>AI Settings (for PDF / Images)</h3>
+          <label for="api-key-input">Google API Key</label>
+          <input type="password" id="api-key-input" placeholder="AIza..." value="">
+          <label for="model-select">Model</label>
+          <input type="text" id="model-select" value="gemini-2.5-flash" readonly>
+          <div class="dp-note">Your key is stored in localStorage only. Used for AI calls to parse PDFs and images — never sent to our servers.</div>
         </div>
       </div>
 
@@ -1394,5 +1434,17 @@ details[open] summary svg { transform: rotate(180deg); }
 <script src="vendor/jszip.min.js"></script>
 <script src="vendor/mammoth.browser.min.js"></script>
 <script src="js/wasm-demo.js"></script>
+<script>
+// API key persistence for AI-powered PDF/image parsing
+(function () {
+  var apiKeyInput = document.getElementById('api-key-input');
+  if (!apiKeyInput) return;
+  var savedKey = localStorage.getItem('gemini-api-key') || '';
+  if (savedKey) apiKeyInput.value = savedKey;
+  apiKeyInput.addEventListener('change', function () {
+    localStorage.setItem('gemini-api-key', this.value);
+  });
+})();
+</script>
 </body>
 </html>
