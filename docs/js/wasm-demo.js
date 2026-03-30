@@ -1523,13 +1523,13 @@
     meta.delays.forEach(function (delay, i) {
       var t = setTimeout(function () {
         if (counter) counter.textContent = (i + 1) + '/' + meta.totalNodes;
-        // Auto-scroll to keep current element visible
+        // Auto-scroll to keep current element visible (scroll the parent panel)
         var el = meta.richEls[i];
-        if (el && meta.docPanel) {
-          var panelRect = meta.docPanel.getBoundingClientRect();
+        if (el && panelA2UI) {
+          var panelRect = panelA2UI.getBoundingClientRect();
           var elRect = el.getBoundingClientRect();
           if (elRect.bottom > panelRect.bottom - 20) {
-            meta.docPanel.scrollTop += elRect.bottom - panelRect.bottom + 40;
+            panelA2UI.scrollTop += elRect.bottom - panelRect.bottom + 40;
           }
         }
         if (i === meta.totalNodes - 1 && statusEl) {
