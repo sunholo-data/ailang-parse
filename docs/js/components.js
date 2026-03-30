@@ -46,10 +46,8 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
         // Primary navigation — page links
         '<nav class="header-nav dp-site-nav">' +
           navLink('index.html', 'Home', 'index') +
-          navLink('why.html', 'Why', 'why') +
-          navLink('try.html', 'Try It', 'try') +
+          navLink('docs.html', 'Docs', 'docs') +
           navLink('api.html', 'API', 'api') +
-          navLink('vs-pdf-conversion.html', 'Compare', 'vs-pdf-conversion') +
           navLink('benchmarks.html', 'Benchmarks', 'benchmarks') +
         '</nav>' +
 
