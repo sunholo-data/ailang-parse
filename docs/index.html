@@ -1101,11 +1101,11 @@ details[open] summary svg { transform: rotate(180deg); }
   <!-- ============ OUTPUT EXAMPLES ============ -->
   <section class="section reveal" id="output-examples">
     <div class="section-header">
-      <span class="section-title">Parsed Output</span>
-      <span class="section-count">Block ADT → JSON</span>
+      <span class="section-title">What You Get</span>
+      <span class="section-count">real output from real documents</span>
     </div>
     <p class="section-desc">
-      Every format produces the same structured Block ADT. Here's real output from actual documents &mdash; no AI needed for Office formats.
+      Every format produces the same structured Block ADT &mdash; track changes, merged cells, comments, and more preserved as typed data, not flattened text.
     </p>
 
     <div class="dp-output-tabs">
@@ -1124,39 +1124,38 @@ details[open] summary svg { transform: rotate(180deg); }
         <span class="dp-output-badge dp-output-badge--exclusive">Exclusive</span>
         <span class="dp-output-desc">Moved paragraphs preserved with author &amp; timestamp</span>
       </div>
-      <div class="dp-output-json">
-        <pre>{
-  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
-  <span class="json-key">"metadata"</span>: {
-    <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
-    <span class="json-key">"created"</span>: <span class="json-str">"2016-04-16T12:18:00Z"</span>
-  },
-  <span class="json-key">"blocks"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Here is some text."</span> },
-
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span> },
-
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"change"</span>,
-      <span class="json-key">"changeType"</span>: <span class="json-str">"move-to"</span>,
-      <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
-      <span class="json-key">"date"</span>: <span class="json-str">"2016-04-16T08:20:00Z"</span>,
-      <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span>
-    }</span>,
-
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Here is some more text."</span> },
-
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"change"</span>,
-      <span class="json-key">"changeType"</span>: <span class="json-str">"move-from"</span>,
-      <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
-      <span class="json-key">"date"</span>: <span class="json-str">"2016-04-16T08:20:00Z"</span>,
-      <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span>
-    }</span>
-  ],
-  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">11</span>, <span class="json-key">"changes"</span>: <span class="json-num">2</span> }
-}</pre>
+      <div class="dp-output-visual">
+        <div class="dp-visual-meta">
+          <span><span class="dp-visual-meta-label">Author:</span> Jesse Rosenthal</span>
+          <span><span class="dp-visual-meta-label">Created:</span> 2016-04-16</span>
+          <span><span class="dp-visual-meta-label">Changes:</span> 2 tracked</span>
+        </div>
+        <div class="dp-output-visual-doc">
+          <p>Here is some text.</p>
+          <p>Here is the text to be moved.</p>
+          <div class="dp-change-block dp-change-block--move-to">
+            <div class="dp-change-label dp-change-label--move-to">&#8600; Moved here<span class="dp-change-author">Jesse Rosenthal &middot; 2016-04-16</span></div>
+            Here is the text to be moved.
+          </div>
+          <p>Here is some more text.</p>
+          <div class="dp-change-block dp-change-block--move-from">
+            <div class="dp-change-label dp-change-label--move-from">&#8598; Moved from here<span class="dp-change-author">Jesse Rosenthal &middot; 2016-04-16</span></div>
+            Here is the text to be moved.
+          </div>
+        </div>
       </div>
+      <details class="dp-json-toggle">
+        <summary>View JSON</summary>
+        <div class="dp-output-json">
+          <pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"change"</span>,
+  <span class="json-key">"changeType"</span>: <span class="json-str">"move-to"</span>,
+  <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
+  <span class="json-key">"date"</span>: <span class="json-str">"2016-04-16T08:20:00Z"</span>,
+  <span class="json-key">"text"</span>: <span class="json-str">"Here is the text to be moved."</span>
+}</pre>
+        </div>
+      </details>
     </div>
 
     <!-- Merged Cells -->
@@ -1166,32 +1165,41 @@ details[open] summary svg { transform: rotate(180deg); }
         <span class="dp-output-badge dp-output-badge--exclusive">Exclusive</span>
         <span class="dp-output-desc">Column spans &amp; merged cells preserved structurally</span>
       </div>
-      <div class="dp-output-json">
-        <pre>{
-  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
-  <span class="json-key">"metadata"</span>: {
-    <span class="json-key">"author"</span>: <span class="json-str">"Shay Hill"</span>,
-    <span class="json-key">"created"</span>: <span class="json-str">"2023-01-23T17:59:00Z"</span>
-  },
-  <span class="json-key">"blocks"</span>: [
-    {
-      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
-      <span class="json-key">"headers"</span>: [
-        <span class="json-str">"0-0"</span>,
-        <span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">"0-12"</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">2</span>, <span class="json-key">"merged"</span>: <span class="json-bool">false</span> }</span>,
-        <span class="json-str">"0-3"</span>
-      ],
-      <span class="json-key">"rows"</span>: [
-        [<span class="json-str">"12-0"</span>, <span class="json-str">"1-1"</span>, <span class="json-str">"1-2"</span>, <span class="json-str">"1-3"</span>],
-        [<span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">""</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">1</span>, <span class="json-key">"merged"</span>: <span class="json-bool">true</span> }</span>, <span class="json-str">"2-1"</span>, <span class="json-str">"2-2"</span>, <span class="json-str">"2-3"</span>],
-        [<span class="json-str">"3-0"</span>, <span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">"34-123"</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">3</span>, <span class="json-key">"merged"</span>: <span class="json-bool">false</span> }</span>],
-        [<span class="json-str">"4-0"</span>, <span class="json-highlight">{ <span class="json-key">"text"</span>: <span class="json-str">""</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">3</span>, <span class="json-key">"merged"</span>: <span class="json-bool">true</span> }</span>]
-      ]
-    }
-  ],
-  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">2</span>, <span class="json-key">"tables"</span>: <span class="json-num">1</span> }
-}</pre>
+      <div class="dp-output-visual">
+        <div class="dp-visual-meta">
+          <span><span class="dp-visual-meta-label">Author:</span> Shay Hill</span>
+          <span><span class="dp-visual-meta-label">Created:</span> 2023-01-23</span>
+        </div>
+        <table class="dp-visual-table">
+          <thead>
+            <tr>
+              <th>0-0</th>
+              <th colspan="2" class="merged-cell">0-12 <span class="merged-indicator">colspan: 2</span></th>
+              <th>0-3</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>12-0</td><td>1-1</td><td>1-2</td><td>1-3</td></tr>
+            <tr><td class="merged-cell" style="opacity:0.4"><span class="merged-indicator">merged &#8593;</span></td><td>2-1</td><td>2-2</td><td>2-3</td></tr>
+            <tr><td>3-0</td><td colspan="3" class="merged-cell">34-123 <span class="merged-indicator">colspan: 3</span></td></tr>
+            <tr><td>4-0</td><td colspan="3" class="merged-cell" style="opacity:0.4"><span class="merged-indicator">merged &#8593; &middot; colspan: 3</span></td></tr>
+          </tbody>
+        </table>
       </div>
+      <details class="dp-json-toggle">
+        <summary>View JSON</summary>
+        <div class="dp-output-json">
+          <pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
+  <span class="json-key">"headers"</span>: [<span class="json-str">"0-0"</span>, { <span class="json-key">"text"</span>: <span class="json-str">"0-12"</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">2</span> }, <span class="json-str">"0-3"</span>],
+  <span class="json-key">"rows"</span>: [
+    [<span class="json-str">"12-0"</span>, <span class="json-str">"1-1"</span>, <span class="json-str">"1-2"</span>, <span class="json-str">"1-3"</span>],
+    [{ <span class="json-key">"colSpan"</span>: <span class="json-num">1</span>, <span class="json-key">"merged"</span>: <span class="json-bool">true</span> }, <span class="json-str">"2-1"</span>, <span class="json-str">"2-2"</span>, <span class="json-str">"2-3"</span>],
+    [<span class="json-str">"3-0"</span>, { <span class="json-key">"text"</span>: <span class="json-str">"34-123"</span>, <span class="json-key">"colSpan"</span>: <span class="json-num">3</span> }]
+  ]
+}</pre>
+        </div>
+      </details>
     </div>
 
     <!-- Tables -->
@@ -1201,33 +1209,45 @@ details[open] summary svg { transform: rotate(180deg); }
         <span class="dp-output-badge dp-output-badge--structural">Structural</span>
         <span class="dp-output-desc">Headers, rows, and multi-paragraph cells</span>
       </div>
-      <div class="dp-output-json">
-        <pre>{
-  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
-  <span class="json-key">"blocks"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"heading"</span>, <span class="json-key">"text"</span>: <span class="json-str">"A table, with and without a header row"</span>, <span class="json-key">"level"</span>: <span class="json-num">2</span> },
-
-    {
-      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
-      <span class="json-key">"headers"</span>: [<span class="json-str">"Name"</span>, <span class="json-str">"Game"</span>, <span class="json-str">"Fame"</span>, <span class="json-str">"Blame"</span>],
-      <span class="json-key">"rows"</span>: [
-        <span class="json-highlight">[<span class="json-str">"Lebron James"</span>,  <span class="json-str">"Basketball"</span>, <span class="json-str">"Very High"</span>, <span class="json-str">"Leaving Cleveland"</span>]</span>,
-        [<span class="json-str">"Ryan Braun"</span>,     <span class="json-str">"Baseball"</span>,   <span class="json-str">"Moderate"</span>,  <span class="json-str">"Steroids"</span>],
-        [<span class="json-str">"Russell Wilson"</span>, <span class="json-str">"Football"</span>,   <span class="json-str">"High"</span>,     <span class="json-str">"Tacky uniform"</span>]
-      ]
-    },
-
-    { <span class="json-key">"type"</span>: <span class="json-str">"table"</span>, <span class="json-key">"headers"</span>: [<span class="json-str">"Sinple"</span>, <span class="json-str">"Table"</span>], <span class="json-key">"rows"</span>: [[<span class="json-str">"Without"</span>, <span class="json-str">"Header"</span>]] },
-
-    {
-      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
-      <span class="json-key">"headers"</span>: [<span class="json-str">"Simple\n\nMultiparagraph"</span>, <span class="json-str">"Table\n\nFull"</span>],
-      <span class="json-key">"rows"</span>: [[<span class="json-str">"Of\n\nParagraphs"</span>, <span class="json-str">"In each\n\nCell."</span>]]
-    }
-  ],
-  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">8</span>, <span class="json-key">"headings"</span>: <span class="json-num">1</span>, <span class="json-key">"tables"</span>: <span class="json-num">3</span> }
-}</pre>
+      <div class="dp-output-visual">
+        <div class="dp-output-visual-doc">
+          <h3 style="font-size:14px;font-weight:600;color:var(--text-primary);margin:0 0 12px">A table, with and without a header row</h3>
+          <table class="dp-visual-table" style="margin-bottom:16px">
+            <thead><tr><th>Name</th><th>Game</th><th>Fame</th><th>Blame</th></tr></thead>
+            <tbody>
+              <tr><td>Lebron James</td><td>Basketball</td><td>Very High</td><td>Leaving Cleveland</td></tr>
+              <tr><td>Ryan Braun</td><td>Baseball</td><td>Moderate</td><td>Steroids</td></tr>
+              <tr><td>Russell Wilson</td><td>Football</td><td>High</td><td>Tacky uniform</td></tr>
+            </tbody>
+          </table>
+          <table class="dp-visual-table" style="margin-bottom:16px;max-width:280px">
+            <tbody>
+              <tr><td>Sinple</td><td>Table</td></tr>
+              <tr><td>Without</td><td>Header</td></tr>
+            </tbody>
+          </table>
+          <table class="dp-visual-table" style="max-width:360px">
+            <thead><tr><th>Simple<br><br>Multiparagraph</th><th>Table<br><br>Full</th></tr></thead>
+            <tbody>
+              <tr><td>Of<br><br>Paragraphs</td><td>In each<br><br>Cell.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
+      <details class="dp-json-toggle">
+        <summary>View JSON</summary>
+        <div class="dp-output-json">
+          <pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
+  <span class="json-key">"headers"</span>: [<span class="json-str">"Name"</span>, <span class="json-str">"Game"</span>, <span class="json-str">"Fame"</span>, <span class="json-str">"Blame"</span>],
+  <span class="json-key">"rows"</span>: [
+    [<span class="json-str">"Lebron James"</span>, <span class="json-str">"Basketball"</span>, <span class="json-str">"Very High"</span>, <span class="json-str">"Leaving Cleveland"</span>],
+    [<span class="json-str">"Ryan Braun"</span>, <span class="json-str">"Baseball"</span>, <span class="json-str">"Moderate"</span>, <span class="json-str">"Steroids"</span>],
+    [<span class="json-str">"Russell Wilson"</span>, <span class="json-str">"Football"</span>, <span class="json-str">"High"</span>, <span class="json-str">"Tacky uniform"</span>]
+  ]
+}</pre>
+        </div>
+      </details>
     </div>
 
     <!-- Comments -->
@@ -1235,54 +1255,55 @@ details[open] summary svg { transform: rotate(180deg); }
       <div class="dp-output-header">
         <span class="dp-output-file">comments.docx</span>
         <span class="dp-output-badge dp-output-badge--exclusive">Exclusive</span>
-        <span class="dp-output-desc">Comments as nested SectionBlocks with author attribution</span>
+        <span class="dp-output-desc">Comments preserved with author attribution</span>
       </div>
-      <div class="dp-output-json">
-        <pre>{
-  <span class="json-key">"format"</span>: <span class="json-str">"docx"</span>,
-  <span class="json-key">"metadata"</span>: {
-    <span class="json-key">"author"</span>: <span class="json-str">"Jesse Rosenthal"</span>,
-    <span class="json-key">"created"</span>: <span class="json-str">"2016-05-09T20:15:00Z"</span>
-  },
+      <div class="dp-output-visual">
+        <div class="dp-visual-meta">
+          <span><span class="dp-visual-meta-label">Author:</span> Jesse Rosenthal</span>
+          <span><span class="dp-visual-meta-label">Created:</span> 2016-05-09</span>
+          <span><span class="dp-visual-meta-label">Comments:</span> 5</span>
+        </div>
+        <div class="dp-comment-body-text">
+          <p style="margin:4px 0">I want some text to have a comment on it.</p>
+          <p style="margin:4px 0">This is a new paragraph.</p>
+          <p style="margin:4px 0">And so is this.</p>
+          <p style="margin:4px 0">One more. And this is one with a comment in a comment.</p>
+        </div>
+        <div class="dp-comment-thread">
+          <div class="dp-comment-bubble">
+            <div class="dp-comment-avatar">JR</div>
+            <div><div class="dp-comment-author">Jesse Rosenthal</div><div class="dp-comment-text">I left a comment.</div></div>
+          </div>
+          <div class="dp-comment-bubble">
+            <div class="dp-comment-avatar">JR</div>
+            <div><div class="dp-comment-author">Jesse Rosenthal</div><div class="dp-comment-text">A comment across paragraphs.</div></div>
+          </div>
+          <div class="dp-comment-bubble">
+            <div class="dp-comment-avatar">JR</div>
+            <div><div class="dp-comment-author">Jesse Rosenthal</div><div class="dp-comment-text">This one has multiple paragraphs. See?</div></div>
+          </div>
+          <div class="dp-comment-bubble">
+            <div class="dp-comment-avatar">JR</div>
+            <div><div class="dp-comment-author">Jesse Rosenthal</div><div class="dp-comment-text">Do something.</div></div>
+          </div>
+          <div class="dp-comment-bubble">
+            <div class="dp-comment-avatar">JR</div>
+            <div><div class="dp-comment-author">Jesse Rosenthal</div><div class="dp-comment-text">Do something else.</div></div>
+          </div>
+        </div>
+      </div>
+      <details class="dp-json-toggle">
+        <summary>View JSON</summary>
+        <div class="dp-output-json">
+          <pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
+  <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
   <span class="json-key">"blocks"</span>: [
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"I want some text to have a comment on it."</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"This is a new paragraph."</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"And so is this."</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"One more. And this is one with a comment in a comment."</span> },
-
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
-      <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
-      <span class="json-key">"blocks"</span>: [
-        { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] I left a comment."</span> }
-      ]
-    }</span>,
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
-      <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
-      <span class="json-key">"blocks"</span>: [
-        { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] A comment across paragraphs."</span> }
-      ]
-    }</span>,
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>,
-      <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
-      <span class="json-key">"blocks"</span>: [
-        { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] This one has multiple paragraphs. See?"</span> }
-      ]
-    }</span>,
-    {
-      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>, <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
-      <span class="json-key">"blocks"</span>: [{ <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] Do something."</span> }]
-    },
-    {
-      <span class="json-key">"type"</span>: <span class="json-str">"section"</span>, <span class="json-key">"kind"</span>: <span class="json-str">"comment"</span>,
-      <span class="json-key">"blocks"</span>: [{ <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] Do something else."</span> }]
-    }
-  ],
-  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">9</span>, <span class="json-key">"changes"</span>: <span class="json-num">0</span> }
+    { <span class="json-key">"text"</span>: <span class="json-str">"[Jesse Rosenthal] I left a comment."</span> }
+  ]
 }</pre>
-      </div>
+        </div>
+      </details>
     </div>
 
     <!-- Audio Transcription -->
@@ -1292,22 +1313,40 @@ details[open] summary svg { transform: rotate(180deg); }
         <span class="dp-output-badge dp-output-badge--ai">AI-powered</span>
         <span class="dp-output-desc">Transcription with speaker detection &amp; language ID</span>
       </div>
-      <div class="dp-output-json">
-        <pre>{
-  <span class="json-key">"format"</span>: <span class="json-str">"mp3"</span>,
-  <span class="json-key">"blocks"</span>: [
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"audio"</span>,
-      <span class="json-key">"transcription"</span>: <span class="json-str">"Welcome to the show. Today we're discussing document parsing and why structure matters more than text extraction..."</span>,
-      <span class="json-key">"mime"</span>: <span class="json-str">"audio/mp3"</span>
-    }</span>,
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Summary: Discussion about document parsing approaches"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Speakers: 2"</span> },
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Language: en"</span> }
-  ],
-  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">4</span> }
-}</pre>
+      <div class="dp-output-visual">
+        <div class="dp-media-card">
+          <div class="dp-media-header">
+            <div class="dp-media-icon dp-media-icon--audio">
+              <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            </div>
+            <div>
+              <div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--text-primary)">interview.mp3</div>
+              <div style="font-size:11px;color:var(--text-muted)">audio/mp3</div>
+            </div>
+          </div>
+          <div class="dp-media-chips">
+            <span class="dp-media-chip">2 speakers</span>
+            <span class="dp-media-chip">Language: en</span>
+            <span class="dp-media-chip">4 blocks extracted</span>
+          </div>
+          <div class="dp-media-transcript">
+            &ldquo;Welcome to the show. Today we're discussing document parsing and why structure matters more than text extraction...&rdquo;
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.5">
+            <strong style="color:var(--text-secondary)">Summary:</strong> Discussion about document parsing approaches
+          </div>
+        </div>
       </div>
+      <details class="dp-json-toggle">
+        <summary>View JSON</summary>
+        <div class="dp-output-json">
+          <pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"audio"</span>,
+  <span class="json-key">"transcription"</span>: <span class="json-str">"Welcome to the show. Today we're discussing..."</span>,
+  <span class="json-key">"mime"</span>: <span class="json-str">"audio/mp3"</span>
+}</pre>
+        </div>
+      </details>
     </div>
 
     <!-- Video Extraction -->
@@ -1317,34 +1356,48 @@ details[open] summary svg { transform: rotate(180deg); }
         <span class="dp-output-badge dp-output-badge--ai">AI-powered</span>
         <span class="dp-output-desc">Visual + audio extraction with structured content blocks</span>
       </div>
-      <div class="dp-output-json">
-        <pre>{
-  <span class="json-key">"format"</span>: <span class="json-str">"mp4"</span>,
-  <span class="json-key">"blocks"</span>: [
-    <span class="json-highlight">{
-      <span class="json-key">"type"</span>: <span class="json-str">"video"</span>,
-      <span class="json-key">"description"</span>: <span class="json-str">"Technical tutorial showing a spreadsheet with quarterly sales data, followed by a presenter explaining trends"</span>,
-      <span class="json-key">"mime"</span>: <span class="json-str">"video/mp4"</span>
-    }</span>,
-    { <span class="json-key">"type"</span>: <span class="json-str">"heading"</span>, <span class="json-key">"text"</span>: <span class="json-str">"Q1 Sales Review"</span>, <span class="json-key">"level"</span>: <span class="json-num">1</span> },
-    {
-      <span class="json-key">"type"</span>: <span class="json-str">"table"</span>,
-      <span class="json-key">"headers"</span>: [<span class="json-str">"Region"</span>, <span class="json-str">"Revenue"</span>, <span class="json-str">"Growth"</span>],
-      <span class="json-key">"rows"</span>: [
-        [<span class="json-str">"North America"</span>, <span class="json-str">"$2.4M"</span>, <span class="json-str">"+12%"</span>],
-        [<span class="json-str">"EMEA"</span>, <span class="json-str">"$1.8M"</span>, <span class="json-str">"+8%"</span>]
-      ]
-    },
-    { <span class="json-key">"type"</span>: <span class="json-str">"text"</span>, <span class="json-key">"text"</span>: <span class="json-str">"[Transcription] As you can see from the data, North America led growth this quarter..."</span> }
-  ],
-  <span class="json-key">"summary"</span>: { <span class="json-key">"totalBlocks"</span>: <span class="json-num">4</span>, <span class="json-key">"headings"</span>: <span class="json-num">1</span>, <span class="json-key">"tables"</span>: <span class="json-num">1</span> }
-}</pre>
+      <div class="dp-output-visual">
+        <div class="dp-media-card">
+          <div class="dp-media-header">
+            <div class="dp-media-icon dp-media-icon--video">
+              <svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            </div>
+            <div>
+              <div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--text-primary)">tutorial.mp4</div>
+              <div style="font-size:11px;color:var(--text-muted)">video/mp4 &middot; 4 blocks extracted</div>
+            </div>
+          </div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;padding:12px 14px;background:rgba(168,85,247,0.04);border-radius:6px;border-left:3px solid #a855f7">
+            Technical tutorial showing a spreadsheet with quarterly sales data, followed by a presenter explaining trends
+          </div>
+          <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin:8px 0 8px">Q1 Sales Review</h4>
+          <table class="dp-visual-table" style="max-width:400px">
+            <thead><tr><th>Region</th><th>Revenue</th><th>Growth</th></tr></thead>
+            <tbody>
+              <tr><td>North America</td><td>$2.4M</td><td style="color:#22c55e">+12%</td></tr>
+              <tr><td>EMEA</td><td>$1.8M</td><td style="color:#22c55e">+8%</td></tr>
+            </tbody>
+          </table>
+          <div class="dp-media-transcript" style="margin-top:12px">
+            &ldquo;As you can see from the data, North America led growth this quarter...&rdquo;
+          </div>
+        </div>
       </div>
+      <details class="dp-json-toggle">
+        <summary>View JSON</summary>
+        <div class="dp-output-json">
+          <pre>{
+  <span class="json-key">"type"</span>: <span class="json-str">"video"</span>,
+  <span class="json-key">"description"</span>: <span class="json-str">"Technical tutorial showing a spreadsheet..."</span>,
+  <span class="json-key">"mime"</span>: <span class="json-str">"video/mp4"</span>
+}</pre>
+        </div>
+      </details>
     </div>
 
     <div class="dp-output-callout">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-      <span>These are real outputs from <strong>actual test documents</strong>, not mock data. The highlighted blocks show features that require direct XML access. Track changes, merged cell spans, and comments are preserved structurally &mdash; not flattened to plain text. Audio and video parsing uses pluggable AI &mdash; Gemini, Claude, or local Ollama.</span>
+      <span>Real output from <strong>actual test documents</strong>. Track changes, merged cells, and comments are preserved structurally &mdash; not flattened to text. Expand &ldquo;View JSON&rdquo; on any tab to see the raw Block ADT.</span>
     </div>
   </section>
 
