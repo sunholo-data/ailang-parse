@@ -289,6 +289,93 @@
   color: var(--text-muted); border-bottom: 1px solid var(--border);
 }
 
+/* ── Path comparison cards ── */
+.dp-path-card {
+  flex: 1; min-width: 280px; max-width: 370px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 20px 22px 16px;
+  position: relative;
+}
+.dp-path--other { border: 1px solid var(--border); }
+.dp-path--ours { border: 2px solid var(--dp-blue); box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.06); }
+.dp-path-label {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  margin-bottom: 14px;
+}
+.dp-path--other .dp-path-label { color: var(--text-muted); }
+.dp-path--ours .dp-path-label { color: var(--dp-blue); }
+.dp-path-flow { display: flex; flex-direction: column; gap: 2px; }
+.dp-path-arrow {
+  font-family: var(--font-mono);
+  font-size: 14px; color: var(--text-muted);
+  text-align: center; line-height: 1;
+  padding: 2px 0;
+}
+.dp-path-step {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.dp-path-node {
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 600;
+  color: var(--text-primary);
+}
+.dp-path-node--dim { color: var(--text-muted); }
+.dp-path-note {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-muted);
+}
+.dp-path-step--loss {
+  background: rgba(239, 68, 68, 0.04);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+}
+.dp-path-step--win {
+  background: rgba(37, 99, 235, 0.04);
+  border: 1px solid rgba(37, 99, 235, 0.12);
+}
+.dp-path-lost, .dp-path-kept {
+  display: flex; flex-wrap: wrap;
+  justify-content: center; gap: 4px;
+  margin-top: 2px;
+}
+.dp-path-lost span {
+  font-family: var(--font-mono);
+  font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  text-decoration: line-through;
+}
+.dp-path-kept span {
+  font-family: var(--font-mono);
+  font-size: 9px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+  background: rgba(5, 150, 105, 0.08);
+  color: #059669;
+}
+.dp-path-warn {
+  font-family: var(--font-mono);
+  font-size: 10px; color: #ef4444; font-weight: 500;
+}
+.dp-path-ok {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--dp-blue); font-weight: 500;
+}
+.dp-path-score {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  text-align: center; margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.dp-path-score--win { color: var(--dp-blue); }
+
 /* ── Details/summary styling ── */
 details summary::-webkit-details-marker { display: none; }
 details[open] summary svg { transform: rotate(180deg); }
@@ -369,26 +456,71 @@ details[open] summary svg { transform: rotate(180deg); }
     <h1 class="reveal">Stop parsing photos<br>of your <span class="dp-accent">documents</span>.</h1>
     <p class="subtitle reveal reveal-delay-1">Your DOCX is already structured XML. AILANG Parse reads it directly &mdash; full structure preserved, sub-11ms, zero dependencies.</p>
 
-    <!-- Path A vs Path B diagram -->
-    <div class="dp-hero-paths reveal reveal-delay-2" style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin:28px 0 12px;">
-      <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:16px 20px;max-width:340px;flex:1;min-width:260px;">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px;">Everyone else</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:var(--text-secondary);">
-          DOCX <span style="color:var(--text-muted)">(structured XML)</span><br>
-          &darr; convert to PDF <span style="color:#e74c3c">&larr; data destroyed</span><br>
-          &darr; ML reconstruction <span style="color:#e74c3c">&larr; approximate</span><br>
-          &darr; flat text output
+    <!-- Path A vs Path B diagram — polished USP visualization -->
+    <div class="dp-hero-paths reveal reveal-delay-2" style="display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin:32px 0 16px;max-width:760px;margin-left:auto;margin-right:auto">
+
+      <!-- PDF-first path -->
+      <div class="dp-path-card dp-path--other">
+        <div class="dp-path-label">Everyone else</div>
+        <div class="dp-path-flow">
+          <div class="dp-path-step">
+            <span class="dp-path-node">DOCX</span>
+            <span class="dp-path-note">structured XML</span>
+          </div>
+          <div class="dp-path-arrow">&darr;</div>
+          <div class="dp-path-step dp-path-step--loss">
+            <span class="dp-path-node">Convert to PDF</span>
+            <div class="dp-path-lost">
+              <span>track changes</span>
+              <span>merged cells</span>
+              <span>comments</span>
+              <span>headers</span>
+            </div>
+          </div>
+          <div class="dp-path-arrow">&darr;</div>
+          <div class="dp-path-step dp-path-step--loss">
+            <span class="dp-path-node">ML reconstruction</span>
+            <span class="dp-path-warn">2&ndash;5 sec, approximate</span>
+          </div>
+          <div class="dp-path-arrow">&darr;</div>
+          <div class="dp-path-step">
+            <span class="dp-path-node dp-path-node--dim">Flat text output</span>
+          </div>
         </div>
+        <div class="dp-path-score">53&ndash;73% OfficeDocBench</div>
       </div>
-      <div style="background:var(--card-bg);border:2px solid var(--primary);border-radius:10px;padding:16px 20px;max-width:340px;flex:1;min-width:260px;">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--primary);margin-bottom:8px;">AILANG Parse</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8;color:var(--text-secondary);">
-          DOCX <span style="color:var(--text-muted)">(structured XML)</span><br>
-          &darr; direct extraction <span style="color:var(--primary)">&larr; 11ms</span><br>
-          &darr; Block ADT <span style="color:var(--primary)">&larr; full structure</span><br>
-          &darr; track changes, merged cells, comments
+
+      <!-- AILANG Parse path -->
+      <div class="dp-path-card dp-path--ours">
+        <div class="dp-path-label">AILANG Parse</div>
+        <div class="dp-path-flow">
+          <div class="dp-path-step">
+            <span class="dp-path-node">DOCX</span>
+            <span class="dp-path-note">structured XML</span>
+          </div>
+          <div class="dp-path-arrow" style="color:var(--dp-blue)">&darr;</div>
+          <div class="dp-path-step dp-path-step--win">
+            <span class="dp-path-node">Direct XML extraction</span>
+            <span class="dp-path-ok">11ms, deterministic</span>
+          </div>
+          <div class="dp-path-arrow" style="color:var(--dp-blue)">&darr;</div>
+          <div class="dp-path-step dp-path-step--win">
+            <span class="dp-path-node">Block ADT</span>
+            <div class="dp-path-kept">
+              <span>track changes</span>
+              <span>merged cells</span>
+              <span>comments</span>
+              <span>headers</span>
+            </div>
+          </div>
+          <div class="dp-path-arrow" style="color:var(--dp-blue)">&darr;</div>
+          <div class="dp-path-step">
+            <span class="dp-path-node">JSON + Markdown + A2UI</span>
+          </div>
         </div>
+        <div class="dp-path-score dp-path-score--win">96.6% OfficeDocBench</div>
       </div>
+
     </div>
 
     <div class="dp-stats-strip reveal reveal-delay-3">
