@@ -935,6 +935,19 @@
     URL.revokeObjectURL(url);
   };
 
+  // ── Switch output tabs (used by onclick handlers in HTML) ──
+  window.switchOutputTab = function (tab) {
+    if (!tab) return;
+    document.querySelectorAll('#output-tabs .dp-output-tab').forEach(function (t) { t.classList.remove('active'); });
+    tab.classList.add('active');
+    var which = tab.getAttribute('data-tab');
+    var panels = ['blocks', 'preview', 'json', 'markdown', 'a2ui'];
+    panels.forEach(function (p) {
+      var el = document.getElementById('panel-' + p);
+      if (el) el.style.display = which === p ? 'block' : 'none';
+    });
+  };
+
   function renderBlocks(blocks) {
     if (!Array.isArray(blocks)) return '<div class="dp-block"><div class="dp-block-text">No blocks</div></div>';
 
