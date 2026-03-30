@@ -1200,15 +1200,16 @@
     }).join('\n\n');
   }
 
-  // ── A2UI visual renderer (streaming/progressive) ──
-  // Note: blocksToA2UI conversion is now handled by AILANG via WASM
-  // (docparse/services/a2ui_formatter.ail → convertBlocksJsonToA2UI)
-  // The JS duplicate was removed to eliminate drift risk.
+  // ── A2UI visual renderer (streaming rich document) ──
+  // Renders A2UI nodes as an actual document (headings, paragraphs, tables, lists)
+  // with progressive streaming animation. The document builds itself when the tab
+  // is selected, with a collapsible JSON panel showing the underlying data.
 
   function typeClass(t) { return 'a2ui-type-' + t.replace(/[^a-z]/g, ''); }
 
-  // Walk the A2UI tree depth-first from root, collecting nodes with depth metadata
-  function flattenTreeOrder(nodes) {
+  // Walk the A2UI tree depth-first from root, collecting leaf content nodes
+  // (skip containers — they're structural, not visual)
+  function flattenContentNodes(nodes) {
     var nodeMap = {};
     nodes.forEach(function (n) { nodeMap[n.id] = n; });
     var root = nodeMap['doc'] || nodes[0];
@@ -1217,7 +1218,10 @@
     var ordered = [];
     function walk(node, depth) {
       if (!node || depth > 10) return;
-      ordered.push({ node: node, depth: depth });
+      // Include all non-container nodes (the visible content)
+      if (node.type !== 'container') {
+        ordered.push({ node: node, depth: depth });
+      }
       if (node.children && node.children.length > 0) {
         node.children.forEach(function (childId) {
           var child = nodeMap[childId];
@@ -1229,133 +1233,170 @@
     return { ordered: ordered, nodeMap: nodeMap };
   }
 
-  // Compute animation delays: depth-wave cascade
-  function computeDelays(ordered) {
-    var total = ordered.length;
-    var interLevel = total > 80 ? 40 : 80;
-    var intraLevel = total > 80 ? 15 : 30;
-
-    // Group by depth, track index within each depth level
-    var depthCounts = {};
+  // Compute sequential streaming delays (simple stagger — content appears top to bottom)
+  function computeStreamDelays(total) {
+    var gap = total > 80 ? 15 : total > 30 ? 30 : 50;
     var delays = [];
-    ordered.forEach(function (entry) {
-      var d = entry.depth;
-      if (!depthCounts[d]) depthCounts[d] = 0;
-      var delay = (d * interLevel) + (depthCounts[d] * intraLevel);
-      delays.push(delay);
-      depthCounts[d]++;
-    });
-
+    for (var i = 0; i < total; i++) {
+      delays.push(i * gap);
+    }
     // Cap at 3000ms
-    var maxDelay = Math.max.apply(null, delays);
-    if (maxDelay > 3000) {
-      var scale = 3000 / maxDelay;
+    if (delays.length > 0 && delays[delays.length - 1] > 3000) {
+      var scale = 3000 / delays[delays.length - 1];
       delays = delays.map(function (d) { return Math.round(d * scale); });
     }
     return delays;
   }
 
-  // Build a single A2UI node DOM element (no animation classes yet — added by container class)
-  function buildNodeEl(node, nodeMap, depth, orderIndex, delay) {
-    var el = document.createElement('div');
-    el.className = 'a2ui-node a2ui-node--hidden';
-    el.style.animationDelay = delay + 'ms';
-    el.setAttribute('data-a2ui-idx', orderIndex);
+  // Render a single A2UI node as a rich document element
+  function renderRichNode(node) {
+    var p = node.props || {};
 
-    // Header
-    var header = document.createElement('div');
-    header.className = 'a2ui-node-header';
-    var idSpan = document.createElement('span');
-    idSpan.className = 'a2ui-node-id';
-    idSpan.textContent = node.id;
-    header.appendChild(idSpan);
-    var typeSpan = document.createElement('span');
-    typeSpan.className = 'a2ui-node-type ' + typeClass(node.type);
-    typeSpan.textContent = node.type;
-    header.appendChild(typeSpan);
-    if (node.props && node.props.label) {
-      var labelSpan = document.createElement('span');
-      labelSpan.style.cssText = 'font-size:11px;color:var(--text-muted)';
-      labelSpan.textContent = node.props.label;
-      header.appendChild(labelSpan);
+    if (node.type === 'heading') {
+      var lvl = Math.min(parseInt(p.level || '1'), 6);
+      var h = document.createElement('h' + lvl);
+      h.className = 'a2ui-rich-heading';
+      h.textContent = p.text || '';
+      return h;
     }
-    el.appendChild(header);
 
-    // Content preview
-    var content = null;
-    if (node.type === 'heading' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      var lvl = parseInt(node.props.level || '1');
-      content.style.cssText = 'font-weight:700;font-size:' + (20 - lvl * 2) + 'px';
-      content.textContent = node.props.text || '';
-    } else if (node.type === 'text' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      var txt = node.props.text || '';
-      content.textContent = txt.length > 200 ? txt.substring(0, 200) + '...' : txt;
-    } else if (node.type === 'table' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      content.style.cssText = 'font-family:var(--font-mono);font-size:11px';
-      try {
-        var hdrs = JSON.parse(node.props.headers || '[]');
-        var rows = JSON.parse(node.props.rows || '[]');
-        content.textContent = hdrs.length + ' cols, ' + rows.length + ' rows';
-      } catch(e) { content.textContent = '[table]'; }
-    } else if (node.type === 'list' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      content.style.cssText = 'font-family:var(--font-mono);font-size:11px';
-      try {
-        var items = JSON.parse(node.props.items || '[]');
-        content.textContent = items.length + ' items (' + (node.props.ordered === 'true' ? 'ordered' : 'unordered') + ')';
-      } catch(e) { content.textContent = '[list]'; }
-    } else if (node.type === 'callout' && node.props) {
-      content = document.createElement('div');
-      var cls = node.props.variant === 'delete' ? 'dp-block-change--delete' : 'dp-block-change--insert';
-      content.className = 'dp-block-change ' + cls;
-      content.style.fontSize = '12px';
-      content.innerHTML = '<strong>' + escHtml(node.props.variant || '') + '</strong> ' + escHtml(node.props.text || '');
-    } else if (node.type === 'image' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      content.style.color = 'var(--dp-blue)';
-      content.textContent = '[Image: ' + (node.props.alt || node.props.mime || '') + ']';
-    } else if (node.type === 'media' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      content.textContent = '[' + (node.props.mediaType || 'media') + ': ' + (node.props.description || '') + ']';
-    } else if (node.type === 'key-value' && node.props) {
-      content = document.createElement('div');
-      content.className = 'a2ui-node-content';
-      content.innerHTML = '<strong>' + escHtml(node.props.label || '') + ':</strong> ' + escHtml(node.props.value || '');
+    if (node.type === 'text') {
+      var div = document.createElement('div');
+      div.className = 'a2ui-rich-text';
+      if (p.style && p.style !== 'normal' && p.style !== '') {
+        div.setAttribute('data-style', p.style);
+      }
+      div.textContent = p.text || '';
+      return div;
     }
-    if (content) el.appendChild(content);
 
-    // Props (non-trivial)
-    if (node.props && Object.keys(node.props).length > 0 && node.type !== 'container') {
-      var propKeys = Object.keys(node.props).filter(function(k) { return k !== 'text' && k !== 'label'; });
-      if (propKeys.length > 0) {
-        var propsDiv = document.createElement('div');
-        propsDiv.className = 'a2ui-node-props';
-        propKeys.forEach(function(k) {
-          var v = node.props[k];
-          if (v.length > 40) v = v.substring(0, 40) + '...';
-          var s = document.createElement('span');
-          s.textContent = k + '=' + v;
-          propsDiv.appendChild(s);
+    if (node.type === 'table') {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'a2ui-rich-table-wrap';
+      var table = document.createElement('table');
+      table.className = 'a2ui-rich-table';
+      try {
+        var hdrs = JSON.parse(p.headers || '[]');
+        var rows = JSON.parse(p.rows || '[]');
+        if (hdrs.length > 0) {
+          var thead = document.createElement('thead');
+          var tr = document.createElement('tr');
+          hdrs.forEach(function (h) {
+            var th = document.createElement('th');
+            th.textContent = typeof h === 'string' ? h : (h.text || '');
+            if (h.colSpan && h.colSpan > 1) th.colSpan = h.colSpan;
+            tr.appendChild(th);
+          });
+          thead.appendChild(tr);
+          table.appendChild(thead);
+        }
+        if (rows.length > 0) {
+          var tbody = document.createElement('tbody');
+          rows.forEach(function (row) {
+            var tr = document.createElement('tr');
+            (Array.isArray(row) ? row : []).forEach(function (cell) {
+              var td = document.createElement('td');
+              td.textContent = typeof cell === 'string' ? cell : (cell.text || '');
+              if (cell.colSpan && cell.colSpan > 1) td.colSpan = cell.colSpan;
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          });
+          table.appendChild(tbody);
+        }
+      } catch (e) {
+        table.innerHTML = '<tr><td>[table data]</td></tr>';
+      }
+      wrapper.appendChild(table);
+      return wrapper;
+    }
+
+    if (node.type === 'list') {
+      try {
+        var items = JSON.parse(p.items || '[]');
+        var list = document.createElement(p.ordered === 'true' ? 'ol' : 'ul');
+        list.className = 'a2ui-rich-list';
+        items.forEach(function (item) {
+          var li = document.createElement('li');
+          li.textContent = item;
+          list.appendChild(li);
         });
-        el.appendChild(propsDiv);
+        return list;
+      } catch (e) {
+        var fb = document.createElement('div');
+        fb.className = 'a2ui-rich-text';
+        fb.textContent = '[list]';
+        return fb;
       }
     }
 
-    return el;
+    if (node.type === 'callout') {
+      var callout = document.createElement('div');
+      var isDelete = p.variant === 'delete';
+      callout.className = 'a2ui-rich-callout ' + (isDelete ? 'a2ui-rich-callout--delete' : 'a2ui-rich-callout--insert');
+      var badge = document.createElement('span');
+      badge.className = 'a2ui-rich-callout-badge';
+      badge.textContent = p.variant || 'change';
+      callout.appendChild(badge);
+      if (p.text) {
+        var txt = document.createElement('span');
+        txt.textContent = p.text;
+        if (isDelete) txt.style.textDecoration = 'line-through';
+        callout.appendChild(txt);
+      }
+      var meta = [];
+      if (p.author) meta.push(p.author);
+      if (p.date) meta.push(p.date);
+      if (meta.length > 0) {
+        var metaSpan = document.createElement('span');
+        metaSpan.className = 'a2ui-rich-callout-meta';
+        metaSpan.textContent = meta.join(' \u00B7 ');
+        callout.appendChild(metaSpan);
+      }
+      return callout;
+    }
+
+    if (node.type === 'image') {
+      var imgDiv = document.createElement('div');
+      imgDiv.className = 'a2ui-rich-image';
+      imgDiv.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+      var desc = document.createElement('span');
+      desc.textContent = p.alt || p.description || p.mime || 'Image';
+      imgDiv.appendChild(desc);
+      return imgDiv;
+    }
+
+    if (node.type === 'media') {
+      var mediaDiv = document.createElement('div');
+      mediaDiv.className = 'a2ui-rich-media';
+      var icon = p.mediaType === 'audio' ? '\u266B' : '\u25B6';
+      mediaDiv.innerHTML = '<span class="a2ui-rich-media-icon">' + icon + '</span>';
+      var label = document.createElement('span');
+      label.textContent = (p.mediaType || 'media') + ': ' + (p.description || p.transcription || '');
+      mediaDiv.appendChild(label);
+      return mediaDiv;
+    }
+
+    if (node.type === 'key-value') {
+      var kvDiv = document.createElement('div');
+      kvDiv.className = 'a2ui-rich-kv';
+      kvDiv.innerHTML = '<span class="a2ui-rich-kv-label">' + escHtml(p.label || '') + '</span> ' + escHtml(p.value || '');
+      return kvDiv;
+    }
+
+    if (node.type === 'divider') {
+      return document.createElement('hr');
+    }
+
+    // Fallback
+    var fallback = document.createElement('div');
+    fallback.className = 'a2ui-rich-text';
+    fallback.textContent = p.text || '[' + node.type + ']';
+    return fallback;
   }
 
-  // Build the full A2UI demo DOM structure with streaming support
+  // Build the full A2UI demo: rich document (streaming) + collapsible JSON
   function buildA2UIDemo(nodes, container) {
-    // Clear previous
     container.innerHTML = '';
     container._a2uiMeta = null;
     if (container._a2uiTimers) {
@@ -1368,118 +1409,92 @@
       return;
     }
 
-    var treeData = flattenTreeOrder(nodes);
+    var treeData = flattenContentNodes(nodes);
     var ordered = treeData.ordered;
-    var nodeMap = treeData.nodeMap;
-    var delays = computeDelays(ordered);
+    var delays = computeStreamDelays(ordered.length);
 
-    // Create the split-panel wrapper
+    // Wrapper
     var demo = document.createElement('div');
     demo.className = 'a2ui-demo';
 
-    // ── Left: JSON panel ──
-    var jsonPanel = document.createElement('div');
-    jsonPanel.className = 'a2ui-json';
-    var jsonLabel = document.createElement('div');
-    jsonLabel.className = 'a2ui-label';
-    jsonLabel.textContent = 'A2UI JSON';
-    jsonPanel.appendChild(jsonLabel);
+    // ── Rich document panel (primary, top/left) ──
+    var docPanel = document.createElement('div');
+    docPanel.className = 'a2ui-rich-doc';
 
-    var pre = document.createElement('pre');
-    var jsonSpans = [];
-
-    // Build per-node JSON spans
-    pre.appendChild(document.createTextNode('[\n'));
-    ordered.forEach(function (entry, i) {
-      var span = document.createElement('span');
-      span.className = 'a2ui-json-node a2ui-node--hidden';
-      span.style.animationDelay = delays[i] + 'ms';
-      span.setAttribute('data-a2ui-idx', i);
-      span.textContent = '  ' + JSON.stringify(entry.node, null, 2).split('\n').join('\n  ');
-      if (i < ordered.length - 1) span.textContent += ',';
-      span.textContent += '\n';
-      pre.appendChild(span);
-      jsonSpans.push(span);
-    });
-    pre.appendChild(document.createTextNode(']'));
-    jsonPanel.appendChild(pre);
-    demo.appendChild(jsonPanel);
-
-    // ── Right: Component tree ──
-    var preview = document.createElement('div');
-    preview.className = 'a2ui-preview';
-
-    // Header with replay controls
+    // Header with controls
     var streamHeader = document.createElement('div');
     streamHeader.className = 'a2ui-stream-header';
-    var treeLabel = document.createElement('div');
-    treeLabel.className = 'a2ui-label';
-    treeLabel.textContent = 'Component Tree';
-    streamHeader.appendChild(treeLabel);
+    var docLabel = document.createElement('div');
+    docLabel.className = 'a2ui-label';
+    docLabel.textContent = 'Rendered Document';
+    streamHeader.appendChild(docLabel);
 
     var controls = document.createElement('div');
     controls.className = 'a2ui-stream-controls';
     var status = document.createElement('span');
     status.className = 'a2ui-stream-status';
-    status.innerHTML = '<span class="a2ui-stream-counter">0/' + ordered.length + '</span> nodes';
+    status.innerHTML = '<span class="a2ui-stream-counter">0/' + ordered.length + '</span> elements';
     controls.appendChild(status);
     var replayBtn = document.createElement('button');
     replayBtn.className = 'a2ui-replay-btn';
-    replayBtn.textContent = 'Replay';
+    replayBtn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Replay';
     replayBtn.onclick = function () { window.triggerA2UIStream(); };
     controls.appendChild(replayBtn);
     streamHeader.appendChild(controls);
-    preview.appendChild(streamHeader);
+    docPanel.appendChild(streamHeader);
 
-    // Build tree DOM recursively, assigning delays from the ordered list
-    var orderLookup = {};
+    // Render each content node as rich document element
+    var richEls = [];
     ordered.forEach(function (entry, i) {
-      orderLookup[entry.node.id] = { index: i, delay: delays[i], depth: entry.depth };
+      var el = renderRichNode(entry.node);
+      el.classList.add('a2ui-node--hidden');
+      el.style.animationDelay = delays[i] + 'ms';
+      el.setAttribute('data-a2ui-idx', i);
+      docPanel.appendChild(el);
+      richEls.push(el);
     });
 
-    function buildTree(node, depth) {
-      if (!node || depth > 10) return null;
-      var info = orderLookup[node.id];
-      if (!info) return null;
+    demo.appendChild(docPanel);
 
-      var el = buildNodeEl(node, nodeMap, info.depth, info.index, info.delay);
+    // ── JSON panel (secondary, collapsible) ──
+    var jsonPanel = document.createElement('div');
+    jsonPanel.className = 'a2ui-json';
 
-      // Recursively build children
-      if (node.children && node.children.length > 0) {
-        var childrenDiv = document.createElement('div');
-        childrenDiv.className = 'a2ui-container-children';
-        var parentDelay = info.delay;
-        childrenDiv.style.animationDelay = parentDelay + 'ms';
-        node.children.forEach(function (childId) {
-          var child = nodeMap[childId];
-          if (child) {
-            var childEl = buildTree(child, depth + 1);
-            if (childEl) childrenDiv.appendChild(childEl);
-          }
-        });
-        el.appendChild(childrenDiv);
+    var jsonToggle = document.createElement('button');
+    jsonToggle.className = 'a2ui-json-toggle';
+    jsonToggle.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg> A2UI JSON <span class="a2ui-json-badge">' + nodes.length + ' nodes</span>';
+    jsonToggle.onclick = function () {
+      var content = jsonPanel.querySelector('.a2ui-json-content');
+      if (content) {
+        var isOpen = content.style.display !== 'none';
+        content.style.display = isOpen ? 'none' : 'block';
+        jsonToggle.classList.toggle('open', !isOpen);
       }
-      return el;
-    }
+    };
+    jsonPanel.appendChild(jsonToggle);
 
-    var root = nodeMap['doc'] || nodes[0];
-    if (root) {
-      var rootEl = buildTree(root, 0);
-      if (rootEl) preview.appendChild(rootEl);
-    }
-    demo.appendChild(preview);
+    var jsonContent = document.createElement('div');
+    jsonContent.className = 'a2ui-json-content';
+    jsonContent.style.display = 'none';
+    var pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(nodes, null, 2);
+    jsonContent.appendChild(pre);
+    jsonPanel.appendChild(jsonContent);
+
+    demo.appendChild(jsonPanel);
     container.appendChild(demo);
 
-    // Store metadata for streaming trigger
+    // Store metadata
     container._a2uiMeta = {
       totalNodes: ordered.length,
       delays: delays,
-      jsonSpans: jsonSpans,
-      demo: demo
+      richEls: richEls,
+      demo: demo,
+      docPanel: docPanel
     };
   }
 
-  // Trigger the streaming animation (called on tab switch + replay)
+  // Trigger the streaming animation
   function triggerA2UIStream() {
     if (!panelA2UI || !panelA2UI._a2uiMeta) return;
     var meta = panelA2UI._a2uiMeta;
@@ -1492,30 +1507,31 @@
     }
     panelA2UI._a2uiTimers = [];
 
-    // Reset: remove streaming class, force reflow
+    // Reset
     demo.classList.remove('a2ui-demo--streaming');
-    // Also reset the status badge
     var statusEl = demo.querySelector('.a2ui-stream-status');
     if (statusEl) statusEl.classList.remove('done');
     var counter = demo.querySelector('.a2ui-stream-counter');
     if (counter) counter.textContent = '0/' + meta.totalNodes;
 
-    void demo.offsetHeight; // force reflow to reset CSS animations
+    void demo.offsetHeight; // force reflow
 
     // Start streaming
     demo.classList.add('a2ui-demo--streaming');
 
-    // Schedule counter updates + JSON auto-scroll to match animation timing
+    // Counter updates + auto-scroll the rich doc panel
     meta.delays.forEach(function (delay, i) {
       var t = setTimeout(function () {
         if (counter) counter.textContent = (i + 1) + '/' + meta.totalNodes;
-        // Auto-scroll JSON panel to current node
-        var jsonSpan = meta.jsonSpans[i];
-        if (jsonSpan && jsonSpan.parentNode && jsonSpan.parentNode.parentNode) {
-          var scrollContainer = jsonSpan.parentNode.parentNode;
-          scrollContainer.scrollTop = jsonSpan.offsetTop - 40;
+        // Auto-scroll to keep current element visible
+        var el = meta.richEls[i];
+        if (el && meta.docPanel) {
+          var panelRect = meta.docPanel.getBoundingClientRect();
+          var elRect = el.getBoundingClientRect();
+          if (elRect.bottom > panelRect.bottom - 20) {
+            meta.docPanel.scrollTop += elRect.bottom - panelRect.bottom + 40;
+          }
         }
-        // Mark done on last node
         if (i === meta.totalNodes - 1 && statusEl) {
           statusEl.classList.add('done');
         }
