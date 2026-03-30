@@ -51,6 +51,20 @@ GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI \
   --ai gemini-3-flash-preview docparse/main.ail document.pdf
 ```
 
+## AILANG Language & Toolchain Reference
+
+Before writing or modifying AILANG code, load the full language and toolchain references:
+
+```bash
+ailang prompt              # Full AILANG language reference (syntax, types, effects, contracts, patterns)
+ailang devtools-prompt     # Dev tools reference (CLI flags, debugging, tracing, packages)
+ailang docs --list         # List all stdlib modules
+ailang docs <module>       # Show module API (e.g., ailang docs std/string)
+ailang examples search "keyword"  # Find working code examples
+```
+
+**These are essential.** `ailang prompt` covers the complete language: type system, pattern matching, algebraic effects, HOF conventions, contracts/Z3, testing, multi-module projects, reserved keywords, and common mistakes. `ailang devtools-prompt` covers all CLI commands, debugging workflows, tracing, package management, and serve-api.
+
 ## AILANG Conventions
 
 - `module` declarations use `docparse/` prefix (e.g., `module docparse/services/docx_parser`)
