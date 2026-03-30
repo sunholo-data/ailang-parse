@@ -1,4 +1,12 @@
 /**
+ * AILANG Parse — API base URL
+ * Override via ?api=https://your-endpoint.run.app in the URL.
+ * Defaults to the current dev Cloud Run service.
+ */
+var _dpParams = (typeof window !== 'undefined') ? new URLSearchParams(window.location.search) : null;
+var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+
+/**
  * AILANG Parse — Shared Components
  * Injects header navigation, footer, scroll-reveal, and output tab logic
  * across all pages. No build step required.
@@ -135,5 +143,18 @@
 
     window.addEventListener('scroll', updateActiveSection, { passive: true });
     updateActiveSection();
+  }
+
+  // ── Rewrite API URLs in code blocks when ?api= override is active ──
+  var DEFAULT_API = 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+  if (API_BASE !== DEFAULT_API) {
+    document.querySelectorAll('pre code').forEach(function (el) {
+      if (el.innerHTML.indexOf(DEFAULT_API) !== -1) {
+        el.innerHTML = el.innerHTML.split(DEFAULT_API).join(API_BASE);
+      }
+    });
+    document.querySelectorAll('a[href*="' + DEFAULT_API + '"]').forEach(function (el) {
+      el.href = el.href.replace(DEFAULT_API, API_BASE);
+    });
   }
 })();
