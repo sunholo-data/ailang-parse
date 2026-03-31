@@ -2092,13 +2092,12 @@ function deviceAuthPoll(deviceCode) {
 function loadHistory(apiKey) {
   var historyEl = document.getElementById('request-history');
   if (!historyEl) return;
-  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
-  var userId = user ? user.uid : '';
+  if (!apiKey) return;
 
   fetch(API_BASE + '/api/v1/requests/history', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-    body: JSON.stringify({ userId: userId })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: apiKey })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
