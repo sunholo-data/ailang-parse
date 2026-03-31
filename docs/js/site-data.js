@@ -15,7 +15,7 @@ var DP_DATA = {
         requests_per_day: 200,
         requests_per_month: 2000,
         ai_requests_per_month: 50,
-        max_file_size_mb: 10,
+        max_file_size_mb: 5,
         ai_file_size_limits: { video_mb: 10, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
         concurrent: 1,
         rate_limit: '1 req/s',
@@ -26,7 +26,7 @@ var DP_DATA = {
         requests_per_day: 2000,
         requests_per_month: 10000,
         ai_requests_per_month: 500,
-        max_file_size_mb: 50,
+        max_file_size_mb: 25,
         ai_file_size_limits: { video_mb: 20, audio_mb: 50, pdf_mb: 50, image_mb: 30 },
         concurrent: 5,
         rate_limit: '10 req/s',
@@ -37,10 +37,10 @@ var DP_DATA = {
         requests_per_day: 10000,
         requests_per_month: 50000,
         ai_requests_per_month: 1000,
-        max_file_size_mb: 200,
+        max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 40, audio_mb: 100, pdf_mb: 50, image_mb: 50 },
         concurrent: 20,
-        rate_limit: '100 req/s',
+        rate_limit: '50 req/s',
         support: 'Dedicated'
       }
     }

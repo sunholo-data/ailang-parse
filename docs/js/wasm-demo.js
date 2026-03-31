@@ -327,7 +327,7 @@
   window.handleDocParseFile = async function (file) {
     // Validate size
     if (file.size > MAX_FILE_SIZE) {
-      showError('File too large for browser parsing (' + (file.size / 1024 / 1024).toFixed(1) + 'MB). Use the <a href="api.html" style="color:var(--dp-blue)">API</a> for files up to 200MB.');
+      showError('File too large for browser parsing (' + (file.size / 1024 / 1024).toFixed(1) + 'MB). Use the <a href="api.html" style="color:var(--dp-blue)">API</a> for files up to 50MB.');
       return;
     }
 

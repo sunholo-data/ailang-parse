@@ -95,11 +95,11 @@ Once there are paying users, add API Gateway in front of Cloud Run for:
 | **Monthly price** | $0 | $29/mo | Custom |
 | **Requests/day** | 20 | 2,000 | Unlimited |
 | **Pages/month** | 100 | 10,000 | 100,000 |
-| **Max file size** | 10MB | 50MB | 200MB |
+| **Max file size** | 5MB | 25MB | 50MB |
 | **AI pages/request** | 5 | 50 | 500 |
 | **FS ops/request** | 100 | 5,000 | 50,000 |
 | **Concurrent requests** | 1 | 5 | 20 |
-| **Rate limit** | 1 req/s | 10 req/s | 100 req/s |
+| **Rate limit** | 1 req/s | 10 req/s | 50 req/s |
 | **Formats** | All 13 | All 13 | All 13 + priority |
 | **Support** | Community | Email | Dedicated |
 
