@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Install — AILANG Parse</title>
+<title>Run Locally — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Install AILANG Parse locally. One command, zero dependencies for Office parsing. Parse 13 formats from the CLI in under 11ms per document. Docker available for API server deployment.">
+<meta name="description" content="Run AILANG Parse locally. Install the AILANG CLI, parse 13 document formats from your terminal in under 11ms. Zero dependencies for Office formats. Free and private.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,15 +14,104 @@
 <link rel="stylesheet" href="css/prism.css">
 <link rel="stylesheet" href="css/docs-layout.css">
 <link rel="stylesheet" href="css/components.css">
+<style>
+/* Three ways cards */
+.dp-ways-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-way-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dp-way-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08);
+}
+.dp-way-card--highlight {
+  border: 2px solid var(--dp-blue, #2563eb);
+  background: rgba(37, 99, 235, 0.02);
+}
+.dp-way-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--dp-blue, #2563eb);
+}
+.dp-way-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.dp-way-icon--green { background: rgba(5, 150, 105, 0.08); color: #059669; }
+.dp-way-icon--purple { background: rgba(124, 58, 237, 0.08); color: #7c3aed; }
+.dp-way-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.dp-way-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-way-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+.dp-way-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 100px;
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--dp-blue, #2563eb);
+}
+.dp-way-tag--green { background: rgba(5, 150, 105, 0.06); color: #059669; }
+.dp-way-tag--amber { background: rgba(217, 119, 6, 0.06); color: #b45309; }
+.dp-way-link {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dp-blue, #2563eb);
+  margin-top: 4px;
+}
+@media (max-width: 900px) {
+  .dp-ways-grid { grid-template-columns: 1fr; }
+}
+</style>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I install AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Run curl -fsSL https://ailang.sunholo.com/install.sh | bash to install AILANG, then clone the repo and run ./bin/docparse. For a Docker API server: docker run -p 8080:8080 sunholo/docparse:latest. Office parsing has zero external dependencies."}},
-    {"@type": "Question", "name": "What are the system requirements?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini or Claude, or a local Ollama model."}},
-    {"@type": "Question", "name": "Can I use AILANG Parse as a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Both the hosted API and Docker server implement the same /general/v0/general endpoint format as Unstructured. Point your existing client at AILANG Parse and Office documents will be parsed with full structural fidelity."}},
-    {"@type": "Question", "name": "Does local parsing require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline — no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline."}}
+    {"@type": "Question", "name": "How do I install AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Run curl -fsSL https://ailang.sunholo.com/install.sh | bash to install AILANG, then ailang install sunholo/ailang_parse to install the parsing package. Office parsing has zero external dependencies."}},
+    {"@type": "Question", "name": "What are the system requirements?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini or Claude, or a local Ollama model."}},
+    {"@type": "Question", "name": "What is the difference between the API and running locally?", "acceptedAnswer": {"@type": "Answer", "text": "The hosted API gives you zero-maintenance scaling with Python, JS, and Go SDKs — 60 free requests per day included. Running locally gives you unlimited free parsing with full privacy, but requires installing AILANG on your machine."}},
+    {"@type": "Question", "name": "Does local parsing require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline — no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline."}},
+    {"@type": "Question", "name": "Can I use AILANG for other projects?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG is a general-purpose programming language for AI-powered applications. Once installed, you can build your own apps with capability budgets, formal contracts, and pluggable AI models. AILANG Parse is just one application built on AILANG."}}
   ]
 }
 </script>
@@ -34,8 +123,8 @@
 <div class="page">
 
   <section class="hero" style="margin-bottom:32px">
-    <h1 class="reveal"><span class="dp-accent">Install</span> AILANG Parse</h1>
-    <p class="subtitle reveal reveal-delay-1">One command. Zero dependencies. Parse 13 formats from your terminal in under 11ms.</p>
+    <h1 class="reveal"><span class="dp-accent">Run</span> Locally</h1>
+    <p class="subtitle reveal reveal-delay-1">Install AILANG, parse documents from your terminal. Zero dependencies for Office formats, under 11ms per document.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -43,13 +132,15 @@
     <!-- Sidebar ToC -->
     <aside class="dp-docs-sidebar reveal">
       <nav>
-        <a href="#quickstart" class="active">Quick Start</a>
-        <a href="#install">Installation</a>
-        <a href="#config">Configuration</a>
+        <a href="#three-ways" class="active">Three Ways to Parse</a>
+        <a href="#quickstart">Quick Start</a>
+        <a href="#install">Install AILANG</a>
+        <a href="#about-ailang">What is AILANG?</a>
         <a href="#ai-models">AI Models</a>
+        <a href="#sdks">SDKs (API)</a>
+        <a href="#config">Configuration</a>
         <a href="#formats">Supported Formats</a>
-        <a href="#docker">Docker API Server</a>
-        <a href="#contact">Enterprise</a>
+        <a href="#docker">Docker</a>
         <a href="#faq">FAQ</a>
       </nav>
     </aside>
@@ -57,17 +148,90 @@
     <!-- Content -->
     <main class="dp-docs-content">
 
+      <h2 id="three-ways">Three Ways to Parse</h2>
+      <p>AILANG Parse offers three ways to parse documents. Choose what fits your needs:</p>
+
+      <div class="dp-ways-grid">
+
+        <a href="index.html#try-it" class="dp-way-card">
+          <div class="dp-way-icon dp-way-icon--green">
+            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="dp-way-name">Try in Browser</div>
+          <div class="dp-way-desc">Parse documents directly in your browser via WebAssembly. Nothing to install, nothing leaves your machine. Office formats only.</div>
+          <div class="dp-way-tags">
+            <span class="dp-way-tag dp-way-tag--green">Free</span>
+            <span class="dp-way-tag dp-way-tag--green">Private</span>
+            <span class="dp-way-tag">Zero install</span>
+          </div>
+          <span class="dp-way-link">Parse in browser &rarr;</span>
+        </a>
+
+        <a href="api.html" class="dp-way-card">
+          <div class="dp-way-icon dp-way-icon--purple">
+            <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </div>
+          <div class="dp-way-name">Use the API</div>
+          <div class="dp-way-desc">REST API with Python, JavaScript, and Go SDKs. Zero maintenance, scales to millions of documents. 60 free requests per day.</div>
+          <div class="dp-way-tags">
+            <span class="dp-way-tag dp-way-tag--green">Free tier</span>
+            <span class="dp-way-tag dp-way-tag--amber">Scales to millions</span>
+          </div>
+          <span class="dp-way-link">API docs &rarr;</span>
+        </a>
+
+        <div class="dp-way-card dp-way-card--highlight">
+          <div class="dp-way-icon">
+            <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          </div>
+          <div class="dp-way-name">Run Locally</div>
+          <div class="dp-way-desc">Install the AILANG CLI and parse everything locally. All 13 formats, AI-powered PDF parsing, unlimited and free. Full control.</div>
+          <div class="dp-way-tags">
+            <span class="dp-way-tag dp-way-tag--green">Free</span>
+            <span class="dp-way-tag dp-way-tag--green">Private</span>
+            <span class="dp-way-tag">Full power</span>
+          </div>
+          <span class="dp-way-link" style="color:var(--text-muted)">This page</span>
+        </div>
+
+      </div>
+
+      <table class="dp-config-table" style="font-size:13px">
+        <thead>
+          <tr><th></th><th>Browser (WASM)</th><th>API + SDKs</th><th>Run Locally</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Install required</td><td>None</td><td>SDK only</td><td>AILANG CLI</td></tr>
+          <tr><td>Office parsing</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+          <tr><td>AI / PDF parsing</td><td>With API key</td><td>Yes</td><td>Yes</td></tr>
+          <tr><td>Offline capable</td><td>Yes (Office)</td><td>No</td><td>Yes (Office)</td></tr>
+          <tr><td>Throughput</td><td>Browser-limited</td><td>Unlimited (paid)</td><td>Unlimited</td></tr>
+          <tr><td>Cost</td><td>Free</td><td>Free tier, then paid</td><td>Free (bring your own AI keys)</td></tr>
+          <tr><td>Data privacy</td><td>Stays in browser</td><td>Regional servers (EU, US)</td><td>Stays on your machine</td></tr>
+        </tbody>
+      </table>
+
       <h2 id="quickstart">Quick Start</h2>
-      <p>Parse a document in three commands:</p>
+      <p>Parse a document in two commands:</p>
       <pre><code class="language-bash"># Install AILANG
 curl -fsSL https://ailang.sunholo.com/install.sh | bash
 
-# Clone AILANG Parse
-git clone https://github.com/sunholo-data/docparse.git
-cd docparse
+# Install AILANG Parse from the package registry
+ailang install sunholo/ailang_parse</code></pre>
 
-# Parse a document
+      <p>Now parse a document:</p>
+      <pre><code class="language-bash"># Parse a DOCX file
+ailang run --entry main --caps IO,FS,Env \
+  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail your-file.docx</code></pre>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Want the convenience wrapper?</strong> Clone the repo for the <code>./bin/docparse</code> shortcut, test files, and benchmarks:
+          <pre style="margin:8px 0 0"><code class="language-bash">git clone https://github.com/sunholo-data/ailang-parse.git
+cd ailang-parse
 ./bin/docparse data/test_files/sample.docx</code></pre>
+        </div>
+      </div>
 
       <p>Convert between formats:</p>
       <pre><code class="language-bash"># DOCX to HTML
@@ -87,10 +251,10 @@ cd docparse
 ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
   docparse/main.ail --generate report.docx --prompt "Q1 sales report with revenue table"</code></pre>
 
-      <h2 id="install">Installation</h2>
+      <h2 id="install">Install AILANG</h2>
 
-      <h3>AILANG CLI</h3>
-      <p>AILANG Parse runs on the AILANG runtime. Install it for your platform:</p>
+      <h3>Step 1: Install the AILANG CLI</h3>
+      <p>AILANG is a single binary with no dependencies. Install it for your platform:</p>
       <pre><code class="language-bash"># macOS / Linux
 curl -fsSL https://ailang.sunholo.com/install.sh | bash
 
@@ -101,9 +265,15 @@ curl -fsSL https://ailang.sunholo.com/install.sh | bash
       <pre><code class="language-bash">ailang --version
 # ailang v0.9.2 (or later)</code></pre>
 
-      <h3>AILANG Parse Source</h3>
-      <pre><code class="language-bash">git clone https://github.com/sunholo-data/docparse.git
-cd docparse
+      <h3>Step 2: Install AILANG Parse</h3>
+      <p>Install the parsing package from the AILANG registry:</p>
+      <pre><code class="language-bash">ailang install sunholo/ailang_parse</code></pre>
+      <p>This downloads all 31 parsing modules and their dependencies. No build step needed.</p>
+
+      <h3>Optional: Clone the Source</h3>
+      <p>For development, testing, and benchmarks, clone the repository:</p>
+      <pre><code class="language-bash">git clone https://github.com/sunholo-data/ailang-parse.git
+cd ailang-parse
 
 # Type-check all 31 modules
 ./bin/docparse --check
@@ -111,41 +281,15 @@ cd docparse
 # Run inline tests
 ./bin/docparse --test</code></pre>
 
-      <h2 id="config">Configuration</h2>
-      <p>AILANG Parse is configured via environment variables and AILANG capability budgets.</p>
+      <h2 id="about-ailang">What is AILANG?</h2>
+      <p>AILANG is a general-purpose programming language designed for AI-powered applications. It treats AI calls as a first-class <strong>effect</strong> &mdash; just like file I/O or network access &mdash; with hard capability budgets that cap how many AI calls, file reads, or network requests a program can make. These limits are enforced at compile time, not just by convention.</p>
+      <p>AILANG also supports <strong>formal contracts</strong> verified by Z3, deterministic execution for non-AI code paths, and a package registry for sharing modules. The result: programs that are auditable, reproducible, and cost-predictable.</p>
+      <p>AILANG Parse is one application built on AILANG. Once you have the CLI installed, you can build your own AI-powered tools &mdash; document processors, data pipelines, code generators, agents &mdash; using the same language and toolchain.</p>
 
-      <h3>Environment Variables</h3>
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>PORT</td><td>8080</td><td>API server port</td></tr>
-          <tr><td>GOOGLE_API_KEY</td><td>(empty)</td><td>Google AI Studio API key. Set to <code>""</code> for ADC on Cloud Run.</td></tr>
-          <tr><td>GOOGLE_CLOUD_PROJECT</td><td>(empty)</td><td>GCP project ID for Firestore + Vertex AI</td></tr>
-          <tr><td>FIRESTORE_DATABASE</td><td>docparse</td><td>Dedicated Firestore database name</td></tr>
-          <tr><td>FIRESTORE_COLLECTION</td><td>api_keys</td><td>Firestore collection for API keys</td></tr>
-          <tr><td>FIRESTORE_STUB</td><td>false</td><td>Use local filesystem instead of Firestore (for testing)</td></tr>
-          <tr><td>DOCPARSE_OUTPUT_DIR</td><td>docparse/data</td><td>Output directory for parsed results</td></tr>
-          <tr><td>ANTHROPIC_API_KEY</td><td>(empty)</td><td>Anthropic API key for Claude models</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Capability Budgets</h3>
-      <p>AILANG enforces hard limits on what each request can do. These are compile-time guarantees &mdash; exceed them and the runtime halts deterministically.</p>
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>Capability</th><th>Budget</th><th>Purpose</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>IO @limit</td><td>50,000</td><td>Console output operations</td></tr>
-          <tr><td>FS @limit</td><td>5,000</td><td>File system reads (ZIP entries, output writes)</td></tr>
-          <tr><td>AI @limit</td><td>30</td><td>AI model calls (PDF pages, image descriptions)</td></tr>
-          <tr><td>Net</td><td>unlimited</td><td>HTTP requests (Firestore, metadata server)</td></tr>
-          <tr><td>Rand</td><td>unlimited</td><td>Random number generation (API key generation)</td></tr>
-          <tr><td>Clock</td><td>unlimited</td><td>Timestamp access</td></tr>
-        </tbody>
-      </table>
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Explore AILANG:</strong> Run <code>ailang prompt</code> for the full language reference, or visit <a href="https://ailang.sunholo.com" style="color:var(--dp-blue);font-weight:600">ailang.sunholo.com</a> for documentation, examples, and the package registry.</div>
+      </div>
 
       <h2 id="ai-models">AI Models</h2>
       <p>AILANG Parse uses AI for PDFs, images, audio, and video. Office formats (DOCX, PPTX, XLSX, etc.) are parsed deterministically with zero AI calls.</p>
@@ -190,6 +334,65 @@ ailang run --entry main --caps IO,FS,Env,AI \
         <div><strong>Recommended model:</strong> <code>gemini-2.5-flash</code> &mdash; best balance of accuracy (92% on PDF benchmark) and speed. Ollama models score lower (0-3%) due to structured JSON output limitations.</div>
       </div>
 
+      <h2 id="sdks">SDKs (API, not local)</h2>
+      <p>The Python, JavaScript, and Go SDKs connect to the <strong>hosted API</strong> &mdash; they don't run parsing locally. Use them when you want zero-maintenance scaling without installing AILANG.</p>
+
+      <pre><code class="language-bash"># Python
+pip install ailang-parse
+
+# JavaScript / TypeScript
+npm install @ailang/parse
+
+# Go
+go get github.com/sunholo-data/ailang-parse-go</code></pre>
+
+      <p>Example (Python):</p>
+      <pre><code class="language-python">from ailang_parse import AilangParse
+
+client = AilangParse()
+result = client.parse("report.docx")
+print(result.markdown)</code></pre>
+
+      <p>SDKs include a free tier (60 requests/day, 500 pages/month). See the <a href="api.html" style="color:var(--dp-blue);font-weight:600">API documentation</a> for full details, authentication, and pricing.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Local vs API:</strong> For local parsing with full control, use the AILANG CLI described above. For programmatic integration without managing infrastructure, use the SDKs.</div>
+      </div>
+
+      <h2 id="config">Configuration</h2>
+      <p>Local parsing is configured via environment variables and AILANG capability budgets.</p>
+
+      <h3>Environment Variables</h3>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>GOOGLE_API_KEY</td><td>(empty)</td><td>Google AI Studio API key for Gemini models (PDF, image, audio, video parsing)</td></tr>
+          <tr><td>ANTHROPIC_API_KEY</td><td>(empty)</td><td>Anthropic API key for Claude models</td></tr>
+          <tr><td>DOCPARSE_OUTPUT_DIR</td><td>docparse/data</td><td>Output directory for parsed results</td></tr>
+        </tbody>
+      </table>
+
+      <p style="font-size:13px;color:var(--text-secondary)">Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) need no API keys &mdash; parsing is fully deterministic and offline.</p>
+
+      <h3>Capability Budgets</h3>
+      <p>AILANG enforces hard limits on what each program can do. These are compile-time guarantees &mdash; exceed them and the runtime halts deterministically.</p>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Capability</th><th>Budget</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>IO @limit</td><td>50,000</td><td>Console output operations</td></tr>
+          <tr><td>FS @limit</td><td>5,000</td><td>File system reads (ZIP entries, output writes)</td></tr>
+          <tr><td>AI @limit</td><td>30</td><td>AI model calls (PDF pages, image descriptions)</td></tr>
+          <tr><td>Net</td><td>unlimited</td><td>HTTP requests (metadata, AI endpoints)</td></tr>
+          <tr><td>Rand</td><td>unlimited</td><td>Random number generation</td></tr>
+          <tr><td>Clock</td><td>unlimited</td><td>Timestamp access</td></tr>
+        </tbody>
+      </table>
+
       <h2 id="formats">Supported Formats</h2>
       <table class="dp-config-table">
         <thead>
@@ -214,33 +417,27 @@ ailang run --entry main --caps IO,FS,Env,AI \
         </tbody>
       </table>
 
-      <h2 id="docker">Docker API Server</h2>
-      <p>Need to run AILANG Parse as an API server? Use Docker &mdash; no local AILANG installation needed:</p>
-      <pre><code class="language-docker"># Pull and run (when published)
-docker run -p 8080:8080 sunholo/docparse:latest
-
-# Or build from source
+      <h2 id="docker">Docker</h2>
+      <p>Prefer containers? A CLI-only Dockerfile is included in the repository:</p>
+      <pre><code class="language-bash"># Build the image
+git clone https://github.com/sunholo-data/ailang-parse.git
+cd ailang-parse
 docker build -t docparse .
-docker run -p 8080:8080 docparse</code></pre>
 
-      <p>The Docker image includes AILANG and all 31 modules. The API server starts automatically on port 8080.</p>
+# Parse a file (mount your documents into /data)
+docker run -v $(pwd):/data docparse /data/report.docx
 
-      <pre><code class="language-bash"># Test the running container
-curl http://localhost:8080/api/v1/health
-curl http://localhost:8080/api/v1/formats</code></pre>
+# Parse with AI (pass your API key)
+docker run -e GOOGLE_API_KEY="your-key" \
+  -v $(pwd):/data docparse --ai gemini-2.5-flash /data/document.pdf</code></pre>
 
-      <div class="dp-callout">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>For most users, the <a href="api.html" style="color:var(--dp-blue);font-weight:600">hosted API</a> (60 free requests/day) is easier than running Docker. Use Docker when you need unlimited local parsing or air-gapped deployment.</div>
-      </div>
-
-      <h2 id="contact">Enterprise &amp; Custom Deployment</h2>
+      <p>The image builds AILANG from source, installs all dependencies, and uses an <code>ENTRYPOINT</code> for direct CLI parsing. No API server included &mdash; this is for local batch processing in containers.</p>
 
       <div class="dp-callout dp-callout--contact">
         <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
         <div>
-          <strong>Need Cloud Run, Kubernetes, or managed infrastructure?</strong><br>
-          Contact us for a copy of our production deployment infrastructure, or deploy AILANG Parse as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform for enterprise document processing and dedicated support.
+          <strong>Need a managed API with authentication, rate limiting, and SDKs?</strong><br>
+          Use the <a href="api.html" style="color:#8b5cf6;font-weight:600">hosted API</a> (60 free requests/day), or contact us for enterprise deployment on Cloud Run, Kubernetes, or as part of <a href="https://www.sunholo.com/ai-platform.html" style="color:#8b5cf6;font-weight:600">Sunholo Multivac</a> &mdash; our AI platform with dedicated support.
           <br><br>
           <a href="https://www.sunholo.com/contact" style="color:#8b5cf6;font-weight:600;font-family:var(--font-mono);font-size:13px">Contact Sunholo &rarr;</a>
         </div>
@@ -250,19 +447,23 @@ curl http://localhost:8080/api/v1/formats</code></pre>
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I install AILANG Parse?</summary>
-          <div class="dp-faq-answer"><p>Run <code>curl -fsSL https://ailang.sunholo.com/install.sh | bash</code> to install AILANG, then clone the repo and run <code>./bin/docparse</code>. For a Docker API server: <code>docker run -p 8080:8080 sunholo/docparse:latest</code>. Office parsing has zero external dependencies.</p></div>
+          <div class="dp-faq-answer"><p>Run <code>curl -fsSL https://ailang.sunholo.com/install.sh | bash</code> to install AILANG, then <code>ailang install sunholo/ailang_parse</code> to download the parsing package. For the convenience CLI wrapper and test files, clone the repo: <code>git clone https://github.com/sunholo-data/ailang-parse.git</code>.</p></div>
         </details>
         <details>
           <summary>What are the system requirements?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini/Claude, or a local Ollama model.</p></div>
+          <div class="dp-faq-answer"><p>AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini/Claude, or a local Ollama model.</p></div>
         </details>
         <details>
-          <summary>Can I use AILANG Parse as a drop-in replacement for Unstructured?</summary>
-          <div class="dp-faq-answer"><p>Yes. Both the hosted API and Docker server implement the same <code>/general/v0/general</code> endpoint format as Unstructured. Point your existing client at AILANG Parse and Office documents will be parsed with full structural fidelity. See the <a href="integrations.html">integrations page</a> for migration guides.</p></div>
+          <summary>What's the difference between the API and running locally?</summary>
+          <div class="dp-faq-answer"><p>The <a href="api.html">hosted API</a> gives you zero-maintenance scaling with Python, JS, and Go SDKs &mdash; 60 free requests per day included. Running locally gives you unlimited free parsing with full privacy, but requires installing the AILANG CLI. Both produce identical output.</p></div>
         </details>
         <details>
           <summary>Does local parsing require an internet connection?</summary>
           <div class="dp-faq-answer"><p>For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline &mdash; no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline.</p></div>
+        </details>
+        <details>
+          <summary>Can I use AILANG for other projects?</summary>
+          <div class="dp-faq-answer"><p>Yes. AILANG is a general-purpose programming language for AI-powered applications. Once installed, you can build your own tools with capability budgets, formal contracts, and pluggable AI models. Run <code>ailang prompt</code> for the full language reference, or visit <a href="https://ailang.sunholo.com">ailang.sunholo.com</a> to explore the ecosystem.</p></div>
         </details>
       </div>
 
@@ -275,6 +476,7 @@ curl http://localhost:8080/api/v1/formats</code></pre>
 
 <script src="js/components.js"></script>
 <script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
 <script>
 // Sidebar active link tracking on scroll
 (function() {

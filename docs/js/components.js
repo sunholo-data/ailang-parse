@@ -48,7 +48,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
           navLink('index.html', 'Home', 'index') +
           navLink('docs.html', 'Docs', 'docs') +
           navLink('api.html', 'API', 'api') +
-          navLink('selfhost.html', 'Install', 'selfhost') +
+          navLink('selfhost.html', 'Run Locally', 'selfhost') +
           navLink('benchmarks.html', 'Benchmarks', 'benchmarks') +
         '</nav>' +
 
