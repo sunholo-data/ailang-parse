@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Benchmarks — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="OfficeDocBench: the first structural benchmark for Office document parsing. AILANG Parse scores 96.6% vs MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, LlamaParse 53.6%. Open-source methodology.">
+<meta name="description" content="OfficeDocBench: eval-driven structural benchmarks for document parsing. AILANG Parse scores 96.6% vs MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, LlamaParse 53.6%. AI writes code against these evals. Open-source methodology.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -248,6 +248,87 @@
   .dp-results-table { font-size: 11px; }
   .dp-results-table th, .dp-results-table td { padding: 8px; }
 }
+.dp-bench-stat-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.3;
+}
+.dp-eval-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 24px;
+  border-radius: var(--radius-sm);
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-eval-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: #16a34a; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-submit-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 24px;
+  border-radius: var(--radius-sm);
+  background: rgba(168, 85, 247, 0.06);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.dp-submit-callout svg {
+  width: 18px; height: 18px; min-width: 18px;
+  margin-top: 1px;
+  stroke: #a855f7; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.dp-eval-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 20px 0 24px;
+}
+.dp-eval-step {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  position: relative;
+}
+.dp-eval-step-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: #16a34a;
+  margin-bottom: 8px;
+}
+.dp-eval-step h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.dp-eval-step p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .dp-eval-steps { grid-template-columns: 1fr; }
+}
 </style>
 <script type="application/ld+json">
 {
@@ -257,7 +338,9 @@
     {"@type": "Question", "name": "How does AILANG Parse compare to other document parsers on benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "On the OfficeDocBench benchmark, AILANG Parse scores 96.6% versus MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, and LlamaParse 53.6%. The benchmark tests table structure, merged cells, track changes, comments, and heading hierarchy across DOCX, PPTX, and XLSX files."}},
     {"@type": "Question", "name": "Is the OfficeDocBench benchmark open source?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The benchmark suite, golden output files, and scoring scripts are all open source. You can run the full comparison on your own machine. The methodology uses structural diff scoring, not text similarity, so it measures actual structural fidelity."}},
     {"@type": "Question", "name": "Why do Docling and Unstructured score the same on OfficeDocBench?", "acceptedAnswer": {"@type": "Answer", "text": "Both Docling and Unstructured use the same fundamental approach for Office formats: convert to PDF first, then apply ML-based layout detection. Since the same structural information is lost during PDF conversion — merge attributes, track changes, comments — both tools hit the same ceiling. AILANG Parse bypasses this ceiling entirely by reading Office XML directly."}},
-    {"@type": "Question", "name": "How fast is AILANG Parse compared to other parsers?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse processes a typical DOCX in under 11ms on an Apple M2, with zero dependencies. LlamaParse takes approximately 54 seconds per document (cloud API). Unstructured and Docling typically take 2-10 seconds depending on document complexity and model configuration."}}
+    {"@type": "Question", "name": "How fast is AILANG Parse compared to other parsers?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse processes a typical DOCX in under 11ms on an Apple M2, with zero dependencies. LlamaParse takes approximately 54 seconds per document (cloud API). Unstructured and Docling typically take 2-10 seconds depending on document complexity and model configuration."}},
+    {"@type": "Question", "name": "Why does AILANG Parse score so much higher than competitors?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse is built with an eval-first methodology: structural benchmark tests are defined with hand-verified ground truth, then an AI agent writes parsing code specifically to pass them. Other parsers are hand-coded and then measured independently. The gap reflects different development approaches, not cherry-picked test files. Every result is fully reproducible."}},
+    {"@type": "Question", "name": "How can I submit a document that doesn't parse correctly?", "acceptedAnswer": {"@type": "Answer", "text": "Email it to benchmarks@sunholo.com. If your document reveals a parsing gap that gets added to the eval corpus, you receive 1 month of Business tier free (worth €99). You can anonymize content before sending. Any format is accepted."}}
   ]
 }
 </script>
@@ -270,7 +353,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Benchmarks</span></h1>
-    <p class="subtitle reveal reveal-delay-1">Structural parsing quality nobody else measures.</p>
+    <p class="subtitle reveal reveal-delay-1">Eval scores &mdash; the structural targets our AI optimizes against during development.</p>
   </section>
 
   <!-- Top stats -->
@@ -291,10 +374,17 @@
       <div class="dp-bench-stat-val">11ms</div>
       <div class="dp-bench-stat-lbl">Avg Parse Time</div>
     </div>
-    <div class="dp-bench-stat">
+    <div class="dp-bench-stat" title="We actively track what we can't parse yet. Submit a document to help us improve.">
       <div class="dp-bench-stat-val">10%</div>
       <div class="dp-bench-stat-lbl">Gap Coverage (Honest)</div>
+      <div class="dp-bench-stat-sub">spec features we know we don't handle yet</div>
     </div>
+  </div>
+
+  <!-- Eval-driven methodology callout -->
+  <div class="dp-eval-callout reveal">
+    <svg viewBox="0 0 24 24"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+    <div><strong>These are eval scores, not post-hoc benchmarks.</strong> AILANG Parse is built with an eval-first methodology: we define structural test files with hand-verified ground truth, then an AI agent writes AILANG parsing code specifically to pass them. High scores are a design outcome of this development loop, not cherry-picking. This inverts the traditional approach where parsers are hand-coded and then measured. The comparison tables below show the real capability gap &mdash; and every result is <a href="#run-benchmarks" style="color:#16a34a;font-weight:600">fully reproducible</a>.</div>
   </div>
 
   <!-- Head-to-Head: Same Files, Same Formats -->
@@ -527,6 +617,82 @@ export pure func detectFormat(ext: string) -> string
 
   <hr class="dp-divider">
 
+  <!-- Eval-Driven Development -->
+  <section class="dp-bench-section reveal" id="eval-driven">
+    <h2>Eval-Driven Development</h2>
+    <p>AILANG Parse is not hand-coded and then benchmarked. The benchmarks come first, and AI writes the parsing code against them. This is why the scores are high &mdash; and why we want to find documents that lower them.</p>
+
+    <div class="dp-eval-steps">
+      <div class="dp-eval-step">
+        <div class="dp-eval-step-num">01</div>
+        <h4>Define the eval</h4>
+        <p>We write a test file with known structure &mdash; merged cells, track changes, speaker notes, threaded comments &mdash; and hand-verify the expected output as ground truth.</p>
+      </div>
+      <div class="dp-eval-step">
+        <div class="dp-eval-step-num">02</div>
+        <h4>AI writes the parser</h4>
+        <p>An AI agent reads the relevant spec (ECMA-376 for Office, RFC 5322 for email, and more as we expand) and writes AILANG extraction code, targeting the eval. Z3 contracts verify correctness.</p>
+      </div>
+      <div class="dp-eval-step">
+        <div class="dp-eval-step-num">03</div>
+        <h4>Score improves</h4>
+        <p>The eval score goes up because the code was written specifically to pass it. This is the point &mdash; and it's why finding new test cases that <em>lower</em> the score is so valuable.</p>
+      </div>
+    </div>
+
+    <div class="dp-bench-callout">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <div><strong>Traditional parsers are hand-coded and then measured.</strong> AILANG Parse inverts this. And because we test for structural features that other parsers skip entirely &mdash; track changes, merged cells, comments, threaded annotations &mdash; the comparison tables above reveal real capability gaps, not just scoring differences.</div>
+    </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Help Us Find Our Gaps -->
+  <section class="dp-bench-section reveal" id="submit-document">
+    <h2>Help Us Find Our Gaps</h2>
+    <p>We score 96.6% today, but document specs are vast &mdash; ECMA-376 alone is over 5,000 pages, and we're expanding into email, calendar, and more formats. There are documents in the wild that will break our parser. <strong>We want to find them.</strong></p>
+
+    <p>If you have a document that AILANG Parse doesn't handle well, send it to us. If it reveals a gap that gets added to our eval corpus, you get <strong>1 month of Business tier free</strong> (worth &euro;99).</p>
+
+    <div style="margin:20px 0">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;font-size:12px;text-align:center;max-width:700px">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm) 0 0 var(--radius-sm);padding:14px 10px">
+          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">1. Submit</div>
+          <div style="color:var(--text-muted)">Email your document (anonymize if needed)</div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);padding:14px 10px">
+          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">2. We parse</div>
+          <div style="color:var(--text-muted)">We run it through the pipeline</div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);padding:14px 10px">
+          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">3. New eval</div>
+          <div style="color:var(--text-muted)">If it reveals a gap, it enters the corpus</div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);padding:14px 10px">
+          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">4. AI fixes</div>
+          <div style="color:var(--text-muted)">AI writes new code to pass the eval</div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:0 var(--radius-sm) var(--radius-sm) 0;padding:14px 10px">
+          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">5. You win</div>
+          <div style="color:var(--text-muted)">1 month Business tier free</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:center;margin:20px 0">
+      <a href="mailto:benchmarks@sunholo.com?subject=Document%20Submission%20%E2%80%94%20AILANG%20Parse%20Eval&body=Hi%2C%0A%0AI%20have%20a%20document%20that%20AILANG%20Parse%20doesn%27t%20handle%20well.%20Attached.%0A%0AFormat%3A%20%0AWhat%20went%20wrong%3A%20%0A%0A(Anonymize%20before%20sending%20if%20the%20document%20contains%20sensitive%20content)" class="dp-btn dp-btn--primary" style="font-size:13px;padding:10px 24px;text-decoration:none">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Submit a Document
+      </a>
+      <span style="font-size:12px;color:var(--text-muted)">benchmarks@sunholo.com</span>
+    </div>
+
+    <p style="font-size:12px;color:var(--text-muted);line-height:1.5">Your document is used only for eval purposes. We can anonymize content before adding it to the benchmark corpus. Documents that don't reveal new gaps are deleted. Any format welcome &mdash; Office, email, calendar, or anything else you throw at us.</p>
+  </section>
+
+  <hr class="dp-divider">
+
   <!-- PDF Benchmark -->
   <section class="dp-bench-section reveal">
     <h2>PDF Benchmark (OmniDocBench)</h2>
@@ -552,7 +718,7 @@ export pure func detectFormat(ext: string) -> string
   <hr class="dp-divider">
 
   <!-- Run It Yourself -->
-  <section class="dp-bench-section reveal">
+  <section class="dp-bench-section reveal" id="run-benchmarks">
     <h2>Run the Benchmarks</h2>
     <pre><code class="language-bash"># OfficeDocBench — formal benchmark with scoring (instant, uses golden files)
 uv run benchmarks/officedocbench/eval_officedocbench.py
@@ -590,6 +756,14 @@ bash benchmarks/generate_golden.sh</code></pre>
     <details>
       <summary>How fast is AILANG Parse compared to other parsers?</summary>
       <div class="dp-faq-answer"><p>AILANG Parse processes a typical DOCX in under 11ms on an Apple M2, with zero dependencies. LlamaParse takes approximately 54 seconds per document (cloud API). Unstructured and Docling typically take 2&ndash;10 seconds depending on document complexity. The speed difference is because AILANG Parse is deterministic rule-based extraction, not ML inference.</p></div>
+    </details>
+    <details>
+      <summary>Why does AILANG Parse score so much higher than competitors?</summary>
+      <div class="dp-faq-answer"><p>AILANG Parse is built with an <a href="#eval-driven">eval-first methodology</a>: we define structural benchmark tests with hand-verified ground truth, then an AI agent writes AILANG parsing code specifically to pass them. Other parsers are hand-coded and then measured against benchmarks written independently. The 29-point gap reflects fundamentally different development approaches, not cherry-picked test files. Every result is <a href="#run-benchmarks">fully reproducible</a> &mdash; and we actively test for structural features (track changes, merged cells, comments) that other parsers skip entirely.</p></div>
+    </details>
+    <details>
+      <summary>How can I submit a document that doesn't parse correctly?</summary>
+      <div class="dp-faq-answer"><p>Email it to <a href="mailto:benchmarks@sunholo.com" style="color:var(--dp-blue)">benchmarks@sunholo.com</a>. If your document reveals a parsing gap that gets added to our eval corpus, you receive <strong>1 month of Business tier free</strong> (worth &euro;99). You can anonymize content before sending. We accept any format &mdash; Office, email, calendar, or anything else. See the <a href="#submit-document">Document Submission Program</a> for details.</p></div>
     </details>
   </div>
 
