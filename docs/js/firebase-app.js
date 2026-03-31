@@ -67,6 +67,12 @@
     var dashActive = document.getElementById('dashboard-active');
     var signinBtn = document.getElementById('signin-btn');
 
+    // Header auth elements
+    var headerAuth = document.getElementById('header-auth');
+    var headerAvatar = document.getElementById('header-avatar');
+    var headerUserName = document.getElementById('header-user-name');
+    var headerUserEmail = document.getElementById('header-user-email');
+
     if (user) {
       // Signed in — hide any FirebaseUI containers
       if (dashPlaceholder) dashPlaceholder.style.display = 'none';
@@ -80,16 +86,39 @@
       document.querySelectorAll('.dp-firebaseui-container').forEach(function (el) {
         el.style.display = 'none';
       });
+
+      // Show avatar + name in header
+      if (headerAuth) headerAuth.style.display = 'block';
+      if (headerAvatar) {
+        headerAvatar.src = user.photoURL || '';
+        headerAvatar.style.display = user.photoURL ? 'block' : 'none';
+      }
+      if (headerUserName) headerUserName.textContent = user.displayName || user.email || '';
+      if (headerUserEmail) headerUserEmail.textContent = user.email || '';
     } else {
       // Signed out
       if (dashPlaceholder) dashPlaceholder.style.display = 'block';
       if (dashActive) dashActive.style.display = 'none';
       if (signinBtn) signinBtn.style.display = 'inline-flex';
+
+      // Hide header auth
+      if (headerAuth) {
+        headerAuth.style.display = 'none';
+        headerAuth.classList.remove('open');
+      }
     }
 
     // Dispatch event for playground and other listeners
     window.dispatchEvent(new CustomEvent('dp-auth-change', { detail: { user: user } }));
   }
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', function (e) {
+    var headerAuth = document.getElementById('header-auth');
+    if (headerAuth && !headerAuth.contains(e.target)) {
+      headerAuth.classList.remove('open');
+    }
+  });
 
   // ── Sign In (renders FirebaseUI into the nearest container) ──
   window.dpSignIn = function () {

@@ -52,11 +52,23 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
           navLink('benchmarks.html', 'Benchmarks', 'benchmarks') +
         '</nav>' +
 
-        // Right-side links
+        // Right-side links + auth
         '<div class="header-right">' +
           '<a href="https://www.sunholo.com/" target="_blank" rel="noopener">' +
             '<img src="img/sunholo-logo.svg" alt="" width="14" height="14" style="vertical-align:-2px;margin-right:3px">sunholo.com' +
           '</a>' +
+          '<div id="header-auth" class="dp-header-auth" style="display:none">' +
+            '<button class="dp-header-auth-btn" onclick="document.getElementById(\'header-auth\').classList.toggle(\'open\')">' +
+              '<img id="header-avatar" class="dp-header-avatar" src="" alt="">' +
+              '<span id="header-user-name" class="dp-header-user-name"></span>' +
+              '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="2,4 5,7 8,4"/></svg>' +
+            '</button>' +
+            '<div class="dp-header-auth-menu">' +
+              '<div id="header-user-email" class="dp-header-auth-email"></div>' +
+              '<a href="dashboard.html" class="dp-header-auth-item">Dashboard</a>' +
+              '<button class="dp-header-auth-item" onclick="dpSignOut()">Sign out</button>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
 
         // Mobile hamburger
