@@ -1,4 +1,7 @@
-/** AILANG Parse key management — generate, list, revoke, rotate, usage. */
+/** AILANG Parse key management — list, revoke, rotate, usage.
+ *
+ * To generate a new key, use `client.deviceAuth({ label: "my-agent" })`.
+ */
 
 import type { KeyInfo, UsageInfo } from "./types.js";
 import type { DocParse } from "./client.js";
@@ -8,22 +11,6 @@ export class KeyManager {
 
   constructor(client: DocParse) {
     this.client = client;
-  }
-
-  /**
-   * Generate a new API key via the device auth flow.
-   * Note: Direct key generation endpoint has been removed (v0.10.0).
-   * Use the device auth flow instead:
-   *   1. POST /api/v1/auth/device → get device_code + user_code
-   *   2. POST /api/v1/auth/device/approve (with Firebase Bearer token)
-   *   3. POST /api/v1/auth/device/poll → get api_key
-   * @deprecated Use DeviceAuth flow instead
-   */
-  async generate(_label = "default", _userId = ""): Promise<KeyInfo> {
-    throw new Error(
-      "Direct key generation removed in v0.10.0. Use device auth flow: " +
-      "POST /api/v1/auth/device → approve → poll"
-    );
   }
 
   /** List API keys for a user. */

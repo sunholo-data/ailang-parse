@@ -36,6 +36,88 @@ export class DocParse {
     return this._call("GET", "/api/v1/formats") as Promise<FormatsResult>;
   }
 
+  /**
+   * Run the device authorization flow (RFC 8628) to obtain an API key.
+   *
+   * Requests a device code, prints the verification URL, then polls until
+   * the user approves. On success the key is stored on this client instance.
+   *
+   * @param label - Key label (default: "default")
+   * @param scope - Access scope (default: "parse")
+   * @param pollInterval - Override poll interval in ms (default: from server)
+   * @param timeout - Max time to wait in ms (default: 900000 = 15 min)
+   * @returns Object with api_key, key_id, tier, label
+   */
+  async deviceAuth(opts?: {
+    label?: string;
+    scope?: string;
+    pollInterval?: number;
+    timeout?: number;
+  }): Promise<{ api_key: string; key_id: string; tier: string; label: string }> {
+    const label = opts?.label || "default";
+    const scope = opts?.scope || "parse";
+    const timeout = opts?.timeout || 900_000;
+
+    // 1. Request device code (unauthenticated)
+    const resp = await fetch(this.baseUrl + "/api/v1/auth/device", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, scope }),
+    });
+    if (!resp.ok) throw new DocParseError(`Device auth request failed: ${resp.status}`, resp.status);
+    const data = this._unwrap(await resp.json());
+
+    const deviceCode = data.device_code;
+    const userCode = data.user_code;
+    const url = data.verification_url || "";
+    const interval = opts?.pollInterval || (data.interval || 5) * 1000;
+
+    // 2. Print instructions
+    console.log(`\n  Authorize this device:`);
+    console.log(`  ${url}`);
+    console.log(`  Code: ${userCode}\n`);
+
+    // 3. Poll until approved or timeout
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, interval));
+      const pollResp = await fetch(this.baseUrl + "/api/v1/auth/device/poll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceCode }),
+      });
+      const pollData = this._unwrap(await pollResp.json());
+
+      if (pollData.status === "approved" && pollData.api_key) {
+        this.apiKey = pollData.api_key;
+        return {
+          api_key: pollData.api_key,
+          key_id: pollData.key_id || "",
+          tier: pollData.tier || "free",
+          label: pollData.label || label,
+        };
+      }
+
+      const err = pollData.error || "";
+      if (err && err !== "AUTHORIZATION_PENDING") {
+        throw new DocParseError(pollData.message || err);
+      }
+    }
+    throw new DocParseError("Device authorization timed out");
+  }
+
+  /** Unwrap serve-api response envelope. */
+  private _unwrap(outer: any): any {
+    if (outer.error) throw new DocParseError(outer.error);
+    const resultStr = outer.result || "";
+    if (!resultStr) return outer;
+    try {
+      return JSON.parse(resultStr);
+    } catch {
+      return { raw: resultStr };
+    }
+  }
+
   /** Internal: make an API call and unwrap the serve-api response envelope. */
   async _call(method: string, path: string, args?: string[]): Promise<any> {
     const url = this.baseUrl + path;
@@ -63,16 +145,7 @@ export class DocParse {
 
       const outer = await resp.json();
 
-      if (outer.error) throw new DocParseError(outer.error);
-
-      const resultStr = outer.result || "";
-      if (!resultStr) return outer;
-
-      try {
-        return JSON.parse(resultStr);
-      } catch {
-        return { raw: resultStr };
-      }
+      return this._unwrap(outer);
     } finally {
       clearTimeout(timer);
     }

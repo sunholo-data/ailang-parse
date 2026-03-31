@@ -7,21 +7,10 @@ import (
 )
 
 // KeyManager provides API key management methods.
+//
+// To generate a new key, use client.DeviceAuth(ctx, "my-agent").
 type KeyManager struct {
 	client *Client
-}
-
-// Generate is deprecated. Direct key generation was removed in v0.10.0.
-// Use the device auth flow instead:
-//  1. POST /api/v1/auth/device       → get device_code + user_code
-//  2. POST /api/v1/auth/device/approve (with Firebase Bearer token)
-//  3. POST /api/v1/auth/device/poll   → get api_key
-//
-// Deprecated: Use DeviceAuth methods instead.
-func (km *KeyManager) Generate(ctx context.Context, label, userID string) (*KeyInfo, error) {
-	return nil, fmt.Errorf(
-		"direct key generation removed in v0.10.0; use device auth flow: " +
-			"POST /api/v1/auth/device → approve → poll")
 }
 
 // List returns API keys for a user.

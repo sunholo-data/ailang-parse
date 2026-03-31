@@ -1,4 +1,4 @@
-"""AILANG Parse key management — generate, list, revoke, rotate, usage."""
+"""AILANG Parse key management — list, revoke, rotate, usage."""
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
@@ -9,24 +9,13 @@ if TYPE_CHECKING:
 
 
 class KeyManager:
-    """API key management. Access via ``client.keys``."""
+    """API key management. Access via ``client.keys``.
+
+    To generate a new key, use ``client.device_auth(label="my-agent")``.
+    """
 
     def __init__(self, client: "DocParse"):
         self._client = client
-
-    def generate(self, label: str = "default", user_id: str = "", auth_token: str = "") -> KeyInfo:
-        """Generate a new API key.
-
-        .. deprecated:: 0.10.0
-            Direct key generation removed. Use the device auth flow instead:
-            1. POST /api/v1/auth/device → get device_code + user_code
-            2. POST /api/v1/auth/device/approve (with Firebase Bearer token)
-            3. POST /api/v1/auth/device/poll → get api_key
-        """
-        raise NotImplementedError(
-            "Direct key generation removed in v0.10.0. Use device auth flow: "
-            "POST /api/v1/auth/device → approve → poll"
-        )
 
     def list(self, user_id: str = "", auth_token: str = "") -> dict:
         """List API keys for a user."""
