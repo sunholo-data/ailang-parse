@@ -16,6 +16,8 @@
 <link rel="stylesheet" href="css/design-system.css">
 <link rel="stylesheet" href="css/docparse.css">
 <link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css">
 <style>
 /* ---- API page specifics ---- */
@@ -748,7 +750,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">Build With AILANG <span class="dp-accent">Parse</span></h1>
-    <p class="subtitle reveal reveal-delay-1">Parse 13 formats, generate 9 &mdash; one API, zero dependencies. 60 requests/day free, no signup required.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse <span data-dp="formats.input_count">13</span> formats, generate <span data-dp="formats.output_count">9</span> &mdash; one API, zero dependencies. <span data-dp="pricing.tiers.free.requests_per_day">60</span> requests/day free, no signup required.</p>
     <div class="dp-hero-ctas reveal reveal-delay-2">
       <a id="dp-swagger-link" href="#" target="_blank" class="dp-btn dp-btn--secondary">API Capabilities &rarr;</a>
       <a id="dp-health-link" href="#" target="_blank" class="dp-btn dp-btn--ghost">Health Check</a>
@@ -803,7 +805,7 @@
   <!-- Quick Start -->
   <section class="dp-api-section reveal">
     <h2>Quick Start</h2>
-    <pre><code class="language-bash">curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
+    <pre><code class="language-bash" data-src="examples/api/curl-parse.sh">curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_docx_basic","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
     <p style="font-size:13px;color:var(--text-muted)">No file to upload — use any of 15 built-in <code>sample_*</code> IDs to test immediately. <a href="#agent-guide" style="color:var(--dp-blue)">See full agent guide below</a>.</p>
@@ -1080,7 +1082,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
       <pre><code class="language-bash">curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/estimate \
   -H "Content-Type: application/json" \
   -d '{"filepath":"data/test_files/sample.docx","outputFormat":"markdown"}'
-# Returns: {"estimated_credits":1, "format":"docx", "ai_required":false, "estimated_ms":15}</code></pre>
+# Returns: {"format":"zip-office", "strategy":"deterministic", "ai_required":false, "estimated_ms":15}</code></pre>
 
       <!-- Step 5 -->
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 5: Parse a Document</h3>
@@ -1107,7 +1109,9 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pars
         </tr></thead>
         <tbody>
           <tr><td style="padding:4px 8px">INVALID_API_KEY</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">Key missing, malformed, or revoked</td></tr>
-          <tr><td style="padding:4px 8px">QUOTA_EXCEEDED</td><td style="padding:4px 8px">Yes (after reset)</td><td style="padding:4px 8px">Daily or monthly limit hit</td></tr>
+          <tr><td style="padding:4px 8px">QUOTA_EXCEEDED</td><td style="padding:4px 8px">Yes (after reset)</td><td style="padding:4px 8px">Daily or monthly request limit hit</td></tr>
+          <tr><td style="padding:4px 8px">AI_QUOTA_EXCEEDED</td><td style="padding:4px 8px">Yes (after reset)</td><td style="padding:4px 8px">Monthly AI parse limit hit</td></tr>
+          <tr><td style="padding:4px 8px">FILE_TOO_LARGE</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">File exceeds format-specific size limit</td></tr>
           <tr><td style="padding:4px 8px">INPUT_NOT_FOUND</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">File path doesn't exist</td></tr>
           <tr><td style="padding:4px 8px">UNSUPPORTED_FORMAT</td><td style="padding:4px 8px">No</td><td style="padding:4px 8px">File extension not recognized</td></tr>
           <tr><td style="padding:4px 8px">PARSE_FAILED</td><td style="padding:4px 8px">Maybe</td><td style="padding:4px 8px">Corrupt or empty file</td></tr>
@@ -1127,23 +1131,23 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pars
 6. Verify response has request_id in meta (confirms v0.9.0 API)
 7. Monitor meta.quota_remaining between requests</code></pre>
 
-      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Credit Costs</h3>
+      <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Format Categories</h3>
       <table style="width:100%;font-size:12px;font-family:var(--font-mono);border-collapse:collapse;margin:12px 0">
         <thead><tr style="border-bottom:1px solid var(--border)">
-          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Operation</th>
-          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Credits</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Format</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Type</th>
           <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Speed</th>
         </tr></thead>
         <tbody>
-          <tr><td style="padding:4px 8px">Office (DOCX, PPTX, XLSX, OD*)</td><td style="padding:4px 8px">1</td><td style="padding:4px 8px">&lt;15ms deterministic</td></tr>
-          <tr><td style="padding:4px 8px">Text (HTML, MD, CSV, EPUB)</td><td style="padding:4px 8px">1</td><td style="padding:4px 8px">&lt;15ms deterministic</td></tr>
-          <tr><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">3</td><td style="padding:4px 8px">~2s (AI)</td></tr>
-          <tr><td style="padding:4px 8px">Image (PNG, JPG, etc.)</td><td style="padding:4px 8px">3</td><td style="padding:4px 8px">~2s (AI)</td></tr>
-          <tr><td style="padding:4px 8px">Audio (MP3, WAV)</td><td style="padding:4px 8px">5</td><td style="padding:4px 8px">~5s (AI)</td></tr>
-          <tr><td style="padding:4px 8px">Video (MP4)</td><td style="padding:4px 8px">10</td><td style="padding:4px 8px">~10s (AI)</td></tr>
+          <tr><td style="padding:4px 8px">Office (DOCX, PPTX, XLSX, OD*)</td><td style="padding:4px 8px">Deterministic</td><td style="padding:4px 8px">&lt;15ms</td></tr>
+          <tr><td style="padding:4px 8px">Text (HTML, MD, CSV, EPUB)</td><td style="padding:4px 8px">Deterministic</td><td style="padding:4px 8px">&lt;15ms</td></tr>
+          <tr><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~2s</td></tr>
+          <tr><td style="padding:4px 8px">Image (PNG, JPG, etc.)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~1.5s</td></tr>
+          <tr><td style="padding:4px 8px">Audio (MP3, WAV)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~5s</td></tr>
+          <tr><td style="padding:4px 8px">Video (MP4)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~10s</td></tr>
         </tbody>
       </table>
-      <p>Free tier: 60 requests/day, 500 pages/month. <a href="https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pricing" style="color:var(--dp-blue)">GET /api/v1/pricing</a> for full tier details.</p>
+      <p>Deterministic formats have zero AI cost and are unlimited within your request quota. AI formats count against your monthly AI parse limit with per-format file size caps. Free tier: <span data-dp="pricing.tiers.free.requests_per_month">500</span> requests/month + <span data-dp="pricing.tiers.free.ai_requests_per_month">50</span> AI parses. <a href="https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pricing" style="color:var(--dp-blue)">GET /api/v1/pricing</a> for full tier details.</p>
 
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Runnable Examples</h3>
       <pre><code class="language-bash"># Quickstart: auth + first parse in one command
@@ -1192,7 +1196,7 @@ DOCPARSE_API_KEY=dp_... bash examples/agent_workflow.sh</code></pre>
         <span class="dp-lang-tab" onclick="switchLang(this,'sdk')">Go</span>
       </div>
       <div class="dp-lang-panel active" data-group="sdk" data-lang="Python">
-        <pre><code class="language-python">from ailang_parse import DocParse
+        <pre><code class="language-python" data-src="examples/sdk/quickstart.py">from ailang_parse import DocParse
 
 client = DocParse(api_key="dp_your_key_here")
 
@@ -1211,7 +1215,7 @@ client = UnstructuredClient(server_url="https://ailang-dev-docparse-api-...")
 elements = client.general.partition(file="report.docx")</code></pre>
       </div>
       <div class="dp-lang-panel" data-group="sdk" data-lang="JavaScript">
-        <pre><code class="language-javascript">import { DocParse } from '@ailang/parse';
+        <pre><code class="language-javascript" data-src="examples/sdk/quickstart.js">import { DocParse } from '@ailang/parse';
 
 const client = new DocParse({ apiKey: 'dp_your_key_here' });
 
@@ -1228,7 +1232,7 @@ const uc = new UnstructuredClient({ serverUrl: 'https://ailang-dev-docparse-api-
 const elements = await uc.general.partition({ file: 'report.docx' });</code></pre>
       </div>
       <div class="dp-lang-panel" data-group="sdk" data-lang="Go">
-        <pre><code class="language-go">client := docparse.New("dp_your_key_here")
+        <pre><code class="language-go" data-src="examples/sdk/quickstart.go">client := docparse.New("dp_your_key_here")
 
 result, err := client.Parse(ctx, "report.docx")
 for _, block := range result.Blocks {
@@ -1261,7 +1265,7 @@ elements, _ := uc.Partition(ctx, "report.docx")</code></pre>
     </details>
     <details>
       <summary>Does the AILANG Parse API require an API key?</summary>
-      <div class="dp-faq-answer"><p>The Free tier provides 60 requests/day without an API key for quick testing. For production use, generate an API key via the <a href="dashboard.html">dashboard</a> or the device auth flow (<code>/api/v1/auth/device</code>). Pro and Business tiers increase limits to 10,000 and 50,000 pages/month respectively.</p></div>
+      <div class="dp-faq-answer"><p>Yes, all parse requests require an API key. The Free tier provides <span data-dp="pricing.tiers.free.requests_per_month">500</span> requests/month including <span data-dp="pricing.tiers.free.ai_requests_per_month">50</span> AI parses. Generate a key via the <a href="dashboard.html">dashboard</a> or the device auth flow (<code>/api/v1/auth/device</code>). Pro and Business tiers increase limits to <span data-dp="pricing.tiers.pro.requests_per_month">10,000</span> and <span data-dp="pricing.tiers.business.requests_per_month">50,000</span> requests/month respectively.</p></div>
     </details>
     <details>
       <summary>Can I run AILANG Parse locally instead of using the cloud API?</summary>
@@ -1405,9 +1409,16 @@ function renderFormats(data) {
 var PRICING_LABELS = {
   price_eur: 'Price',
   requests_per_day: 'Requests / day',
-  pages_per_month: 'Pages / month',
-  max_file_size_mb: 'Max file size (MB)',
-  ai_limit_per_request: 'AI pages / request'
+  requests_per_month: 'Requests / month',
+  ai_requests_per_month: 'AI parses / month',
+  max_file_size_mb: 'Max file size (MB)'
+};
+
+var FORMAT_LIMIT_LABELS = {
+  pdf_mb: 'PDF max (MB)',
+  image_mb: 'Image max (MB)',
+  audio_mb: 'Audio max (MB)',
+  video_mb: 'Video max (MB)'
 };
 
 function renderPricing(data) {
@@ -1432,30 +1443,32 @@ function renderPricing(data) {
 
   var limitKeys = Object.keys(PRICING_LABELS);
   limitKeys.forEach(function(key) {
-    if (key === 'price_eur') return; // Already in header
+    if (key === 'price_eur') return;
     html += '<tr><td>' + PRICING_LABELS[key] + '</td>';
     tierNames.forEach(function(name) {
       var val = data.tiers[name][key];
+      if (val === undefined || val === null) { html += '<td>\u2014</td>'; return; }
       var display = val >= 1000000 ? 'Unlimited' : (val >= 1000 ? Math.round(val).toLocaleString() : val);
       html += '<td>' + display + '</td>';
     });
     html += '</tr>';
   });
 
-  // Credits section
-  if (data.credits) {
-    html += '<tr><td colspan="' + (tierNames.length + 1) + '" style="font-weight:700;padding-top:16px">Credits per Operation</td></tr>';
-    for (var op in data.credits) {
-      var label = op.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-      html += '<tr><td>' + escapeHtml(label) + '</td>';
-      tierNames.forEach(function() {
-        html += '<td>' + data.credits[op] + '</td>';
-      });
-      html += '</tr>';
-    }
-  }
+  // Per-format AI file size limits
+  html += '<tr><td colspan="' + (tierNames.length + 1) + '" style="font-weight:700;padding-top:16px">AI Format File Size Limits</td></tr>';
+  var fmtKeys = Object.keys(FORMAT_LIMIT_LABELS);
+  fmtKeys.forEach(function(key) {
+    html += '<tr><td>' + FORMAT_LIMIT_LABELS[key] + '</td>';
+    tierNames.forEach(function(name) {
+      var limits = data.tiers[name].ai_file_size_limits;
+      var val = limits ? limits[key] : '\u2014';
+      html += '<td>' + (val != null ? val : '\u2014') + '</td>';
+    });
+    html += '</tr>';
+  });
 
   html += '</tbody></table>';
+  html += '<p style="font-size:12px;color:var(--text-muted);margin-top:8px"><strong>Need higher limits?</strong> <a href="https://www.sunholo.com/contact" style="color:var(--dp-blue)">Get in touch</a> for custom pricing. Office formats (DOCX, PPTX, XLSX) are deterministic and unlimited within your request quota.</p>';
   mount.innerHTML = html;
 }
 
@@ -1470,7 +1483,7 @@ function renderBadges(ep) {
     if (ep.cost.unit === 'none') {
       html += '<span class="dp-badge dp-badge-free">free</span>';
     } else {
-      html += '<span class="dp-badge dp-badge-cost">credits</span>';
+      html += '<span class="dp-badge dp-badge-cost">AI</span>';
     }
   }
   if (ep.determinism && ep.determinism.replayable) {

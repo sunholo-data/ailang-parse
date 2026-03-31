@@ -248,7 +248,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
             }
           }
         }
-        if (data.credits) DP_DATA.pricing.credits = data.credits;
+        // credits removed — AI request caps replace them
         // Re-inject data-dp values with live data
         document.querySelectorAll('[data-dp]').forEach(function (el) {
           var val = dpResolve(el.getAttribute('data-dp'));

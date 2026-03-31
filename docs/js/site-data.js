@@ -13,44 +13,36 @@ var DP_DATA = {
       free: {
         price_eur: 0,
         requests_per_day: 60,
-        pages_per_month: 500,
-        max_file_mb: 10,
-        ai_per_request: 5,
-        fs_ops_per_request: 100,
+        requests_per_month: 500,
+        ai_requests_per_month: 50,
+        max_file_size_mb: 10,
+        ai_file_size_limits: { video_mb: 10, audio_mb: 20, pdf_mb: 20, image_mb: 10 },
         concurrent: 1,
         rate_limit: '1 req/s',
         support: 'Community'
       },
       pro: {
         price_eur: 29,
-        requests_per_day: 5000,
-        pages_per_month: 10000,
-        max_file_mb: 50,
-        ai_per_request: 50,
-        fs_ops_per_request: 5000,
+        requests_per_day: 2000,
+        requests_per_month: 10000,
+        ai_requests_per_month: 500,
+        max_file_size_mb: 50,
+        ai_file_size_limits: { video_mb: 20, audio_mb: 50, pdf_mb: 50, image_mb: 20 },
         concurrent: 5,
         rate_limit: '10 req/s',
         support: 'Email'
       },
       business: {
         price_eur: 99,
-        requests_per_day: -1,
-        pages_per_month: 50000,
-        max_file_mb: 200,
-        ai_per_request: 500,
-        fs_ops_per_request: 50000,
+        requests_per_day: 10000,
+        requests_per_month: 50000,
+        ai_requests_per_month: 1000,
+        max_file_size_mb: 200,
+        ai_file_size_limits: { video_mb: 40, audio_mb: 100, pdf_mb: 100, image_mb: 30 },
         concurrent: 20,
         rate_limit: '100 req/s',
         support: 'Dedicated'
       }
-    },
-    credits: {
-      office_parse: 1,
-      pdf_parse: 3,
-      image_parse: 3,
-      audio_parse: 5,
-      video_parse: 10,
-      document_generate: 10
     }
   },
   formats: {
