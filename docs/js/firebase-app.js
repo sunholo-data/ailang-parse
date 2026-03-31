@@ -31,13 +31,27 @@
   // ── FirebaseUI Config ──
   // Add providers here to show them in the sign-in widget.
   // Enable matching providers in Firebase Console → Authentication → Sign-in method.
+  // For email link: also enable "Email link (passwordless sign-in)" in the console.
   function getUiConfig() {
+    // The URL Firebase sends in the magic link email — user lands back here
+    var emailLinkUrl = window.location.origin + window.location.pathname;
+
     return {
       signInFlow: 'popup',
       signInOptions: [
         firebase.auth.GoogleAuthProvider.PROVIDER_ID,
         firebase.auth.GithubAuthProvider.PROVIDER_ID,
-        firebase.auth.EmailAuthProvider.PROVIDER_ID
+        {
+          provider: firebase.auth.EmailAuthProvider.PROVIDER_ID,
+          signInMethod: firebase.auth.EmailAuthProvider.EMAIL_LINK_SIGN_IN_METHOD,
+          forceSameDevice: false,
+          emailLinkSignIn: function () {
+            return {
+              url: emailLinkUrl,
+              handleCodeInApp: true
+            };
+          }
+        }
       ],
       callbacks: {
         signInSuccessWithAuthResult: function () { return false; } // stay on page
@@ -55,6 +69,19 @@
       app = firebase.initializeApp(firebaseConfig);
       auth = firebase.auth();
       auth.onAuthStateChanged(onAuthChange);
+
+      // Handle email link sign-in callback (user clicked magic link)
+      if (firebase.auth().isSignInWithEmailLink(window.location.href)) {
+        var email = window.localStorage.getItem('emailForSignIn');
+        if (!email) {
+          email = window.prompt('Please enter your email to confirm sign-in:');
+        }
+        if (email) {
+          firebase.auth().signInWithEmailLink(email, window.location.href)
+            .then(function () { window.localStorage.removeItem('emailForSignIn'); })
+            .catch(function (err) { console.error('Email link sign-in error:', err); });
+        }
+      }
     } catch (e) {
       console.warn('Firebase init failed:', e.message);
     }
