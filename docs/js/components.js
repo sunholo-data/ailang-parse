@@ -103,6 +103,9 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
 
         // Right-side links + auth
         '<div class="header-right">' +
+          '<a href="https://ailang.sunholo.com/" target="_blank" rel="noopener">' +
+            '<img src="img/ailang-logo.svg" alt="" width="14" height="14" style="vertical-align:-2px;margin-right:3px">AILANG' +
+          '</a>' +
           '<a href="https://www.sunholo.com/" target="_blank" rel="noopener">' +
             '<img src="img/sunholo-logo.svg" alt="" width="14" height="14" style="vertical-align:-2px;margin-right:3px">sunholo.com' +
           '</a>' +
@@ -137,7 +140,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
           '<span>AILANG <span style="color:var(--dp-blue)">Parse</span></span>' +
         '</div>' +
         '<div class="footer-line">' +
-          'Powered by <a href="https://github.com/sunholo-data/ailang">AILANG</a>' +
+          'Powered by <a href="https://ailang.sunholo.com/"><img src="img/ailang-logo.svg" alt="" width="14" height="14" style="vertical-align:-2px;margin-right:3px">AILANG</a>' +
           '<span class="footer-sep"></span>' +
           '<a href="https://www.sunholo.com/">sunholo.com</a>' +
           '<span class="footer-sep"></span>' +
