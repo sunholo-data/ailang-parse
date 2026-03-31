@@ -17,8 +17,8 @@ The WASM and local tiers are inherently private (data never leaves the user's ma
 ## Current State
 
 ### What we do well
-- **No document storage**: Documents are processed in-memory and returned as structured JSON. No files are persisted to GCS or databases.
-- **Regional deployment**: Cloud Run supports EU (`europe-west1`) and US (`us-central1`) regions. We can deploy to either or both.
+- **Minimal document storage**: Documents are processed in-memory. For large PDFs (>500KB), files are temporarily uploaded to a regional GCS bucket for AI processing efficiency, then auto-deleted within 24 hours (GCS lifecycle policy). The application also deletes files immediately after parsing completes.
+- **Regional deployment**: Cloud Run and GCS bucket are co-located in `europe-west1`. US region can be added.
 - **Firebase Auth**: All API keys tied to verified Firebase UIDs since v0.10.0.
 - **Capability budgets**: Hard limits on AI calls, file ops per request — cost-predictable by design.
 - **Request logs**: Capped at 10KB response, 200 entries per user in Firestore.
@@ -62,9 +62,10 @@ client = AilangParse(region="eu")
 
 #### 3. Explicit Retention Policy
 Document and enforce:
-- Request logs: retained 30 days, then auto-deleted (Firestore TTL)
-- API keys: retained until user deletes account
-- No document content retained at any point
+- **Uploaded files** (large PDFs): deleted immediately after parsing, GCS 24-hour lifecycle as safety net
+- **Request logs**: retained 30 days, then auto-deleted (Firestore TTL)
+- **API keys**: retained until user deletes account
+- **Small documents** (<500KB): processed in-memory only, never written to disk or cloud storage
 
 **Effort**: Add Firestore TTL policy + document on website. Half a day.
 
@@ -134,7 +135,8 @@ For enterprise customers who can't use shared infrastructure:
 Add a "Privacy & Trust" section after the SDK section:
 
 **Your data stays yours**
-- Documents processed in-memory, never stored
+- Small documents processed in-memory, never stored
+- Large PDFs temporarily uploaded for AI processing, deleted immediately after parsing (24-hour auto-delete safety net)
 - Regional servers: choose EU or US
 - Request metadata retained 30 days for billing, then deleted
 - No content used for training or analytics
