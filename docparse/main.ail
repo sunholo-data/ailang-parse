@@ -370,14 +370,19 @@ func parsePowerPointDocument(filepath: string, useAI: bool, doSummarize: bool, c
   println("Extracted " ++ show(countBlocks(blocks)) ++ " slide blocks.");
   println("");
 
-  -- Step 2c: Extract embedded images
-  println("Extracting images...");
-  let imageBlocks = parsePptxImages(filepath);
-  println("Found " ++ show(countBlocks(imageBlocks)) ++ " embedded images.");
-  println("");
-
-  -- Combine slide blocks + images
-  let combinedBlocks = concat(blocks, imageBlocks);
+  -- Step 2c: Extract embedded images (only when AI will describe them)
+  let combinedBlocks = if useAI then {
+    println("Extracting images for AI description...");
+    let imageBlocks = parsePptxImages(filepath);
+    println("Found " ++ show(countBlocks(imageBlocks)) ++ " embedded images.");
+    println("");
+    concat(blocks, imageBlocks)
+  } else {
+    let inlineImages = countBlocks(filterImages(blocks));
+    println("Images: " ++ show(inlineImages) ++ " (pass 'describe' arg to extract)");
+    println("");
+    blocks
+  };
 
   -- Step 2d: AI image descriptions (optional)
   let imageCount = countBlocks(filterImages(combinedBlocks));

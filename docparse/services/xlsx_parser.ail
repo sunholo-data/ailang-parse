@@ -3,8 +3,9 @@ module docparse/services/xlsx_parser
 import std/xml (parse, parseElements, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, startsWith, substring)
+import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take)
+import std/array (fromList as arrayFromList, getOpt as arrayGetOpt, length as arrayLength)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry)
 
@@ -27,13 +28,24 @@ import docparse/services/zip_extract (readCoreProperties, findSheetEntries, read
 
 -- Parse all worksheets from an XLSX file
 export func parseXlsx(filepath: string) -> [Block] ! {FS} {
-  -- Load shared strings table
+  -- Load shared strings table (capped at 100K for memory safety)
   let sharedStrings = loadSharedStrings(filepath);
+  let stringCount = arrayLength(sharedStrings);
   -- Get real sheet names from workbook.xml
   let sheetNames = readWorkbookSheetNames(filepath);
   -- Find and parse each sheet
   let sheetEntries = findSheetEntries(filepath);
-  parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames, 0)
+  let sheetBlocks = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames, 0);
+  -- Warn if shared strings were truncated
+  if stringCount == 100000
+  then {
+    let warning = TextBlock({
+      text: "Warning: spreadsheet has more than 100,000 unique text values. Some cell text may be missing. For large datasets, consider CSV format.",
+      style: "warning", level: 0
+    });
+    warning :: sheetBlocks
+  }
+  else sheetBlocks
 }
 
 -- Parse metadata from XLSX (same core.xml format)
@@ -46,15 +58,14 @@ export func parseXlsxMetadata(filepath: string) -> DocMetadata ! {FS} {
 }
 
 -- Load the shared strings table from xl/sharedStrings.xml
-func loadSharedStrings(filepath: string) -> [string] ! {FS} {
+-- Cap at 100K strings to bound memory. Cells referencing strings beyond
+-- the cap get empty text. Remove cap when streaming ZIP/XML lands in stdlib.
+func loadSharedStrings(filepath: string) -> Array[string] ! {FS} {
   let xml = readZipEntry(filepath, "xl/sharedStrings.xml");
-  if length(xml) == 0 then []
-  else match parse(xml) {
-    Ok(root) => {
-      let items = findAll(root, "si");
-      extractSharedStrings(items)
-    },
-    Err(_) => []
+  if length(xml) == 0 then arrayFromList([])
+  else match parseElements(xml, "si", 100000) {
+    Ok(items) => arrayFromList(extractSharedStrings(items)),
+    Err(_) => arrayFromList([])
   }
 }
 
@@ -104,7 +115,7 @@ pure func xlsxGetSheetName(names: [string], idx: int, entry: string) -> string =
   }
 
 -- Parse each sheet entry into blocks, using real sheet names
-func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: [string], names: [string], idx: int) -> [Block] ! {FS} =
+func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Array[string], names: [string], idx: int) -> [Block] ! {FS} =
   match entries {
     [] => [],
     entry :: rest => {
@@ -118,7 +129,7 @@ func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: [s
 
 -- Parse a single worksheet's XML into blocks
 -- Emits a HeadingBlock with the sheet name followed by the table data.
-export pure func parseSheetXml(xml: string, sharedStrings: [string], sheetName: string) -> [Block] {
+export pure func parseSheetXml(xml: string, sharedStrings: Array[string], sheetName: string) -> [Block] {
   if length(xml) == 0 then []
   else {
     -- Use parseElements for streaming: only builds subtrees for <row> elements
@@ -183,20 +194,20 @@ pure func xlsxFormatSheetName(name: string) -> string {
 -- where module-level let bindings used as function args kill codegen)
 
 -- Parse all rows
-pure func parseXlsxRows(rows: [XmlNode], sharedStrings: [string]) -> [[TableCell]] =
+pure func parseXlsxRows(rows: [XmlNode], sharedStrings: Array[string]) -> [[TableCell]] =
   flatMap(\row.
     let cells = parseXlsxRow(row, sharedStrings) in
     if listLength(cells) > 0 then [cells] else [],
     rows)
 
 -- Parse a single row
-pure func parseXlsxRow(row: XmlNode, sharedStrings: [string]) -> [TableCell] {
+pure func parseXlsxRow(row: XmlNode, sharedStrings: Array[string]) -> [TableCell] {
   let cells = findAll(row, "c");
   parseXlsxCells(cells, sharedStrings)
 }
 
 -- Parse all cells in a row
-pure func parseXlsxCells(cells: [XmlNode], sharedStrings: [string]) -> [TableCell]
+pure func parseXlsxCells(cells: [XmlNode], sharedStrings: Array[string]) -> [TableCell]
   ensures { listLength(result) == listLength(cells) }
 {
   map(\cell. parseXlsxCell(cell, sharedStrings), cells)
@@ -204,7 +215,7 @@ pure func parseXlsxCells(cells: [XmlNode], sharedStrings: [string]) -> [TableCel
 
 -- Parse a single cell
 -- Reads t= attribute for type, resolves shared strings
-pure func parseXlsxCell(c: XmlNode, sharedStrings: [string]) -> TableCell {
+pure func parseXlsxCell(c: XmlNode, sharedStrings: Array[string]) -> TableCell {
   let cellType = getCellType(c);
   let text = if cellType == "s" then resolveSharedString(c, sharedStrings)
     else if cellType == "inlineStr" then getInlineString(c)
@@ -219,11 +230,11 @@ pure func getCellType(c: XmlNode) -> string =
   getOrElse(getAttr(c, "t"), "n")
 
 -- Resolve a shared string reference: <v>INDEX</v> -> sharedStrings[INDEX]
-pure func resolveSharedString(c: XmlNode, sharedStrings: [string]) -> string {
+pure func resolveSharedString(c: XmlNode, sharedStrings: Array[string]) -> string {
   match optMap(getText, findFirst(c, "v")) {
     Some(indexStr) =>
       match stringToInt(indexStr) {
-        Some(idx) => getOrElse(nth(sharedStrings, idx), ""),
+        Some(idx) => getOrElse(arrayGetOpt(sharedStrings, idx), ""),
         None => indexStr
       },
     None => ""

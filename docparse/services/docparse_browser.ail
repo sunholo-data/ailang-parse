@@ -18,6 +18,7 @@ import std/math (intToFloat)
 import std/result (Ok, Err)
 import std/option (Some, None, getOrElse, map as optMap)
 import std/list (map)
+import std/array (fromList as arrayFromList)
 import docparse/types/document (Block, TextBlock, SectionBlock, DocMetadata, emptyMetadata,
     countBlocks, filterHeadings, filterTables, filterImages)
 import docparse/services/format_router (detectFormat, getExtension, officeType,
@@ -69,7 +70,7 @@ export pure func parsePptxSlide(slideXml: string) -> string {
 
 -- Parse XLSX shared strings XML into string list, then parse sheet XML
 export pure func parseXlsxSheet(sheetXml: string, sharedStringsXml: string, sheetName: string) -> string {
-  let sharedStrings = parseSharedStringsXml(sharedStringsXml);
+  let sharedStrings = arrayFromList(parseSharedStringsXml(sharedStringsXml));
   let blocks = parseSheetXml(sheetXml, sharedStrings, sheetName);
   encode(ja(blocksToJson(blocks)))
 }

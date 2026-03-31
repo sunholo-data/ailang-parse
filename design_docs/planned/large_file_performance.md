@@ -1,7 +1,7 @@
-# Large File Performance — XLSX & PPTX (Confirmed)
+# Large File Performance — XLSX & PPTX (PPTX Fixed, XLSX Partial)
 
 **Status:** Planned
-**Priority:** P2 (not launch-blocking, but impacts pricing claims)
+**Priority:** P2 (PPTX resolved, XLSX still open)
 **Date:** 2026-03-31
 
 ## Context
@@ -16,10 +16,14 @@ Stress testing with real-world files revealed that DOCX parsing scales well (10 
 | docx_20mb.docx (TestFileHub) | 21 MB | DOCX | 5.1s | Normal | OK |
 | xlsx_usda_food_atlas.xlsx (USDA) | 8.7 MB | XLSX | 4–7 min | 1.1 GB | Problem |
 | poi_many_merges.xlsx | 829 KB | XLSX | OK | OK | OK |
-| pptx_generated_20mb.pptx | 10.8 MB | PPTX | 1m 42s | High | Slow |
-| pptx_generated_50mb.pptx | 50.1 MB | PPTX | Killed (lagging hard) | Very high | Problem |
+| pptx_generated_20mb.pptx | 10.8 MB | PPTX | 1m 42s → **16.6s** | High → Normal | **FIXED** |
+| pptx_generated_50mb.pptx | 50.1 MB | PPTX | SIGKILL → **9.4s** | Very high → Normal | **FIXED** |
 
-The XLSX parser consumed 1.1 GB of RAM during testing, requiring manual `kill`. The PPTX parser completed 60 slides (10.8 MB) in 1m42s but had to be killed on 200 slides (50 MB) due to severe system lag — confirming the recursive slide loading and image extraction issues are real, not theoretical.
+### Fixes Applied (2026-03-31)
+
+**PPTX — RESOLVED:** Conditional image extraction (skip eager base64 when AI disabled) + 500-slide cap. 50 MB / 200 slides now parses in 9.4 seconds.
+
+**XLSX — PARTIAL:** Switched shared strings from `parse()` to `parseElements()` streaming. Avoids DOM overhead but peak memory still ~1.5 GB for 8.7 MB file because 200K+ shared strings must all live in memory for cell index resolution (`nth(sharedStrings, idx)`). Needs deeper fix (see remaining items below).
 
 ## Problem 1: XLSX Shared Strings (Parser)
 
@@ -131,14 +135,15 @@ All images are read into memory as base64. A 50 MB PPTX that's 80% images would 
 
 ## Priority Order
 
-| # | Fix | Impact | Effort | Blocked? |
-|---|-----|--------|--------|----------|
-| 1 | XLSX shared strings streaming | High (fixes OOM) | Medium | No |
-| 2 | PPTX lazy image loading | **High (confirmed OOM)** | Medium | No |
-| 3 | PPTX tail-recursive slides | **High (confirmed)** | Low | No |
-| 4 | XLSX truncation warning | Low (UX) | Low | No |
-| 5 | XLSX generator hashmap | Medium (generator perf) | Medium | Needs std/map |
-| 6 | XLSX row cap increase | Medium | Low | Go codegen bug |
+| # | Fix | Impact | Effort | Status |
+|---|-----|--------|--------|--------|
+| 1 | XLSX shared strings streaming | High | Medium | **Done** (partial — avoids DOM, still high memory) |
+| 2 | PPTX conditional image extraction | **High** | Low | **Done** (50 MB in 9.4s) |
+| 3 | PPTX slide count cap (500) | Safety | Low | **Done** |
+| 4 | XLSX shared string cap/lazy load | High (fixes remaining OOM) | Medium | Open — needs std/map or two-pass |
+| 5 | XLSX truncation warning | Low (UX) | Low | Open |
+| 6 | XLSX generator hashmap | Medium (generator perf) | Medium | Blocked — needs std/map |
+| 7 | XLSX row cap increase | Medium | Low | Blocked — Go codegen bug |
 
 ## Recommendation
 
