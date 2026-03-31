@@ -210,7 +210,7 @@
       return fetch(API_BASE + '/api/v1/auth/device', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ args: [label, 'parse'] })
+        body: JSON.stringify({ label: label, scope: 'parse' })
       });
     }).then(function (r) { return r.json(); })
       .then(function (data) {

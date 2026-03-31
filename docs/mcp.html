@@ -103,13 +103,13 @@ curl -s http://localhost:8080/api/v1/tools | jq '.tools'
 
 # Parse a document (example tool call)
 curl -X POST http://localhost:8080/api/v1/parse \
-  -H "Authorization: Bearer dp_your_api_key_here" \
-  -F "file=@report.docx"
+  -H "Content-Type: application/json" \
+  -d '{"filepath": "report.docx", "apiKey": "dp_your_api_key_here"}'
 
 # Estimate cost before parsing
 curl -X POST http://localhost:8080/api/v1/estimate \
   -H "Content-Type: application/json" \
-  -d '{"filename": "report.docx", "size_bytes": 245000}'</code></pre>
+  -d '{"filepath": "report.docx", "outputFormat": "blocks"}'</code></pre>
 
       <h2 id="available-tools">Available Tools</h2>
       <p>AILANG Parse exposes the following tools via MCP:</p>
@@ -203,12 +203,10 @@ curl -s http://localhost:8080/api/v1/tools?format=mcp | jq '.tools[0]'
 import requests
 
 # Parse a document
-with open("report.docx", "rb") as f:
-    response = requests.post(
-        "http://localhost:8080/api/v1/parse",
-        headers={"Authorization": "Bearer dp_your_api_key_here"},
-        files={"file": f}
-    )
+response = requests.post(
+    "http://localhost:8080/api/v1/parse",
+    json={"filepath": "report.docx", "apiKey": "dp_your_api_key_here"}
+)
 blocks = response.json()</code></pre>
 
       <h3>LangChain / LlamaIndex</h3>
@@ -219,8 +217,7 @@ from langchain.tools import StructuredTool
 ailang_parse = StructuredTool.from_function(
     func=lambda file_path: requests.post(
         "http://localhost:8080/api/v1/parse",
-        headers={"Authorization": "Bearer dp_your_api_key_here"},
-        files={"file": open(file_path, "rb")}
+        json={"filepath": file_path, "apiKey": "dp_your_api_key_here"}
     ).json(),
     name="ailang_parse",
     description="Parse a document into structured blocks"

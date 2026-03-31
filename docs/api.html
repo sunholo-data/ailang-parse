@@ -989,7 +989,7 @@ curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/tools</code>
       <pre><code class="language-bash"># 1. Request a device code
 curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth/device \
   -H "Content-Type: application/json" \
-  -d '{"args":["my-agent","parse"]}'
+  -d '{"label":"my-agent","scope":"parse"}'
 # Returns: device_code, user_code (e.g. ABCD-1234), verification_url
 
 # 2. Display the verification_url to the user. They open it, sign in, click Approve.
@@ -997,7 +997,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
 # 3. Poll every 5 seconds until approved:
 curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth/device/poll \
   -H "Content-Type: application/json" \
-  -d '{"args":["DEVICE_CODE_FROM_STEP_1"]}'
+  -d '{"deviceCode":"DEVICE_CODE_FROM_STEP_1"}'
 # Returns: {"status":"approved", "api_key":"dp_...", "tier":"free"}</code></pre>
       <p>Save the <code>api_key</code> — it won't be shown again. The key persists across sessions.</p>
 
@@ -1566,7 +1566,8 @@ function getAuthHeader(ep) {
   if (!ep.auth || !ep.auth.required) return null;
   if (ep.auth.scheme === 'firebase_bearer') return { name: 'Authorization', value: 'Bearer YOUR_TOKEN' };
   if (ep.id === 'unstructured') return { name: 'unstructured-api-key', value: 'YOUR_KEY' };
-  return { name: 'x-api-key', value: 'YOUR_KEY' };
+  // api_key scheme: key goes in body (handled by buildExampleBody), no header needed
+  return null;
 }
 
 function renderCodeExamples(ep) {
@@ -1925,9 +1926,8 @@ function pgSendGeneric(epId) {
   container.classList.add('visible');
 
   var headers = { 'Content-Type': 'application/json' };
-  if (needsKey) {
-    if (epId === 'unstructured') headers['unstructured-api-key'] = apiKey;
-    else headers['x-api-key'] = apiKey;
+  if (needsKey && epId === 'unstructured') {
+    headers['unstructured-api-key'] = apiKey;
   }
 
   // For Bearer token endpoints, get Firebase ID token first
@@ -1965,8 +1965,7 @@ function pgCopyGeneric(epId, format, btn) {
   var body = pgBuildBody(epId);
   var url = API_BASE + path;
   var ep = dpEndpointMap[epId];
-  var auth = ep ? getAuthHeader(ep) : { name: 'x-api-key', value: apiKey };
-  if (auth) auth.value = apiKey;
+  var auth = ep ? getAuthHeader(ep) : null;
   var text = '';
 
   if (format === 'curl') {
@@ -2137,8 +2136,8 @@ function replayRequest(requestId) {
 
   fetch(API_BASE + '/api/v1/requests/replay', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-    body: JSON.stringify({ request_id: requestId })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId: requestId })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
