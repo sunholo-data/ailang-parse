@@ -15,7 +15,7 @@ var DP_DATA = {
         requests_per_day: 200,
         requests_per_month: 2000,
         ai_requests_per_month: 50,
-        max_file_size_mb: 5,
+        max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 10, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
 
         rate_limit: '1 req/s',
@@ -26,7 +26,7 @@ var DP_DATA = {
         requests_per_day: 2000,
         requests_per_month: 10000,
         ai_requests_per_month: 500,
-        max_file_size_mb: 25,
+        max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 20, audio_mb: 50, pdf_mb: 50, image_mb: 30 },
 
         rate_limit: '10 req/s',
