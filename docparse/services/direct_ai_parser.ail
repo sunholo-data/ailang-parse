@@ -8,12 +8,14 @@ import std/option (Some, None, getOrElse)
 import std/list (map, flatMap, concat, any)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+import pkg/sunholo/gemini_files/upload (uploadFile, deleteFile, UploadedFile)
 
 -- Direct AI Parser for PDF and Image files
 --
--- Uses multimodal AI requests (same pattern as invoice_processor_wasm):
--- encode a JSON request with mode:"multimodal", mimeType, data (base64), and prompt.
--- The AILANG runtime sends file data as a proper multimodal part, not embedded in text.
+-- Uses multimodal AI requests with two strategies:
+--   Small files (< 500KB base64): inline base64 data in each request
+--   Large files (>= 500KB): upload once to GCS/Files API, reference by URI
+-- The AILANG runtime supports both inlineData and fileData parts.
 --
 -- This is the "AI-first" path - the file content IS the AI input.
 -- Budget: AI @limit=N ensures bounded cost.
@@ -24,28 +26,67 @@ pure func pdfMimeType() -> string = "application/pdf"
 -- Parse a PDF file using AI multimodal extraction
 -- Uses page-by-page parsing to avoid output token truncation on multi-page documents.
 -- Each page is extracted separately, then results are concatenated.
-export func parsePdf(filepath: string) -> [Block] ! {FS, AI} {
+-- For large files: uploads once to GCS/Files API, references by URI in all AI calls.
+export func parsePdf(filepath: string) -> [Block] ! {FS, AI, Net, Env} {
   match readFileBytes(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
       else {
-        let pageCount = aiGetPageCount(base64Data, filepath);
-        if pageCount <= 5
-        then aiExtractWithRetry(base64Data, filepath, true, 1)
-        else parsePdfAllPages(base64Data, filepath, 1, pageCount)
+        -- Upload large files for efficiency (avoids re-sending base64 per page)
+        let uploaded = prepareUpload(base64Data, pdfMimeType(), filepath);
+        let fileUri = uploadedUri(uploaded);
+        let pageCount = aiGetPageCount(base64Data, fileUri, filepath);
+        let blocks = if pageCount <= 5
+          then aiExtractWithRetry(base64Data, fileUri, filepath, true, 1)
+          else parsePdfAllPages(base64Data, fileUri, filepath, 1, pageCount);
+        -- Cleanup uploaded file (best-effort; GCS lifecycle policy as safety net)
+        cleanupUpload(uploaded);
+        blocks
       }
   }
 }
 
+-- Upload file if large enough and a backend (GCS or AI Studio) is available.
+-- Returns Ok(UploadedFile) if uploaded, Err if below threshold or unavailable.
+func prepareUpload(base64Data: string, mimeType: string, filepath: string)
+  -> Result[UploadedFile, string] ! {Net, FS, Env} {
+  if length(base64Data) <= 500000 then Err("below threshold")
+  else uploadFile(base64Data, mimeType, filepath)
+}
+
+-- Extract file URI from upload result ("" if not uploaded — use inline base64)
+pure func uploadedUri(uploaded: Result[UploadedFile, string]) -> string =
+  match uploaded {
+    Ok(f) => f.uri,
+    Err(_) => ""
+  }
+
+-- Delete uploaded file. Silent on failure (GCS 1-day lifecycle as safety net).
+func cleanupUpload(uploaded: Result[UploadedFile, string]) -> () ! {Net, FS, Env} =
+  match uploaded {
+    Ok(f) => match deleteFile(f) {
+      Ok(_) => (),
+      Err(_) => ()
+    },
+    Err(_) => ()
+  }
+
+-- Build the source key-value for multimodal requests.
+-- If fileUri is non-empty, use fileUri (file reference); otherwise use inline base64 data.
+pure func sourceKv(base64Data: string, fileUri: string) -> {key: string, value: Json} =
+  if length(fileUri) > 0
+  then kv("fileUri", js(fileUri))
+  else kv("data", js(base64Data))
+
 -- Validate-and-retry: extract PDF content, retry once if output looks bad.
 -- Checks: non-empty result, no ai-raw fallbacks, no empty list items.
 -- At most 1 retry (2 total calls) to stay within AI budget.
-func aiExtractWithRetry(base64Data: string, filepath: string, singlePage: bool, retriesLeft: int) -> [Block] ! {AI} {
-  let blocks = parsePdfOnePage(base64Data, filepath, 1, singlePage);
+func aiExtractWithRetry(base64Data: string, fileUri: string, filepath: string, singlePage: bool, retriesLeft: int) -> [Block] ! {AI} {
+  let blocks = parsePdfOnePage(base64Data, fileUri, filepath, 1, singlePage);
   if aiIsValidExtraction(blocks) then blocks
   else if retriesLeft <= 0 then blocks
-  else aiExtractWithRetry(base64Data, filepath, singlePage, retriesLeft - 1)
+  else aiExtractWithRetry(base64Data, fileUri, filepath, singlePage, retriesLeft - 1)
 }
 
 -- Validation: did the AI produce usable structured output?
@@ -72,11 +113,11 @@ pure func aiIsEmptyList(b: Block) -> bool =
   }
 
 -- Get page count from PDF via lightweight AI call
-func aiGetPageCount(base64Data: string, filepath: string) -> int ! {AI} {
+func aiGetPageCount(base64Data: string, fileUri: string, filepath: string) -> int ! {AI} {
   let request = encode(jo([
     kv("mode", js("multimodal")),
     kv("mimeType", js(pdfMimeType())),
-    kv("data", js(base64Data)),
+    sourceKv(base64Data, fileUri),
     kv("fileName", js(filepath)),
     kv("prompt", js("How many pages does this PDF have? Return ONLY the integer."))
   ]));
@@ -99,17 +140,17 @@ func aiParsePageCountFromText(response: string) -> int {
 }
 
 -- Recursively parse all pages, concatenating blocks
-func parsePdfAllPages(base64Data: string, filepath: string, page: int, totalPages: int) -> [Block] ! {AI} {
+func parsePdfAllPages(base64Data: string, fileUri: string, filepath: string, page: int, totalPages: int) -> [Block] ! {AI} {
   if page > totalPages then []
   else {
-    let pageBlocks = parsePdfOnePage(base64Data, filepath, page, false);
-    let rest = parsePdfAllPages(base64Data, filepath, page + 1, totalPages);
+    let pageBlocks = parsePdfOnePage(base64Data, fileUri, filepath, page, false);
+    let rest = parsePdfAllPages(base64Data, fileUri, filepath, page + 1, totalPages);
     concat(pageBlocks, rest)
   }
 }
 
 -- Parse a single page of a PDF
-func parsePdfOnePage(base64Data: string, filepath: string, page: int, singlePage: bool) -> [Block] ! {AI} {
+func parsePdfOnePage(base64Data: string, fileUri: string, filepath: string, page: int, singlePage: bool) -> [Block] ! {AI} {
   let pageInstruction = if singlePage
     then "Extract ALL content from this entire PDF"
     else "This is a multi-page PDF. Extract ALL content that appears on page " ++ intToStr(page) ++ " only. " ++
@@ -117,7 +158,7 @@ func parsePdfOnePage(base64Data: string, filepath: string, page: int, singlePage
   let request = encode(jo([
     kv("mode", js("multimodal")),
     kv("mimeType", js(pdfMimeType())),
-    kv("data", js(base64Data)),
+    sourceKv(base64Data, fileUri),
     kv("fileName", js(filepath)),
     kv("prompt", js(
       pageInstruction ++ " Return a JSON array of blocks. " ++
