@@ -1422,15 +1422,19 @@ var FORMAT_LIMIT_LABELS = {
 };
 
 // Merge API pricing data into DP_DATA, keeping static fallbacks for missing fields.
+// Maps legacy "enterprise" tier name to "business".
 function mergePricing(apiData) {
   if (!apiData || !apiData.tiers) return;
   var local = (typeof DP_DATA !== 'undefined' && DP_DATA.pricing) ? DP_DATA.pricing.tiers : {};
   for (var name in apiData.tiers) {
-    if (!local[name]) local[name] = {};
+    var target = (name === 'enterprise') ? 'business' : name;
+    if (!local[target]) local[target] = {};
     for (var key in apiData.tiers[name]) {
-      local[name][key] = apiData.tiers[name][key];
+      local[target][key] = apiData.tiers[name][key];
     }
   }
+  // Remove enterprise if it was added before the remap
+  delete local['enterprise'];
 }
 
 function renderPricing(apiData) {

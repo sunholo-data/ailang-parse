@@ -1766,6 +1766,11 @@ details[open] summary svg { transform: rotate(180deg); }
     .then(function (res) {
       var data = (res && res.data) ? res.data : res;
       if (!data || !data.tiers) return;
+      // Map legacy "enterprise" → "business"
+      if (data.tiers['enterprise'] && !data.tiers['business']) {
+        data.tiers['business'] = data.tiers['enterprise'];
+        delete data.tiers['enterprise'];
+      }
       var cards = document.querySelectorAll('#home-pricing-cards [data-tier]');
       cards.forEach(function (card) {
         var tierName = card.getAttribute('data-tier');

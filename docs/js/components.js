@@ -252,12 +252,15 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
       .then(function (data) {
         if (!data || !data.tiers) return;
         // Merge live API values into DP_DATA (static fallbacks remain for missing fields)
+        // Map legacy "enterprise" → "business"
         for (var name in data.tiers) {
-          if (!DP_DATA.pricing.tiers[name]) DP_DATA.pricing.tiers[name] = {};
+          var target = (name === 'enterprise') ? 'business' : name;
+          if (!DP_DATA.pricing.tiers[target]) DP_DATA.pricing.tiers[target] = {};
           for (var key in data.tiers[name]) {
-            DP_DATA.pricing.tiers[name][key] = data.tiers[name][key];
+            DP_DATA.pricing.tiers[target][key] = data.tiers[name][key];
           }
         }
+        delete DP_DATA.pricing.tiers['enterprise'];
         // Re-inject data-dp values with merged data
         injectDataDp();
       })
