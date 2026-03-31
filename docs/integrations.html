@@ -9,7 +9,7 @@
 <meta property="og:title" content="Integrations — AILANG Parse">
 <meta property="og:description" content="Use AILANG Parse alongside Unstructured, Docling, or LlamaParse. Drop-in Unstructured API compatibility. Route Office formats through AILANG Parse, PDFs through your existing pipeline.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://www.sunholo.com/docparse/integrations">
+<meta property="og:url" content="https://www.sunholo.com/docparse/integrations.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -71,7 +71,7 @@
 
       <h3>curl</h3>
       <pre><code class="language-bash"># Same request format as Unstructured API
-curl -X POST http://localhost:8080/general/v0/general \
+curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/general/v0/general \
   -F "files=@report.docx" \
   -H "Accept: application/json"</code></pre>
 
@@ -83,7 +83,7 @@ elements = partition(filename="report.docx")
 # After: AILANG Parse (same API surface)
 import requests
 resp = requests.post(
-    "http://localhost:8080/general/v0/general",
+    "https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/general/v0/general",
     files={"files": open("report.docx", "rb")}
 )
 elements = resp.json()</code></pre>
@@ -103,7 +103,7 @@ elements = resp.json()</code></pre>
       <pre><code class="language-python">import requests
 from pathlib import Path
 
-AILANG_PARSE_URL = "http://localhost:8080"
+AILANG_PARSE_URL = "https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app"
 OFFICE_EXTS = {".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods",
                ".csv", ".html", ".md", ".epub"}
 
@@ -143,7 +143,7 @@ def parse_document(filepath: str) -> dict:
       <pre><code class="language-python">import requests
 from pathlib import Path
 
-AILANG_PARSE_URL = "http://localhost:8080"
+AILANG_PARSE_URL = "https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app"
 OFFICE_EXTS = {".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods",
                ".csv", ".html", ".md", ".epub"}
 
@@ -200,34 +200,37 @@ def parse_document(filepath: str) -> dict:
       </table>
 
       <pre><code class="language-bash"># Health check
-curl http://localhost:8080/api/v1/health
+curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/health
 
 # List supported formats
-curl http://localhost:8080/api/v1/formats
+curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/formats
 
 # Parse a document
-curl -X POST http://localhost:8080/api/v1/parse \
+curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
   -F "file=@report.docx"
 
 # Capability manifest (agent discovery)
-curl http://localhost:8080/api/v1/capabilities</code></pre>
+curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/capabilities</code></pre>
 
       <p>See the <a href="api.html" style="color:var(--dp-blue);font-weight:600">API Reference</a> for the full endpoint documentation, authentication, and OpenAPI spec.</p>
 
       <h2 id="self-hosting">Self-Hosting</h2>
 
-      <p>Run AILANG Parse on your own infrastructure with Docker &mdash; one command to start:</p>
+      <p>Prefer containers? Build and run AILANG Parse locally with Docker for batch CLI processing:</p>
 
-      <pre><code class="language-bash">docker run -p 8080:8080 sunholo/docparse:latest</code></pre>
+      <pre><code class="language-bash"># Build the image
+git clone https://github.com/sunholo-data/ailang-parse.git
+cd ailang-parse
+docker build -t docparse .
 
-      <p>No external dependencies for Office parsing. The Docker image includes AILANG and all 31 modules. Add a <code>GOOGLE_API_KEY</code> environment variable if you need PDF/image parsing via AI.</p>
+# Parse a file (mount your documents into /data)
+docker run -v $(pwd):/data docparse /data/report.docx
 
-      <pre><code class="language-bash"># With AI support for PDFs
-docker run -p 8080:8080 \
-  -e GOOGLE_API_KEY="your-key" \
-  sunholo/docparse:latest</code></pre>
+# Parse with AI (pass your API key)
+docker run -e GOOGLE_API_KEY="your-key" \
+  -v $(pwd):/data docparse --ai gemini-2.5-flash /data/document.pdf</code></pre>
 
-      <p>See the <a href="selfhost.html" style="color:var(--dp-blue);font-weight:600">Self-Host guide</a> for full installation options (CLI, Docker, source), configuration, AI model setup, and capability budgets.</p>
+      <p>The image builds AILANG from source and uses a CLI entrypoint for direct parsing. For REST API access, use the <a href="api.html" style="color:var(--dp-blue);font-weight:600">hosted API</a> with Python, JS, or Go SDKs. See the <a href="selfhost.html" style="color:var(--dp-blue);font-weight:600">Run Locally guide</a> for full installation options.</p>
 
       <div class="dp-faq" id="faq">
         <h2>Frequently Asked Questions</h2>

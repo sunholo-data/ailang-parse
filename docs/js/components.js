@@ -1,10 +1,11 @@
 /**
  * AILANG Parse — API base URL
  * Override via ?api=https://your-endpoint.run.app in the URL.
- * Defaults to the current dev Cloud Run service.
+ * Or change DP_DATA.site.api_url in site-data.js to update all pages at once.
  */
 var _dpParams = (typeof window !== 'undefined') ? new URLSearchParams(window.location.search) : null;
-var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+var _dpApiUrl = (typeof DP_DATA !== 'undefined' && DP_DATA.site && DP_DATA.site.api_url) || null;
+var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
 
 /**
  * AILANG Parse — Shared Components
@@ -113,7 +114,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
             '</button>' +
             '<div class="dp-header-auth-menu">' +
               '<div id="header-user-email" class="dp-header-auth-email"></div>' +
-              '<a href="dashboard.html" class="dp-header-auth-item">Dashboard</a>' +
+              '<a href="/docparse/dashboard.html" class="dp-header-auth-item">Dashboard</a>' +
               '<button class="dp-header-auth-item" onclick="dpSignOut()">Sign out</button>' +
             '</div>' +
           '</div>' +
