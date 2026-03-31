@@ -8,11 +8,59 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
 
 /**
  * AILANG Parse — Shared Components
- * Injects header navigation, footer, scroll-reveal, and output tab logic
+ * Injects header navigation, footer, scroll-reveal, output tab logic,
+ * head normalisation, data-dp value injection, and data-src code loading
  * across all pages. No build step required.
+ *
+ * Requires: site-data.js loaded first (defines DP_DATA, dpResolve, dpFormat).
  */
 (function () {
   'use strict';
+
+  // ── Ensure <head> has OG tags and all CSS files ──
+  (function ensureHead() {
+    var head = document.head;
+    var title = document.title || '';
+    var desc = (document.querySelector('meta[name="description"]') || {}).content || '';
+
+    function ensureMeta(prop, content) {
+      if (!content) return;
+      if (head.querySelector('meta[property="' + prop + '"]')) return;
+      var m = document.createElement('meta');
+      m.setAttribute('property', prop);
+      m.setAttribute('content', content);
+      head.appendChild(m);
+    }
+
+    var site = (typeof DP_DATA !== 'undefined' && DP_DATA.site) || {};
+    var page = location.pathname.split('/').pop() || 'index.html';
+    ensureMeta('og:title', title);
+    ensureMeta('og:description', desc);
+    ensureMeta('og:type', 'website');
+    ensureMeta('og:url', (site.base_url || '') + '/' + page);
+    if (site.og_image) ensureMeta('og:image', site.og_image);
+
+    // Ensure all CSS files are linked
+    var cssFiles = ['design-system.css', 'docparse.css', 'prism.css', 'docs-layout.css', 'components.css'];
+    cssFiles.forEach(function (file) {
+      if (!head.querySelector('link[href$="' + file + '"]')) {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'css/' + file;
+        head.appendChild(link);
+      }
+    });
+  })();
+
+  // ── Inject data-dp values from DP_DATA ──
+  if (typeof DP_DATA !== 'undefined' && typeof dpResolve === 'function') {
+    document.querySelectorAll('[data-dp]').forEach(function (el) {
+      var val = dpResolve(el.getAttribute('data-dp'));
+      if (val !== undefined) {
+        el.textContent = (typeof dpFormat === 'function') ? dpFormat(val) : String(val);
+      }
+    });
+  }
 
   // ── Detect current page for active nav highlighting ──
   var path = window.location.pathname;
@@ -167,5 +215,48 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
     document.querySelectorAll('a[href*="' + DEFAULT_API + '"]').forEach(function (el) {
       el.href = el.href.replace(DEFAULT_API, API_BASE);
     });
+  }
+
+  // ── Load external code examples via data-src ──
+  document.querySelectorAll('code[data-src]').forEach(function (el) {
+    var src = el.getAttribute('data-src');
+    fetch(src)
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.text();
+      })
+      .then(function (text) {
+        el.textContent = text;
+        if (window.Prism) Prism.highlightElement(el);
+      })
+      .catch(function () {
+        // Keep inline fallback content — do nothing
+      });
+  });
+
+  // ── Fetch live pricing to overlay DP_DATA (best-effort) ──
+  if (typeof DP_DATA !== 'undefined' && DP_DATA.pricing) {
+    fetch(API_BASE + '/api/v1/pricing', { signal: AbortSignal.timeout(5000) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.tiers) return;
+        // Update DP_DATA with live values
+        for (var name in data.tiers) {
+          if (DP_DATA.pricing.tiers[name]) {
+            for (var key in data.tiers[name]) {
+              DP_DATA.pricing.tiers[name][key] = data.tiers[name][key];
+            }
+          }
+        }
+        if (data.credits) DP_DATA.pricing.credits = data.credits;
+        // Re-inject data-dp values with live data
+        document.querySelectorAll('[data-dp]').forEach(function (el) {
+          var val = dpResolve(el.getAttribute('data-dp'));
+          if (val !== undefined) {
+            el.textContent = dpFormat(val);
+          }
+        });
+      })
+      .catch(function () { /* API unavailable — static values stand */ });
   }
 })();
