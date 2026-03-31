@@ -234,28 +234,32 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || 'https://ailang-dev-docpar
       });
   });
 
+  // ── Inject data-dp values from static DP_DATA immediately ──
+  function injectDataDp() {
+    document.querySelectorAll('[data-dp]').forEach(function (el) {
+      var val = dpResolve(el.getAttribute('data-dp'));
+      if (val !== undefined && typeof val !== 'object') {
+        el.textContent = dpFormat(val);
+      }
+    });
+  }
+  if (typeof DP_DATA !== 'undefined') injectDataDp();
+
   // ── Fetch live pricing to overlay DP_DATA (best-effort) ──
   if (typeof DP_DATA !== 'undefined' && DP_DATA.pricing) {
     fetch(API_BASE + '/api/v1/pricing', { signal: AbortSignal.timeout(5000) })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data || !data.tiers) return;
-        // Update DP_DATA with live values
+        // Merge live API values into DP_DATA (static fallbacks remain for missing fields)
         for (var name in data.tiers) {
-          if (DP_DATA.pricing.tiers[name]) {
-            for (var key in data.tiers[name]) {
-              DP_DATA.pricing.tiers[name][key] = data.tiers[name][key];
-            }
+          if (!DP_DATA.pricing.tiers[name]) DP_DATA.pricing.tiers[name] = {};
+          for (var key in data.tiers[name]) {
+            DP_DATA.pricing.tiers[name][key] = data.tiers[name][key];
           }
         }
-        // credits removed — AI request caps replace them
-        // Re-inject data-dp values with live data
-        document.querySelectorAll('[data-dp]').forEach(function (el) {
-          var val = dpResolve(el.getAttribute('data-dp'));
-          if (val !== undefined) {
-            el.textContent = dpFormat(val);
-          }
-        });
+        // Re-inject data-dp values with merged data
+        injectDataDp();
       })
       .catch(function () { /* API unavailable — static values stand */ });
   }

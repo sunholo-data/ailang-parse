@@ -1421,7 +1421,22 @@ var FORMAT_LIMIT_LABELS = {
   video_mb: 'Video max (MB)'
 };
 
-function renderPricing(data) {
+// Merge API pricing data into DP_DATA, keeping static fallbacks for missing fields.
+function mergePricing(apiData) {
+  if (!apiData || !apiData.tiers) return;
+  var local = (typeof DP_DATA !== 'undefined' && DP_DATA.pricing) ? DP_DATA.pricing.tiers : {};
+  for (var name in apiData.tiers) {
+    if (!local[name]) local[name] = {};
+    for (var key in apiData.tiers[name]) {
+      local[name][key] = apiData.tiers[name][key];
+    }
+  }
+}
+
+function renderPricing(apiData) {
+  // Merge any live API data into DP_DATA, then render from DP_DATA
+  mergePricing(apiData);
+  var data = (typeof DP_DATA !== 'undefined' && DP_DATA.pricing) ? DP_DATA.pricing : (apiData || {});
   var mount = document.getElementById('pricing-mount');
   if (!mount) return;
   if (!data || !data.tiers) {
@@ -1461,7 +1476,7 @@ function renderPricing(data) {
     html += '<tr><td>' + FORMAT_LIMIT_LABELS[key] + '</td>';
     tierNames.forEach(function(name) {
       var limits = data.tiers[name].ai_file_size_limits;
-      var val = limits ? limits[key] : '\u2014';
+      var val = limits ? limits[key] : null;
       html += '<td>' + (val != null ? val : '\u2014') + '</td>';
     });
     html += '</tr>';
@@ -2408,6 +2423,9 @@ function showFallbacks() {
 }
 
 (function boot() {
+  // Render pricing immediately from static DP_DATA (no API needed)
+  renderPricing(null);
+
   var fetchJson = function(path) {
     return fetch(API_BASE + path).then(function(r) { return r.json(); }).then(unwrapEnvelope);
   };
@@ -2423,6 +2441,7 @@ function showFallbacks() {
       dpSamples = (results[1] && results[1].samples) ? results[1].samples : [];
       renderFormats(results[2]);
       renderEndpoints(results[0]);
+      // Re-render pricing with live API data merged into DP_DATA
       renderPricing(results[3]);
     });
   }
