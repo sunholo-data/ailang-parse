@@ -89,7 +89,7 @@ type FormatsResult struct {
 // Quota contains tier quota limits.
 type Quota struct {
 	RequestsPerDay     int `json:"requestsPerDay"`
-	PagesPerMonth      int `json:"pagesPerMonth"`
+	RequestsPerMonth   int `json:"requestsPerMonth"`
 	AILimitPerRequest  int `json:"aiLimitPerRequest"`
 	FSLimitPerRequest  int `json:"fsLimitPerRequest"`
 }
@@ -108,10 +108,9 @@ type KeyInfo struct {
 
 // Usage contains usage counters.
 type Usage struct {
-	RequestsToday  int `json:"requestsToday"`
-	PagesThisMonth int `json:"pagesThisMonth"`
-	TotalRequests  int `json:"totalRequests"`
-	TotalPages     int `json:"totalPages"`
+	RequestsToday      int `json:"requestsToday"`
+	RequestsThisMonth  int `json:"requestsThisMonth"`
+	TotalRequests      int `json:"totalRequests"`
 }
 
 // UsageInfo is the response from /api/v1/keys/usage.

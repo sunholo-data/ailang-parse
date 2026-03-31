@@ -19,7 +19,7 @@ class AuthError(DocParseError):
 
 
 class QuotaError(DocParseError):
-    """Quota exceeded (daily requests or monthly pages)."""
+    """Quota exceeded (daily or monthly requests)."""
     def __init__(self, message: str, tier: str = "", used: int = 0, limit: int = 0):
         super().__init__(message, 429)
         self.tier = tier
@@ -209,7 +209,7 @@ class FormatsResult:
 @dataclass
 class Quota:
     requests_per_day: int = 0
-    pages_per_month: int = 0
+    requests_per_month: int = 0
     ai_limit_per_request: int = 0
     fs_limit_per_request: int = 0
 
@@ -217,7 +217,7 @@ class Quota:
     def from_dict(cls, d: Dict[str, Any]) -> "Quota":
         return cls(
             requests_per_day=int(d.get("requestsPerDay", 0)),
-            pages_per_month=int(d.get("pagesPerMonth", 0)),
+            requests_per_month=int(d.get("requestsPerMonth", 0)),
             ai_limit_per_request=int(d.get("aiLimitPerRequest", 0)),
             fs_limit_per_request=int(d.get("fsLimitPerRequest", 0)),
         )
@@ -249,17 +249,15 @@ class KeyInfo:
 @dataclass
 class Usage:
     requests_today: int = 0
-    pages_this_month: int = 0
+    requests_this_month: int = 0
     total_requests: int = 0
-    total_pages: int = 0
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Usage":
         return cls(
             requests_today=int(d.get("requestsToday", 0)),
-            pages_this_month=int(d.get("pagesThisMonth", 0)),
+            requests_this_month=int(d.get("requestsThisMonth", 0)),
             total_requests=int(d.get("totalRequests", 0)),
-            total_pages=int(d.get("totalPages", 0)),
         )
 
 

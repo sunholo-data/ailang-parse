@@ -114,7 +114,7 @@ export interface FormatsResult {
 
 export interface Quota {
   requestsPerDay: number;
-  pagesPerMonth: number;
+  requestsPerMonth: number;
   aiLimitPerRequest: number;
   fsLimitPerRequest: number;
 }
@@ -132,9 +132,8 @@ export interface KeyInfo {
 
 export interface Usage {
   requestsToday: number;
-  pagesThisMonth: number;
+  requestsThisMonth: number;
   totalRequests: number;
-  totalPages: number;
 }
 
 export interface UsageInfo {
