@@ -7,12 +7,98 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
 const DefaultBaseURL = "https://api.parse.sunholo.com"
 
+const configDirName = "ailang-parse"
+const credentialsFile = "credentials.json"
+
+// configDir returns the platform-appropriate config directory for AILANG Parse.
+//
+//   - Linux/macOS: $XDG_CONFIG_HOME/ailang-parse or ~/.config/ailang-parse
+//   - Windows: %APPDATA%\ailang-parse
+func configDir() string {
+	if runtime.GOOS == "windows" {
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			home, _ := os.UserHomeDir()
+			base = filepath.Join(home, "AppData", "Roaming")
+		}
+		return filepath.Join(base, configDirName)
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, _ := os.UserHomeDir()
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, configDirName)
+}
+
+// savedCredentials is the on-disk format for stored API keys.
+type savedCredentials struct {
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+	KeyID   string `json:"key_id"`
+	Tier    string `json:"tier"`
+	Label   string `json:"label"`
+}
+
+// loadSavedKey reads stored credentials for the given base URL.
+func loadSavedKey(baseURL string) *savedCredentials {
+	credPath := filepath.Join(configDir(), credentialsFile)
+	data, err := os.ReadFile(credPath)
+	if err != nil {
+		return nil
+	}
+	var cred savedCredentials
+	if err := json.Unmarshal(data, &cred); err != nil {
+		return nil
+	}
+	if len(cred.APIKey) < 3 || cred.APIKey[:3] != "dp_" {
+		return nil
+	}
+	savedBase := cred.BaseURL
+	if savedBase == "" {
+		savedBase = DefaultBaseURL
+	}
+	if savedBase != baseURL {
+		return nil
+	}
+	return &cred
+}
+
+// saveKey persists credentials to disk with restrictive permissions.
+func saveKey(apiKey, baseURL, keyID, tier, label string) error {
+	dir := configDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	cred := savedCredentials{
+		APIKey:  apiKey,
+		BaseURL: baseURL,
+		KeyID:   keyID,
+		Tier:    tier,
+		Label:   label,
+	}
+	data, err := json.MarshalIndent(cred, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(dir, credentialsFile), data, 0600)
+}
+
 // Client is the AILANG Parse API client.
+//
+// API key resolution order:
+//  1. Explicit apiKey parameter to New()
+//  2. DOCPARSE_API_KEY environment variable
+//  3. Saved credentials in ~/.config/ailang-parse/credentials.json
 type Client struct {
 	APIKey  string
 	BaseURL string
@@ -36,6 +122,7 @@ func WithHTTPClient(hc *http.Client) Option {
 }
 
 // New creates a new AILANG Parse client.
+// If apiKey is empty, it checks DOCPARSE_API_KEY env var and then saved credentials.
 func New(apiKey string, opts ...Option) *Client {
 	c := &Client{
 		APIKey:  apiKey,
@@ -47,6 +134,17 @@ func New(apiKey string, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
+
+	// Resolve API key: explicit > env var > saved credentials
+	if c.APIKey == "" {
+		c.APIKey = os.Getenv("DOCPARSE_API_KEY")
+	}
+	if c.APIKey == "" {
+		if saved := loadSavedKey(c.BaseURL); saved != nil {
+			c.APIKey = saved.APIKey
+		}
+	}
+
 	c.Keys = &KeyManager{client: c}
 	return c
 }
@@ -146,6 +244,7 @@ func (c *Client) DeviceAuth(ctx context.Context, label string) (*DeviceAuthResul
 
 			if poll.Status == "approved" && poll.APIKey != "" {
 				c.APIKey = poll.APIKey
+				_ = saveKey(poll.APIKey, c.BaseURL, poll.KeyID, poll.Tier, poll.Label)
 				return &DeviceAuthResult{
 					APIKey: poll.APIKey,
 					KeyID:  poll.KeyID,

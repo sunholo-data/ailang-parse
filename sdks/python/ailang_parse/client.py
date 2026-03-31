@@ -1,8 +1,11 @@
 """AILANG Parse HTTP client — handles API communication and response unwrapping."""
 from __future__ import annotations
 import json
+import os
+import stat
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
@@ -13,16 +16,82 @@ from .types import (
 )
 
 DEFAULT_BASE_URL = "https://api.parse.sunholo.com"
+_CONFIG_DIR_NAME = "ailang-parse"
+_CREDENTIALS_FILE = "credentials.json"
+
+
+def _config_dir() -> Path:
+    """Return the platform-appropriate config directory for AILANG Parse.
+
+    - Linux/macOS: ``$XDG_CONFIG_HOME/ailang-parse`` or ``~/.config/ailang-parse``
+    - Windows: ``%APPDATA%\\ailang-parse``
+    """
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / _CONFIG_DIR_NAME
+
+
+def _load_saved_key(base_url: str) -> Optional[Dict[str, Any]]:
+    """Load saved credentials for *base_url*, or return None."""
+    cred_path = _config_dir() / _CREDENTIALS_FILE
+    if not cred_path.exists():
+        return None
+    try:
+        data = json.loads(cred_path.read_text())
+        if isinstance(data, dict) and data.get("api_key", "").startswith("dp_"):
+            if data.get("base_url", DEFAULT_BASE_URL) == base_url:
+                return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _save_key(
+    api_key: str,
+    base_url: str,
+    key_id: str = "",
+    tier: str = "free",
+    label: str = "",
+) -> None:
+    """Persist credentials to disk with restrictive permissions."""
+    d = _config_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "win32":
+        os.chmod(d, stat.S_IRWXU)  # 0700
+
+    cred_path = d / _CREDENTIALS_FILE
+    payload = {
+        "api_key": api_key,
+        "base_url": base_url,
+        "key_id": key_id,
+        "tier": tier,
+        "label": label,
+    }
+    cred_path.write_text(json.dumps(payload, indent=2) + "\n")
+    if sys.platform != "win32":
+        os.chmod(cred_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
 
 
 class DocParse:
     """AILANG Parse API client.
 
+    API key resolution order:
+
+    1. Explicit ``api_key`` parameter
+    2. ``DOCPARSE_API_KEY`` environment variable
+    3. Saved credentials in ``~/.config/ailang-parse/credentials.json``
+
     Usage::
 
         from ailang_parse import DocParse
 
+        # Explicit key
         client = DocParse(api_key="dp_a1b2c3d4...")
+
+        # Or auto-load from env / saved credentials
+        client = DocParse()
         result = client.parse("report.docx")
         print(result.blocks)
     """
@@ -33,10 +102,19 @@ class DocParse:
         base_url: str = DEFAULT_BASE_URL,
         timeout: int = 60,
     ):
-        self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
+
+        # Resolve API key: explicit > env var > saved credentials
+        if not api_key:
+            api_key = os.environ.get("DOCPARSE_API_KEY", "")
+        if not api_key:
+            saved = _load_saved_key(self.base_url)
+            if saved:
+                api_key = saved["api_key"]
+
+        self.api_key = api_key
         if api_key:
             self._session.headers["x-api-key"] = api_key
 
@@ -119,12 +197,20 @@ class DocParse:
             if poll_data.get("status") == "approved" and poll_data.get("api_key"):
                 self.api_key = poll_data["api_key"]
                 self._session.headers["x-api-key"] = self.api_key
-                return {
+                result = {
                     "api_key": poll_data["api_key"],
                     "key_id": poll_data.get("key_id", ""),
                     "tier": poll_data.get("tier", "free"),
                     "label": poll_data.get("label", label),
                 }
+                _save_key(
+                    api_key=result["api_key"],
+                    base_url=self.base_url,
+                    key_id=result["key_id"],
+                    tier=result["tier"],
+                    label=result["label"],
+                )
+                return result
 
             err = poll_data.get("error", "")
             if err and err != "AUTHORIZATION_PENDING":

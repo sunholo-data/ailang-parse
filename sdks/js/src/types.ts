@@ -164,7 +164,7 @@ export interface Element {
 // ── Client options ──
 
 export interface DocParseOptions {
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   timeout?: number;
 }

@@ -1,10 +1,66 @@
-/** AILANG Parse HTTP client — handles API communication and response unwrapping. */
+/**
+ * AILANG Parse HTTP client — handles API communication, response unwrapping,
+ * and persistent credential storage.
+ */
 
 import type { ParseResult, HealthResult, FormatsResult, DocParseOptions } from "./types.js";
 import { DocParseError, AuthError, QuotaError } from "./types.js";
 import { KeyManager } from "./keys.js";
 
 const DEFAULT_BASE_URL = "https://api.parse.sunholo.com";
+const CONFIG_DIR_NAME = "ailang-parse";
+const CREDENTIALS_FILE = "credentials.json";
+
+/** Return the platform-appropriate config directory path, or null in browsers. */
+function configDir(): string | null {
+  try {
+    const os = require("os");
+    const path = require("path");
+    if (process.platform === "win32") {
+      const base = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
+      return path.join(base, CONFIG_DIR_NAME);
+    }
+    const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+    return path.join(base, CONFIG_DIR_NAME);
+  } catch {
+    return null; // browser — no filesystem
+  }
+}
+
+/** Load saved API key for the given baseUrl. Returns null if unavailable. */
+function loadSavedKey(baseUrl: string): { api_key: string; key_id?: string; tier?: string; label?: string } | null {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const dir = configDir();
+    if (!dir) return null;
+    const credPath = path.join(dir, CREDENTIALS_FILE);
+    if (!fs.existsSync(credPath)) return null;
+    const data = JSON.parse(fs.readFileSync(credPath, "utf-8"));
+    if (data?.api_key?.startsWith("dp_") && (data.base_url || DEFAULT_BASE_URL) === baseUrl) {
+      return data;
+    }
+  } catch {
+    // ignore — browser or corrupted file
+  }
+  return null;
+}
+
+/** Persist credentials to disk with restrictive permissions (Node.js only). */
+function saveKey(apiKey: string, baseUrl: string, keyId = "", tier = "free", label = ""): void {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const dir = configDir();
+    if (!dir) return;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const credPath = path.join(dir, CREDENTIALS_FILE);
+    const payload = JSON.stringify({ api_key: apiKey, base_url: baseUrl, key_id: keyId, tier, label }, null, 2) + "\n";
+    fs.writeFileSync(credPath, payload, { mode: 0o600 });
+  } catch {
+    // ignore — browser or permission error
+  }
+}
 
 export class DocParse {
   private apiKey: string;
@@ -14,10 +70,29 @@ export class DocParse {
   /** Key management methods. */
   keys: KeyManager;
 
-  constructor(opts: DocParseOptions) {
-    this.apiKey = opts.apiKey;
-    this.baseUrl = (opts.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
-    this.timeout = opts.timeout || 60000;
+  /**
+   * Create a new AILANG Parse client.
+   *
+   * API key resolution order:
+   * 1. Explicit ``apiKey`` in options
+   * 2. ``DOCPARSE_API_KEY`` environment variable (Node.js)
+   * 3. Saved credentials in ``~/.config/ailang-parse/credentials.json``
+   */
+  constructor(opts?: DocParseOptions) {
+    this.baseUrl = ((opts?.baseUrl || DEFAULT_BASE_URL) as string).replace(/\/$/, "");
+    this.timeout = opts?.timeout || 60000;
+
+    // Resolve API key: explicit > env var > saved credentials
+    let key = opts?.apiKey || "";
+    if (!key) {
+      try { key = process.env.DOCPARSE_API_KEY || ""; } catch { /* browser */ }
+    }
+    if (!key) {
+      const saved = loadSavedKey(this.baseUrl);
+      if (saved) key = saved.api_key;
+    }
+
+    this.apiKey = key;
     this.keys = new KeyManager(this);
   }
 
@@ -90,12 +165,14 @@ export class DocParse {
 
       if (pollData.status === "approved" && pollData.api_key) {
         this.apiKey = pollData.api_key;
-        return {
+        const result = {
           api_key: pollData.api_key,
           key_id: pollData.key_id || "",
           tier: pollData.tier || "free",
           label: pollData.label || label,
         };
+        saveKey(result.api_key, this.baseUrl, result.key_id, result.tier, result.label);
+        return result;
       }
 
       const err = pollData.error || "";

@@ -98,17 +98,26 @@ for block in result.blocks:
 
 ## API Key Management
 
-Use the device auth flow to get an API key. The user signs in once in their browser — authorization is automatic.
+API key resolution (checked in order):
+1. Explicit `api_key` parameter
+2. `DOCPARSE_API_KEY` environment variable
+3. Saved credentials in `~/.config/ailang-parse/credentials.json`
+
+Use the device auth flow to get an API key. The user signs in once — the key is saved automatically and reused in future sessions.
 
 ```python
 from ailang_parse import DocParse
 
-# No API key needed — device_auth() handles everything
+# First time: device_auth() opens browser, user signs in, key saved to disk
 client = DocParse()
 client.device_auth(label="my-agent")
-# Opens browser, user signs in, key is stored on the client
 
-# Now parse documents
+# Future sessions: key auto-loaded from ~/.config/ailang-parse/credentials.json
+client = DocParse()
+result = client.parse("report.docx")
+
+# Or set env var: export DOCPARSE_API_KEY=dp_your_key
+client = DocParse()
 result = client.parse("report.docx")
 
 # Check usage

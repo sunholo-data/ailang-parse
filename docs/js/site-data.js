@@ -40,7 +40,7 @@ var DP_DATA = {
         max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 40, audio_mb: 100, pdf_mb: 50, image_mb: 50 },
         concurrent: 20,
-        rate_limit: '50 req/s',
+        rate_limit: '100 req/s',
         support: 'Dedicated'
       }
     }

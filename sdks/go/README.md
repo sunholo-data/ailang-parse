@@ -82,16 +82,21 @@ fmt.Println(formats.AIRequired)  // ["pdf", "png", "jpg", ...]
 
 ## API Key Management
 
-Use the device auth flow to get an API key. The user signs in once in their browser — authorization is automatic.
+API key resolution (checked in order):
+1. Explicit `apiKey` parameter to `New()`
+2. `DOCPARSE_API_KEY` environment variable
+3. Saved credentials in `~/.config/ailang-parse/credentials.json`
+
+Use the device auth flow to get an API key. The user signs in once — the key is saved automatically and reused in future sessions.
 
 ```go
-// No API key needed — DeviceAuth() handles everything
+// First time: DeviceAuth() opens browser, user signs in, key saved to disk
 client := docparse.New("")
 result, err := client.DeviceAuth(ctx, "my-agent")
-// Opens browser, user signs in, key is stored on the client
 
-// Now parse documents
-parsed, err := client.Parse(ctx, "report.docx", "blocks")
+// Future sessions: key auto-loaded from ~/.config/ailang-parse/credentials.json
+client := docparse.New("")
+parsed, err := client.Parse(ctx, "report.docx")
 
 // Usage / Rotate / Revoke
 usage, err := client.Keys.Usage(ctx, "keyId123", "user123")

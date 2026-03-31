@@ -71,17 +71,22 @@ for (const block of result.blocks) {
 
 ## API Key Management
 
-Use the device auth flow to get an API key. The user signs in once in their browser — authorization is automatic.
+API key resolution (checked in order):
+1. Explicit `apiKey` in constructor options
+2. `DOCPARSE_API_KEY` environment variable (Node.js)
+3. Saved credentials in `~/.config/ailang-parse/credentials.json`
+
+Use the device auth flow to get an API key. The user signs in once — the key is saved automatically and reused in future sessions.
 
 ```typescript
 import { DocParse } from '@ailang/parse';
 
-// No API key needed — deviceAuth() handles everything
-const client = new DocParse({ apiKey: '' });
+// First time: deviceAuth() opens browser, user signs in, key saved to disk
+const client = new DocParse();
 await client.deviceAuth({ label: 'my-agent' });
-// Opens browser, user signs in, key is stored on the client
 
-// Now parse documents
+// Future sessions: key auto-loaded from ~/.config/ailang-parse/credentials.json
+const client = new DocParse();
 const result = await client.parse('report.docx');
 
 // Usage / Rotate / Revoke
