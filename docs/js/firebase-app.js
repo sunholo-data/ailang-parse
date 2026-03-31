@@ -153,15 +153,12 @@
 
   window.dpRevokeKey = function (keyId) {
     if (!confirm('Revoke key ' + keyId + '? This cannot be undone.')) return;
-    getIdToken().then(function (token) {
-      return fetch(API_BASE + '/api/v1/keys/revoke', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + token
-        },
-        body: JSON.stringify({ args: [keyId, currentUser.uid] })
-      });
+    var storedKey = localStorage.getItem('dp_api_key');
+    if (!storedKey) { alert('No API key stored. Generate one first.'); return; }
+    fetch(API_BASE + '/api/v1/keys/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyId: keyId, apiKey: storedKey })
     }).then(function (r) { return r.json(); })
       .then(function () { loadDashboard(); })
       .catch(function (err) { alert('Error: ' + err.message); });
@@ -177,16 +174,18 @@
       keysTable.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px">Loading...</td></tr>';
     }
 
-    // List keys
-    getIdToken().then(function (token) {
-      return fetch(API_BASE + '/api/v1/keys/list', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + token
-        },
-        body: JSON.stringify({ args: [currentUser.uid] })
-      });
+    // List keys (authenticates via stored API key)
+    var storedKey = localStorage.getItem('dp_api_key');
+    if (!storedKey) {
+      if (keysTable) {
+        keysTable.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px">No keys yet. Generate one below.</td></tr>';
+      }
+      return;
+    }
+    fetch(API_BASE + '/api/v1/keys/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: storedKey })
     }).then(function (r) { return r.json(); })
       .then(function (data) {
         var result = typeof data.result === 'string' ? JSON.parse(data.result) : data;
@@ -241,13 +240,12 @@
   window.dpGetCurrentUser = function () { return currentUser; };
   window.dpGetIdToken = function () { return getIdToken(); };
   window.dpListKeysAsync = function () {
-    if (!currentUser) return Promise.reject(new Error('Not signed in'));
-    return getIdToken().then(function (token) {
-      return fetch(API_BASE + '/api/v1/keys/list', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ args: [currentUser.uid] })
-      });
+    var storedKey = localStorage.getItem('dp_api_key');
+    if (!storedKey) return Promise.reject(new Error('No API key stored. Generate one first.'));
+    return fetch(API_BASE + '/api/v1/keys/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: storedKey })
     }).then(function (r) { return r.json(); })
       .then(function (data) {
         var result = typeof data.result === 'string' ? JSON.parse(data.result) : data;
