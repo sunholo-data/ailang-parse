@@ -12,8 +12,8 @@ var DP_DATA = {
     tiers: {
       free: {
         price_eur: 0,
-        requests_per_day: 60,
-        requests_per_month: 500,
+        requests_per_day: 200,
+        requests_per_month: 2000,
         ai_requests_per_month: 50,
         max_file_size_mb: 10,
         ai_file_size_limits: { video_mb: 10, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
@@ -50,6 +50,10 @@ var DP_DATA = {
     output: ['JSON', 'Markdown', 'HTML', 'Text', 'Quarto', 'A2UI', 'Unstructured', 'DOCX', 'PPTX'],
     input_count: 13,
     output_count: 9
+  },
+  page_estimates: {
+    avg_page_size_kb: { office: 50, pdf: 100 },
+    methodology: 'Office: ~50 KB/page average (compressed XML with typical formatting). PDF: ~100 KB/page average (text-based with mixed content). Actual pages vary by content — text-heavy documents yield more pages, image-heavy fewer.'
   },
   site: {
     name: 'AILANG Parse',
