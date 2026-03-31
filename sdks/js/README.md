@@ -71,19 +71,21 @@ for (const block of result.blocks) {
 
 ## API Key Management
 
-Key generation uses the device auth flow (v0.10.0+). Direct generation is no longer available.
+Use the device auth flow to get an API key. The user signs in once in their browser — authorization is automatic.
 
 ```typescript
-// Get a key via device auth flow:
-//   1. POST /api/v1/auth/device       → {device_code, user_code, verification_url}
-//   2. User opens verification_url, signs in, clicks Approve
-//   3. POST /api/v1/auth/device/poll  → {api_key, tier}
+import { DocParse } from '@ailang/parse';
 
-// Usage
+// No API key needed — deviceAuth() handles everything
+const client = new DocParse({ apiKey: '' });
+await client.deviceAuth({ label: 'my-agent' });
+// Opens browser, user signs in, key is stored on the client
+
+// Now parse documents
+const result = await client.parse('report.docx');
+
+// Usage / Rotate / Revoke
 const usage = await client.keys.usage('keyId123', 'user123');
-console.log(`${usage.usage.requestsToday} / ${usage.quota.requestsPerDay} requests`);
-
-// Rotate / Revoke
 const newKey = await client.keys.rotate('keyId123', 'user123');
 await client.keys.revoke('keyId123', 'user123');
 ```

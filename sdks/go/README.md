@@ -82,20 +82,19 @@ fmt.Println(formats.AIRequired)  // ["pdf", "png", "jpg", ...]
 
 ## API Key Management
 
-Key generation uses the device auth flow (v0.10.0+). Direct generation is no longer available.
+Use the device auth flow to get an API key. The user signs in once in their browser — authorization is automatic.
 
 ```go
-// Get a key via device auth flow:
-//   1. POST /api/v1/auth/device       → {device_code, user_code, verification_url}
-//   2. User opens verification_url, signs in, clicks Approve
-//   3. POST /api/v1/auth/device/poll  → {api_key, tier}
+// No API key needed — DeviceAuth() handles everything
+client := docparse.New("")
+result, err := client.DeviceAuth(ctx, "my-agent")
+// Opens browser, user signs in, key is stored on the client
 
-// Usage
+// Now parse documents
+parsed, err := client.Parse(ctx, "report.docx", "blocks")
+
+// Usage / Rotate / Revoke
 usage, err := client.Keys.Usage(ctx, "keyId123", "user123")
-fmt.Printf("%d / %d requests today\n",
-	usage.Usage.RequestsToday, usage.Quota.RequestsPerDay)
-
-// Rotate / Revoke
 newKey, err := client.Keys.Rotate(ctx, "keyId123", "user123")
 err = client.Keys.Revoke(ctx, "keyId123", "user123")
 ```

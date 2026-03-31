@@ -98,18 +98,22 @@ for block in result.blocks:
 
 ## API Key Management
 
-Key generation uses the device auth flow (v0.10.0+). Direct generation is no longer available.
+Use the device auth flow to get an API key. The user signs in once in their browser — authorization is automatic.
 
 ```python
-# Get a key via device auth flow:
-#   1. POST /api/v1/auth/device       → {device_code, user_code, verification_url}
-#   2. User opens verification_url, signs in, clicks Approve
-#   3. POST /api/v1/auth/device/poll  → {api_key, tier}
+from ailang_parse import DocParse
+
+# No API key needed — device_auth() handles everything
+client = DocParse()
+client.device_auth(label="my-agent")
+# Opens browser, user signs in, key is stored on the client
+
+# Now parse documents
+result = client.parse("report.docx")
 
 # Check usage
 usage = client.keys.usage(key_id="abc123", user_id="user123")
 print(f"Requests today: {usage.usage.requests_today} / {usage.quota.requests_per_day}")
-print(f"Pages this month: {usage.usage.pages_this_month} / {usage.quota.pages_per_month}")
 
 # Rotate (new key, old one revoked, same tier)
 new_key = client.keys.rotate(key_id="abc123", user_id="user123")

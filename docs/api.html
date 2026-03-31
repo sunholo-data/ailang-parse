@@ -1036,7 +1036,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
   -d '{"label":"my-agent","scope":"parse"}'
 # Returns: device_code, user_code (e.g. ABCD-1234), verification_url
 
-# 2. Display the verification_url to the user. They open it, sign in, click Approve.
+# 2. Display the verification_url to the user. They open it and sign in (authorization is automatic).
 
 # 3. Poll every 5 seconds until approved:
 curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth/device/poll \
@@ -1048,7 +1048,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
       <!-- Interactive device auth — try it from the browser -->
       <div class="dp-device-auth-panel" id="device-auth-panel" style="margin:16px 0 24px;padding:16px 20px">
         <h4 style="font-size:13px;font-weight:600;color:var(--text-primary);margin:0 0 6px">Try It: Request a Device Code</h4>
-        <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">For CLI tools and AI agents. The agent requests a code, the user approves in a browser, the agent polls for the key.</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">For CLI tools and AI agents. The agent requests a code, the user signs in to authorize, the agent polls for the key.</p>
         <div id="device-auth-content">
           <button class="dp-btn dp-btn--ghost" style="font-size:12px;padding:6px 14px" onclick="deviceAuthStart()">Request Device Code</button>
         </div>
@@ -1494,6 +1494,90 @@ function renderPricing(apiData) {
   });
 
   html += '</tbody></table>';
+
+  // ── Estimated page capacity section ──
+  var pe = (typeof DP_DATA !== 'undefined' && DP_DATA.page_estimates) ? DP_DATA.page_estimates : null;
+  if (pe) {
+    var officeKB = pe.avg_page_size_kb.office;
+    var pdfKB = pe.avg_page_size_kb.pdf;
+
+    html += '<div style="margin-top:24px;padding:20px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
+    html += '<div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:12px">Estimated Page Capacity</div>';
+    html += '<p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">Unlike per-page competitors, each AILANG Parse request can contain an entire multi-page document. Estimated pages per request based on file size limits:</p>';
+
+    // Pages-per-request table
+    html += '<table class="dp-tier-table"><thead><tr><th></th>';
+    tierNames.forEach(function(name) {
+      html += '<th>' + name.charAt(0).toUpperCase() + name.slice(1) + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    // Office pages per request
+    html += '<tr><td>Office pages/request</td>';
+    tierNames.forEach(function(name) {
+      var maxMB = data.tiers[name].max_file_size_mb;
+      var pages = Math.round((maxMB * 1024) / officeKB);
+      html += '<td>~' + pages.toLocaleString() + '</td>';
+    });
+    html += '</tr>';
+
+    // PDF pages per request (uses AI file size limit)
+    html += '<tr><td>PDF pages/request</td>';
+    tierNames.forEach(function(name) {
+      var pdfMB = data.tiers[name].ai_file_size_limits ? data.tiers[name].ai_file_size_limits.pdf_mb : data.tiers[name].max_file_size_mb;
+      var pages = Math.round((pdfMB * 1024) / pdfKB);
+      html += '<td>~' + pages.toLocaleString() + '</td>';
+    });
+    html += '</tr>';
+
+    // Max Office pages per month
+    html += '<tr><td>Office pages/month (max)</td>';
+    tierNames.forEach(function(name) {
+      var maxMB = data.tiers[name].max_file_size_mb;
+      var pagesPerReq = Math.round((maxMB * 1024) / officeKB);
+      var total = pagesPerReq * data.tiers[name].requests_per_month;
+      html += '<td>~' + total.toLocaleString() + '</td>';
+    });
+    html += '</tr>';
+
+    // Effective cost per 1,000 pages (Office, realistic ~25 pages/request average)
+    html += '<tr><td>Effective cost / 1,000 pages*</td>';
+    tierNames.forEach(function(name) {
+      var price = data.tiers[name].price_eur;
+      var reqs = data.tiers[name].requests_per_month;
+      var maxMB = data.tiers[name].max_file_size_mb;
+      var pagesPerReq = Math.round((maxMB * 1024) / officeKB);
+      // Use 25 pages/request as a realistic average for the per-page cost
+      var realisticPages = reqs * 25;
+      if (price === 0) {
+        html += '<td style="color:var(--dp-blue);font-weight:700">Free</td>';
+      } else {
+        var costPer1K = (price / realisticPages) * 1000;
+        html += '<td style="color:var(--dp-blue);font-weight:700">\u20AC' + costPer1K.toFixed(2) + '</td>';
+      }
+    });
+    html += '</tr>';
+
+    html += '</tbody></table>';
+
+    // Methodology footnote
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">';
+    html += '<strong>How we estimate:</strong> ' + escapeHtml(pe.methodology);
+    html += '<br>* Effective cost assumes ~25 pages per request (a typical business document). ';
+    html += 'At maximum file sizes, effective cost is orders of magnitude lower.';
+    html += '</div>';
+
+    // Competitor comparison
+    html += '<div style="margin-top:16px;padding:12px 16px;background:var(--bg-input);border-radius:var(--radius);font-size:12px;color:var(--text-secondary);line-height:1.6">';
+    html += '<strong style="color:var(--text-primary)">Competitor per-page pricing (for reference):</strong><br>';
+    html += 'Amazon Textract / Google Document AI: ~$0.0015/pg (OCR) to $0.03/pg (structured)<br>';
+    html += 'Unstructured.io: $0.03/pg &middot; Reducto: $0.015\u2013$0.06/pg &middot; LlamaParse: $0.001\u2013$0.056/pg<br>';
+    html += 'DocParser: $0.03\u2013$0.08/pg &middot; Mathpix: $0.005/pg';
+    html += '</div>';
+
+    html += '</div>';
+  }
+
   html += '<p style="font-size:12px;color:var(--text-muted);margin-top:8px"><strong>Need higher limits?</strong> <a href="https://www.sunholo.com/contact" style="color:var(--dp-blue)">Get in touch</a> for custom pricing. Office formats (DOCX, PPTX, XLSX) are deterministic and unlimited within your request quota.</p>';
   mount.innerHTML = html;
 }
