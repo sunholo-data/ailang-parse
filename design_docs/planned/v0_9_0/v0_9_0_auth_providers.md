@@ -135,49 +135,7 @@ With country defaults:
 
 ---
 
-### 4. Anonymous Auth (Try Before You Sign Up)
-
-Anonymous auth gives visitors a temporary Firebase uid so they can try the API immediately without any sign-up form. They can later "link" a real provider (Google, email, etc.) to keep their account and data.
-
-**Firebase Console:**
-1. Authentication → Sign-in method → Add provider → Anonymous
-2. Enable it (no configuration needed)
-
-**Frontend change** — no change to `signInOptions` (anonymous users don't appear in FirebaseUI). Instead, add a "Try without signing in" button that calls:
-```javascript
-firebase.auth().signInAnonymously();
-```
-
-**Backend change — quota restriction:**
-Anonymous users should get heavily restricted quotas to prevent abuse. The backend can detect anonymous tokens by checking the `provider_id` field in the Firebase ID token (it will be `anonymous`).
-
-Recommended anonymous limits:
-- **5 requests/day** (vs 60 for free tier with real identity)
-- **No key generation** — anonymous users use a session-scoped token, not a persistent API key
-- **No device auth flow** — agents must authenticate with a real identity
-- **Prompt to link account** after 3 requests or on first POST to a paid endpoint
-
-**Account linking flow:**
-```javascript
-// When anonymous user clicks "Sign in to keep your account":
-var credential = firebase.auth.GoogleAuthProvider.credential(googleIdToken);
-firebase.auth().currentUser.linkWithCredential(credential);
-// uid stays the same, usage history preserved
-```
-
-**Risk:** Abuse via repeated anonymous sign-ins from different IPs. Mitigations:
-- Very low quota (5 req/day)
-- Rate limit by IP on Cloud Run (future)
-- No persistent keys — session only
-- Firebase's built-in anonymous account cleanup (auto-delete after 30 days of inactivity)
-
-**Cost:** Free. Anonymous users count toward Firebase Auth MAU but are auto-cleaned.
-
-**Docs:** https://firebase.google.com/docs/auth/web/anonymous-auth
-
----
-
-### 5. SAML / Generic OIDC (Enterprise SSO)
+### 4. SAML / Generic OIDC (Enterprise SSO)
 
 Enterprise customers with their own identity provider (Okta, Auth0, PingIdentity, Azure AD tenant-specific, etc.) can sign in using corporate SSO. This is the #1 ask from enterprise buyers who can't use personal Google/Microsoft accounts for work tools.
 
@@ -216,6 +174,7 @@ Note: Each enterprise customer gets their own SAML/OIDC provider entry. This is 
 
 | Provider | Reason |
 |----------|--------|
+| Anonymous | Not viable — the API requires an API key (`dp_...`) for all authenticated endpoints. Anonymous users can't generate keys or use device auth, so they'd have no way to make API calls. Email magic link is nearly as frictionless and gives a real identity from the start. |
 | Twitter/X | Wrong audience — developers and enterprise users rarely use X for tool auth |
 | Facebook | Wrong audience — not a developer/enterprise identity |
 | Yahoo | Negligible user base for this market |
@@ -269,19 +228,9 @@ function getUiConfig() {
 }
 ```
 
-Anonymous auth is handled separately (not in FirebaseUI). Add a "Try without signing in" link:
-```javascript
-// In api.html, below the Sign In button:
-firebase.auth().signInAnonymously();
-```
-
-### Backend: Minimal Changes
+### Backend: No Changes Required
 
 The backend verifies Firebase ID tokens via JWT/RSA signature checking (`sunholo/firebase_auth@0.1.1`). All providers produce standard Firebase ID tokens with the same structure — the backend doesn't care which provider was used. The `firebase_uid` in the token is the canonical user identity.
-
-**Exception — anonymous auth:** The backend needs to detect anonymous tokens and enforce stricter limits. The Firebase ID token's `firebase.sign_in_provider` field will be `"anonymous"`. Add a check in the quota logic:
-- If `sign_in_provider == "anonymous"`: cap at 5 requests/day, block key generation, block device auth
-- All other providers: use existing tier-based quotas
 
 ### Authorized Domains
 
@@ -307,12 +256,11 @@ This must be registered as the redirect URI in each provider's developer console
 | Priority | Provider   | Effort | External Account Needed      | Value |
 |----------|------------|--------|------------------------------|-------|
 | 1        | Microsoft  | ~30min | Azure portal (free)          | Enterprise coverage — biggest unserved audience |
-| 2        | Anonymous  | ~2hr   | None (Firebase only)         | Zero-friction trial — backend quota changes needed |
-| 3        | Phone SMS  | ~15min | None (Firebase only)         | Universal fallback for users without OAuth accounts |
-| 4        | Apple      | ~45min | Apple Developer ($99/year)   | iOS/Mac ecosystem completeness |
-| 5        | SAML/OIDC  | Per customer | Identity Platform upgrade | Enterprise SSO — implement on demand |
+| 2        | Phone SMS  | ~15min | None (Firebase only)         | Universal fallback for users without OAuth accounts |
+| 3        | Apple      | ~45min | Apple Developer ($99/year)   | iOS/Mac ecosystem completeness |
+| 4        | SAML/OIDC  | Per customer | Identity Platform upgrade | Enterprise SSO — implement on demand |
 
-Microsoft first — broadest enterprise coverage with minimal setup. Anonymous second — biggest UX win, but needs backend work to enforce strict limits. Phone SMS third — Firebase-only config. Apple fourth — requires paid developer account. SAML/OIDC last — configure per enterprise customer when they request it.
+Microsoft first — broadest enterprise coverage with minimal setup. Phone SMS second — Firebase-only config. Apple third — requires paid developer account. SAML/OIDC last — configure per enterprise customer when they request it.
 
 ## Checklist
 
@@ -325,15 +273,7 @@ Microsoft first — broadest enterprise coverage with minimal setup. Anonymous s
 - [ ] **Test:** Verify the backend accepts tokens from all providers (device auth flow)
 - [ ] **Mobile:** Confirm FirebaseUI renders all provider buttons correctly at 768px
 
-### Phase 2: Anonymous trial
-- [ ] **Firebase:** Enable Anonymous provider in Firebase Console
-- [ ] **Frontend:** Add "Try without signing in" button that calls `signInAnonymously()`
-- [ ] **Frontend:** Show "Link account" prompt after N requests or on key generation attempt
-- [ ] **Backend:** Detect anonymous tokens (`sign_in_provider == "anonymous"`)
-- [ ] **Backend:** Enforce anonymous quota (5 req/day, no key generation, no device auth)
-- [ ] **Test:** Verify anonymous → linked account preserves uid and usage history
-
-### Phase 3: Enterprise SSO (on demand)
+### Phase 2: Enterprise SSO (on demand)
 - [ ] **Upgrade** to Firebase Identity Platform (free, enables SAML/OIDC)
 - [ ] **Per customer:** Configure SAML or OIDC provider in Firebase Console
 - [ ] **Per customer:** Add provider entry to `signInOptions` with customer branding
