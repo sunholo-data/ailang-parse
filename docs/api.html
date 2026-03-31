@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="css/design-system.css">
 <link rel="stylesheet" href="css/docparse.css">
 <link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.css">
 <style>
 /* ---- API page specifics ---- */
 .dp-api-section { margin-bottom: 48px; }
@@ -755,14 +756,15 @@
     <!-- State A: Not signed in -->
     <div id="akp-signin">
       <h3>Get Your API Key</h3>
-      <p>Sign in with Google to generate an API key and try endpoints live.</p>
+      <p>Sign in to generate an API key and try endpoints live.</p>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <button class="dp-btn dp-btn--primary" onclick="dpSignIn()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-          Sign In with Google
+          Sign In
         </button>
         <span style="font-size:12px;color:var(--text-muted)">Using a CLI or AI agent? <a href="#agent-guide" style="color:var(--dp-blue)">See Device Auth below</a></span>
       </div>
+      <div id="firebaseui-auth-container" class="dp-firebaseui-container" style="display:none;margin-top:16px"></div>
     </div>
     <!-- State B: Signed in, no stored key -->
     <div id="akp-generate" style="display:none">
@@ -1269,6 +1271,7 @@ elements, _ := uc.Partition(ctx, "report.docx")</code></pre>
 
 <script src="vendor/firebase/firebase-app-compat.js"></script>
 <script src="vendor/firebase/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/ui/6.1.0/firebase-ui-auth.js"></script>
 <script src="js/firebase-app.js"></script>
 <script src="js/components.js"></script>
 <script>window.Prism = window.Prism || {}; Prism.manual = true;</script>
@@ -1297,14 +1300,13 @@ var dpEndpointMap = {}; // ep.id → ep object, for playground lookups
 // Client-side parameter hints for endpoints where the capabilities manifest
 // has incomplete input_schema.  'auto' values are resolved at send time:
 //   'api_key'      → stored dp_ key from localStorage
-//   'firebase_uid' → currentUser.uid from Firebase auth
 var PARAM_HINTS = {
   keys_usage: [
-    { name: 'keyId', type: 'string', description: 'API key (dp_…)', auto: 'api_key' },
-    { name: 'userId', type: 'string', description: 'User ID (auto-filled when signed in)', auto: 'firebase_uid' }
+    { name: 'keyId', type: 'string', description: 'Key ID (from keys/list)' },
+    { name: 'apiKey', type: 'string', description: 'API key (dp_…)', auto: 'api_key' }
   ],
   requests_history: [
-    { name: 'userId', type: 'string', description: 'User ID (auto-filled when signed in)', auto: 'firebase_uid' }
+    { name: 'apiKey', type: 'string', description: 'API key (dp_…)', auto: 'api_key' }
   ]
 };
 
@@ -1534,7 +1536,6 @@ function buildExampleBody(ep) {
       var hintBody = {};
       PARAM_HINTS[ep.id].forEach(function(hint) {
         if (hint.auto === 'api_key') hintBody[hint.name] = 'dp_YOUR_KEY_ID';
-        else if (hint.auto === 'firebase_uid') hintBody[hint.name] = 'YOUR_USER_ID';
         else hintBody[hint.name] = 'example';
       });
       return hintBody;
@@ -1804,15 +1805,12 @@ function pgValidateKey(input) {
 }
 
 function pgFetchQuota(apiKey) {
-  // keys/usage requires firebase_bearer auth + keyId + userId
-  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
-  if (!user) return;
-  window.dpGetIdToken().then(function(token) {
-    return fetch(API_BASE + '/api/v1/keys/usage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ keyId: apiKey, userId: user.uid })
-    });
+  // keys/usage authenticates via apiKey param
+  if (!apiKey) return;
+  fetch(API_BASE + '/api/v1/keys/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyId: apiKey, apiKey: apiKey })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -1834,10 +1832,6 @@ function pgGetApiKey() {
 // Resolve auto-fill value for a PARAM_HINTS entry
 function resolveAutoValue(auto) {
   if (auto === 'api_key') return localStorage.getItem('dp_api_key') || '';
-  if (auto === 'firebase_uid') {
-    var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
-    return user ? user.uid : '';
-  }
   return '';
 }
 
@@ -2162,7 +2156,7 @@ function replayRequest(requestId) {
   });
 }
 
-// ── Key management playground (Bearer token auth) ──
+// ── Key management playground (API key auth) ──
 
 function pgSendKeygen() {
   var label = document.getElementById('pg-keygen-label');
@@ -2191,18 +2185,18 @@ function pgSendKeygen() {
 function pgSendUsage() {
   var keyId = document.getElementById('pg-usage-keyid');
   if (!keyId || !keyId.value) { alert('Select a key ID'); return; }
+  var storedKey = localStorage.getItem('dp_api_key');
+  if (!storedKey) { alert('No API key stored. Generate one first.'); return; }
   var container = document.getElementById('pg-usage-response');
   if (!container) return;
   container.innerHTML = '<div class="dp-response-meta"><span>Sending...</span></div>';
   container.classList.add('visible');
 
   var start = performance.now();
-  window.dpGetIdToken().then(function(token) {
-    return fetch(API_BASE + '/api/v1/keys/usage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ args: [keyId.value] })
-    });
+  fetch(API_BASE + '/api/v1/keys/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyId: keyId.value, apiKey: storedKey })
   }).then(function(r) {
     var clientMs = Math.round(performance.now() - start);
     return r.json().then(function(data) { pgRenderResponse(container, r.status, data, clientMs); });

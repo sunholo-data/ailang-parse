@@ -4,9 +4,9 @@
  * Reuses the ailang-multivac-dev Firebase project (same as website-builder).
  * AILANG Parse uses its own Firestore database ("docparse") — not the default.
  *
- * Auth pattern: Google sign-in popup → ID token → call Cloud Run key mgmt endpoints.
- * API keys stored server-side in Firestore. User's Google API key (for WASM AI)
- * stored in localStorage only.
+ * Auth uses FirebaseUI — providers are configured in the Firebase console.
+ * Adding a new provider (GitHub, Microsoft, etc.) only requires enabling it
+ * in the console; no frontend changes needed.
  */
 (function () {
   'use strict';
@@ -26,6 +26,24 @@
   var app = null;
   var auth = null;
   var currentUser = null;
+  var uiInstance = null;
+
+  // ── FirebaseUI Config ──
+  // Add providers here to show them in the sign-in widget.
+  // Enable matching providers in Firebase Console → Authentication → Sign-in method.
+  function getUiConfig() {
+    return {
+      signInFlow: 'popup',
+      signInOptions: [
+        firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+        firebase.auth.GithubAuthProvider.PROVIDER_ID,
+        firebase.auth.EmailAuthProvider.PROVIDER_ID
+      ],
+      callbacks: {
+        signInSuccessWithAuthResult: function () { return false; } // stay on page
+      }
+    };
+  }
 
   // ── Initialize ──
   function init() {
@@ -50,14 +68,18 @@
     var signinBtn = document.getElementById('signin-btn');
 
     if (user) {
-      // Signed in
+      // Signed in — hide any FirebaseUI containers
       if (dashPlaceholder) dashPlaceholder.style.display = 'none';
       if (dashActive) {
         dashActive.style.display = 'block';
-        document.getElementById('dash-email').textContent = user.email || '';
+        var dashEmail = document.getElementById('dash-email');
+        if (dashEmail) dashEmail.textContent = user.email || '';
         loadDashboard();
       }
       if (signinBtn) signinBtn.style.display = 'none';
+      document.querySelectorAll('.dp-firebaseui-container').forEach(function (el) {
+        el.style.display = 'none';
+      });
     } else {
       // Signed out
       if (dashPlaceholder) dashPlaceholder.style.display = 'block';
@@ -69,17 +91,41 @@
     window.dispatchEvent(new CustomEvent('dp-auth-change', { detail: { user: user } }));
   }
 
-  // ── Sign In ──
+  // ── Sign In (renders FirebaseUI into the nearest container) ──
   window.dpSignIn = function () {
     if (!auth) {
       alert('Firebase not loaded. Check your internet connection.');
       return;
     }
-    var provider = new firebase.auth.GoogleAuthProvider();
-    auth.signInWithPopup(provider).catch(function (err) {
-      console.error('Sign in error:', err);
-      alert('Sign in failed: ' + err.message);
-    });
+    if (typeof firebaseui === 'undefined') {
+      alert('FirebaseUI not loaded. Check your internet connection.');
+      return;
+    }
+
+    // Find or create the FirebaseUI container
+    var container = document.getElementById('firebaseui-auth-container');
+    if (!container) {
+      // Insert below the sign-in panel
+      var panel = document.getElementById('akp-signin');
+      if (panel) {
+        container = document.createElement('div');
+        container.id = 'firebaseui-auth-container';
+        container.className = 'dp-firebaseui-container';
+        panel.appendChild(container);
+      }
+    }
+    if (container) container.style.display = 'block';
+
+    // Start FirebaseUI (reuse existing instance)
+    if (!uiInstance) {
+      uiInstance = new firebaseui.auth.AuthUI(auth);
+    }
+    if (uiInstance.isPendingRedirect()) {
+      uiInstance.start('#firebaseui-auth-container', getUiConfig());
+    } else {
+      uiInstance.reset();
+      uiInstance.start('#firebaseui-auth-container', getUiConfig());
+    }
   };
 
   // ── Sign Out ──
