@@ -162,12 +162,12 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
           var siblings = entry.target.parentElement.querySelectorAll('.reveal');
           var index = Array.prototype.indexOf.call(siblings, entry.target);
           if (!entry.target.style.transitionDelay && !entry.target.className.match(/reveal-delay/)) {
-            entry.target.style.transitionDelay = (index * 0.06) + 's';
+            entry.target.style.transitionDelay = (index * 0.04) + 's';
           }
           entry.target.classList.add('visible');
         }
       });
-    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+    }, { threshold: 0.05, rootMargin: '0px 0px -10px 0px' });
 
     document.querySelectorAll('.reveal').forEach(function (el) {
       observer.observe(el);
@@ -185,10 +185,9 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
       if (el) sections.push({ el: el, link: a });
     });
     function updateSpy() {
-      var scrollY = window.scrollY + 100;
       var active = sections[0];
       sections.forEach(function (s) {
-        if (s.el.offsetTop <= scrollY) active = s;
+        if (s.el.getBoundingClientRect().top <= 120) active = s;
       });
       sidebarLinks.forEach(function (a) { a.classList.remove('active'); });
       if (active) active.link.classList.add('active');
