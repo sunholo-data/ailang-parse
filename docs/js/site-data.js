@@ -16,7 +16,7 @@ var DP_DATA = {
         requests_per_month: 1000000,
         ai_requests_per_month: 1000000,
         max_file_size_mb: 20,
-        ai_file_size_limits: { video_mb: null, audio_mb: null, pdf_mb: null, image_mb: null },
+        ai_file_size_limits: { video_mb: 20, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
 
         rate_limit: 'None',
         support: 'Community'
