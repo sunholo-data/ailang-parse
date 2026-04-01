@@ -843,7 +843,7 @@
   <!-- Supported Formats — rendered from /api/v1/formats -->
   <section class="dp-api-section reveal">
     <h2 id="formats">Supported Formats</h2>
-    <p>The <code>/api/v1/parse</code> endpoint accepts all of these formats. Office and text formats are parsed deterministically; PDF, images, audio, and video use pluggable AI.</p>
+    <p>The <code>/api/v1/parse</code> endpoint accepts all of these formats. Office and text formats are parsed deterministically; PDFs and images use pluggable AI.</p>
     <div id="formats-mount">
       <div class="dp-loading"><div class="dp-loading-spinner"></div><div>Loading formats...</div></div>
     </div>
@@ -853,11 +853,9 @@
         <div class="dp-format-card"><div class="dp-format-card-title">Office (Deterministic)</div><div class="dp-format-card-exts">.docx .pptx .xlsx .odt .odp .ods</div></div>
         <div class="dp-format-card"><div class="dp-format-card-title">Text (Native)</div><div class="dp-format-card-exts">.csv .md .html .epub</div></div>
         <div class="dp-format-card"><div class="dp-format-card-title">Images &amp; PDF (AI)</div><div class="dp-format-card-exts">.pdf .png .jpg .webp .gif .tiff</div></div>
-        <div class="dp-format-card"><div class="dp-format-card-title">Audio (AI)</div><div class="dp-format-card-exts">.wav .mp3 .aiff .aac .ogg .flac</div></div>
-        <div class="dp-format-card"><div class="dp-format-card-title">Video (AI)</div><div class="dp-format-card-exts">.mp4 .mov .avi .webm</div></div>
       </div>
     </noscript>
-    <p style="font-size:12px;color:var(--text-muted)">Audio parsing returns transcription with speaker detection and language identification. Video parsing extracts visual content (headings, tables, text) plus spoken-word transcription.</p>
+    <p style="font-size:12px;color:var(--text-muted)">Video and audio parsing is available via CLI/WASM. See Self-Host.</p>
   </section>
 
   <hr class="dp-divider">
@@ -882,8 +880,6 @@
           <tr><td colspan="5" style="font-weight:700;padding-top:12px">AI Format File Size Limits</td></tr>
           <tr><td>PDF max</td><td>20 MB</td><td><span data-dp="pricing.tiers.free.ai_file_size_limits.pdf_mb">20</span> MB</td><td><span data-dp="pricing.tiers.pro.ai_file_size_limits.pdf_mb">50</span> MB</td><td><span data-dp="pricing.tiers.business.ai_file_size_limits.pdf_mb">50</span> MB</td></tr>
           <tr><td>Image max</td><td>20 MB</td><td><span data-dp="pricing.tiers.free.ai_file_size_limits.image_mb">20</span> MB</td><td><span data-dp="pricing.tiers.pro.ai_file_size_limits.image_mb">30</span> MB</td><td><span data-dp="pricing.tiers.business.ai_file_size_limits.image_mb">50</span> MB</td></tr>
-          <tr><td>Audio max</td><td>20 MB</td><td><span data-dp="pricing.tiers.free.ai_file_size_limits.audio_mb">20</span> MB</td><td><span data-dp="pricing.tiers.pro.ai_file_size_limits.audio_mb">50</span> MB</td><td><span data-dp="pricing.tiers.business.ai_file_size_limits.audio_mb">100</span> MB</td></tr>
-          <tr><td>Video max</td><td>20 MB</td><td><span data-dp="pricing.tiers.free.ai_file_size_limits.video_mb">10</span> MB</td><td><span data-dp="pricing.tiers.pro.ai_file_size_limits.video_mb">20</span> MB</td><td><span data-dp="pricing.tiers.business.ai_file_size_limits.video_mb">40</span> MB</td></tr>
         </tbody>
       </table>
       <p style="font-size:12px;color:var(--text-muted);margin-top:8px"><strong>Need higher limits?</strong> <a href="https://www.sunholo.com/contact" style="color:var(--dp-blue)">Get in touch</a> for custom pricing.</p>
@@ -1149,8 +1145,6 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
           <tr><td style="padding:4px 8px">sample_ods</td><td style="padding:4px 8px">ODS</td><td style="padding:4px 8px">No</td></tr>
           <tr><td style="padding:4px 8px">sample_epub</td><td style="padding:4px 8px">EPUB</td><td style="padding:4px 8px">No</td></tr>
           <tr><td style="padding:4px 8px">sample_pdf</td><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">Yes</td></tr>
-          <tr><td style="padding:4px 8px">sample_mp3</td><td style="padding:4px 8px">Audio</td><td style="padding:4px 8px">Yes</td></tr>
-          <tr><td style="padding:4px 8px">sample_mp4</td><td style="padding:4px 8px">Video</td><td style="padding:4px 8px">Yes</td></tr>
         </tbody>
       </table>
       <p>Use <code>GET /api/v1/samples</code> to download test files programmatically.</p>
@@ -1169,7 +1163,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pars
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_docx_basic","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'
 
-# AI-powered (PDF/images/audio/video) — content depends on model
+# AI-powered (PDF/images) — content depends on model
 curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
@@ -1221,8 +1215,6 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pars
           <tr><td style="padding:4px 8px">Text (HTML, MD, CSV, EPUB)</td><td style="padding:4px 8px">Deterministic</td><td style="padding:4px 8px">&lt;15ms</td></tr>
           <tr><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~2s</td></tr>
           <tr><td style="padding:4px 8px">Image (PNG, JPG, etc.)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~1.5s</td></tr>
-          <tr><td style="padding:4px 8px">Audio (MP3, WAV)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~5s</td></tr>
-          <tr><td style="padding:4px 8px">Video (MP4)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~10s</td></tr>
         </tbody>
       </table>
       <p>Deterministic formats have zero AI cost and are unlimited within your request quota. AI formats count against your monthly AI parse limit with per-format file size caps. Free tier: <span data-dp="pricing.tiers.free.requests_per_month">10,000</span> requests/month + <span data-dp="pricing.tiers.free.ai_requests_per_month">50</span> AI parses. <a href="https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pricing" style="color:var(--dp-blue)">GET /api/v1/pricing</a> for full tier details.</p>
@@ -1449,14 +1441,14 @@ function renderFormats(data) {
   }
 
   var aiRequired = data.ai_required || [];
-  // Categorize parse formats
-  var office = [], text = [], aiFormats = [], audio = [], video = [];
+  // Categorize parse formats (audio/video are self-host only, not shown in hosted API)
   var audioExts = ['wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac'];
   var videoExts = ['mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg', 'flv', '3gpp'];
+  var office = [], text = [], aiFormats = [];
   (data.parse || []).forEach(function(ext) {
-    if (audioExts.indexOf(ext) >= 0) audio.push(ext);
-    else if (videoExts.indexOf(ext) >= 0) video.push(ext);
-    else if (aiRequired.indexOf(ext) >= 0) aiFormats.push(ext);
+    if (audioExts.indexOf(ext) >= 0) return; // self-host only
+    if (videoExts.indexOf(ext) >= 0) return; // self-host only
+    if (aiRequired.indexOf(ext) >= 0) aiFormats.push(ext);
     else if (['docx','pptx','xlsx','odt','odp','ods'].indexOf(ext) >= 0) office.push(ext);
     else text.push(ext);
   });
@@ -1464,9 +1456,7 @@ function renderFormats(data) {
   var groups = [
     { title: 'Office (Deterministic)', exts: office },
     { title: 'Text (Native)', exts: text },
-    { title: 'Images & PDF (AI)', exts: aiFormats },
-    { title: 'Audio (AI)', exts: audio },
-    { title: 'Video (AI)', exts: video }
+    { title: 'Images & PDF (AI)', exts: aiFormats }
   ];
   // Add generation formats
   if (data.generate && data.generate.length > 0) {
@@ -1497,9 +1487,7 @@ var PRICING_LABELS = {
 
 var FORMAT_LIMIT_LABELS = {
   pdf_mb: 'PDF max (MB)',
-  image_mb: 'Image max (MB)',
-  audio_mb: 'Audio max (MB)',
-  video_mb: 'Video max (MB)'
+  image_mb: 'Image max (MB)'
 };
 
 // Merge API pricing data into DP_DATA, keeping static fallbacks for missing fields.

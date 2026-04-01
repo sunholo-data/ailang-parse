@@ -26,7 +26,7 @@ var DP_DATA = {
         requests_per_month: 10000,
         ai_requests_per_month: 50,
         max_file_size_mb: 50,
-        ai_file_size_limits: { video_mb: 10, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
+        ai_file_size_limits: { pdf_mb: 20, image_mb: 20 },
         support: 'Community'
       },
       pro: {
@@ -35,7 +35,7 @@ var DP_DATA = {
         requests_per_month: 100000,
         ai_requests_per_month: 500,
         max_file_size_mb: 50,
-        ai_file_size_limits: { video_mb: 20, audio_mb: 50, pdf_mb: 50, image_mb: 30 },
+        ai_file_size_limits: { pdf_mb: 50, image_mb: 30 },
         support: 'Email'
       },
       business: {
@@ -44,7 +44,7 @@ var DP_DATA = {
         requests_per_month: 500000,
         ai_requests_per_month: 1000,
         max_file_size_mb: 50,
-        ai_file_size_limits: { video_mb: 40, audio_mb: 100, pdf_mb: 50, image_mb: 50 },
+        ai_file_size_limits: { pdf_mb: 50, image_mb: 50 },
         support: 'Dedicated'
       }
     }
