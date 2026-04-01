@@ -18,7 +18,7 @@ import std/math (intToFloat)
 import std/result (Ok, Err)
 import std/option (Some, None, getOrElse, map as optMap)
 import std/list (map)
-import std/array (fromList as arrayFromList)
+import std/map (empty as emptyMap, insert as mapInsert)
 import docparse/types/document (Block, TextBlock, SectionBlock, DocMetadata, emptyMetadata,
     countBlocks, filterHeadings, filterTables, filterImages)
 import docparse/services/format_router (detectFormat, getExtension, officeType,
@@ -68,9 +68,9 @@ export pure func parsePptxSlide(slideXml: string) -> string {
   }
 }
 
--- Parse XLSX shared strings XML into string list, then parse sheet XML
+-- Parse XLSX shared strings XML into Map, then parse sheet XML
 export pure func parseXlsxSheet(sheetXml: string, sharedStringsXml: string, sheetName: string) -> string {
-  let sharedStrings = arrayFromList(parseSharedStringsXml(sharedStringsXml));
+  let sharedStrings = parseSharedStringsToMap(sharedStringsXml);
   let blocks = parseSheetXml(sheetXml, sharedStrings, sheetName);
   encode(ja(blocksToJson(blocks)))
 }
@@ -190,15 +190,23 @@ pure func extractCommentTexts(paragraphs: [XmlNode]) -> [string] =
     }
   }
 
--- Helper: parse shared strings XML into a list of strings
--- Handles the same logic as xlsx_parser.loadSharedStrings but pure (no FS)
-pure func parseSharedStringsXml(xml: string) -> [string] {
-  if length(xml) == 0 then []
+-- Helper: parse shared strings XML into a Map[int, string]
+-- Pure version for browser (no FS). Builds indexed map for O(1) cell resolution.
+pure func parseSharedStringsToMap(xml: string) -> Map[int, string] {
+  if length(xml) == 0 then emptyMap()
   else match parse(xml) {
     Ok(root) => {
       let items = findAll(root, "si");
-      extractSharedStrings(items)
+      let strings = extractSharedStrings(items);
+      xlsxBrowserBuildMap(strings, 0)
     },
-    Err(_) => []
+    Err(_) => emptyMap()
   }
 }
+
+-- Build Map[int, string] from a list of strings with indices
+pure func xlsxBrowserBuildMap(strings: [string], idx: int) -> Map[int, string] =
+  match strings {
+    [] => emptyMap(),
+    s :: rest => mapInsert(xlsxBrowserBuildMap(rest, idx + 1), idx, s)
+  }

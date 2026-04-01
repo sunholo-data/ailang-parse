@@ -845,18 +845,18 @@
     <div id="pricing-fallback" style="display:none">
       <table class="dp-tier-table">
         <thead>
-          <tr><th></th><th>Free</th><th>Pro &mdash; &euro;29/mo</th><th>Business &mdash; &euro;99/mo</th></tr>
+          <tr><th></th><th>Browser</th><th>Free</th><th>Pro &mdash; &euro;29/mo</th><th>Business &mdash; &euro;99/mo</th></tr>
         </thead>
         <tbody>
-          <tr><td>Requests / day</td><td>200</td><td>2,000</td><td>10,000</td></tr>
-          <tr><td>Requests / month</td><td>2,000</td><td>10,000</td><td>50,000</td></tr>
-          <tr><td>AI parses / month</td><td>50</td><td>500</td><td>1,000</td></tr>
-          <tr><td>Max file size</td><td>50 MB</td><td>50 MB</td><td>50 MB</td></tr>
-          <tr><td colspan="4" style="font-weight:700;padding-top:12px">AI Format File Size Limits</td></tr>
-          <tr><td>PDF max</td><td>20 MB</td><td>50 MB</td><td>50 MB</td></tr>
-          <tr><td>Image max</td><td>20 MB</td><td>30 MB</td><td>50 MB</td></tr>
-          <tr><td>Audio max</td><td>20 MB</td><td>50 MB</td><td>100 MB</td></tr>
-          <tr><td>Video max</td><td>10 MB</td><td>20 MB</td><td>40 MB</td></tr>
+          <tr><td>Requests / day</td><td>Unlimited</td><td>200</td><td>2,000</td><td>10,000</td></tr>
+          <tr><td>Requests / month</td><td>Unlimited</td><td>2,000</td><td>10,000</td><td>50,000</td></tr>
+          <tr><td>AI parses / month</td><td>&mdash;</td><td>50</td><td>500</td><td>1,000</td></tr>
+          <tr><td>Max file size</td><td>20 MB</td><td>50 MB</td><td>50 MB</td><td>50 MB</td></tr>
+          <tr><td colspan="5" style="font-weight:700;padding-top:12px">AI Format File Size Limits</td></tr>
+          <tr><td>PDF max</td><td>&mdash;</td><td>20 MB</td><td>50 MB</td><td>50 MB</td></tr>
+          <tr><td>Image max</td><td>&mdash;</td><td>20 MB</td><td>30 MB</td><td>50 MB</td></tr>
+          <tr><td>Audio max</td><td>&mdash;</td><td>20 MB</td><td>50 MB</td><td>100 MB</td></tr>
+          <tr><td>Video max</td><td>&mdash;</td><td>10 MB</td><td>20 MB</td><td>40 MB</td></tr>
         </tbody>
       </table>
       <p style="font-size:12px;color:var(--text-muted);margin-top:8px"><strong>Need higher limits?</strong> <a href="https://www.sunholo.com/contact" style="color:var(--dp-blue)">Get in touch</a> for custom pricing.</p>
@@ -1549,16 +1549,19 @@ function renderPricing(apiData) {
     html += '<div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:12px">Estimated Page Capacity</div>';
     html += '<p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">Unlike per-page competitors, each AILANG Parse request can contain an entire multi-page document. Estimated pages per request based on file size limits:</p>';
 
-    // Pages-per-request table
+    // Filter out browser tier for page capacity (client-side, no meaningful monthly quotas)
+    var apiTierNames = tierNames.filter(function(n) { return n !== 'browser'; });
+
+    // Pages-per-request table uses only API tiers
     html += '<table class="dp-tier-table"><thead><tr><th></th>';
-    tierNames.forEach(function(name) {
+    apiTierNames.forEach(function(name) {
       html += '<th>' + name.charAt(0).toUpperCase() + name.slice(1) + '</th>';
     });
     html += '</tr></thead><tbody>';
 
     // Office pages per request
     html += '<tr><td>Office pages/request</td>';
-    tierNames.forEach(function(name) {
+    apiTierNames.forEach(function(name) {
       var maxMB = data.tiers[name].max_file_size_mb;
       var pages = Math.round((maxMB * 1024) / officeKB);
       html += '<td>~' + pages.toLocaleString() + '</td>';
@@ -1567,7 +1570,7 @@ function renderPricing(apiData) {
 
     // PDF pages per request (uses AI file size limit)
     html += '<tr><td>PDF pages/request</td>';
-    tierNames.forEach(function(name) {
+    apiTierNames.forEach(function(name) {
       var pdfMB = data.tiers[name].ai_file_size_limits ? data.tiers[name].ai_file_size_limits.pdf_mb : data.tiers[name].max_file_size_mb;
       var pages = Math.round((pdfMB * 1024) / pdfKB);
       html += '<td>~' + pages.toLocaleString() + '</td>';
@@ -1576,7 +1579,7 @@ function renderPricing(apiData) {
 
     // Max Office pages per month
     html += '<tr><td>Office pages/month (max)</td>';
-    tierNames.forEach(function(name) {
+    apiTierNames.forEach(function(name) {
       var maxMB = data.tiers[name].max_file_size_mb;
       var pagesPerReq = Math.round((maxMB * 1024) / officeKB);
       var total = pagesPerReq * data.tiers[name].requests_per_month;
@@ -1586,7 +1589,7 @@ function renderPricing(apiData) {
 
     // Effective cost per 1,000 pages (Office, realistic ~25 pages/request average)
     html += '<tr><td>Effective cost / 1,000 pages*</td>';
-    tierNames.forEach(function(name) {
+    apiTierNames.forEach(function(name) {
       var price = data.tiers[name].price_eur;
       var reqs = data.tiers[name].requests_per_month;
       var maxMB = data.tiers[name].max_file_size_mb;

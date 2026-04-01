@@ -10,6 +10,17 @@
 var DP_DATA = {
   pricing: {
     tiers: {
+      browser: {
+        price_eur: 0,
+        requests_per_day: 1000000,
+        requests_per_month: 1000000,
+        ai_requests_per_month: 0,
+        max_file_size_mb: 20,
+        ai_file_size_limits: { video_mb: null, audio_mb: null, pdf_mb: null, image_mb: null },
+
+        rate_limit: 'None',
+        support: 'Community'
+      },
       free: {
         price_eur: 0,
         requests_per_day: 200,

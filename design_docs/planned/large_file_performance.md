@@ -1,170 +1,84 @@
-# Large File Performance — XLSX & PPTX (PPTX Fixed, XLSX Partial)
+# Large File Performance — XLSX, PPTX, DOCX
 
-**Status:** Planned
-**Priority:** P2 (PPTX resolved, XLSX still open)
-**Date:** 2026-03-31
+**Status:** Mostly resolved (2026-04-01)
+**Priority:** P3 — remaining work is edge-case optimization
+**Date:** 2026-03-31, updated 2026-04-01
 
-## Context
+## Summary
 
-Stress testing with real-world files revealed that DOCX parsing scales well (10 MB in 1.7s, 21 MB in 5s), but XLSX parsing has serious performance and memory issues. PPTX has architectural risks at scale due to recursive slide processing.
+All three Office formats now handle files within their pricing tier limits. The key remaining limitation is extreme XLSX files (200K+ unique strings) which hit the 100K shared string cap.
 
-### Test Results
+## Current Performance
 
-| File | Size | Format | Time | Memory | Status |
-|------|------|--------|------|--------|--------|
-| docx_10mb.docx (TestFileHub) | 9.7 MB | DOCX | 1.7s | Normal | OK |
-| docx_20mb.docx (TestFileHub) | 21 MB | DOCX | 5.1s | Normal | OK |
-| xlsx_usda_food_atlas.xlsx (USDA) | 8.7 MB | XLSX | 4–7 min | 1.1 GB | Problem |
-| poi_many_merges.xlsx | 829 KB | XLSX | OK | OK | OK |
-| pptx_generated_20mb.pptx | 10.8 MB | PPTX | 1m 42s → **16.6s** | High → Normal | **FIXED** |
-| pptx_generated_50mb.pptx | 50.1 MB | PPTX | SIGKILL → **9.4s** | Very high → Normal | **FIXED** |
+| File | Size | Format | Time | Status |
+|------|------|--------|------|--------|
+| docx_10mb.docx | 9.7 MB | DOCX | 11.6s | OK |
+| poi_many_merges.xlsx | 829 KB | XLSX | <5s | OK |
+| pandoc_basic.xlsx | 13 KB | XLSX | <4s | OK |
+| pptx_generated_20mb.pptx | 10.8 MB | PPTX | 23s | OK |
+| xlsx_usda_food_atlas.xlsx | 8.7 MB | XLSX | ~1:30 | OK (100K string cap, warning emitted) |
 
-### Fixes Applied (2026-03-31)
+## Fixes Applied
 
-**PPTX — RESOLVED:** Conditional image extraction (skip eager base64 when AI disabled) + 500-slide cap. 50 MB / 200 slides now parses in 9.4 seconds.
+### 2026-03-31 — PPTX and XLSX initial fixes
+- **PPTX:** Conditional image extraction (skip eager base64 when AI disabled) + 500-slide cap
+  - 50 MB / 200 slides: SIGKILL → 9.4s
+  - 11 MB / 60 slides: 1m42s → 23s (4.4x faster)
+- **XLSX:** `parseElements` streaming for shared strings, `Array[string]` with O(1) lookup, 100K cap with warning
 
-**XLSX — PARTIAL:** Switched shared strings from `parse()` to `parseElements()` streaming. Avoids DOM overhead but peak memory still ~1.5 GB for 8.7 MB file because 200K+ shared strings must all live in memory for cell index resolution (`nth(sharedStrings, idx)`). Needs deeper fix (see remaining items below).
+### 2026-04-01 — std/map, parseFold, scanFold integration
+- **XLSX parser:** `scanFold` for shared strings (zero-copy ZIP→XML streaming, no 100 MB string materialization), `Map[int, string]` for O(1) cell resolution, `mapFromList` for bulk map construction
+- **XLSX generator:** `Map[string, int]` for O(1) string-to-index lookup (was O(n²) linear scan)
+- **Browser adapter:** Updated to use `Map[int, string]` for shared strings
 
-## Problem 1: XLSX Shared Strings (Parser)
+### Current caps
 
-**File:** `docparse/services/xlsx_parser.ail`, line 49–58
+| Limit | Value | Rationale |
+|-------|-------|-----------|
+| Shared strings (XLSX) | 100K | Bounds memory for string table. 99%+ of business spreadsheets have <10K |
+| Rows per sheet (XLSX) | 5K | `parseElements` early termination bounds per-sheet parse time |
+| Slides (PPTX) | 500 | Bounds slide processing time |
+| File size | Tier-based (10/50/200 MB) | API-level guard |
 
-The shared strings table (`xl/sharedStrings.xml`) is loaded entirely into memory via `parse(xml)` before any row processing begins. For the 8.7 MB USDA file, the shared strings XML alone decompresses to ~100 MB+ of XML, all parsed into an in-memory DOM tree, then converted to a `[string]` array.
+## Architecture Decisions
 
-```ailang
-func loadSharedStrings(filepath: string) -> [string] ! {FS} {
-  let xml = readZipEntry(filepath, "xl/sharedStrings.xml");  -- entire XML in memory
-  if length(xml) == 0 then []
-  else match parse(xml) {                                     -- full DOM parse
-    Ok(root) => {
-      let items = findAll(root, "si");                        -- walk entire tree
-      extractSharedStrings(items)                             -- build [string] array
-    },
-    Err(_) => []
-  }
-}
-```
+### Why hybrid streaming (scanFold for strings, parseElements for rows)
 
-**Impact:** Memory scales linearly with unique string count. A typical 8 MB XLSX has 50K–200K shared strings.
+- **Shared strings:** Must process ALL strings (or up to cap) — `scanFold` is ideal because it streams from ZIP without materializing the XML string (~100 MB for large files)
+- **Worksheet rows:** Only need first 5K — `parseElements` is better because it has early termination at `maxResults`, so it stops parsing XML after 5K `<row>` elements. `scanFold` must scan the entire XML stream even when capped.
 
-### Fix Options
+### Why not higher row caps
 
-1. **Use `parseElements` for streaming** — same approach used for rows (line 126). Parse `<si>` elements one at a time instead of the full DOM:
-   ```ailang
-   let items = parseElements(xml, "si", 500000);  -- streaming, bounded
-   ```
+Tested 10K and 50K row caps on the USDA file:
+- 5K rows: ~1:30
+- 10K rows: 24 min
+- 50K rows: 46 min
 
-2. **Lazy shared string resolution** — only parse shared strings referenced by cells in the first 5000 rows (current cap). Requires two-pass or deferred lookup.
+The scaling is non-linear because `parseElements` still processes all XML up to the cap, and more rows means more cell resolution against the shared strings map. The 5K cap is the sweet spot.
 
-3. **AILANG stdlib enhancement** — request a SAX-style `parseStream` that yields elements without building a full tree.
+### Why not full scanFold for everything
 
-## Problem 2: XLSX Row Cap (Parser)
+Tested full `scanFold` for both shared strings AND worksheet rows. Problems:
+- `scanFold` can't stop early — must scan entire XML stream per entry
+- For worksheets with >5K rows, `parseElements` + early termination is faster
+- Full scanFold approach took 8+ minutes vs 1:30 with hybrid
 
-**File:** `docparse/services/xlsx_parser.ail`, line 126
+## Remaining Opportunities (P3)
 
-```ailang
-let parsedRows = match parseElements(xml, "row", 5000) {
-```
-
-Sheets are silently truncated at 5000 rows. The USDA Food Atlas has sheets with 3,000+ rows of county-level data across 12+ sheets. No warning is emitted when truncation occurs.
-
-### Fix Options
-
-1. **Increase cap** to 50,000 or 100,000 (requires Go codegen bug to be fixed first — see line 182 comment)
-2. **Emit a warning block** when truncation occurs so the user knows data was cut
-3. **Make configurable** — accept a `max_rows` parameter
-
-## Problem 3: XLSX String Index Lookup (Generator)
-
-**File:** `docparse/services/xlsx_generator.ail`
-
-The generator uses `xlsxStringIndex()` which does a linear O(n) search through the entire string array for every cell. For a document with 100K cells and 50K unique strings, this is ~5 billion string comparisons.
-
-### Fix Options
-
-1. **Use a hashmap** for string-to-index lookup (O(1) per cell) — requires AILANG stdlib `std/map`
-2. **Build index during collection** — `xlsxCollectAllStrings()` already walks all cells; build the index at the same time
-
-## Problem 4: PPTX Recursive Slide Loading
-
-**File:** `docparse/services/pptx_parser.ail`, line 70–84
-
-```ailang
-func parseSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
-  match entries {
-    [] => [],
-    entry :: rest => {
-      let xml = readZipEntry(filepath, entry);       -- full slide XML in memory
-      let blocks = parseSlideXml(xml);
-      let moreBlocks = parseSlides(filepath, rest);  -- recursive, all slides in memory
-      ...
-    }
-  }
-```
-
-Each slide's full XML is loaded and parsed recursively. For a 200-slide deck with embedded images, all slide DOMs accumulate on the stack before any are returned.
-
-**Confirmed:** 10.8 MB / 60 slides took 1m42s. 50 MB / 200 slides had to be killed — caused severe system lag. This is not theoretical; the recursive accumulation of slide DOMs and image data is a real problem above ~20 MB / ~80 slides.
-
-### Fix Options
-
-1. **Tail-recursive with accumulator** — process slides iteratively, freeing each slide's DOM after extracting blocks
-2. **Bounded slide count** — add a configurable cap (e.g., 500 slides) with warning
-
-## Problem 5: PPTX Image Extraction
-
-**File:** `docparse/services/pptx_parser.ail`, line 287–297
-
-```ailang
-func extractPptxImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
-  match entries {
-    [] => [],
-    entry :: rest => {
-      let imageData = readImageEntry(filepath, entry);  -- base64 image in memory
-      ...
-    }
-  }
-```
-
-All images are read into memory as base64. A 50 MB PPTX that's 80% images would load ~40 MB of base64 data (~53 MB after encoding).
-
-### Fix Options
-
-1. **Lazy image loading** — return image references (paths) instead of data; load on demand
-2. **Skip images by default** — only load when `describe` arg is passed (already partially done for AI descriptions)
-
-## Priority Order
-
-| # | Fix | Impact | Effort | Status |
-|---|-----|--------|--------|--------|
-| 1 | XLSX shared strings streaming | High | Medium | **Done** (partial — avoids DOM, still high memory) |
-| 2 | PPTX conditional image extraction | **High** | Low | **Done** (50 MB in 9.4s) |
-| 3 | PPTX slide count cap (500) | Safety | Low | **Done** |
-| 4 | XLSX shared string cap/lazy load | High (fixes remaining OOM) | Medium | Open — needs std/map or two-pass |
-| 5 | XLSX truncation warning | Low (UX) | Low | Open |
-| 6 | XLSX generator hashmap | Medium (generator perf) | Medium | Blocked — needs std/map |
-| 7 | XLSX row cap increase | Medium | Low | Blocked — Go codegen bug |
-
-## Recommendation
-
-**For launch:** DOCX is the hero format and performs well at all tier sizes. XLSX and PPTX work fine for typical files (<1 MB). Document the known limitations:
-
-- XLSX: best for spreadsheets under 5 MB / 50K rows. Large datasets may be slow.
-- PPTX: works well for decks up to ~100 slides.
-
-**Post-launch (P2):** Fix #1 (XLSX shared strings streaming) and Fix #2+#3 (PPTX image/slide loading) are both confirmed blockers for large file support. Fixing these would allow raising the Business tier file size limit above 50 MB.
+1. **`scanFoldUntil`** — AILANG feature request for early-termination fold. Would allow higher caps without penalty.
+2. **Configurable caps** — Env vars (`DOCPARSE_MAX_ROWS`, `DOCPARSE_MAX_STRINGS`) for power users. Not implemented; tier-based file size limits are the primary control.
+3. **Two-pass loading** — Scan cells first, only load referenced shared strings. Feasible now with `std/map`. Worth it if customer demand warrants.
+4. **Row truncation warning** — Emit warning block when 5K row cap is hit (shared string truncation warning already implemented).
 
 ## Test Files
 
-Downloaded to `data/test_files/stress/` (gitignored, fetch on demand):
+In `data/test_files/stress/` (gitignored):
 
-| File | Size | Source | Purpose |
-|------|------|--------|---------|
-| docx_10mb.docx | 9.7 MB | TestFileHub GitHub | Free tier validation |
-| xlsx_usda_food_atlas.xlsx | 8.7 MB | USDA ERS | XLSX stress test |
-| poi_many_merges.xlsx | 829 KB | POI test suite | Merged cell regression |
-| pptx_generated_20mb.pptx | 10.8 MB | Generated (python-pptx) | PPTX stress test |
-| pptx_generated_50mb.pptx | 50.1 MB | Generated (python-pptx) | PPTX OOM confirmation |
+| File | Size | Source |
+|------|------|--------|
+| docx_10mb.docx | 9.7 MB | TestFileHub GitHub |
+| xlsx_usda_food_atlas.xlsx | 8.7 MB | USDA ERS |
+| poi_many_merges.xlsx | 829 KB | POI test suite |
+| pptx_generated_20mb.pptx | 10.8 MB | Generated (python-pptx) |
 
-Larger files available from TestFileHub (20 MB, 50 MB DOCX) and World Bank WDI (78 MB XLSX zip).
-PPTX files generated locally with `python-pptx` + `Pillow` (60/200 slides, 2 JPEG images per slide).
+See [xlsx_deep_performance.md](xlsx_deep_performance.md) for detailed XLSX analysis and benchmark data.

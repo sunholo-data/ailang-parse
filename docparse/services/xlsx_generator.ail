@@ -4,6 +4,8 @@ import std/string (length, intToStr)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
+import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
+import std/option (getOrElse)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
@@ -36,13 +38,15 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
   -- Collect all unique strings for shared strings table
   let allStrings = xlsxCollectAllStrings(sheets);
   let sharedStringsXml = xlsxBuildSharedStrings(allStrings);
+  -- Build O(1) string-to-index map for cell XML generation
+  let stringIndex = xlsxBuildStringIndex(allStrings, 0);
 
   let contentTypes = xlsxContentTypes(sheetCount);
   let rootRels = xlsxRootRels();
   let workbook = xlsxWorkbook(sheets);
   let workbookRels = xlsxWorkbookRels(sheetCount);
   let styles = xlsxMinimalStyles();
-  let sheetEntries = xlsxBuildSheetEntries(sheets, allStrings, 1);
+  let sheetEntries = xlsxBuildSheetEntries(sheets, stringIndex, 1);
 
   let baseEntries = [
     {name: "[Content_Types].xml", content: contentTypes},
@@ -181,11 +185,11 @@ pure func xlsxAppendStrList(a: [string], b: [string]) -> [string] =
     x :: rest => x :: xlsxAppendStrList(rest, b)
   }
 
--- Find index of a string in the shared strings list
-pure func xlsxStringIndex(strings: [string], target: string, idx: int) -> int =
+-- Build O(1) string-to-index map from the shared strings list
+pure func xlsxBuildStringIndex(strings: [string], idx: int) -> Map[string, int] =
   match strings {
-    [] => 0,
-    s :: rest => if s == target then idx else xlsxStringIndex(rest, target, idx + 1)
+    [] => emptyMap(),
+    s :: rest => mapInsert(xlsxBuildStringIndex(rest, idx + 1), s, idx)
   }
 
 -- Build shared strings XML
@@ -198,42 +202,42 @@ pure func xlsxBuildSharedStrings(strings: [string]) -> string {
 }
 
 -- Build sheet XML entries
-pure func xlsxBuildSheetEntries(sheets: [XlsxSheet], strings: [string], idx: int) -> [{name: string, content: string}] =
+pure func xlsxBuildSheetEntries(sheets: [XlsxSheet], stringIndex: Map[string, int], idx: int) -> [{name: string, content: string}] =
   match sheets {
     [] => [],
     s :: rest =>
-      let entry = {name: "xl/worksheets/sheet" ++ intToStr(idx) ++ ".xml", content: xlsxSheetXml(s.rows, strings)} in
-      entry :: xlsxBuildSheetEntries(rest, strings, idx + 1)
+      let entry = {name: "xl/worksheets/sheet" ++ intToStr(idx) ++ ".xml", content: xlsxSheetXml(s.rows, stringIndex)} in
+      entry :: xlsxBuildSheetEntries(rest, stringIndex, idx + 1)
   }
 
 -- Build a single worksheet XML
-pure func xlsxSheetXml(rows: [[string]], strings: [string]) -> string {
+pure func xlsxSheetXml(rows: [[string]], stringIndex: Map[string, int]) -> string {
   xmlDecl() ++
   "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" ++
   "<sheetData>" ++
-  xlsxRowsToXml(rows, strings, 1) ++
+  xlsxRowsToXml(rows, stringIndex, 1) ++
   "</sheetData></worksheet>"
 }
 
-pure func xlsxRowsToXml(rows: [[string]], strings: [string], rowIdx: int) -> string =
+pure func xlsxRowsToXml(rows: [[string]], stringIndex: Map[string, int], rowIdx: int) -> string =
   match rows {
     [] => "",
     row :: rest =>
       "<row r=\"" ++ intToStr(rowIdx) ++ "\">" ++
-      xlsxCellsToXml(row, strings, rowIdx, 1) ++
+      xlsxCellsToXml(row, stringIndex, rowIdx, 1) ++
       "</row>" ++
-      xlsxRowsToXml(rest, strings, rowIdx + 1)
+      xlsxRowsToXml(rest, stringIndex, rowIdx + 1)
   }
 
-pure func xlsxCellsToXml(cells: [string], strings: [string], rowIdx: int, colIdx: int) -> string =
+pure func xlsxCellsToXml(cells: [string], stringIndex: Map[string, int], rowIdx: int, colIdx: int) -> string =
   match cells {
     [] => "",
     cell :: rest =>
       let colLetter = xlsxColLetter(colIdx) in
       let cellRef = colLetter ++ intToStr(rowIdx) in
-      let sIdx = xlsxStringIndex(strings, cell, 0) in
+      let sIdx = getOrElse(mapLookup(stringIndex, cell), 0) in
       "<c r=\"" ++ cellRef ++ "\" t=\"s\"><v>" ++ intToStr(sIdx) ++ "</v></c>" ++
-      xlsxCellsToXml(rest, strings, rowIdx, colIdx + 1)
+      xlsxCellsToXml(rest, stringIndex, rowIdx, colIdx + 1)
   }
 
 -- Convert column number to letter (1=A, 2=B, ... 26=Z, 27=AA)
