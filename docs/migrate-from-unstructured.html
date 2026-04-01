@@ -160,17 +160,19 @@ def parse_document(filepath: str) -> dict:
       <h2 id="self-hosting">Self-Hosting</h2>
       <p>Run AILANG Parse locally with Docker &mdash; no external dependencies for Office formats:</p>
 
-      <pre><code class="language-bash"># Pull and run
-docker run -p 8080:8080 sunholo/docparse:latest
+      <pre><code class="language-bash"># Clone and build
+git clone https://github.com/sunholo-data/ailang-parse.git
+cd ailang-parse
+docker build -t docparse .
 
-# Verify it's running
-curl http://localhost:8080/api/v1/health
+# Parse a document (mount your files into /data)
+docker run -v $(pwd):/data docparse /data/report.docx
 
-# Parse a document
-curl -X POST http://localhost:8080/general/v0/general \
-  -F "files=@report.docx"</code></pre>
+# Parse with AI (pass your API key)
+docker run -e GOOGLE_API_KEY="your-key" \
+  -v $(pwd):/data docparse --ai gemini-2.5-flash /data/document.pdf</code></pre>
 
-      <p>The Docker image includes the full AILANG runtime and all 31 parser modules. Office parsing works immediately with zero configuration. Add a <code>GOOGLE_API_KEY</code> environment variable to enable AI-powered PDF and image parsing.</p>
+      <p>The Dockerfile builds AILANG from source and includes all 31 parser modules. Office parsing works immediately with zero configuration. Add a <code>GOOGLE_API_KEY</code> environment variable to enable AI-powered PDF and image parsing.</p>
 
       <p>For detailed configuration options, capability budgets, and AI model setup, see the <a href="selfhost.html" style="color:var(--dp-blue)">Self-Host Guide</a>.</p>
 
