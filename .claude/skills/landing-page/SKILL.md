@@ -1,5 +1,5 @@
 ---
-name: Landing Page
+name: landing-page
 description: Create a new AILANG Parse documentation/landing page targeting a specific keyword or topic. Use when user says 'new landing page', 'new page for X', 'create a page about X', 'landing page for keyword X', or wants to add a documentation page to the docs/ site. Also use when the user references long-tail keywords, SEO pages, or competitor comparison pages.
 ---
 
@@ -39,7 +39,7 @@ Every new page MUST follow this structure. Use [`resources/template.html`](resou
    - `<meta name="description">` — 140-160 chars, include the target keyword naturally
    - **OG tags** in raw HTML (not JS-injected — crawlers need them):
      - `og:title`, `og:description`, `og:type` (website), `og:url`
-   - Google Fonts preconnect + Montserrat/JetBrains Mono
+   - Google Fonts preconnect + Instrument Sans/JetBrains Mono
    - **All 5 CSS files**: `design-system.css`, `docparse.css`, `prism.css`, `docs-layout.css`, `components.css`
 
 2. **`<body>` structure**:

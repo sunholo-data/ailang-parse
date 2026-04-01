@@ -152,11 +152,17 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
       '</footer>';
   }
 
-  // ── Scroll Reveal ──
+  // ── Scroll Reveal (with staggered cascade) ──
   if ('IntersectionObserver' in window) {
     var observer = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (entry.isIntersecting) {
+          // Auto-stagger siblings for cascade effect
+          var siblings = entry.target.parentElement.querySelectorAll('.reveal');
+          var index = Array.prototype.indexOf.call(siblings, entry.target);
+          if (!entry.target.style.transitionDelay && !entry.target.className.match(/reveal-delay/)) {
+            entry.target.style.transitionDelay = (index * 0.06) + 's';
+          }
           entry.target.classList.add('visible');
         }
       });
@@ -166,6 +172,29 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
       observer.observe(el);
     });
   }
+
+  // ── Sidebar scroll-spy (shared across all sidebar pages) ──
+  (function () {
+    var sidebarLinks = document.querySelectorAll('.dp-docs-sidebar a[href^="#"]');
+    if (!sidebarLinks.length) return;
+    var sections = [];
+    sidebarLinks.forEach(function (a) {
+      var id = a.getAttribute('href').slice(1);
+      var el = document.getElementById(id);
+      if (el) sections.push({ el: el, link: a });
+    });
+    function updateSpy() {
+      var scrollY = window.scrollY + 100;
+      var active = sections[0];
+      sections.forEach(function (s) {
+        if (s.el.offsetTop <= scrollY) active = s;
+      });
+      sidebarLinks.forEach(function (a) { a.classList.remove('active'); });
+      if (active) active.link.classList.add('active');
+    }
+    window.addEventListener('scroll', updateSpy, { passive: true });
+    updateSpy();
+  })();
 
   // ── Output example tabs (reusable across pages) ──
   document.querySelectorAll('.dp-output-tab').forEach(function (tab) {
