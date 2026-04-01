@@ -462,14 +462,14 @@
       which charges per page ($0.001&ndash;$0.01/page).</p>
 
       <p>Why? Because we read Office XML directly. A 200-page DOCX is just a zip file of XML &mdash;
-      we parse the structure in ~50ms on a single Cloud Run instance. No PDF conversion, no OCR,
+      we parse the structure in ~50&thinsp;ms on a single server instance. No PDF conversion, no OCR,
       no per-page compute. The cost to us is the same for 1 page or 1,000 pages, so we pass that through.</p>
 
       <p>There are two types of requests:</p>
       <ul>
         <li><strong>Deterministic requests</strong> &mdash; Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS), CSV, Markdown, HTML, EPUB.
           Instant, exact, no AI model involved. Cost: ~&euro;0.000002 per document.</li>
-        <li><strong>AI parses</strong> &mdash; PDFs, images, audio, video. These invoke Gemini 2.5 Flash.
+        <li><strong>AI parses</strong> &mdash; PDFs, images, audio, video. These invoke a multimodal AI model.
           Cost: ~&euro;0.003 per document. Metered separately because the cost is ~1,500x higher.</li>
       </ul>
 
@@ -758,7 +758,7 @@
         <p class="dp-qna-a">
           <strong>Regular requests</strong> use our deterministic parser &mdash; fast, cheap, and reliable for
           Office formats, CSV, Markdown, HTML, EPUB. No AI model involved.
-          <strong>AI parses</strong> invoke Gemini 2.5 Flash for PDFs, images, audio, and video.
+          <strong>AI parses</strong> invoke a multimodal AI model for PDFs, images, audio, and video.
           Metered separately because they cost ~1,500x more (~&euro;0.003 vs ~&euro;0.000002 per document).
         </p>
       </div>
