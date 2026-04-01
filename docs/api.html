@@ -912,7 +912,7 @@
         </tr>
         <tr>
           <td><strong>Large PDFs</strong><br><span style="color:var(--text-muted);font-size:11px">&ge; 375 KB raw</span></td>
-          <td>Temporarily uploaded to a regional Google Cloud Storage bucket for efficient AI page-by-page extraction. Deleted immediately after parsing completes.</td>
+          <td>Temporarily uploaded to regional cloud storage for efficient AI page-by-page extraction. Deleted immediately after parsing completes.</td>
           <td>Deleted on completion.<br>24-hour auto-delete safety net.</td>
         </tr>
         <tr>
@@ -922,18 +922,18 @@
         </tr>
         <tr>
           <td><strong>Request metadata</strong><br><span style="color:var(--text-muted);font-size:11px">timestamp, format, size, block count</span></td>
-          <td>Logged to Firestore for billing and your request history dashboard. No document content is stored.</td>
+          <td>Logged for billing and your request history dashboard. No document content is stored.</td>
           <td>30 days (planned TTL)</td>
         </tr>
         <tr>
           <td><strong>API keys</strong></td>
-          <td>SHA-256 hash stored in Firestore. The raw key is shown once at creation and never stored.</td>
+          <td>Only a SHA-256 hash is stored. The raw key is shown once at creation and never stored.</td>
           <td>Until you revoke</td>
         </tr>
       </tbody>
     </table>
     <div style="margin-top:12px;padding:12px 16px;background:rgba(37,99,235,0.04);border:1px solid rgba(37,99,235,0.12);border-radius:var(--radius);font-size:12px;line-height:1.6">
-      <strong>Infrastructure</strong>: All processing runs on Google Cloud Run in <code>europe-west1</code> (Belgium). Temporary file storage uses a co-located GCS bucket with uniform bucket-level access and 24-hour lifecycle deletion. No document content is used for AI model training or analytics.
+      <strong>Infrastructure</strong>: All processing runs in <code>europe-west1</code> (Belgium). Temporary file storage uses a co-located regional bucket with 24-hour lifecycle deletion. No document content is used for AI model training or analytics.
     </div>
   </section>
 
@@ -1641,10 +1641,9 @@ function renderPricing(apiData) {
 
     // Competitor comparison
     html += '<div style="margin-top:16px;padding:12px 16px;background:var(--bg-input);border-radius:var(--radius);font-size:12px;color:var(--text-secondary);line-height:1.6">';
-    html += '<strong style="color:var(--text-primary)">Competitor per-page pricing (for reference):</strong><br>';
-    html += 'Amazon Textract / Google Document AI: ~$0.0015/pg (OCR) to $0.03/pg (structured)<br>';
-    html += 'Unstructured.io: $0.03/pg &middot; Reducto: $0.015\u2013$0.06/pg &middot; LlamaParse: $0.001\u2013$0.056/pg<br>';
-    html += 'DocParser: $0.03\u2013$0.08/pg &middot; Mathpix: $0.005/pg';
+    html += '<strong style="color:var(--text-primary)">How other APIs charge:</strong><br>';
+    html += 'Most document parsing APIs charge per page ($0.001\u2013$0.01/page typical). A 25-page document costs $0.025\u2013$0.25.<br>';
+    html += 'AILANG Parse charges per document regardless of page count. Office formats are deterministic and cost one request each.';
     html += '</div>';
 
     html += '</div>';
