@@ -12,46 +12,39 @@ var DP_DATA = {
     tiers: {
       browser: {
         price_eur: 0,
-        requests_per_day: 1000000,
+        daily_rate_limit: 1000000,
         requests_per_month: 1000000,
         ai_requests_per_month: 1000000,
         max_file_size_mb: 20,
         ai_file_size_limits: { video_mb: 20, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
 
-        rate_limit: 'None',
         support: 'Community'
       },
       free: {
         price_eur: 0,
-        requests_per_day: 200,
-        requests_per_month: 2000,
+        daily_rate_limit: 500,
+        requests_per_month: 10000,
         ai_requests_per_month: 50,
         max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 10, audio_mb: 20, pdf_mb: 20, image_mb: 20 },
-
-        rate_limit: '1 req/s',
         support: 'Community'
       },
       pro: {
         price_eur: 29,
-        requests_per_day: 2000,
-        requests_per_month: 10000,
+        daily_rate_limit: 5000,
+        requests_per_month: 100000,
         ai_requests_per_month: 500,
         max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 20, audio_mb: 50, pdf_mb: 50, image_mb: 30 },
-
-        rate_limit: '10 req/s',
         support: 'Email'
       },
       business: {
         price_eur: 99,
-        requests_per_day: 10000,
-        requests_per_month: 50000,
+        daily_rate_limit: 20000,
+        requests_per_month: 500000,
         ai_requests_per_month: 1000,
         max_file_size_mb: 50,
         ai_file_size_limits: { video_mb: 40, audio_mb: 100, pdf_mb: 50, image_mb: 50 },
-
-        rate_limit: '100 req/s',
         support: 'Dedicated'
       }
     }
@@ -76,7 +69,7 @@ var DP_DATA = {
 };
 
 /**
- * Helper: resolve a dotted path like "pricing.tiers.free.requests_per_day"
+ * Helper: resolve a dotted path like "pricing.tiers.free.daily_rate_limit"
  * against DP_DATA. Returns undefined if any segment is missing.
  */
 function dpResolve(path) {
