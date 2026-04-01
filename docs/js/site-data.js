@@ -27,6 +27,7 @@ var DP_DATA = {
         ai_requests_per_month: 50,
         max_file_size_mb: 10,
         ai_file_size_limits: { pdf_mb: 10, image_mb: 10 },
+        gcs_upload: false,
         support: 'Community'
       },
       pro: {
@@ -36,6 +37,7 @@ var DP_DATA = {
         ai_requests_per_month: 500,
         max_file_size_mb: 25,
         ai_file_size_limits: { pdf_mb: 25, image_mb: 25 },
+        gcs_upload: false,
         support: 'Email'
       },
       business: {
@@ -45,6 +47,7 @@ var DP_DATA = {
         ai_requests_per_month: 2000,
         max_file_size_mb: 50,
         ai_file_size_limits: { pdf_mb: 50, image_mb: 50 },
+        gcs_upload: true,
         support: 'Dedicated'
       }
     }
