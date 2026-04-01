@@ -98,6 +98,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
           navLink('docs.html', 'Docs', 'docs') +
           navLink('api.html', 'API', 'api') +
           navLink('selfhost.html', 'Run Locally', 'selfhost') +
+          navLink('pricing.html', 'Pricing', 'pricing') +
           navLink('benchmarks.html', 'Benchmarks', 'benchmarks') +
         '</nav>' +
 
