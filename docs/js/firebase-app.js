@@ -38,6 +38,8 @@
 
     return {
       signInFlow: 'popup',
+      tosUrl: 'https://www.sunholo.com/docparse/terms.html',
+      privacyPolicyUrl: 'https://www.sunholo.com/docparse/privacy.html',
       signInOptions: [
         firebase.auth.GoogleAuthProvider.PROVIDER_ID,
         firebase.auth.GithubAuthProvider.PROVIDER_ID,

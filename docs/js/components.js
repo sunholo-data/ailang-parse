@@ -89,6 +89,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
           '<img src="img/docparse-logo.svg" alt="AILANG Parse" class="header-logo">' +
         '</a>' +
         '<span class="header-title">AILANG <span class="dp-accent">Parse</span></span>' +
+        '<span class="dp-beta-badge">Beta</span>' +
         '<span class="header-sep"></span>' +
         '<span class="header-subtitle">Universal Document Parsing</span>' +
 
@@ -149,6 +150,10 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
         '</div>' +
         '<div class="footer-line" style="margin-top:4px">' +
           '&copy; 2026 Holosun ApS' +
+          '<span class="footer-sep"></span>' +
+          '<a href="privacy.html">Privacy</a>' +
+          '<span class="footer-sep"></span>' +
+          '<a href="terms.html">Terms</a>' +
         '</div>' +
       '</footer>';
   }
