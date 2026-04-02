@@ -151,6 +151,8 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
         '<div class="footer-line" style="margin-top:4px">' +
           '&copy; 2026 Holosun ApS' +
           '<span class="footer-sep"></span>' +
+          '<span class="footer-version">v' + (window.DP_DATA && window.DP_DATA.version || '?') + '</span>' +
+          '<span class="footer-sep"></span>' +
           '<a href="privacy.html">Privacy</a>' +
           '<span class="footer-sep"></span>' +
           '<a href="terms.html">Terms</a>' +

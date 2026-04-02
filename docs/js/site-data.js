@@ -8,6 +8,7 @@
  * To update pricing, change values here — they propagate via data-dp attributes.
  */
 var DP_DATA = {
+  version: "0.8.2",
   pricing: {
     tiers: {
       browser: {

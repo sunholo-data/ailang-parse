@@ -27,6 +27,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
 
       - name: Download AILANG WASM runtime
         run: |
@@ -68,6 +71,13 @@ jobs:
           cp docparse/services/output_formatter.ail docs/ailang/docparse/services/
           cp docparse/services/docparse_browser.ail docs/ailang/docparse/services/
           echo "Copied 8 AILANG modules"
+
+      - name: Stamp version from latest git tag
+        run: |
+          VERSION=$(git tag --list 'v*' --sort=-version:refname | head -1 | sed 's/^v//')
+          echo "Stamping version: $VERSION"
+          sed -i "s/version: \".*\"/version: \"$VERSION\"/" docs/js/site-data.js
+          grep 'version:' docs/js/site-data.js | head -1
 
       - name: Build site directory
         run: |
