@@ -155,8 +155,17 @@ pure func processBodyNode(node: XmlNode) -> [Block] {
     mainBlock :: concat(changeBlocks, textBoxBlocks)
   }
   else if tag == "w:tbl" then [parseTable(node)]
+  else if tag == "w:sdt" then extractSdtBodyBlocks(node)
   else []
 }
+
+-- Extract blocks from a body-level structured document tag (w:sdt)
+-- SDTs can wrap paragraphs, tables, and nested SDTs at the body level
+pure func extractSdtBodyBlocks(sdt: XmlNode) -> [Block] =
+  match findFirst(sdt, "w:sdtContent") {
+    Some(content) => processBodyChildren(getChildren(content)),
+    None => []
+  }
 
 -- Extract text from text boxes (wps:txbx / w:txbxContent) inside a node
 -- Text boxes appear inside drawings within paragraphs

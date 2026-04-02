@@ -233,8 +233,29 @@ def check_text_jaccard(golden_els: list[NormalizedElement], actual_els: list[Nor
 
 # --- Main evaluation ---
 
+def run_batch(test_files: list[Path]) -> tuple[float, bool]:
+    """Run DocParse in batch mode: compile once, parse all files.
+
+    Returns (elapsed_ms, success).
+    """
+    start = time.time()
+    try:
+        result = subprocess.run(
+            ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
+             "--max-recursion-depth", "50000", "--batch",
+             "docparse/main.ail"] + [str(f) for f in test_files],
+            capture_output=True, text=True, cwd=str(REPO_DIR),
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        elapsed_ms = round((time.time() - start) * 1000, 1)
+        return elapsed_ms, False
+    elapsed_ms = round((time.time() - start) * 1000, 1)
+    return elapsed_ms, result.returncode == 0
+
+
 def evaluate_file(test_file: Path, golden_file: Path) -> dict:
-    """Run DocParse on a test file and compare against golden output."""
+    """Compare DocParse output against golden (assumes batch already ran)."""
     fname = test_file.name
 
     # Load golden
@@ -242,29 +263,10 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
         golden_json = json.load(f)
     golden_els = normalize_ailang(golden_json)
 
-    # Run DocParse
-    start = time.time()
-    try:
-        result = subprocess.run(
-            ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
-             "--max-recursion-depth", "50000",
-             "docparse/main.ail", str(test_file)],
-            capture_output=True, text=True, cwd=str(REPO_DIR),
-            timeout=120,
-        )
-    except subprocess.TimeoutExpired:
-        elapsed_ms = round((time.time() - start) * 1000, 1)
-        return {"file": fname, "status": "SKIP", "error": "timeout (120s)", "time_ms": elapsed_ms}
-    elapsed_ms = round((time.time() - start) * 1000, 1)
-
-    # Check if the parser succeeded
-    if result.returncode != 0:
-        return {"file": fname, "status": "FAIL", "error": f"parse error (exit {result.returncode})", "time_ms": elapsed_ms}
-
     # Load actual output (filename-based: sample.docx → sample.docx.json)
     output_json = OUTPUT_DIR / f"{fname}.json"
     if not output_json.exists():
-        return {"file": fname, "status": "FAIL", "error": f"no {fname}.json", "time_ms": elapsed_ms}
+        return {"file": fname, "status": "FAIL", "error": f"no {fname}.json", "time_ms": 0}
 
     with open(output_json) as f:
         actual_json = json.load(f)
@@ -308,7 +310,7 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
     return {
         "file": fname,
         "status": "OK",
-        "time_ms": elapsed_ms,
+        "time_ms": 0,
         "golden_elements": len(golden_els),
         "actual_elements": len(actual_els),
         "element_count_match": len(actual_els) == len(golden_els),
@@ -319,18 +321,18 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
     }
 
 
-def print_report(results: list[dict]) -> None:
+def print_report(results: list[dict], batch_ms: float = 0) -> None:
     """Print a markdown-style report."""
     print("\n# DocParse Structural Benchmark\n")
-    print(f"| File | Score | Time | Elements | Tables | Changes | Comments | Hdr/Ftr | TextBox | Jaccard |")
-    print(f"|------|-------|------|----------|--------|---------|----------|---------|---------|---------|")
+    print(f"| File | Score | Elements | Tables | Changes | Comments | Hdr/Ftr | TextBox | Jaccard |")
+    print(f"|------|-------|----------|--------|---------|----------|---------|---------|---------|")
 
     total_score = 0
     total_files = 0
 
     for r in results:
         if r["status"] != "OK":
-            print(f"| {r['file']} | FAIL | {r.get('time_ms', 0)}ms | — | — | — | — | — | — | — |")
+            print(f"| {r['file']} | FAIL | — | — | — | — | — | — | — |")
             continue
 
         total_files += 1
@@ -354,10 +356,11 @@ def print_report(results: list[dict]) -> None:
         jaccard = f"{c['text_similarity']['jaccard']:.2f}"
 
         score_pct = f"{r['score']:.0%}"
-        print(f"| {r['file']} | {score_pct} | {r['time_ms']}ms | {r['actual_elements']} | {tables} | {changes} | {comments} | {hdrftr} | {textbox} | {jaccard} |")
+        print(f"| {r['file']} | {score_pct} | {r['actual_elements']} | {tables} | {changes} | {comments} | {hdrftr} | {textbox} | {jaccard} |")
 
     mean_score = total_score / total_files if total_files else 0
-    print(f"\n**Mean score: {mean_score:.1%}** across {total_files} files\n")
+    batch_s = batch_ms / 1000
+    print(f"\n**Mean score: {mean_score:.1%}** across {total_files} files ({batch_s:.1f}s batch)\n")
 
 
 def main():
@@ -387,12 +390,27 @@ def main():
 
     golden_dir = STRESS_GOLDEN_DIR if args.stress else GOLDEN_DIR
 
-    results = []
+    # Filter to files that have golden outputs
+    eval_pairs = []
     for tf in test_files:
         golden = golden_dir / f"{tf.name}.json"
         if not golden.exists():
             print(f"  SKIP {tf.name} (no golden output)", file=sys.stderr)
             continue
+        eval_pairs.append((tf, golden))
+
+    # Run batch: compile once, parse all files
+    batch_files = [tf for tf, _ in eval_pairs]
+    if not args.json:
+        print(f"  Running batch parse ({len(batch_files)} files)...", file=sys.stderr)
+    batch_ms, batch_ok = run_batch(batch_files)
+    if not args.json:
+        status = "OK" if batch_ok else "WARN (non-zero exit)"
+        print(f"  Batch done in {batch_ms:.0f}ms [{status}]", file=sys.stderr)
+
+    # Evaluate each file against golden
+    results = []
+    for tf, golden in eval_pairs:
         result = evaluate_file(tf, golden)
         if not args.json:
             status = f"{result['score']:.0%}" if result["status"] == "OK" else "FAIL"
@@ -402,7 +420,7 @@ def main():
     if args.json:
         print(json.dumps(results, indent=2))
     else:
-        print_report(results)
+        print_report(results, batch_ms)
 
 
 if __name__ == "__main__":
