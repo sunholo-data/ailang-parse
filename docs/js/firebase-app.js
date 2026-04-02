@@ -21,7 +21,7 @@
     appId: "1:812435936917:web:2dcf2a315dfc7cb2b66d9c"
   };
 
-  var API_BASE = 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+  var API_BASE = 'https://docparse.ailang.sunholo.com';
 
   var app = null;
   var auth = null;

@@ -5,7 +5,7 @@
  */
 var _dpParams = (typeof window !== 'undefined') ? new URLSearchParams(window.location.search) : null;
 var _dpApiUrl = (typeof DP_DATA !== 'undefined' && DP_DATA.site && DP_DATA.site.api_url) || null;
-var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docparse.ailang.sunholo.com';
 
 /**
  * AILANG Parse — Shared Components
@@ -245,7 +245,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://aila
   }
 
   // ── Rewrite API URLs in code blocks when ?api= override is active ──
-  var DEFAULT_API = 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+  var DEFAULT_API = 'https://docparse.ailang.sunholo.com';
   if (API_BASE !== DEFAULT_API) {
     document.querySelectorAll('pre code').forEach(function (el) {
       if (el.innerHTML.indexOf(DEFAULT_API) !== -1) {

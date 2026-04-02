@@ -67,7 +67,7 @@ var DP_DATA = {
     name: 'AILANG Parse',
     tagline: 'Universal Document Parsing',
     base_url: 'https://www.sunholo.com/docparse',
-    api_url: 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app',
+    api_url: 'https://docparse.ailang.sunholo.com',
     og_image: 'img/docparse-og.png'
   }
 };

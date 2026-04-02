@@ -832,7 +832,7 @@
   <!-- Quick Start -->
   <section class="dp-api-section reveal">
     <h2 id="quick-start">Quick Start</h2>
-    <pre><code class="language-bash" data-src="examples/api/curl-parse.sh">curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
+    <pre><code class="language-bash" data-src="examples/api/curl-parse.sh">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_docx_basic","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
     <p style="font-size:13px;color:var(--text-muted)">No file to upload — use any of 15 built-in <code>sample_*</code> IDs to test immediately. <a href="#agent-guide" style="color:var(--dp-blue)">See full agent guide below</a>.</p>
@@ -954,7 +954,7 @@
   <!-- API Explorer — rendered dynamically from /api/v1/capabilities -->
   <section class="dp-api-section reveal">
     <h2 id="api-explorer">API Explorer</h2>
-    <p>Endpoint cards, schemas, and badges are generated from the <a href="https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/capabilities" target="_blank" style="color:var(--dp-blue)">capability manifest</a>. Adding an endpoint to the API automatically adds it here.</p>
+    <p>Endpoint cards, schemas, and badges are generated from the <a href="https://docparse.ailang.sunholo.com/api/v1/capabilities" target="_blank" style="color:var(--dp-blue)">capability manifest</a>. Adding an endpoint to the API automatically adds it here.</p>
 
     <!-- Playground banner (shown when not signed in or no keys) -->
     <div class="dp-pg-banner" id="pg-banner-signin">
@@ -1001,7 +1001,7 @@ client = UnstructuredClient(server_url="https://api.unstructured.io")
 
 # After (AILANG Parse) — one line change
 client = UnstructuredClient(
-    server_url="https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app"
+    server_url="https://docparse.ailang.sunholo.com"
 )</code></pre>
     <p>The <code>/general/v0/general</code> endpoint returns identical element JSON. All existing code works unchanged.</p>
   </section>
@@ -1083,22 +1083,22 @@ bash skills/docparse/scripts/samples.sh</code></pre>
       <!-- Step 1 -->
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 1: Discover the API</h3>
       <pre><code class="language-bash"># Health check — confirms service is up and version
-curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/health
+curl https://docparse.ailang.sunholo.com/api/v1/health
 
 # Full capability manifest — every endpoint, schema, auth, costs
-curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/capabilities
+curl https://docparse.ailang.sunholo.com/api/v1/capabilities
 
 # Supported formats
-curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/formats
+curl https://docparse.ailang.sunholo.com/api/v1/formats
 
 # Machine-readable tool definitions (Claude/OpenAI/MCP)
-curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/tools</code></pre>
+curl https://docparse.ailang.sunholo.com/api/v1/tools</code></pre>
 
       <!-- Step 2 -->
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 2: Get an API Key (Device Auth)</h3>
       <p>Agents use the <a href="https://datatracker.ietf.org/doc/html/rfc8628" target="_blank" style="color:var(--dp-blue)">RFC 8628 Device Authorization</a> flow — no browser session needed after initial approval.</p>
       <pre><code class="language-bash"># 1. Request a device code
-curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth/device \
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/auth/device \
   -H "Content-Type: application/json" \
   -d '{"label":"my-agent","scope":"parse"}'
 # Returns: device_code, user_code (e.g. ABCD-1234), verification_url
@@ -1106,7 +1106,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
 # 2. Display the verification_url to the user. They open it and sign in (authorization is automatic).
 
 # 3. Poll every 5 seconds until approved:
-curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth/device/poll \
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/auth/device/poll \
   -H "Content-Type: application/json" \
   -d '{"deviceCode":"DEVICE_CODE_FROM_STEP_1"}'
 # Returns: {"status":"approved", "api_key":"dp_...", "tier":"free"}</code></pre>
@@ -1124,7 +1124,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
       <!-- Step 3 -->
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 3: List Test Samples</h3>
       <p>Built-in sample files let you test parsing without uploading anything.</p>
-      <pre><code class="language-bash">curl https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/samples</code></pre>
+      <pre><code class="language-bash">curl https://docparse.ailang.sunholo.com/api/v1/samples</code></pre>
       <table style="width:100%;font-size:12px;font-family:var(--font-mono);border-collapse:collapse;margin:12px 0">
         <thead><tr style="border-bottom:1px solid var(--border)">
           <th style="text-align:left;padding:6px 8px;color:var(--text-muted)">Sample ID</th>
@@ -1151,7 +1151,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
 
       <!-- Step 4 -->
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 4: Estimate Cost</h3>
-      <pre><code class="language-bash">curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/estimate \
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/estimate \
   -H "Content-Type: application/json" \
   -d '{"filepath":"data/test_files/sample.docx","outputFormat":"markdown"}'
 # Returns: {"format":"zip-office", "strategy":"deterministic", "ai_required":false, "estimated_ms":15}</code></pre>
@@ -1159,12 +1159,12 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/auth
       <!-- Step 5 -->
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Step 5: Parse a Document</h3>
       <pre><code class="language-bash"># Deterministic (Office/Web/Text) — same output every time, &lt;15ms
-curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_docx_basic","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'
 
 # AI-powered (PDF/images) — content depends on model
-curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/parse \
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
       <p><strong>Output formats:</strong> <code>blocks</code> (structured JSON), <code>markdown</code>, <code>html</code>, <code>a2ui</code> (rich UI components).</p>
@@ -1217,7 +1217,7 @@ curl -X POST https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pars
           <tr><td style="padding:4px 8px">Image (PNG, JPG, etc.)</td><td style="padding:4px 8px">AI</td><td style="padding:4px 8px">~1.5s</td></tr>
         </tbody>
       </table>
-      <p>Deterministic formats have zero AI cost and are unlimited within your request quota. AI formats count against your monthly AI parse limit with per-format file size caps. Free tier: <span data-dp="pricing.tiers.free.requests_per_month">1,000</span> requests/month + <span data-dp="pricing.tiers.free.ai_requests_per_month">50</span> AI parses. <a href="https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app/api/v1/pricing" style="color:var(--dp-blue)">GET /api/v1/pricing</a> for full tier details.</p>
+      <p>Deterministic formats have zero AI cost and are unlimited within your request quota. AI formats count against your monthly AI parse limit with per-format file size caps. Free tier: <span data-dp="pricing.tiers.free.requests_per_month">1,000</span> requests/month + <span data-dp="pricing.tiers.free.ai_requests_per_month">50</span> AI parses. <a href="https://docparse.ailang.sunholo.com/api/v1/pricing" style="color:var(--dp-blue)">GET /api/v1/pricing</a> for full tier details.</p>
 
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px">Runnable Examples</h3>
       <pre><code class="language-bash"># Quickstart: auth + first parse in one command
