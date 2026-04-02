@@ -1,0 +1,132 @@
+From: =?utf-8?Q?Fran=C3=A7ois_M=C3=BCller?= <francois@example.com>
+To: bugs@ailang.sunholo.com
+CC: "Dr. Sarah Chen" <sarah.chen@example.com>,
+ =?utf-8?B?5bGx55Sw5aSq6YOO?= <yamada@example.co.jp>
+Subject: =?utf-8?Q?Bug:_ODT_parser_crashes_on_=C3=BCber-nested_tables_=E2=80=94_Z=C3=BCrich_office?=
+Date: Tue, 01 Apr 2026 16:45:00 +0200
+Message-ID: <bug-2026-0401-odt@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+ boundary="----=_Bug_Report_Mixed"
+X-Priority: 2
+X-Bug-Severity: P1
+X-Component: odf_parser
+
+------=_Bug_Report_Mixed
+Content-Type: multipart/alternative;
+ boundary="----=_Bug_Body_Alt"
+
+------=_Bug_Body_Alt
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Bug Report: ODT Parser Crash on Nested Tables
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D
+
+Environment:
+  AILANG Parse: v0.7.2
+  AILANG Runtime: v0.10.1
+  OS: macOS 14.3 (Apple M2)
+  File: report_z=C3=BCrich_q1.odt (2.3 MB)
+
+Steps to Reproduce:
+  1. Create an ODT with a table containing a nested table in cell B2
+  2. The inner table has merged cells spanning 3 columns
+  3. Parse with: ailang run docparse/ report.odt blocks
+
+Expected: Block ADT with nested Table blocks
+Actual: Runtime panic =E2=80=94 "index out of range [3] with length 2"
+
+Stack trace:
+  odf_parser.ail:142 =E2=80=94 parseTableRow()
+  odf_parser.ail:98  =E2=80=94 parseTable()
+  odf_parser.ail:67  =E2=80=94 parseContent()
+  format_router.ail:45 =E2=80=94 route()
+
+The issue is that parseTableRow() uses the parent table's column =
+count instead of the nested table's column count when allocating =
+the cell array.
+
+Workaround: Flatten nested tables before parsing (loses structure).
+
+Proposed fix: Pass column count as parameter to parseTableRow() =
+instead of reading from module-level state.
+
+Priority: P1 =E2=80=94 blocks our Z=C3=BCrich office quarterly report pipeline.
+
+Regards,
+Fran=C3=A7ois M=C3=BCller
+Senior Data Engineer, Z=C3=BCrich
+
+------=_Bug_Body_Alt
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Bug Report</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto;">
+
+<h1 style="color: #dc2626;">Bug: ODT Parser Crash on Nested Tables</h1>
+
+<table style="border-collapse:collapse;width:100%;margin:12px 0;">
+  <tr><td style="padding:4px 8px;font-weight:bold;width:140px;">AILANG Parse</td><td style="padding:4px 8px;">v0.7.2</td></tr>
+  <tr style="background:#f8f8f8;"><td style="padding:4px 8px;font-weight:bold;">AILANG Runtime</td><td style="padding:4px 8px;">v0.10.1</td></tr>
+  <tr><td style="padding:4px 8px;font-weight:bold;">OS</td><td style="padding:4px 8px;">macOS 14.3 (Apple M2)</td></tr>
+  <tr style="background:#f8f8f8;"><td style="padding:4px 8px;font-weight:bold;">Severity</td><td style="padding:4px 8px;"><span style="background:#fecaca;color:#991b1b;padding:2px 8px;border-radius:4px;">P1</span></td></tr>
+  <tr><td style="padding:4px 8px;font-weight:bold;">Component</td><td style="padding:4px 8px;"><code>odf_parser.ail</code></td></tr>
+</table>
+
+<h2>Steps to Reproduce</h2>
+<ol>
+  <li>Create an ODT with a table containing a nested table in cell B2</li>
+  <li>The inner table has merged cells spanning 3 columns</li>
+  <li>Parse with: <code>ailang run docparse/ report.odt blocks</code></li>
+</ol>
+
+<h2>Stack Trace</h2>
+<pre style="background:#1a1a2e;color:#e0e0e0;padding:12px;border-radius:6px;font-size:13px;overflow-x:auto;">odf_parser.ail:142 &#x2014; parseTableRow()
+odf_parser.ail:98  &#x2014; parseTable()
+odf_parser.ail:67  &#x2014; parseContent()
+format_router.ail:45 &#x2014; route()</pre>
+
+<p><strong>Root cause:</strong> <code>parseTableRow()</code> uses the parent table's column
+count instead of the nested table's column count when allocating the cell array.</p>
+
+<p><strong>Proposed fix:</strong> Pass column count as parameter to <code>parseTableRow()</code>
+instead of reading from module-level state.</p>
+
+</body>
+</html>
+
+------=_Bug_Body_Alt--
+
+------=_Bug_Report_Mixed
+Content-Type: application/vnd.oasis.opendocument.text;
+ name="report_zurich_q1_minimal.odt"
+Content-Disposition: attachment;
+ filename="report_zurich_q1_minimal.odt"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAIAAAAAACKIYOwUQAAAFIAAAAIABwAbWltZXR5cGVVVAkAAwAAAAAAAAAAAAphcHBs
+aWNhdGlvbi92bmQub2FzaXMub3BlbmRvY3VtZW50LnRleHRQSwECHgMUAAAACAAAAAAASiGDsFEA
+AABSAAAACAAYAAAAAAABAAAApIEAAAAAbWltZXR5cGVVVAUAAwAAAAB1eAsAAQT2AQAABBQAAABQSwUG
+AAAAAAEAAQBOAAAAkwAAAAA=
+
+------=_Bug_Report_Mixed
+Content-Type: text/plain; charset=UTF-8;
+ name="stack_trace.txt"
+Content-Disposition: attachment;
+ filename="stack_trace.txt"
+Content-Transfer-Encoding: 7bit
+
+goroutine 1 [running]:
+ailang/eval.(*VM).Run(0xc0001a2000, {0xc0004b6000, 0x42, 0x42})
+	/usr/local/go/src/ailang/eval/vm.go:892 +0x1a4
+ailang/eval.(*VM).evalCall(0xc0001a2000, 0xc0004b8100)
+	/usr/local/go/src/ailang/eval/vm.go:445 +0x3c8
+ailang/eval.(*VM).evalApp(0xc0001a2000, 0xc0004c0000)
+	/usr/local/go/src/ailang/eval/vm.go:312 +0x198
+
+------=_Bug_Report_Mixed--

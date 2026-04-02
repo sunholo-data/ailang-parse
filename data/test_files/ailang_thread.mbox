@@ -1,0 +1,140 @@
+From dev@ailang.sunholo.com Wed Apr 01 09:00:00 2026
+From: Mark <dev@ailang.sunholo.com>
+To: team@ailang.sunholo.com
+Subject: RFC: Add EML/MBOX parsing to AILANG Parse
+Date: Wed, 01 Apr 2026 09:00:00 +0200
+Message-ID: <rfc-eml-001@ailang.sunholo.com>
+Content-Type: text/plain; charset=UTF-8
+
+Team,
+
+I'd like to propose adding email parsing (EML and MBOX formats) to
+AILANG Parse. Here's the rationale:
+
+1. Email is a common document format that agents need to process
+2. EML files contain rich structure: headers, MIME parts, attachments
+3. MBOX files bundle multiple messages (useful for archival analysis)
+4. The RFC 5322 + MIME specs are well-defined and deterministic
+
+Proposed Block mapping:
+  - Email headers -> Text blocks (type: email-header)
+  - Plain text body -> Text block
+  - HTML body -> parsed via existing HTML parser
+  - Attachments -> Text blocks (type: attachment) with metadata
+  - MBOX messages -> Section blocks wrapping individual emails
+
+Implementation estimate: ~300 lines of AILANG in eml_parser.ail.
+
+No AI needed — this is fully deterministic.
+
+Thoughts?
+
+Mark
+
+From sarah@ailang.sunholo.com Wed Apr 01 10:30:00 2026
+From: Sarah Chen <sarah@ailang.sunholo.com>
+To: team@ailang.sunholo.com
+Subject: Re: RFC: Add EML/MBOX parsing to AILANG Parse
+Date: Wed, 01 Apr 2026 10:30:00 +0200
+Message-ID: <rfc-eml-002@ailang.sunholo.com>
+In-Reply-To: <rfc-eml-001@ailang.sunholo.com>
+References: <rfc-eml-001@ailang.sunholo.com>
+Content-Type: text/plain; charset=UTF-8
+
++1 on this. A few questions:
+
+1. How do we handle encoded headers (RFC 2047)?
+   e.g., =?utf-8?Q?Fran=C3=A7ois?= should decode to "Francois"
+
+2. What about nested multipart?
+   multipart/mixed containing multipart/alternative is common.
+
+3. Content-Transfer-Encoding: should we handle both base64 and
+   quoted-printable? Some legacy systems still use 7bit with
+   us-ascii fallback.
+
+4. For MBOX, the "From " line delimiter can appear in message
+   bodies (escaped as ">From "). We need to handle that.
+
+I'd also suggest adding challenge test files for each edge case.
+
+Sarah
+
+From dev@ailang.sunholo.com Wed Apr 01 11:15:00 2026
+From: Mark <dev@ailang.sunholo.com>
+To: team@ailang.sunholo.com
+Subject: Re: RFC: Add EML/MBOX parsing to AILANG Parse
+Date: Wed, 01 Apr 2026 11:15:00 +0200
+Message-ID: <rfc-eml-003@ailang.sunholo.com>
+In-Reply-To: <rfc-eml-002@ailang.sunholo.com>
+References: <rfc-eml-001@ailang.sunholo.com>
+ <rfc-eml-002@ailang.sunholo.com>
+Content-Type: text/plain; charset=UTF-8
+
+Good questions, answers inline:
+
+> 1. How do we handle encoded headers (RFC 2047)?
+
+Yes, both Q-encoding and B-encoding (base64). The std/string
+module has what we need for decoding.
+
+> 2. What about nested multipart?
+
+We'll handle it recursively. Each multipart boundary creates a
+new parsing context. The Block ADT's Section type maps naturally
+to MIME parts.
+
+> 3. Content-Transfer-Encoding: should we handle both base64 and
+>    quoted-printable?
+
+Yes, both. Base64 via std/encoding, QP via a simple decoder
+(replace =XX with the byte value, handle soft line breaks).
+
+> 4. For MBOX, the "From " line delimiter
+
+Good catch. We'll use the standard "From " prefix detection and
+handle ">From " escaping.
+
+I've created 8 challenge test files covering these cases:
+  challenge_basic.eml         - plain text
+  challenge_multipart_alt.eml - text + HTML alternative
+  challenge_multipart_mixed.eml - text + CSV attachment
+  challenge_base64_body.eml   - base64-encoded body
+  challenge_qp_body.eml       - quoted-printable with Unicode
+  challenge_encoded_headers.eml - RFC 2047 Q + B encoding
+  challenge_folded_headers.eml  - long headers wrapped across lines
+  challenge_mbox.mbox         - 3-message thread
+
+PR incoming after I verify all golden outputs.
+
+Mark
+
+From yamada@example.co.jp Wed Apr 01 14:00:00 2026
+From: =?utf-8?B?5bGx55Sw5aSq6YOO?= <yamada@example.co.jp>
+To: team@ailang.sunholo.com
+Subject: Re: RFC: Add EML/MBOX parsing to AILANG Parse
+Date: Wed, 01 Apr 2026 21:00:00 +0900
+Message-ID: <rfc-eml-004@ailang.sunholo.com>
+In-Reply-To: <rfc-eml-003@ailang.sunholo.com>
+References: <rfc-eml-001@ailang.sunholo.com>
+ <rfc-eml-002@ailang.sunholo.com>
+ <rfc-eml-003@ailang.sunholo.com>
+Content-Type: text/plain; charset=UTF-8
+
+Great work on the test coverage. One more edge case to consider:
+
+Japanese email clients often use ISO-2022-JP encoding. Example:
+
+  Content-Type: text/plain; charset=ISO-2022-JP
+
+This uses escape sequences to switch between ASCII and JIS X 0208.
+Not critical for v1 but worth noting for the backlog.
+
+Also, consider adding a sample with:
+  - Multiple To/CC recipients
+  - Reply-To different from From
+  - X-* custom headers (common in ticketing systems)
+
+Otherwise LGTM. Ship it!
+
+Taro Yamada
