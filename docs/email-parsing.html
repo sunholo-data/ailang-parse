@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Email Parsing API — Parse EML to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse EML and MBOX emails to structured JSON. Extract headers, body, attachments, and MIME parts deterministically. No AI needed. One API for email and Office formats.">
+<meta property="og:title" content="Email Parsing API — AILANG Parse">
+<meta property="og:description" content="Parse EML and MBOX emails to structured JSON. Extract headers, body, attachments, and MIME parts deterministically. No AI needed.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/email-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* Raw vs structured comparison */
+.dp-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0 28px;
+}
+.dp-compare-grid > div {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.dp-compare-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dp-compare-label--raw {
+  background: #2d1b1b;
+  color: #f08080;
+}
+.dp-compare-label--structured {
+  background: #1b2d1b;
+  color: #80f080;
+}
+.dp-compare-grid pre {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  background: var(--bg-card);
+  max-height: 340px;
+}
+/* Feature cards */
+.dp-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-feature-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-feature-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+/* Use-case cards */
+.dp-usecase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-usecase-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-usecase-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-usecase-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .dp-compare-grid,
+  .dp-feature-grid,
+  .dp-usecase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse an EML file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .eml file to the AILANG Parse API or use the Python/JS/Go SDK. The parser returns structured JSON with typed blocks for headers, body text, HTML content, and attachments."}},
+    {"@type": "Question", "name": "Does email parsing require AI or an API key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Email parsing is fully deterministic — it uses RFC 5322 and MIME spec parsing, not AI. It runs in the browser via WASM or server-side with zero external dependencies."}},
+    {"@type": "Question", "name": "What email encodings are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Base64 body decoding, quoted-printable (including multi-byte UTF-8), and RFC 2047 encoded-words for international headers (both B and Q encoding)."}},
+    {"@type": "Question", "name": "Can I parse MBOX archives with multiple messages?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction."}},
+    {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks (text, heading, section, table) with metadata (title from Subject, author from From, date from Date). Downstream code handles all formats identically."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Email Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Parse EML and MBOX files to structured JSON. Headers, body, attachments, MIME parts &mdash; all as typed blocks. Deterministic, no AI needed.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#encodings">Encoding Support</a>
+        <a href="#mbox">MBOX Archives</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#example-output">Example Output</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Raw Email Is Noise</h2>
+      <p>A typical email from Gmail or Outlook is 2,000+ lines of wire-format RFC 5322. MIME boundaries, base64-encoded attachments, folded headers across multiple lines, quoted-printable escape sequences. Feed that to an LLM and you're burning tokens on <code>ARC-Seal: i=1; a=rsa-sha256; t=1775136695; cv=none;</code> instead of the actual message.</p>
+
+      <p>AILANG Parse reads the RFC 5322 structure directly and outputs clean, typed blocks &mdash; the same format as <a href="comments.html">DOCX</a>, <a href="tables.html">XLSX</a>, and <a href="docs.html">HTML</a> parsing. Your pipeline handles email identically to every other format.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>A 125 KB Google Cloud invoice email: 2,076 lines raw, 4 structured blocks. The parser extracts the message content, identifies the PDF attachment, and maps Subject/From/Date to typed metadata &mdash; in under 2 seconds, with zero AI calls.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw .eml vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw .eml file (2,076 lines)</div>
+<pre><code>Delivered-To: user@company.com
+Received: by 2002:ad4:5d67:0:b0:89c...
+X-Received: by 2002:a53:c084:0:b0:650...
+ARC-Seal: i=1; a=rsa-sha256; t=17751...
+        d=google.com; s=arc-20240605;
+        b=Htpf2+pNpdk7kEWo2yzUieUhVe...
+         GUGJNZ20uHE4rPvnq0UW+8R1+v4...
+ARC-Message-Signature: i=1; a=rsa-sha...
+DKIM-Signature: v=1; a=rsa-sha256; ...
+Content-Type: multipart/mixed;
+  boundary="000000000000c91f7f064e77bbd9"
+
+--000000000000c91f7f064e77bbd9
+Content-Type: text/plain; charset="UTF-8"
+
+Your monthly invoice is available.
+...
+--000000000000c91f7f064e77bbd9
+Content-Type: application/pdf;
+  name="5539333924.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjcKCjEgMCBvYmoKPDwgL1R5cG
+UgL0NhdGFsb2cgL1BhZ2VzIDIgMCBSIC9N
+YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
+4gL1N0cnVjdFRyZWVSb290IDMgMCBSID4+
+... (1,800+ more lines of base64)</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output (4 blocks)</div>
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "Your invoice is available",
+    "author": "Google Payments",
+    "created": "Thu, 02 Apr 2026 03:33:38 -0700"
+  },
+  "blocks": [
+    {
+      "type": "section",
+      "kind": "email-headers",
+      "blocks": [
+        {"type": "text", "style": "email-header",
+         "text": "From: Google Payments &lt;payments-noreply@google.com&gt;"},
+        {"type": "text", "style": "email-header",
+         "text": "To: user@company.com"},
+        {"type": "text", "style": "email-header",
+         "text": "Subject: Your invoice is available"}
+      ]
+    },
+    {
+      "type": "text",
+      "style": "Normal",
+      "text": "Your monthly invoice is available.
+        Please find the PDF attached..."
+    },
+    {
+      "type": "text",
+      "style": "attachment",
+      "text": "[attachment: 5539333924.pdf,
+        application/pdf]"
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Headers &rarr; Structured Metadata</h4>
+          <p>Subject maps to <code>title</code>, From to <code>author</code>, Date to <code>created</code>. Multi-line folded headers (RFC 5322 &sect;2.2.3) are automatically unfolded into single values.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Body Text</h4>
+          <p>Plain text bodies become <code>TextBlock</code>. For multipart/alternative emails, both text and HTML parts are extracted as separate blocks.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>MIME Multipart</h4>
+          <p>Multipart/mixed (body + attachments), multipart/alternative (text + HTML), and nested multipart structures are all resolved by boundary splitting.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Attachments</h4>
+          <p>Attachments are identified with filename and MIME type: <code>[attachment: report.pdf, application/pdf]</code>. Content-Disposition and Content-Type name parameters are both checked.</p>
+        </div>
+      </div>
+
+      <h2 id="encodings">Encoding Support</h2>
+      <p>Real-world email uses three encoding layers. AILANG Parse handles all of them:</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Encoding</th><th>RFC</th><th>What It Does</th><th>Example</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Base64</td>
+            <td>RFC 2045 &sect;6.8</td>
+            <td>Body or attachment encoded as ASCII</td>
+            <td><code>VGhpcyBpcyBiYXNlNjQ=</code> &rarr; "This is base64"</td>
+          </tr>
+          <tr>
+            <td>Quoted-Printable</td>
+            <td>RFC 2045 &sect;6.7</td>
+            <td>Non-ASCII chars as <code>=XX</code> hex pairs</td>
+            <td><code>=C3=A9</code> &rarr; &eacute; &nbsp; <code>=C3=BC</code> &rarr; &uuml;</td>
+          </tr>
+          <tr>
+            <td>Encoded-Words</td>
+            <td>RFC 2047</td>
+            <td>Non-ASCII in headers (Subject, From)</td>
+            <td><code>=?UTF-8?B?5Lya6K2w?=</code> &rarr; &#20250;&#35696;&#12398;&#35696;&#20107;&#37682;</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p style="margin-top:16px">Multi-byte UTF-8 sequences spanning consecutive <code>=XX</code> pairs are accumulated and decoded together &mdash; accented characters (<em>caf&eacute;</em>, <em>r&eacute;sum&eacute;</em>, <em>Z&uuml;rich</em>), CJK, and emoji all work correctly.</p>
+
+      <h2 id="mbox">MBOX Archives</h2>
+      <p>MBOX files (RFC 4155) contain multiple emails separated by <code>From&nbsp;</code> envelope lines. AILANG Parse splits them into individual messages, each wrapped in a <code>SectionBlock</code> with kind <code>mbox-message</code>. Every message gets full header/body/attachment parsing.</p>
+
+      <p>This makes MBOX ideal for bulk email processing: export a Gmail label or Thunderbird folder as MBOX, parse it in one call, and get structured JSON for every message in the archive.</p>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>AI Email Triage</h4>
+          <p>Feed structured email JSON to an LLM for classification, routing, or auto-response. Clean inputs mean better accuracy &mdash; no tokens wasted on DKIM signatures and base64 blobs.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Email Archival &amp; Search</h4>
+          <p>Index MBOX archives into vector databases or search engines. Metadata fields (author, date, subject) become filterable dimensions alongside full-text body content.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Compliance &amp; E-Discovery</h4>
+          <p>Extract email threads with attachment manifests for legal review. Headers preserve the full delivery chain (Received, DKIM, SPF) for forensic analysis.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Multi-Format Pipelines</h4>
+          <p>Process emails alongside DOCX reports and XLSX spreadsheets in the same pipeline. The Block ADT output is identical &mdash; no format-specific handling downstream.</p>
+        </div>
+      </div>
+
+      <h2 id="example-output">Example: GitHub Notification</h2>
+      <p>A real GitHub Actions notification email (48 KB, multipart/alternative with DKIM/ARC/SPF headers):</p>
+
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "[sunholo-data/ailang] Run failed: Build and Release - dev",
+    "author": "\"Voight-Kampff (bot)\"",
+    "created": "Thu, 02 Apr 2026 06:31:33 -0700"
+  },
+  "blocks": [
+    {
+      "type": "section",
+      "kind": "email-headers",
+      "blocks": [
+        {"type": "text", "style": "email-header",
+         "text": "From: \"Voight-Kampff (bot)\" &lt;notifications@github.com&gt;"},
+        {"type": "text", "style": "email-header",
+         "text": "Subject: [sunholo-data/ailang] Run failed: Build and Release - dev"},
+        {"type": "text", "style": "email-header",
+         "text": "X-Github-Reason: ci_activity"}
+      ]
+    },
+    {
+      "type": "text",
+      "style": "Normal",
+      "text": "Repository: sunholo-data/ailang\nWorkflow: Build and Release\nDuration: 5 minutes and 50.0 seconds\n\nJobs:\n  * Build ubuntu-latest succeeded\n  * Build windows-latest failed (2 annotations)\n  * Create Release Bundle skipped"
+    }
+  ]
+}</code></pre>
+
+      <p>28 raw headers (DKIM chains, ARC seals, SPF results) reduced to the headers that matter. The body is clean text, ready for an LLM to reason about build failures.</p>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash" data-src="examples/cli/parse-email.sh"># Parse an EML email file
+ailang run --entry main --caps IO,FS,Env \
+  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail inbox.eml</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_eml","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <h3>Python SDK</h3>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="YOUR_API_KEY")
+result = client.parse("inbox.eml", output_format="json")
+
+# Metadata extracted from headers
+print(result.metadata.title)   # Subject line
+print(result.metadata.author)  # From display name
+
+# Iterate blocks like any other format
+for block in result.blocks:
+    if block.style == "attachment":
+        print(f"Attachment: {block.text}")
+</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse an EML file to JSON?</summary>
+          <div class="dp-faq-answer"><p>Send the <code>.eml</code> file to the <a href="api.html">AILANG Parse API</a> or use the Python/JS/Go SDK. The parser returns structured JSON with typed blocks for headers, body text, HTML content, and attachments.</p></div>
+        </details>
+        <details>
+          <summary>Does email parsing require AI or an API key?</summary>
+          <div class="dp-faq-answer"><p>No. Email parsing is fully deterministic &mdash; RFC 5322 and MIME spec parsing, not AI. It runs in the <a href="index.html#try-it">browser via WASM</a> or server-side with zero external dependencies.</p></div>
+        </details>
+        <details>
+          <summary>What email encodings are supported?</summary>
+          <div class="dp-faq-answer"><p>Base64 body decoding, quoted-printable (including multi-byte UTF-8), and RFC 2047 encoded-words for international headers (both B and Q encoding).</p></div>
+        </details>
+        <details>
+          <summary>Can I parse MBOX archives with multiple messages?</summary>
+          <div class="dp-faq-answer"><p>Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction.</p></div>
+        </details>
+        <details>
+          <summary>What is the output format for parsed emails?</summary>
+          <div class="dp-faq-answer"><p>The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks with metadata. Downstream code handles all formats identically. See <a href="docs.html">the docs</a> for the full schema.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+module docparse/services/html_parser
+
+import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/string (length, trim, contains, startsWith)
+import std/list (map, flatMap, filter, concat, length as listLength)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell)
+
+-- HTML Parser — converts well-formed HTML/XHTML to Block ADT.
+-- Pure AILANG implementation using std/xml.
+--
+-- Reuses the same XML tree-walking pattern as DOCX/PPTX parsers but
+-- with HTML tag names instead of Office XML namespaces.
+--
+-- Supports:
+--   - Headings (h1 through h6)
+--   - Paragraphs (p, div with text)
+--   - Tables (table/thead/tbody/tr/th/td)
+--   - Ordered and unordered lists (ol, ul, li)
+--   - Images (img src + alt)
+--   - Sections (article, section, main, aside, nav, header, footer)
+--   - Inline text extraction (span, a, em, strong, b, i, code, etc.)
+--
+-- Requires well-formed XML (XHTML). Malformed HTML with unclosed tags
+-- (e.g., <br>, <img> without />) will fail to parse.
+--
+-- Usage:
+--   let blocks = parseHtml(content)
+
+-- Parse HTML content string into Block ADT
+-- Contract: returns error block on malformed input, never crashes
+export pure func parseHtml(content: string) -> [Block]
+  ensures { listLength(result) >= 0 }
+{
+  match parse(content) {
+    Ok(root) => htmlExtractBlocks(root),
+    Err(e) => [TextBlock({text: "HTML parse error: " ++ e, style: "error", level: 0})]
+  }
+}
+
+-- Extract blocks from an HTML root element
+-- Looks for <body> first; falls back to processing root children directly
+pure func htmlExtractBlocks(root: XmlNode) -> [Block] {
+  match findFirst(root, "body") {
+    Some(body) => htmlProcessChildren(getChildren(body)),
+    None => {
+      -- No <body> — might be a fragment or the root IS the content
+      let tag = getTag(root);
+      if tag == "html" then {
+        -- Try to find body inside html
+        let children = getChildren(root);
+        let bodyChildren = flatMap(htmlFindBody, children);
+        if listLength(bodyChildren) > 0 then bodyChildren
+        else htmlProcessChildren(children)
+      }
+      else htmlProcessNode(root)
+    }
+  }
+}
+
+-- Helper to find body inside html children
+pure func htmlFindBody(node: XmlNode) -> [Block] {
+  let tag = getTag(node);
+  if tag == "body" then htmlProcessChildren(getChildren(node))
+  else []
+}
+
+-- Process a list of child nodes into blocks
+pure func htmlProcessChildren(nodes: [XmlNode]) -> [Block] =
+  flatMap(htmlProcessNode, nodes)
+
+-- Process a single HTML node into zero or more blocks
+pure func htmlProcessNode(node: XmlNode) -> [Block] {
+  let tag = getTag(node);
+
+  -- Headings
+  if tag == "h1" then [HeadingBlock({text: htmlDeepText(node), level: 1})]
+  else if tag == "h2" then [HeadingBlock({text: htmlDeepText(node), level: 2})]
+  else if tag == "h3" then [HeadingBlock({text: htmlDeepText(node), level: 3})]
+  else if tag == "h4" then [HeadingBlock({text: htmlDeepText(node), level: 4})]
+  else if tag == "h5" then [HeadingBlock({text: htmlDeepText(node), level: 5})]
+  else if tag == "h6" then [HeadingBlock({text: htmlDeepText(node), level: 6})]
+
+  -- Paragraphs
+  else if tag == "p" then
+    let text = trim(htmlDeepText(node)) in
+    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+    else []
+
+  -- Tables
+  else if tag == "table" then [htmlParseTable(node)]
+
+  -- Lists
+  else if tag == "ul" then htmlParseList(node, false)
+  else if tag == "ol" then htmlParseList(node, true)
+
+  -- Images
+  else if tag == "img" then
+    let src = getOrElse(getAttr(node, "src"), "") in
+    let alt = getOrElse(getAttr(node, "alt"), "") in
+    [ImageBlock({data: src, description: alt, mime: "image/unknown"})]
+
+  -- Semantic sections — recurse into children wrapped in SectionBlock
+  else if tag == "article" || tag == "section" || tag == "main" ||
+          tag == "aside" || tag == "nav" then
+    let blocks = htmlProcessChildren(getChildren(node)) in
+    if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
+    else []
+
+  -- Header/footer sections
+  else if tag == "header" || tag == "footer" then
+    let blocks = htmlProcessChildren(getChildren(node)) in
+    if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
+    else []
+
+  -- Block-level containers (div, blockquote, figure, details) — recurse
+  else if tag == "div" || tag == "blockquote" || tag == "figure" ||
+          tag == "details" || tag == "fieldset" || tag == "form" then
+    htmlProcessChildren(getChildren(node))
+
+  -- Pre/code blocks → TextBlock with "code" style
+  else if tag == "pre" then
+    let text = htmlDeepText(node) in
+    if length(text) > 0 then [TextBlock({text: text, style: "code", level: 0})]
+    else []
+
+  -- Definition lists
+  else if tag == "dl" then htmlParseDl(node)
+
+  -- Skip script, style, head, meta, link, noscript
+  else if tag == "script" || tag == "style" || tag == "head" ||
+          tag == "meta" || tag == "link" || tag == "noscript" ||
+          tag == "template" then []
+
+  -- Horizontal rule → section break marker
+  else if tag == "hr" then [TextBlock({text: "---", style: "separator", level: 0})]
+
+  -- Line break — skip (inline element)
+  else if tag == "br" then []
+
+  -- Fallback: try to extract text from inline elements
+  else
+    let text = trim(htmlDeepText(node)) in
+    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+    else []
+}
+
+-- Extract all text from a node and its children (deep text)
+-- getText() in AILANG's std/xml returns the full recursive text of a node,
+-- so we just use it directly — no need to walk children manually.
+pure func htmlDeepText(node: XmlNode) -> string =
+  getText(node)
+
+-- Parse an HTML <table> into a TableBlock
+-- Handles <thead>/<tbody> structure or flat <tr> rows
+pure func htmlParseTable(table: XmlNode) -> Block
+  ensures { isTable(result) }
+{
+  -- Try thead/tbody structure first
+  let theadRows = htmlFindTheadRows(table);
+  let tbodyRows = htmlFindTbodyRows(table);
+
+  -- Fall back to direct <tr> children if no thead/tbody
+  let directRows = findAll(table, "tr");
+
+  let allRows = if listLength(theadRows) > 0 || listLength(tbodyRows) > 0
+    then concat(theadRows, tbodyRows)
+    else directRows;
+
+  let parsedRows = map(htmlParseTableRow, allRows);
+
+  match parsedRows {
+    [] => TableBlock({rows: [], headers: []}),
+    firstRow :: dataRows =>
+      TableBlock({rows: dataRows, headers: firstRow})
+  }
+}
+
+-- Check if a block is a table (for contract)
+pure func isTable(block: Block) -> bool =
+  match block {
+    TableBlock(_) => true,
+    _ => false
+  }
+
+-- Find <tr> rows inside <thead>
+pure func htmlFindTheadRows(table: XmlNode) -> [XmlNode] {
+  match findFirst(table, "thead") {
+    Some(thead) => findAll(thead, "tr"),
+    None => []
+  }
+}
+
+-- Find <tr> rows inside <tbody>
+pure func htmlFindTbodyRows(table: XmlNode) -> [XmlNode] {
+  match findFirst(table, "tbody") {
+    Some(tbody) => findAll(tbody, "tr"),
+    None => []
+  }
+}
+
+-- Parse a single <tr> into TableCells
+-- Contract: row-level cell count is preserved
+pure func htmlParseTableRow(tr: XmlNode) -> [TableCell] {
+  let thCells = findAll(tr, "th");
+  let tdCells = findAll(tr, "td");
+  let allCells = concat(thCells, tdCells);
+  map(htmlParseTableCell, allCells)
+}
+
+-- Parse a <td> or <th> into a TableCell
+-- Reads colspan attribute for merged cells
+pure func htmlParseTableCell(cell: XmlNode) -> TableCell {
+  let text = trim(htmlDeepText(cell));
+  let colSpanStr = getOrElse(getAttr(cell, "colspan"), "1");
+  let colSpan = htmlParseIntDefault(colSpanStr);
+  let rowSpanStr = getOrElse(getAttr(cell, "rowspan"), "1");
+  let rowSpan = htmlParseIntDefault(rowSpanStr);
+  {text: text, colSpan: colSpan, rowSpan: rowSpan, merged: false}
+}
+
+-- Parse an integer string for colspan/rowspan values
+-- Contract: always returns at least 1 (spans cannot be zero or negative)
+pure func htmlParseIntDefault(s: string) -> int
+  ensures { result >= 1 }
+{
+  if s == "1" then 1
+  else if s == "2" then 2
+  else if s == "3" then 3
+  else if s == "4" then 4
+  else if s == "5" then 5
+  else if s == "6" then 6
+  else if s == "7" then 7
+  else if s == "8" then 8
+  else if s == "9" then 9
+  else if s == "10" then 10
+  else 1
+}
+
+-- Parse a <ul> or <ol> into a ListBlock
+-- Contract: produces exactly one ListBlock if items exist
+pure func htmlParseList(list: XmlNode, ordered: bool) -> [Block] {
+  let items = findAll(list, "li");
+  let texts = map(htmlDeepText, items);
+  let nonEmpty = filter(\t. length(trim(t)) > 0, texts);
+  if listLength(nonEmpty) > 0
+  then [ListBlock({items: map(trim, nonEmpty), ordered: ordered})]
+  else []
+}
+
+-- Parse a <dl> (definition list) into blocks
+-- Each <dt>/<dd> pair becomes a text block
+pure func htmlParseDl(dl: XmlNode) -> [Block] {
+  let children = getChildren(dl);
+  flatMap(htmlParseDlChild, children)
+}
+
+-- Process a single <dt> or <dd> node
+pure func htmlParseDlChild(node: XmlNode) -> [Block] {
+  let tag = getTag(node);
+  let text = trim(htmlDeepText(node));
+  if tag == "dt" && length(text) > 0
+    then [TextBlock({text: text, style: "dt", level: 0})]
+  else if tag == "dd" && length(text) > 0
+    then [TextBlock({text: text, style: "dd", level: 0})]
+  else []
+}

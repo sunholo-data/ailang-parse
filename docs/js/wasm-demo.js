@@ -37,6 +37,11 @@
     { name: 'docparse/services/docx_parser',      path: 'docparse/services/docx_parser.ail' },
     { name: 'docparse/services/pptx_parser',      path: 'docparse/services/pptx_parser.ail' },
     { name: 'docparse/services/xlsx_parser',      path: 'docparse/services/xlsx_parser.ail' },
+    // Text format parsers (html_parser before eml_parser — dependency)
+    { name: 'docparse/services/html_parser',      path: 'docparse/services/html_parser.ail' },
+    { name: 'docparse/services/csv_parser',       path: 'docparse/services/csv_parser.ail' },
+    { name: 'docparse/services/markdown_parser',   path: 'docparse/services/markdown_parser.ail' },
+    { name: 'docparse/services/eml_parser',       path: 'docparse/services/eml_parser.ail' },
     { name: 'docparse/services/output_formatter', path: 'docparse/services/output_formatter.ail' },
     // A2UI: vendored package + formatter (dependencies before dependents)
     { name: 'pkg/sunholo/a2ui/components',        path: 'pkg/sunholo/a2ui/components.ail' },
@@ -44,7 +49,7 @@
     { name: 'docparse/services/docparse_browser', path: 'docparse/services/docparse_browser.ail' },
   ];
 
-  var EXTRA_STDLIBS = ['std/xml', 'std/list', 'std/io'];
+  var EXTRA_STDLIBS = ['std/xml', 'std/list', 'std/io', 'std/bytes'];
 
   // ── State ──
   var engine = null;
@@ -343,7 +348,7 @@
     lastFileExt = ext;
 
     // Capture buffer upfront so preview works for all file types
-    var textFormats = ['html', 'htm', 'md', 'csv', 'tsv'];
+    var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox'];
     if (textFormats.indexOf(ext) !== -1) {
       lastFileContent = await file.text();
     } else {
@@ -381,7 +386,11 @@
                      'mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg', 'flv', '3gpp'];
 
     if (textFormats.indexOf(ext) !== -1) {
-      pipelineLog('route', 'Text format \u2014 client-side parsing');
+      pipelineLog('route', 'Text format \u2014 WASM parsing');
+      if (!wasmReady) {
+        showError('WASM not loaded. ' + (wasmError || 'Try refreshing.'));
+        return;
+      }
       await parseTextFile(file, ext);
     } else if (zipFormats.indexOf(ext) !== -1) {
       pipelineLog('route', 'ZIP-based Office format \u2014 WASM parsing');
@@ -398,17 +407,47 @@
     }
   };
 
-  // ── Parse text-based formats ──
+  // ── Parse text-based formats via AILANG WASM ──
   async function parseTextFile(file, ext) {
     var content = lastFileContent;
 
-    pipelineLog('parse', 'Reading ' + content.length + ' characters');
+    pipelineLog('parse', 'Parsing ' + content.length + ' characters via WASM');
 
-    var blocks = textToBlocks(content, ext);
-    pipelineLog('done', blocks.length + ' blocks extracted', 'done');
-    setDotState('ready');
-    setStatus('Parsed ' + blocks.length + ' blocks');
-    showOutput(blocks, content);
+    // Route to the correct AILANG parser
+    var r;
+    if (ext === 'eml') {
+      r = engine.call('parseEmlContent', content);
+    } else if (ext === 'mbox') {
+      r = engine.call('parseMboxContent', content);
+    } else if (ext === 'html' || ext === 'htm') {
+      r = engine.call('parseHtmlContent', content);
+    } else if (ext === 'csv') {
+      r = engine.call('parseCsvContent', content, ',');
+    } else if (ext === 'tsv') {
+      r = engine.call('parseCsvContent', content, '\t');
+    } else if (ext === 'md') {
+      r = engine.call('parseMarkdownContent', content);
+    } else {
+      // Fallback for unknown text formats
+      var blocks = [{ type: 'text', text: content.substring(0, 10000), style: 'normal' }];
+      pipelineLog('done', blocks.length + ' blocks extracted', 'done');
+      setDotState('ready');
+      setStatus('Parsed ' + blocks.length + ' blocks');
+      showOutput(blocks, content);
+      return;
+    }
+
+    if (r && r.success) {
+      var blocks = safeJsonParse(r.result, []);
+      pipelineLog('done', blocks.length + ' blocks extracted', 'done');
+      setDotState('ready');
+      setStatus('Parsed ' + blocks.length + ' blocks');
+      showOutput(blocks, content);
+    } else {
+      var errMsg = r ? r.error : 'WASM call returned null';
+      pipelineLog('error', errMsg, 'error');
+      showError('Parse error: ' + errMsg);
+    }
   }
 
   // ── Parse ZIP-based Office formats via WASM ──
