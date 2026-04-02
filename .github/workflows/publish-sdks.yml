@@ -25,11 +25,16 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
 
-      - name: Update version in pyproject.toml
+      - name: Verify tag matches pyproject.toml version
         run: |
           cd sdks/python
-          sed -i "s/^version = .*/version = \"${{ steps.version.outputs.version }}\"/" pyproject.toml
-          cat pyproject.toml | grep "^version"
+          FILE_VERSION=$(grep '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match sdks/python/pyproject.toml version ($FILE_VERSION)"
+            exit 1
+          fi
+          echo "Version $TAG_VERSION confirmed"
 
       - name: Build package
         run: cd sdks/python && uv build
@@ -61,11 +66,16 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
 
-      - name: Update version in package.json
+      - name: Verify tag matches package.json version
         run: |
           cd sdks/js
-          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
-          cat package.json | grep '"version"'
+          FILE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match sdks/js/package.json version ($FILE_VERSION)"
+            exit 1
+          fi
+          echo "Version $TAG_VERSION confirmed"
 
       - name: Publish to npm (trusted publishing via OIDC)
         run: cd sdks/js && npm publish --access public --provenance
