@@ -3,8 +3,8 @@ module docparse/services/docx_parser
 import std/xml (parse, findAll, findAllTexts, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join)
-import std/list (map, flatMap, any, concat, length as listLength)
+import std/string (contains, length, trim, stringToInt, join, charCode, chars)
+import std/list (map, flatMap, any, concat, length as listLength, filter)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments)
 
@@ -276,10 +276,43 @@ pure func extractSdtText(sdt: XmlNode) -> string {
 pure func joinRunTexts(runs: [XmlNode]) -> string =
   join("", map(extractRunText, runs))
 
+-- Check if a font name is a symbol/dingbat font that uses PUA codepoints
+pure func docxIsSymbolFont(fontName: string) -> bool =
+  contains(fontName, "Wingdings") ||
+  contains(fontName, "Webdings") ||
+  fontName == "Symbol"
+
+-- Strip Private Use Area characters (U+F000-U+F0FF) from text
+-- These only render with the matching symbol font installed
+pure func docxStripPuaChars(text: string) -> string {
+  let charList = chars(text);
+  let filtered = filter(\c. {
+    let code = charCode(c);
+    code < 61440 || code > 61695
+  }, charList);
+  join("", filtered)
+}
+
+-- Get the ASCII font name from a run's properties (w:rPr/w:rFonts[@w:ascii])
+pure func docxGetRunFont(run: XmlNode) -> string =
+  getOrElse(
+    optFlatMap(\rpr.
+      optFlatMap(\rfonts.
+        getAttr(rfonts, "w:ascii"),
+        findFirst(rpr, "w:rFonts")),
+      findFirst(run, "w:rPr")),
+    "")
+
 -- Extract text from a single w:r (run)
+-- Strips PUA characters from symbol font runs (Wingdings, Webdings, Symbol)
 pure func extractRunText(run: XmlNode) -> string {
   match findFirst(run, "w:t") {
-    Some(t) => getText(t),
+    Some(t) => {
+      let text = getText(t);
+      let font = docxGetRunFont(run);
+      if docxIsSymbolFont(font) then docxStripPuaChars(text)
+      else text
+    },
     None => ""
   }
 }
