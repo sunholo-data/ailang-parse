@@ -1578,12 +1578,19 @@ function renderPricing(apiData) {
     });
     html += '</tr></thead><tbody>';
 
-    // Office pages per request
+    // Compact number formatter: 200000 → "200K", 50000000 → "50M"
+    function fmtCompact(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1).replace(/\.0$/, '') + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1).replace(/\.0$/, '') + 'K';
+      return n.toLocaleString();
+    }
+
+    // Office pages per request (use ×1000 for MB, not ×1024)
     html += '<tr><td>Office pages/request</td>';
     apiTierNames.forEach(function(name) {
       var maxMB = data.tiers[name].max_file_size_mb;
-      var pages = Math.round((maxMB * 1024) / officeKB);
-      html += '<td>~' + pages.toLocaleString() + '</td>';
+      var pages = Math.round((maxMB * 1000) / officeKB);
+      html += '<td>~' + fmtCompact(pages) + '</td>';
     });
     html += '</tr>';
 
@@ -1591,8 +1598,8 @@ function renderPricing(apiData) {
     html += '<tr><td>PDF pages/request</td>';
     apiTierNames.forEach(function(name) {
       var pdfMB = data.tiers[name].ai_file_size_limits ? data.tiers[name].ai_file_size_limits.pdf_mb : data.tiers[name].max_file_size_mb;
-      var pages = Math.round((pdfMB * 1024) / pdfKB);
-      html += '<td>~' + pages.toLocaleString() + '</td>';
+      var pages = Math.round((pdfMB * 1000) / pdfKB);
+      html += '<td>~' + fmtCompact(pages) + '</td>';
     });
     html += '</tr>';
 
@@ -1600,9 +1607,9 @@ function renderPricing(apiData) {
     html += '<tr><td>Office pages/month (max)</td>';
     apiTierNames.forEach(function(name) {
       var maxMB = data.tiers[name].max_file_size_mb;
-      var pagesPerReq = Math.round((maxMB * 1024) / officeKB);
+      var pagesPerReq = Math.round((maxMB * 1000) / officeKB);
       var total = pagesPerReq * data.tiers[name].requests_per_month;
-      html += '<td>~' + total.toLocaleString() + '</td>';
+      html += '<td>~' + fmtCompact(total) + '</td>';
     });
     html += '</tr>';
 
@@ -1612,7 +1619,7 @@ function renderPricing(apiData) {
       var price = data.tiers[name].price_eur;
       var reqs = data.tiers[name].requests_per_month;
       var maxMB = data.tiers[name].max_file_size_mb;
-      var pagesPerReq = Math.round((maxMB * 1024) / officeKB);
+      var pagesPerReq = Math.round((maxMB * 1000) / officeKB);
       // Use 25 pages/request as a realistic average for the per-page cost
       var realisticPages = reqs * 25;
       if (price === 0) {
