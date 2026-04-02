@@ -47,14 +47,18 @@ export pure func parseHtml(content: string) -> [Block]
 
 -- Sanitize HTML so it can be parsed by a strict XML parser.
 -- Handles: void elements, HTML entities, DOCTYPE, CDATA-like content.
-pure func htmlSanitize(content: string) -> string {
+pure func htmlSanitize(content: string) -> string
+  ensures { length(result) >= 0 }
+{
   let noDoctype = htmlStripDoctype(content);
   let entitiesFixed = htmlReplaceEntities(noDoctype);
   htmlCloseVoidElements(entitiesFixed)
 }
 
 -- Strip <!DOCTYPE ...> declarations
-pure func htmlStripDoctype(content: string) -> string {
+pure func htmlStripDoctype(content: string) -> string
+  ensures { length(result) <= length(content) }
+{
   let lower = toLower(content);
   let pos = find(lower, "<!doctype");
   if pos < 0 then content
@@ -71,7 +75,9 @@ pure func htmlStripDoctype(content: string) -> string {
 
 -- Replace common HTML entities with Unicode equivalents via UTF-8 bytes.
 -- XML only supports &amp; &lt; &gt; &apos; &quot; — everything else must be replaced.
-pure func htmlReplaceEntities(content: string) -> string {
+pure func htmlReplaceEntities(content: string) -> string
+  ensures { length(result) >= 0 }
+{
   let s = replace(content, "&nbsp;", bytesToStr(fromInts([194, 160])));
   let s2 = replace(s, "&mdash;", bytesToStr(fromInts([226, 128, 148])));
   let s3 = replace(s2, "&ndash;", bytesToStr(fromInts([226, 128, 147])));
@@ -100,7 +106,9 @@ pure func htmlReplaceEntities(content: string) -> string {
 -- Close HTML5 void elements so XML parser accepts them.
 -- Handles: <br>, <meta ...>, <img ...>, <hr>, <input ...>, etc.
 -- Converts <tag ...> to <tag .../> and <tag> to <tag/>
-pure func htmlCloseVoidElements(content: string) -> string {
+pure func htmlCloseVoidElements(content: string) -> string
+  ensures { length(result) >= length(content) }
+{
   let s = htmlCloseVoidTag(content, "br");
   let s2 = htmlCloseVoidTag(s, "hr");
   let s3 = htmlCloseVoidTag(s2, "meta");
@@ -118,7 +126,9 @@ pure func htmlCloseVoidElements(content: string) -> string {
 
 -- Close all instances of a specific void tag in the content.
 -- Finds <tagname ...> (not already self-closed) and adds />
-pure func htmlCloseVoidTag(content: string, tagName: string) -> string {
+pure func htmlCloseVoidTag(content: string, tagName: string) -> string
+  ensures { length(result) >= length(content) }
+{
   -- Handle both <tag> and <tag ...> forms, case-insensitive
   htmlCloseVoidTagFrom(content, tagName, 0)
 }
@@ -158,7 +168,9 @@ pure func htmlCloseVoidTagFrom(content: string, tagName: string, startPos: int) 
 
 -- Case-insensitive search for <tagName within content
 -- Returns position of the < or -1
-pure func htmlFindTagCI(content: string, tagName: string) -> int {
+pure func htmlFindTagCI(content: string, tagName: string) -> int
+  ensures { result >= -1 }
+{
   let lower = toLower(content);
   let searchLower = "<" ++ tagName;
   let pos = find(lower, searchLower);

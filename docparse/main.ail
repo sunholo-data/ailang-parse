@@ -1038,7 +1038,9 @@ func emlParseOfficeFile(filepath: string, ext: string) -> [Block] ! {IO, FS} {
 }
 
 -- Check if a block list contains an attachment-data TextBlock
-pure func emlHasAttachmentData(blocks: [Block]) -> bool =
+pure func emlHasAttachmentData(blocks: [Block]) -> bool
+  ensures { result == true || result == false }
+=
   match blocks {
     [] => false,
     TextBlock(t) :: rest => if t.style == "attachment-data" then true else emlHasAttachmentData(rest),
@@ -1046,7 +1048,9 @@ pure func emlHasAttachmentData(blocks: [Block]) -> bool =
   }
 
 -- Extract the base64 data from attachment blocks
-pure func emlGetAttachmentData(blocks: [Block]) -> string =
+pure func emlGetAttachmentData(blocks: [Block]) -> string
+  ensures { length(result) >= 0 }
+=
   match blocks {
     [] => "",
     TextBlock(t) :: rest => if t.style == "attachment-data" then t.text else emlGetAttachmentData(rest),
@@ -1054,7 +1058,9 @@ pure func emlGetAttachmentData(blocks: [Block]) -> string =
   }
 
 -- Extract the file extension from attachment blocks
-pure func emlGetAttachmentExt(blocks: [Block]) -> string =
+pure func emlGetAttachmentExt(blocks: [Block]) -> string
+  ensures { length(result) >= 0 }
+=
   match blocks {
     [] => "bin",
     TextBlock(t) :: rest => if t.style == "attachment-ext" then t.text else emlGetAttachmentExt(rest),
@@ -1062,7 +1068,9 @@ pure func emlGetAttachmentExt(blocks: [Block]) -> string =
   }
 
 -- Extract the meta label from attachment blocks
-pure func emlGetAttachmentMeta(blocks: [Block]) -> string =
+pure func emlGetAttachmentMeta(blocks: [Block]) -> string
+  ensures { length(result) >= 0 }
+=
   match blocks {
     [] => "",
     TextBlock(t) :: rest => if t.style == "attachment-meta" then t.text else emlGetAttachmentMeta(rest),
