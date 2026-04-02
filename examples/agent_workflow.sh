@@ -231,7 +231,7 @@ echo "=== Step 5: Parse DOCX (deterministic, no AI) ==="
 
 PARSE_DOCX=$(curl -s --max-time 30 -X POST "$API/api/v1/parse" \
   -H "Content-Type: application/json" \
-  -d "{\"filepath\":\"sample_docx_basic\",\"outputFormat\":\"markdown\",\"apiKey\":\"$API_KEY\"}")
+  -d "{\"filepath\":\"sample_docx_formatting\",\"outputFormat\":\"markdown\",\"apiKey\":\"$API_KEY\"}")
 
 # Check for errors
 PARSE_ERROR=$(echo "$PARSE_DOCX" | field code)

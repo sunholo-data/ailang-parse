@@ -62,7 +62,7 @@ echo ""
 
 curl -s --max-time 30 -X POST "$API/api/v1/parse" \
   -H "Content-Type: application/json" \
-  -d "{\"filepath\":\"sample_docx_basic\",\"outputFormat\":\"markdown\",\"apiKey\":\"$KEY\"}" \
+  -d "{\"filepath\":\"sample_docx_formatting\",\"outputFormat\":\"markdown\",\"apiKey\":\"$KEY\"}" \
   | python3 -c "
 import json, sys
 data = json.loads(sys.stdin.read())
@@ -78,10 +78,13 @@ echo ""
 echo ""
 echo "── Try other formats ──"
 echo ""
-echo "  # Parse any of 15 built-in samples:"
-echo "  sample_docx_basic, sample_docx_tables, sample_docx_comments,"
-echo "  sample_pptx_show, sample_xlsx_basic, sample_csv, sample_markdown,"
-echo "  sample_html, sample_odt, sample_odp, sample_ods, sample_epub,"
+echo "  # Parse any of 22 built-in samples:"
+echo "  sample_docx_formatting, sample_docx_tables, sample_docx_comments,"
+echo "  sample_docx_track_changes, sample_docx_footnotes, sample_docx_hyperlinks,"
+echo "  sample_docx_real_world, sample_pptx_notes, sample_pptx_formatting,"
+echo "  sample_xlsx_merged, sample_xlsx_formulas, sample_xlsx_formats,"
+echo "  sample_csv, sample_markdown, sample_html, sample_odt, sample_odp,"
+echo "  sample_ods, sample_epub, sample_eml,"
 echo "  sample_pdf (AI), sample_mp3 (AI), sample_mp4 (AI)"
 echo ""
 echo "  # Or download a test file and parse by URL/path:"
@@ -92,4 +95,4 @@ echo ""
 echo "  # Output formats: blocks, markdown, html, a2ui"
 echo "  curl -X POST $API/api/v1/parse \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"filepath\":\"sample_pptx_show\",\"outputFormat\":\"markdown\",\"apiKey\":\"$KEY\"}'"
+echo "    -d '{\"filepath\":\"sample_pptx_notes\",\"outputFormat\":\"markdown\",\"apiKey\":\"$KEY\"}'"
