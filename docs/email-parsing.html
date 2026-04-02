@@ -127,7 +127,7 @@
     {"@type": "Question", "name": "What email encodings are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Base64 body decoding, quoted-printable (including multi-byte UTF-8), and RFC 2047 encoded-words for international headers (both B and Q encoding)."}},
     {"@type": "Question", "name": "Can I parse MBOX archives with multiple messages?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction."}},
     {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks (text, heading, section, table) with metadata (title from Subject, author from From, date from Date). Downstream code handles all formats identically."}},
-    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline. Binary attachments are identified by filename and MIME type for downstream processing."}},
+    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the --deep flag, DOCX, PPTX, and XLSX attachments are also extracted and parsed using the full Office parser."}},
     {"@type": "Question", "name": "Can I reconstruct email threads from an MBOX file?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use the --threaded flag. Messages are grouped into conversation threads using Message-ID/In-Reply-To/References headers, with quoted text stripped from replies."}}
   ]
 }
@@ -308,7 +308,7 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
 
       <p>Emails are documents that contain other documents. A budget email has a CSV; a contract email has HTML or a forwarded <code>.eml</code>. AILANG Parse decodes and parses text-based attachments inline &mdash; one API call extracts the email <em>and</em> its attachment content.</p>
 
-      <p>Supported inline formats: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). Binary attachments (PDF, images) are identified by filename and MIME type.</p>
+      <p>Supported inline formats: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). With the <code>--deep</code> flag, <strong>DOCX</strong>, <strong>PPTX</strong>, and <strong>XLSX</strong> attachments are also extracted and parsed using the full Office parser. Binary attachments (PDF, images) are identified by filename and MIME type.</p>
 
 <pre><code class="language-json">{
   "type": "section",
@@ -322,6 +322,25 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
        [{"text": "EMEA"}, {"text": "125000"}, {"text": "110000"}],
        [{"text": "APAC"}, {"text": "143000"}, {"text": "130000"}]
      ]}
+  ]
+}</code></pre>
+
+      <p>With <code>--deep</code>, Office attachments get the same treatment &mdash; a DOCX attachment is decoded, extracted, and parsed into paragraphs and tables:</p>
+
+<pre><code class="language-bash"># Parse email + resolve Office attachments
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail invoice-email.eml --deep</code></pre>
+
+<pre><code class="language-json">{
+  "type": "section",
+  "kind": "attachment",
+  "blocks": [
+    {"type": "text", "style": "attachment-meta",
+     "text": "q1_revenue.docx (application/vnd...wordprocessingml.document)"},
+    {"type": "text", "text": "Q1 Revenue Analysis", "style": "Normal"},
+    {"type": "table",
+     "headers": ["Region", "Revenue"],
+     "rows": [["EMEA", "$125,000"], ["APAC", "$143,000"], ["Americas", "$157,000"]]}
   ]
 }</code></pre>
 
@@ -477,7 +496,7 @@ for block in result.blocks:
         </details>
         <details>
           <summary>Are email attachments parsed automatically?</summary>
-          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline. Binary attachments are identified by filename and MIME type for downstream processing.</p></div>
+          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the <code>--deep</code> flag, DOCX, PPTX, and XLSX attachments are also extracted and parsed using the full Office parser.</p></div>
         </details>
         <details>
           <summary>Can I reconstruct email threads from an MBOX file?</summary>

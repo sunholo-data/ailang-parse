@@ -59,7 +59,9 @@ Binary attachments (PDF, images) stay as placeholder TextBlocks. Output:
 
 ---
 
-### P0a: Office Attachment Parsing (two-pass approach)
+### P0a: Office Attachment Parsing (two-pass approach) — DONE
+
+**Status:** Shipped (2026-04-02)
 
 **Problem:** DOCX/PPTX/XLSX attachments are ZIP archives. The email parser is `pure func` — no filesystem effects — so it can't extract ZIP contents to parse them. These attachments currently appear as placeholders: `[attachment: report.docx, application/vnd...]`.
 
@@ -231,14 +233,14 @@ Tested with 5 interleaved messages forming 2 threads (3+2). 3/3 thread gap check
 |----|----------|--------|--------|--------|
 | P0 | Attachment chain parsing (text-based) | Medium | High | **DONE** |
 | P1 | Thread reconstruction | Medium | High | **DONE** |
-| P0a | Office attachment parsing (two-pass) | Medium | High | Do next |
+| P0a | Office attachment parsing (two-pass) | Medium | High | **DONE** |
 | P4 | Calendar invite parsing | Low-Med | Medium | Quick win |
 | P6 | HTML email rendering fix | Low | Medium | Quick win |
 | P2 | Inbox monitoring agent | High | Very high | Plan carefully |
 | P3 | Outlook .msg support | High | Medium-high | Backlog |
 | P5 | S/MIME / PGP | Low-High | Low-medium | Backlog |
 
-**Recommended sequence:** P0a (two-pass Office attachments — completes the attachment story) → P6 (unblocks HTML-only emails) → P4 (quick win, extends format coverage) → P2 (the product play).
+**Recommended sequence:** P6 (unblocks HTML-only emails) → P4 (quick win, extends format coverage) → P2 (the product play).
 
 ---
 

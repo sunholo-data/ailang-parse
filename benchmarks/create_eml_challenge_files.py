@@ -7,6 +7,8 @@ Usage: uv run benchmarks/create_eml_challenge_files.py
 """
 
 import os
+import io
+import zipfile
 import base64
 import quopri
 from pathlib import Path
@@ -529,6 +531,69 @@ def create_challenge_threaded_mbox():
     print("  Created challenge_threaded.mbox")
 
 
+def create_minimal_docx():
+    """Create a minimal valid DOCX (ZIP with word/document.xml) in memory.
+    Returns base64-encoded bytes.
+    """
+    content_types = '<?xml version="1.0" encoding="UTF-8"?>\r\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+
+    rels = '<?xml version="1.0" encoding="UTF-8"?>\r\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+
+    document = '<?xml version="1.0" encoding="UTF-8"?>\r\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Q1 Revenue Analysis</w:t></w:r></w:p><w:p><w:r><w:t>Total revenue: $425,000 across three regions.</w:t></w:r></w:p><w:tbl><w:tblGrid><w:gridCol/><w:gridCol/></w:tblGrid><w:tr><w:tc><w:p><w:r><w:t>Region</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Revenue</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>EMEA</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>$125,000</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>APAC</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>$143,000</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>Americas</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>$157,000</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>'
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('[Content_Types].xml', content_types)
+        zf.writestr('_rels/.rels', rels)
+        zf.writestr('word/document.xml', document)
+
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def create_challenge_docx_attachment_eml():
+    """Email with a DOCX attachment (Office ZIP format).
+
+    Tests: Two-pass Office attachment parsing via --deep flag.
+    Expected: Without --deep: attachment-data preserved. With --deep: DOCX parsed to blocks.
+    """
+    boundary = "----=_Part_013_docxattach"
+    docx_b64 = create_minimal_docx()
+
+    # Wrap at 76 chars per RFC 2045
+    wrapped = "\r\n".join(docx_b64[i:i+76] for i in range(0, len(docx_b64), 76))
+
+    eml = (
+        "From: Reports <reports@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Q1 Revenue Report with DOCX\r\n"
+        "Date: Wed, 02 Apr 2026 09:00:00 +0000\r\n"
+        "Message-ID: <docxattach013@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        f"Content-Type: multipart/mixed;\r\n"
+        f" boundary=\"{boundary}\"\r\n"
+        "\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Hi team,\r\n"
+        "\r\n"
+        "Please find the Q1 revenue analysis attached as a Word document.\r\n"
+        "\r\n"
+        "Best,\r\n"
+        "Reports\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document;\r\n"
+        " name=\"q1_revenue.docx\"\r\n"
+        "Content-Disposition: attachment; filename=\"q1_revenue.docx\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{wrapped}\r\n"
+        f"--{boundary}--\r\n"
+    )
+    (OUTPUT_DIR / "challenge_docx_attachment.eml").write_text(eml, newline="")
+    print("  Created challenge_docx_attachment.eml")
+
+
 def create_challenge_quoted_reply_eml():
     """Reply email with quoted text and attribution line.
 
@@ -579,5 +644,6 @@ if __name__ == "__main__":
     create_challenge_attachment_chain_eml()
     create_challenge_email_in_email_eml()
     create_challenge_threaded_mbox()
+    create_challenge_docx_attachment_eml()
     create_challenge_quoted_reply_eml()
-    print(f"\nGenerated 12 challenge files in {OUTPUT_DIR}/")
+    print(f"\nGenerated 13 challenge files in {OUTPUT_DIR}/")

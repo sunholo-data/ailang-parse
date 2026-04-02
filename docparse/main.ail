@@ -1,10 +1,11 @@
 module docparse/main
 
-import std/fs (readFile, writeFile, fileExists)
+import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile)
 import std/json (encode)
 import std/string (length, intToStr, floatToStr, toLower, split, contains)
-import std/list (last, concat, any)
+import std/list (last, concat, any, map, flatMap as listFlatMap, filter)
 import std/option (Some, None)
+import std/bytes (fromBase64)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, cellText, countBlocks, filterHeadings, filterTables, filterImages, filterSections)
 import docparse/services/format_router (detectFormat, getExtension, officeType, strategyDescription, needsAI)
@@ -133,7 +134,7 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=30, Env} 
       "html" => parseHtmlDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "epub" => parseEpubDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "zip-odf" => parseOdfDocument(filepath, ext, useAI || doSummarize, doSummarize, convertTarget),
-      "email" => parseEmailDocument(filepath, ext, hasFlag(args, "--threaded")),
+      "email" => parseEmailDocument(filepath, ext, hasFlag(args, "--threaded"), hasFlag(args, "--deep")),
       "text" => parseTextDocument(filepath),
       _ => println("Format '" ++ format ++ "' not yet supported in this demo.")
     }
@@ -931,9 +932,10 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 }
 
 -- Parse an email document (EML or MBOX)
-func parseEmailDocument(filepath: string, ext: string, threaded: bool) -> () ! {IO, FS, AI, Env} {
+func parseEmailDocument(filepath: string, ext: string, threaded: bool, deep: bool) -> () ! {IO, FS, AI, Env} {
   println("--- Parsing Email (pure AILANG, RFC 5322) ---");
   if threaded then println("Mode: threaded (grouping by conversation)") else ();
+  if deep then println("Mode: deep (resolving Office attachments)") else ();
   println("");
 
   let content = readFile(filepath);
@@ -945,13 +947,21 @@ func parseEmailDocument(filepath: string, ext: string, threaded: bool) -> () ! {
                else parseEml(content);
   let metadata = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
   println("Extracted " ++ show(countBlocks(blocks)) ++ " blocks.");
+
+  -- Pass 2: Resolve Office attachments (DOCX/PPTX/XLSX) if --deep
+  let resolvedBlocks = if deep then {
+    println("Resolving Office attachments...");
+    let resolved = emlResolveOfficeAttachments(blocks, 0);
+    println("Resolved " ++ show(resolved.count) ++ " Office attachment(s).");
+    resolved.blocks
+  } else blocks;
   println("");
 
   let doc = {
     format: ext,
     filename: filepath,
     metadata: metadata,
-    blocks: blocks
+    blocks: resolvedBlocks
   };
 
   let result = {
@@ -963,11 +973,101 @@ func parseEmailDocument(filepath: string, ext: string, threaded: bool) -> () ! {
   printSummary(doc);
   println("");
   println("--- Content Blocks ---");
-  printBlocks(blocks);
+  printBlocks(resolvedBlocks);
   println("");
 
   writeOutputs(doc, result, false, filepath, "")
 }
+
+-- ============================================================
+-- Pass 2: Office Attachment Resolution
+-- ============================================================
+
+-- Walk blocks, find attachment SectionBlocks with attachment-data, resolve them
+func emlResolveOfficeAttachments(blocks: [Block], counter: int) -> { blocks: [Block], count: int } ! {IO, FS} {
+  match blocks {
+    [] => { blocks: [], count: 0 },
+    block :: rest => {
+      let resolved = emlResolveOneBlock(block, counter);
+      let restResolved = emlResolveOfficeAttachments(rest, counter + resolved.count);
+      { blocks: resolved.block :: restResolved.blocks, count: resolved.count + restResolved.count }
+    }
+  }
+}
+
+-- Resolve a single block (recurse into SectionBlocks)
+func emlResolveOneBlock(block: Block, counter: int) -> { block: Block, count: int } ! {IO, FS} {
+  match block {
+    SectionBlock(s) => {
+      if s.kind == "attachment" && emlHasAttachmentData(s.blocks) then {
+        -- This attachment has base64 data to resolve
+        let b64 = emlGetAttachmentData(s.blocks);
+        let ext = emlGetAttachmentExt(s.blocks);
+        let meta = emlGetAttachmentMeta(s.blocks);
+        let tmpPath = "/tmp/ailang_email_attach_" ++ show(counter) ++ "." ++ ext;
+        match fromBase64(b64) {
+          Some(bytes) => {
+            writeFileBytes(tmpPath, bytes);
+            let parsedBlocks = emlParseOfficeFile(tmpPath, ext);
+            removeFile(tmpPath);
+            let metaBlock = TextBlock({text: meta, style: "attachment-meta", level: 0});
+            { block: SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks}), count: 1 }
+          },
+          None => {
+            println("  Warning: Failed to decode base64 for attachment");
+            { block: block, count: 0 }
+          }
+        }
+      }
+      else {
+        -- Recurse into nested sections (threads, mbox-messages, etc.)
+        let inner = emlResolveOfficeAttachments(s.blocks, counter);
+        { block: SectionBlock({kind: s.kind, blocks: inner.blocks}), count: inner.count }
+      }
+    },
+    _ => { block: block, count: 0 }
+  }
+}
+
+-- Parse an Office file by extension using existing parsers
+func emlParseOfficeFile(filepath: string, ext: string) -> [Block] ! {IO, FS} {
+  if ext == "docx" then parseDocx(filepath)
+  else if ext == "xlsx" then parseXlsx(filepath)
+  else if ext == "pptx" then parsePptx(filepath)
+  else [TextBlock({text: "[unsupported Office format: " ++ ext ++ "]", style: "error", level: 0})]
+}
+
+-- Check if a block list contains an attachment-data TextBlock
+pure func emlHasAttachmentData(blocks: [Block]) -> bool =
+  match blocks {
+    [] => false,
+    TextBlock(t) :: rest => if t.style == "attachment-data" then true else emlHasAttachmentData(rest),
+    _ :: rest => emlHasAttachmentData(rest)
+  }
+
+-- Extract the base64 data from attachment blocks
+pure func emlGetAttachmentData(blocks: [Block]) -> string =
+  match blocks {
+    [] => "",
+    TextBlock(t) :: rest => if t.style == "attachment-data" then t.text else emlGetAttachmentData(rest),
+    _ :: rest => emlGetAttachmentData(rest)
+  }
+
+-- Extract the file extension from attachment blocks
+pure func emlGetAttachmentExt(blocks: [Block]) -> string =
+  match blocks {
+    [] => "bin",
+    TextBlock(t) :: rest => if t.style == "attachment-ext" then t.text else emlGetAttachmentExt(rest),
+    _ :: rest => emlGetAttachmentExt(rest)
+  }
+
+-- Extract the meta label from attachment blocks
+pure func emlGetAttachmentMeta(blocks: [Block]) -> string =
+  match blocks {
+    [] => "",
+    TextBlock(t) :: rest => if t.style == "attachment-meta" then t.text else emlGetAttachmentMeta(rest),
+    _ :: rest => emlGetAttachmentMeta(rest)
+  }
 
 -- Parse a plain text document
 func parseTextDocument(filepath: string) -> () ! {IO, FS} {

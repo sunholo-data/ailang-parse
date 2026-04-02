@@ -545,6 +545,93 @@ def check_mbox_parsing(output: dict) -> dict:
     }
 
 
+# --- P3.5: Office Attachment Parsing (two-pass) ---
+
+def parse_file_deep(filepath: Path) -> dict | None:
+    """Run DocParse on a file with --deep flag."""
+    result = subprocess.run(
+        ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
+         "--max-recursion-depth", "50000",
+         "docparse/main.ail", str(filepath), "--deep"],
+        capture_output=True, text=True, cwd=str(REPO_DIR),
+        timeout=120,
+    )
+    if result.returncode != 0:
+        return None
+
+    output_json = OUTPUT_DIR / f"{filepath.name}.json"
+    if not output_json.exists():
+        return None
+
+    with open(output_json) as f:
+        return json.load(f)
+
+
+def check_eml_docx_attachment_pass1(output: dict) -> dict:
+    """Does the parser preserve DOCX base64 data for two-pass resolution?
+
+    File: challenge_docx_attachment.eml (without --deep)
+    Expected: SectionBlock with kind 'attachment' containing attachment-data block.
+    Spec: P0a Office Attachment (Pass 1)
+    """
+    full_output = json.dumps(output)
+
+    checks = {
+        "q1_revenue.docx": "Filename in meta",
+        "attachment-data": "Base64 data block present",
+        "attachment-ext": "Extension block present",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    return {
+        "name": "EML DOCX Attachment Pass 1 (data preserved)",
+        "spec_ref": "P0a Office Attachment",
+        "file": "challenge_docx_attachment.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} pass-1 markers found (meta, data, ext blocks)",
+    }
+
+
+def check_eml_docx_attachment_deep(output: dict) -> dict:
+    """Does --deep resolve the DOCX attachment into parsed content blocks?
+
+    File: challenge_docx_attachment.eml (with --deep)
+    Expected: DOCX parsed to text + table blocks inside attachment section.
+    Spec: P0a Office Attachment (Pass 2)
+    """
+    full_output = json.dumps(output)
+
+    checks = {
+        "Q1 Revenue Analysis": "DOCX heading text",
+        "$425,000": "DOCX body text",
+        "EMEA": "DOCX table cell",
+        "$125,000": "DOCX table data",
+        "$143,000": "DOCX table data",
+        "Americas": "DOCX table cell",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    # Verify no attachment-data block remains (base64 should be resolved)
+    has_leftover_data = "attachment-data" in full_output
+
+    return {
+        "name": "EML DOCX Attachment Deep (parsed)",
+        "spec_ref": "P0a Office Attachment",
+        "file": "challenge_docx_attachment.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "data_resolved": not has_leftover_data,
+        "detail": f"{found}/{total} DOCX content items parsed (data resolved: {'yes' if not has_leftover_data else 'no'})",
+    }
+
+
 # --- P4: Thread Reconstruction ---
 
 def parse_file_threaded(filepath: Path) -> dict | None:
@@ -710,6 +797,13 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
             check_eml_attachment_binary_placeholder,
         ],
         "challenge_email_in_email.eml": [check_eml_email_in_email],
+        # P5: Office Attachment (Pass 1 — no --deep)
+        "challenge_docx_attachment.eml": [check_eml_docx_attachment_pass1],
+    }
+
+    # Deep checks (require --deep flag)
+    deep_checks = {
+        "challenge_docx_attachment.eml": [check_eml_docx_attachment_deep],
     }
 
     # Threaded checks (require --threaded flag)
@@ -767,6 +861,33 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
                     "file": filename,
                     "score": 0.0,
                     "detail": "Threaded parse failed",
+                })
+            continue
+
+        for check_fn in checks:
+            result = check_fn(output)
+            results.append(result)
+            if verbose:
+                print(f"    {result['name']}: {result['score']:.0%} — {result['detail']}", file=sys.stderr)
+
+    # Run deep checks (require --deep flag)
+    for filename, checks in deep_checks.items():
+        filepath = CHALLENGE_DIR / filename
+        if not filepath.exists():
+            print(f"  SKIP {filename} --deep (not found)", file=sys.stderr)
+            continue
+
+        print(f"  Parsing {filename} (deep)...", file=sys.stderr)
+        output = parse_file_deep(filepath)
+        if output is None:
+            print(f"  FAIL {filename} --deep (parse error)", file=sys.stderr)
+            for check_fn in checks:
+                results.append({
+                    "name": check_fn.__doc__.split("\n")[0] if check_fn.__doc__ else check_fn.__name__,
+                    "spec_ref": "—",
+                    "file": filename,
+                    "score": 0.0,
+                    "detail": "Deep parse failed",
                 })
             continue
 
