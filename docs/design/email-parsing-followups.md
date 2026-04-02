@@ -22,7 +22,7 @@
 - Batch mode via `ailang run --batch`
 
 ### Known limitations
-- HTML parts fail on non-XML-compliant HTML (self-closing `<meta>`, unquoted attributes). Plain text fallback always works in multipart/alternative.
+- ~~HTML parts fail on non-XML-compliant HTML~~ **DONE** — htmlSanitize pre-processor closes void elements, replaces HTML entities, strips DOCTYPE. HTML-only emails now parse fully.
 - ~~No attachment content extraction~~ **DONE** — text-based attachments (CSV, HTML, Markdown, nested EML) parsed inline. Office/binary attachments identified but not yet parsed (see P0a below).
 - ~~No thread reconstruction~~ **DONE** — `parseMboxThreaded` groups by Message-ID/In-Reply-To/References with quote stripping.
 - No Outlook `.msg` support (binary format, different from EML)
@@ -212,18 +212,19 @@ Tested with 5 interleaved messages forming 2 threads (3+2). 3/3 thread gap check
 
 ---
 
-### P6: HTML Email Rendering Improvement
+### P6: HTML Email Rendering Improvement — DONE
 
-**Problem:** Our HTML parser uses Go's strict XML parser, which chokes on real-world HTML email (self-closing `<meta>`, unquoted attributes, `<br>` without `/>`). This affects the HTML part of multipart/alternative emails.
+**Status:** Shipped (2026-04-02)
 
-**Proposal:** Either:
-1. Pre-process HTML to close self-closing tags before XML parsing
-2. Add an HTML5-tolerant parser to the AILANG stdlib
-3. Use a regex-based fallback that extracts text, headings, lists, and tables from HTML without full DOM parsing
+Added `htmlSanitize` pre-processor to `html_parser.ail` (option 1 from original proposal):
+- **Void element closing:** `<br>`, `<meta>`, `<img>`, `<hr>`, `<input>`, `<link>`, `<col>`, `<area>`, `<base>`, `<embed>`, `<source>`, `<track>`, `<wbr>` — all self-closed before XML parsing
+- **HTML entity replacement:** 23 common entities (`&mdash;`, `&euro;`, `&nbsp;`, `&copy;`, etc.) replaced with actual Unicode characters via UTF-8 byte construction
+- **DOCTYPE stripping:** `<!DOCTYPE ...>` removed before XML parsing
+- Case-insensitive tag matching with word boundary checks (won't match `<breaking>` when looking for `<br>`)
 
-**Complexity:** Low for option 1, medium for option 3, high for option 2.
+Tested on real emails from MailMate inbox — zero HTML parse errors on previously-failing marketing and transactional emails. HTML-only emails now parse fully (headings, tables, lists, images).
 
-**Impact:** Medium. Plain text fallback works for multipart/alternative, but HTML-only emails (increasingly common from marketing/transactional senders) need this fix.
+3/3 HTML gap checks at 100%.
 
 ---
 
@@ -235,12 +236,12 @@ Tested with 5 interleaved messages forming 2 threads (3+2). 3/3 thread gap check
 | P1 | Thread reconstruction | Medium | High | **DONE** |
 | P0a | Office attachment parsing (two-pass) | Medium | High | **DONE** |
 | P4 | Calendar invite parsing | Low-Med | Medium | Quick win |
-| P6 | HTML email rendering fix | Low | Medium | Quick win |
+| P6 | HTML email rendering fix | Low | Medium | **DONE** |
 | P2 | Inbox monitoring agent | High | Very high | Plan carefully |
 | P3 | Outlook .msg support | High | Medium-high | Backlog |
 | P5 | S/MIME / PGP | Low-High | Low-medium | Backlog |
 
-**Recommended sequence:** P6 (unblocks HTML-only emails) → P4 (quick win, extends format coverage) → P2 (the product play).
+**Recommended sequence:** P4 (quick win, extends format coverage) → P2 (the product play).
 
 ---
 

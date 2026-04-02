@@ -365,6 +365,108 @@ def check_eml_encoded_headers(output: dict) -> dict:
     }
 
 
+# --- P2.1: HTML Email Rendering (P6) ---
+
+def check_eml_html_only_parsing(output: dict) -> dict:
+    """Does the parser handle HTML-only emails with non-XHTML patterns?
+
+    File: challenge_html_only.eml
+    Expected: Content extracted from HTML with void elements, entities, DOCTYPE.
+    Spec: P6 HTML Email Rendering
+    """
+    full_output = json.dumps(output, ensure_ascii=False)
+
+    checks = {
+        "Your Order Has Shipped": "H1 heading extracted",
+        "order #12345": "Paragraph content",
+        "AILANG Pro License": "Table cell content",
+        "398": "Price with euro entity",
+        "2026 AILANG Inc": "Footer text",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    # Verify no HTML parse errors
+    has_error = "HTML parse error" in full_output
+
+    return {
+        "name": "EML HTML-Only Email Parsing",
+        "spec_ref": "P6 HTML Rendering",
+        "file": "challenge_html_only.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "no_errors": not has_error,
+        "detail": f"{found}/{total} HTML content items extracted (errors: {'yes' if has_error else 'none'})",
+    }
+
+
+def check_eml_html_entities(output: dict) -> dict:
+    """Does the parser replace HTML entities with Unicode characters?
+
+    File: challenge_html_only.eml
+    Expected: &mdash; &euro; &bull; &ndash; &copy; all replaced with Unicode.
+    Spec: P6 HTML Rendering
+    """
+    full_output = json.dumps(output, ensure_ascii=False)
+
+    # Check for actual Unicode characters (not HTML entity names)
+    checks = {
+        "\u2014": "em dash (&mdash;)",       # —
+        "\u20AC": "euro sign (&euro;)",       # €
+        "\u2022": "bullet (&bull;)",          # •
+        "\u2013": "en dash (&ndash;)",        # –
+        "\u00A9": "copyright (&copy;)",       # ©
+    }
+
+    found = sum(1 for char in checks if char in full_output)
+    total = len(checks)
+
+    return {
+        "name": "EML HTML Entity Decoding",
+        "spec_ref": "P6 HTML Rendering",
+        "file": "challenge_html_only.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} HTML entities converted to Unicode",
+    }
+
+
+def check_eml_html_multipart_rendering(output: dict) -> dict:
+    """Does the parser handle HTML parts in multipart emails with non-XHTML?
+
+    File: challenge_html_multipart.eml
+    Expected: HTML alternative part parsed with heading, list, image.
+    Spec: P6 HTML Rendering
+    """
+    full_output = json.dumps(output, ensure_ascii=False)
+
+    checks = {
+        "Weekly Product Update": "H2 heading from HTML part",
+        "Dark mode": "List item from HTML part",
+        "API v2": "List item from HTML part",
+        "Product banner": "Image alt text from HTML part",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    has_error = "HTML parse error" in full_output
+
+    return {
+        "name": "EML HTML Multipart Rendering",
+        "spec_ref": "P6 HTML Rendering",
+        "file": "challenge_html_multipart.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "no_errors": not has_error,
+        "detail": f"{found}/{total} HTML multipart content items (errors: {'yes' if has_error else 'none'})",
+    }
+
+
 # --- P2.5: Attachment Chain Parsing ---
 
 def check_eml_attachment_csv_parsed(output: dict) -> dict:
@@ -790,6 +892,9 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "challenge_encoded_headers.eml": [check_eml_encoded_headers],
         # P3: MBOX (RFC 4155)
         "challenge_mbox.mbox": [check_mbox_parsing],
+        # P6: HTML Email Rendering
+        "challenge_html_only.eml": [check_eml_html_only_parsing, check_eml_html_entities],
+        "challenge_html_multipart.eml": [check_eml_html_multipart_rendering],
         # P4: Attachment Chain Parsing
         "challenge_attachment_chain.eml": [
             check_eml_attachment_csv_parsed,

@@ -3,8 +3,9 @@ module docparse/services/html_parser
 import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
-import std/string (length, trim, contains, startsWith)
+import std/string (length, trim, contains, startsWith, find, substring, replace, toLower, split, join, charAt, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
+import std/bytes (fromInts, toString as bytesToStr)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell)
 
 -- HTML Parser — converts well-formed HTML/XHTML to Block ADT.
@@ -33,9 +34,151 @@ import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, List
 export pure func parseHtml(content: string) -> [Block]
   ensures { listLength(result) >= 0 }
 {
-  match parse(content) {
+  let sanitized = htmlSanitize(content);
+  match parse(sanitized) {
     Ok(root) => htmlExtractBlocks(root),
     Err(e) => [TextBlock({text: "HTML parse error: " ++ e, style: "error", level: 0})]
+  }
+}
+
+-- ============================================================
+-- HTML Sanitizer — pre-process HTML for XML parser compatibility
+-- ============================================================
+
+-- Sanitize HTML so it can be parsed by a strict XML parser.
+-- Handles: void elements, HTML entities, DOCTYPE, CDATA-like content.
+pure func htmlSanitize(content: string) -> string {
+  let noDoctype = htmlStripDoctype(content);
+  let entitiesFixed = htmlReplaceEntities(noDoctype);
+  htmlCloseVoidElements(entitiesFixed)
+}
+
+-- Strip <!DOCTYPE ...> declarations
+pure func htmlStripDoctype(content: string) -> string {
+  let lower = toLower(content);
+  let pos = find(lower, "<!doctype");
+  if pos < 0 then content
+  else {
+    let closePos = find(substring(content, pos, length(content)), ">");
+    if closePos < 0 then content
+    else {
+      let before = substring(content, 0, pos);
+      let after = substring(content, pos + closePos + 1, length(content));
+      htmlStripDoctype(before ++ after)
+    }
+  }
+}
+
+-- Replace common HTML entities with Unicode equivalents via UTF-8 bytes.
+-- XML only supports &amp; &lt; &gt; &apos; &quot; — everything else must be replaced.
+pure func htmlReplaceEntities(content: string) -> string {
+  let s = replace(content, "&nbsp;", bytesToStr(fromInts([194, 160])));
+  let s2 = replace(s, "&mdash;", bytesToStr(fromInts([226, 128, 148])));
+  let s3 = replace(s2, "&ndash;", bytesToStr(fromInts([226, 128, 147])));
+  let s4 = replace(s3, "&lsquo;", bytesToStr(fromInts([226, 128, 152])));
+  let s5 = replace(s4, "&rsquo;", bytesToStr(fromInts([226, 128, 153])));
+  let s6 = replace(s5, "&ldquo;", bytesToStr(fromInts([226, 128, 156])));
+  let s7 = replace(s6, "&rdquo;", bytesToStr(fromInts([226, 128, 157])));
+  let s8 = replace(s7, "&bull;", bytesToStr(fromInts([226, 128, 162])));
+  let s9 = replace(s8, "&hellip;", bytesToStr(fromInts([226, 128, 166])));
+  let s10 = replace(s9, "&copy;", bytesToStr(fromInts([194, 169])));
+  let s11 = replace(s10, "&reg;", bytesToStr(fromInts([194, 174])));
+  let s12 = replace(s11, "&trade;", bytesToStr(fromInts([226, 132, 162])));
+  let s13 = replace(s12, "&euro;", bytesToStr(fromInts([226, 130, 172])));
+  let s14 = replace(s13, "&pound;", bytesToStr(fromInts([194, 163])));
+  let s15 = replace(s14, "&yen;", bytesToStr(fromInts([194, 165])));
+  let s16 = replace(s15, "&cent;", bytesToStr(fromInts([194, 162])));
+  let s17 = replace(s16, "&deg;", bytesToStr(fromInts([194, 176])));
+  let s18 = replace(s17, "&times;", bytesToStr(fromInts([195, 151])));
+  let s19 = replace(s18, "&divide;", bytesToStr(fromInts([195, 183])));
+  let s20 = replace(s19, "&laquo;", bytesToStr(fromInts([194, 171])));
+  let s21 = replace(s20, "&raquo;", bytesToStr(fromInts([194, 187])));
+  let s22 = replace(s21, "&iexcl;", bytesToStr(fromInts([194, 161])));
+  replace(s22, "&iquest;", bytesToStr(fromInts([194, 191])))
+}
+
+-- Close HTML5 void elements so XML parser accepts them.
+-- Handles: <br>, <meta ...>, <img ...>, <hr>, <input ...>, etc.
+-- Converts <tag ...> to <tag .../> and <tag> to <tag/>
+pure func htmlCloseVoidElements(content: string) -> string {
+  let s = htmlCloseVoidTag(content, "br");
+  let s2 = htmlCloseVoidTag(s, "hr");
+  let s3 = htmlCloseVoidTag(s2, "meta");
+  let s4 = htmlCloseVoidTag(s3, "img");
+  let s5 = htmlCloseVoidTag(s4, "input");
+  let s6 = htmlCloseVoidTag(s5, "link");
+  let s7 = htmlCloseVoidTag(s6, "col");
+  let s8 = htmlCloseVoidTag(s7, "area");
+  let s9 = htmlCloseVoidTag(s8, "base");
+  let s10 = htmlCloseVoidTag(s9, "embed");
+  let s11 = htmlCloseVoidTag(s10, "source");
+  let s12 = htmlCloseVoidTag(s11, "track");
+  htmlCloseVoidTag(s12, "wbr")
+}
+
+-- Close all instances of a specific void tag in the content.
+-- Finds <tagname ...> (not already self-closed) and adds />
+pure func htmlCloseVoidTag(content: string, tagName: string) -> string {
+  -- Handle both <tag> and <tag ...> forms, case-insensitive
+  htmlCloseVoidTagFrom(content, tagName, 0)
+}
+
+-- Scan content from position, closing void tags as found
+pure func htmlCloseVoidTagFrom(content: string, tagName: string, startPos: int) -> string {
+  if startPos >= length(content) then content
+  else {
+    let remaining = substring(content, startPos, length(content));
+    -- Find next occurrence of <tagName (case-insensitive search)
+    let tagPos = htmlFindTagCI(remaining, tagName);
+    if tagPos < 0 then content
+    else {
+      let absPos = startPos + tagPos;
+      -- Find the closing > for this tag
+      let afterTag = substring(content, absPos, length(content));
+      let closeAngle = find(afterTag, ">");
+      if closeAngle < 0 then content
+      else {
+        -- Check if already self-closed (ends with />)
+        let beforeClose = substring(afterTag, 0, closeAngle);
+        if endsWith(trim(beforeClose), "/") then {
+          -- Already self-closed, skip past it
+          htmlCloseVoidTagFrom(content, tagName, absPos + closeAngle + 1)
+        }
+        else {
+          -- Not self-closed — insert / before >
+          let before = substring(content, 0, absPos + closeAngle);
+          let after = substring(content, absPos + closeAngle, length(content));
+          let fixed = before ++ "/" ++ after;
+          htmlCloseVoidTagFrom(fixed, tagName, absPos + closeAngle + 2)
+        }
+      }
+    }
+  }
+}
+
+-- Case-insensitive search for <tagName within content
+-- Returns position of the < or -1
+pure func htmlFindTagCI(content: string, tagName: string) -> int {
+  let lower = toLower(content);
+  let searchLower = "<" ++ tagName;
+  let pos = find(lower, searchLower);
+  if pos < 0 then -1
+  else {
+    -- Verify it's actually the tag (next char must be space, >, /)
+    let afterTagLen = length(searchLower);
+    if pos + afterTagLen >= length(lower) then pos
+    else {
+      let nextChar = charAt(lower, pos + afterTagLen);
+      if nextChar == " " || nextChar == ">" || nextChar == "/" || nextChar == "\t" || nextChar == "\n" then pos
+      else {
+        -- False match (e.g., <breaking> when searching for <br>)
+        -- Skip past and search again
+        let rest = substring(content, pos + afterTagLen, length(content));
+        let nextPos = htmlFindTagCI(rest, tagName);
+        if nextPos < 0 then -1
+        else pos + afterTagLen + nextPos
+      }
+    }
   }
 }
 

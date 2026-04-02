@@ -550,6 +550,101 @@ def create_minimal_docx():
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def create_challenge_html_only_eml():
+    """HTML-only email with non-XHTML patterns.
+
+    Tests: HTML sanitizer — void elements, HTML entities, DOCTYPE.
+    Expected: Content extracted despite malformed HTML (self-closing meta/br, &nbsp;).
+    """
+    html_content = (
+        '<!DOCTYPE html>\r\n'
+        '<html>\r\n'
+        '<head>\r\n'
+        '<meta charset="UTF-8">\r\n'
+        '<meta name="viewport" content="width=device-width">\r\n'
+        '</head>\r\n'
+        '<body>\r\n'
+        '<h1>Your Order Has Shipped!</h1>\r\n'
+        '<p>Hi Mark,</p>\r\n'
+        '<p>Great news &mdash; your order #12345 has been shipped.</p>\r\n'
+        '<br>\r\n'
+        '<table>\r\n'
+        '<tr><th>Item</th><th>Qty</th><th>Price</th></tr>\r\n'
+        '<tr><td>AILANG Pro License</td><td>1</td><td>&euro;299</td></tr>\r\n'
+        '<tr><td>Support Plan</td><td>1</td><td>&euro;99</td></tr>\r\n'
+        '</table>\r\n'
+        '<br>\r\n'
+        '<p>Total: &euro;398 &bull; Estimated delivery: 3&ndash;5 business days</p>\r\n'
+        '<p>Track your package <a href="https://example.com/track">here</a>.</p>\r\n'
+        '<hr>\r\n'
+        '<p style="font-size:11px">Questions? Contact support@example.com &copy; 2026 AILANG Inc.</p>\r\n'
+        '</body>\r\n'
+        '</html>\r\n'
+    )
+    html_b64 = base64.b64encode(html_content.encode()).decode()
+    wrapped = "\r\n".join(html_b64[i:i+76] for i in range(0, len(html_b64), 76))
+
+    eml = (
+        "From: AILANG Store <orders@ailang.example.com>\r\n"
+        "To: Mark <mark@example.com>\r\n"
+        "Subject: Your Order Has Shipped - Order #12345\r\n"
+        "Date: Wed, 02 Apr 2026 14:00:00 +0000\r\n"
+        "Message-ID: <htmlonly014@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{wrapped}\r\n"
+    )
+    (OUTPUT_DIR / "challenge_html_only.eml").write_text(eml, newline="")
+    print("  Created challenge_html_only.eml")
+
+
+def create_challenge_html_multipart_eml():
+    """Multipart email where HTML part has non-XHTML patterns.
+
+    Tests: HTML sanitizer in multipart context — void elements in HTML alternative.
+    Expected: HTML content extracted with heading, paragraphs, list.
+    """
+    boundary = "----=_Part_015_htmlmulti"
+    eml = (
+        "From: Newsletter <news@example.com>\r\n"
+        "To: subscribers@example.com\r\n"
+        "Subject: Weekly Product Update\r\n"
+        "Date: Wed, 02 Apr 2026 15:00:00 +0000\r\n"
+        "Message-ID: <htmlmulti015@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        f"Content-Type: multipart/alternative;\r\n"
+        f" boundary=\"{boundary}\"\r\n"
+        "\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Weekly Product Update\r\n"
+        "New features: dark mode, API v2, mobile app\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "\r\n"
+        "<!DOCTYPE html>\r\n"
+        "<html><head><meta charset=\"UTF-8\"></head>\r\n"
+        "<body>\r\n"
+        "<h2>Weekly Product Update</h2>\r\n"
+        "<p>Here&rsquo;s what&rsquo;s new this week:</p>\r\n"
+        "<ul>\r\n"
+        "<li>Dark mode &mdash; now available on all platforms</li>\r\n"
+        "<li>API v2 &mdash; faster, with webhook support</li>\r\n"
+        "<li>Mobile app &mdash; iOS and Android</li>\r\n"
+        "</ul>\r\n"
+        "<img src=\"https://example.com/banner.png\" alt=\"Product banner\">\r\n"
+        "<br>\r\n"
+        "<p>Read the full changelog <a href=\"https://example.com/changelog\">here</a>.</p>\r\n"
+        "</body></html>\r\n"
+        f"--{boundary}--\r\n"
+    )
+    (OUTPUT_DIR / "challenge_html_multipart.eml").write_text(eml, newline="")
+    print("  Created challenge_html_multipart.eml")
+
+
 def create_challenge_docx_attachment_eml():
     """Email with a DOCX attachment (Office ZIP format).
 
@@ -644,6 +739,8 @@ if __name__ == "__main__":
     create_challenge_attachment_chain_eml()
     create_challenge_email_in_email_eml()
     create_challenge_threaded_mbox()
+    create_challenge_html_only_eml()
+    create_challenge_html_multipart_eml()
     create_challenge_docx_attachment_eml()
     create_challenge_quoted_reply_eml()
-    print(f"\nGenerated 13 challenge files in {OUTPUT_DIR}/")
+    print(f"\nGenerated 15 challenge files in {OUTPUT_DIR}/")
