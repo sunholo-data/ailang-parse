@@ -153,7 +153,7 @@
         <a href="#encodings">Encoding Support</a>
         <a href="#mbox">MBOX Archives</a>
         <a href="#use-cases">Use Cases</a>
-        <a href="#example-output">Example Output</a>
+        <a href="#example-output">Example</a>
         <a href="#try-it">Try It</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -302,23 +302,38 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
 
       <h2 id="use-cases">Use Cases</h2>
 
+      <p>Emails are documents that contain other documents. Structured parsing makes them composable with the rest of your data pipeline.</p>
+
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
-          <h4>AI Email Triage</h4>
-          <p>Feed structured email JSON to an LLM for classification, routing, or auto-response. Clean inputs mean better accuracy &mdash; no tokens wasted on DKIM signatures and base64 blobs.</p>
+          <h4>AI Email Triage &amp; Routing</h4>
+          <p>Feed structured email JSON to an LLM for classification, routing, or auto-response. A 2,000-line raw email becomes 4 typed blocks &mdash; the model reasons about content, not DKIM signatures. Classification accuracy improves because tokens are spent on the actual message, not transport headers.</p>
         </div>
         <div class="dp-usecase-card">
-          <h4>Email Archival &amp; Search</h4>
-          <p>Index MBOX archives into vector databases or search engines. Metadata fields (author, date, subject) become filterable dimensions alongside full-text body content.</p>
+          <h4>Inbox Monitoring Agents</h4>
+          <p>An AI agent watching a mailbox (IMAP, local <code>.eml</code> files, or Gmail API exports) parses each email to structured JSON, extracts the message + attachment manifest, and takes action. The agent sees <code>[attachment: invoice.pdf, application/pdf]</code> &mdash; not 1,500 lines of base64.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Email-to-Knowledge-Base</h4>
+          <p>Parse MBOX exports from Gmail labels or Thunderbird folders into structured blocks, embed them in a vector database. Metadata (author, date, subject) becomes filterable dimensions alongside semantic search on body content. One <code>ailang run --batch</code> call processes an entire archive.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Multi-Format Document Pipelines</h4>
+          <p>Emails with DOCX, PDF, or CSV attachments can be parsed in a chain: the email parser identifies attachments, then the appropriate format parser processes each one. Same Block ADT output throughout &mdash; no format-specific handling downstream.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Compliance &amp; E-Discovery</h4>
-          <p>Extract email threads with attachment manifests for legal review. Headers preserve the full delivery chain (Received, DKIM, SPF) for forensic analysis.</p>
+          <p>Bulk MBOX processing with the full delivery chain preserved (Received headers, DKIM, SPF results) for forensic analysis, while body content is cleanly separated for legal review. Attachment manifests provide a complete inventory without extracting binary data.</p>
         </div>
         <div class="dp-usecase-card">
-          <h4>Multi-Format Pipelines</h4>
-          <p>Process emails alongside DOCX reports and XLSX spreadsheets in the same pipeline. The Block ADT output is identical &mdash; no format-specific handling downstream.</p>
+          <h4>Customer Support Automation</h4>
+          <p>Parse inbound support emails to extract the customer query, thread context, and any attached screenshots or documents. The structured output feeds directly into ticket creation, sentiment analysis, or automated response generation &mdash; with the original email metadata preserved for routing.</p>
         </div>
+      </div>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Batch mode:</strong> <code>ailang run --batch</code> compiles once and parses N files. An entire mailbox directory processes at sub-second per email after the initial compilation pass.</div>
       </div>
 
       <h2 id="example-output">Example: GitHub Notification</h2>
