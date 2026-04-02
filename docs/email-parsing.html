@@ -126,7 +126,9 @@
     {"@type": "Question", "name": "Does email parsing require AI or an API key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Email parsing is fully deterministic — it uses RFC 5322 and MIME spec parsing, not AI. It runs in the browser via WASM or server-side with zero external dependencies."}},
     {"@type": "Question", "name": "What email encodings are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Base64 body decoding, quoted-printable (including multi-byte UTF-8), and RFC 2047 encoded-words for international headers (both B and Q encoding)."}},
     {"@type": "Question", "name": "Can I parse MBOX archives with multiple messages?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction."}},
-    {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks (text, heading, section, table) with metadata (title from Subject, author from From, date from Date). Downstream code handles all formats identically."}}
+    {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks (text, heading, section, table) with metadata (title from Subject, author from From, date from Date). Downstream code handles all formats identically."}},
+    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline. Binary attachments are identified by filename and MIME type for downstream processing."}},
+    {"@type": "Question", "name": "Can I reconstruct email threads from an MBOX file?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use the --threaded flag. Messages are grouped into conversation threads using Message-ID/In-Reply-To/References headers, with quoted text stripped from replies."}}
   ]
 }
 </script>
@@ -152,6 +154,8 @@
         <a href="#what-gets-extracted">What Gets Extracted</a>
         <a href="#encodings">Encoding Support</a>
         <a href="#mbox">MBOX Archives</a>
+        <a href="#attachment-chain">Attachment Parsing</a>
+        <a href="#thread-reconstruction">Thread Reconstruction</a>
         <a href="#use-cases">Use Cases</a>
         <a href="#example-output">Example</a>
         <a href="#try-it">Try It</a>
@@ -259,8 +263,8 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
           <p>Multipart/mixed (body + attachments), multipart/alternative (text + HTML), and nested multipart structures are all resolved by boundary splitting.</p>
         </div>
         <div class="dp-feature-card">
-          <h4>Attachments</h4>
-          <p>Attachments are identified with filename and MIME type: <code>[attachment: report.pdf, application/pdf]</code>. Content-Disposition and Content-Type name parameters are both checked.</p>
+          <h4>Attachments &mdash; Parsed Inline</h4>
+          <p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline as <code>SectionBlock</code> with kind <code>attachment</code>. Binary attachments are identified by filename and MIME type. <a href="#attachment-chain">See details below</a>.</p>
         </div>
       </div>
 
@@ -300,6 +304,53 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
 
       <p>This makes MBOX ideal for bulk email processing: export a Gmail label or Thunderbird folder as MBOX, parse it in one call, and get structured JSON for every message in the archive.</p>
 
+      <h2 id="attachment-chain">Attachment Chain Parsing</h2>
+
+      <p>Emails are documents that contain other documents. A budget email has a CSV; a contract email has HTML or a forwarded <code>.eml</code>. AILANG Parse decodes and parses text-based attachments inline &mdash; one API call extracts the email <em>and</em> its attachment content.</p>
+
+      <p>Supported inline formats: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). Binary attachments (PDF, images) are identified by filename and MIME type.</p>
+
+<pre><code class="language-json">{
+  "type": "section",
+  "kind": "attachment",
+  "blocks": [
+    {"type": "text", "style": "attachment-meta",
+     "text": "revenue_q1.csv (text/csv)"},
+    {"type": "table",
+     "headers": [{"text": "Region"}, {"text": "Revenue"}, {"text": "Target"}],
+     "rows": [
+       [{"text": "EMEA"}, {"text": "125000"}, {"text": "110000"}],
+       [{"text": "APAC"}, {"text": "143000"}, {"text": "130000"}]
+     ]}
+  ]
+}</code></pre>
+
+      <p>Forwarded emails (<code>message/rfc822</code> attachments) are parsed recursively &mdash; the inner email gets full header and body extraction, nested inside the attachment block.</p>
+
+      <h2 id="thread-reconstruction">Thread Reconstruction</h2>
+
+      <p>Individual emails are often unintelligible without their thread. AILANG Parse reconstructs conversation threads from MBOX archives using <code>Message-ID</code>, <code>In-Reply-To</code>, and <code>References</code> headers.</p>
+
+<pre><code class="language-bash"># Threaded mode: groups messages into conversations
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail archive.mbox --threaded</code></pre>
+
+      <p>Output: each thread becomes a <code>SectionBlock</code> with kind <code>thread</code>, containing the normalized subject, participant list, and chronologically-ordered messages with quoted text stripped.</p>
+
+<pre><code class="language-json">{
+  "type": "section",
+  "kind": "thread",
+  "blocks": [
+    {"type": "text", "style": "thread-subject", "text": "Q2 Budget Planning"},
+    {"type": "text", "style": "thread-participants", "text": "Alice, Bob, Carol"},
+    {"type": "section", "kind": "thread-message", "blocks": [...]},
+    {"type": "section", "kind": "thread-message", "blocks": [...]},
+    {"type": "section", "kind": "thread-message", "blocks": [...]}
+  ]
+}</code></pre>
+
+      <p>Thread reconstruction gives LLMs the full conversation context for summarization, triage, or automated response &mdash; without the noise of repeated quoted text.</p>
+
       <h2 id="use-cases">Use Cases</h2>
 
       <p>Emails are documents that contain other documents. Structured parsing makes them composable with the rest of your data pipeline.</p>
@@ -319,7 +370,7 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
         </div>
         <div class="dp-usecase-card">
           <h4>Multi-Format Document Pipelines</h4>
-          <p>Emails with DOCX, PDF, or CSV attachments can be parsed in a chain: the email parser identifies attachments, then the appropriate format parser processes each one. Same Block ADT output throughout &mdash; no format-specific handling downstream.</p>
+          <p>CSV, HTML, and Markdown attachments are parsed inline automatically. A single API call returns the email body <em>and</em> the table data from the attached spreadsheet &mdash; no second parse step needed. Binary attachments (PDF, images) are identified for downstream AI processing.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Compliance &amp; E-Discovery</h4>
@@ -423,6 +474,14 @@ for block in result.blocks:
         <details>
           <summary>What is the output format for parsed emails?</summary>
           <div class="dp-faq-answer"><p>The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks with metadata. Downstream code handles all formats identically. See <a href="docs.html">the docs</a> for the full schema.</p></div>
+        </details>
+        <details>
+          <summary>Are email attachments parsed automatically?</summary>
+          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline. Binary attachments are identified by filename and MIME type for downstream processing.</p></div>
+        </details>
+        <details>
+          <summary>Can I reconstruct email threads from an MBOX file?</summary>
+          <div class="dp-faq-answer"><p>Yes. Use the <code>--threaded</code> flag. Messages are grouped into conversation threads using Message-ID/In-Reply-To/References headers, with quoted text stripped from replies.</p></div>
         </details>
       </div>
 

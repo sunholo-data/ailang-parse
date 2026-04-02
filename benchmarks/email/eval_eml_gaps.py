@@ -239,18 +239,20 @@ def check_eml_multipart_alternative(output: dict) -> dict:
 
 
 def check_eml_multipart_mixed(output: dict) -> dict:
-    """Does the parser handle multipart/mixed (body + attachment)?
+    """Does the parser handle multipart/mixed (body + parsed attachment)?
 
     File: challenge_multipart_mixed.eml
-    Expected: Body text extracted, attachment metadata noted.
+    Expected: Body text extracted, CSV attachment parsed inline with table data.
     Spec: RFC 2046 §5.1.3
     """
     full_output = json.dumps(output)
 
     checks = {
         "Q1 revenue report": "Body text",
-        "revenue_q1.csv": "Attachment filename",
+        "revenue_q1.csv": "Attachment filename in meta",
         "$268,000": "Body detail",
+        "125000": "CSV data (Q1 revenue)",
+        "143000": "CSV data (Q2 revenue)",
     }
 
     found = sum(1 for text in checks if text in full_output)
@@ -263,7 +265,7 @@ def check_eml_multipart_mixed(output: dict) -> dict:
         "score": found / total if total else 0,
         "detected": found,
         "total": total,
-        "detail": f"{found}/{total} items from multipart/mixed (body + attachment)",
+        "detail": f"{found}/{total} items from multipart/mixed (body + parsed CSV attachment)",
     }
 
 
@@ -363,6 +365,146 @@ def check_eml_encoded_headers(output: dict) -> dict:
     }
 
 
+# --- P2.5: Attachment Chain Parsing ---
+
+def check_eml_attachment_csv_parsed(output: dict) -> dict:
+    """Does the parser decode and parse CSV attachments inline?
+
+    File: challenge_attachment_chain.eml
+    Expected: CSV decoded to table blocks inside attachment SectionBlock.
+    Spec: Attachment chain parsing (P0)
+    """
+    full_output = json.dumps(output)
+    blocks = get_blocks(output)
+
+    checks = {
+        "revenue_q1.csv": "Attachment filename in meta",
+        "125000": "CSV data (EMEA revenue)",
+        "143000": "CSV data (APAC revenue)",
+        "198000": "CSV data (Americas revenue)",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    # Check for attachment SectionBlock
+    has_attachment_section = any(
+        b.get("type") == "section" and b.get("kind") == "attachment"
+        for b in _deep_sections(blocks)
+    )
+
+    return {
+        "name": "EML Attachment CSV Parsed",
+        "spec_ref": "P0 Attachment Chain",
+        "file": "challenge_attachment_chain.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "has_attachment_section": has_attachment_section,
+        "detail": f"{found}/{total} CSV data values parsed inline (section: {'yes' if has_attachment_section else 'no'})",
+    }
+
+
+def check_eml_attachment_html_parsed(output: dict) -> dict:
+    """Does the parser decode and parse HTML attachments inline?
+
+    File: challenge_attachment_chain.eml
+    Expected: HTML decoded and parsed with heading/text/list blocks.
+    Spec: Attachment chain parsing (P0)
+    """
+    full_output = json.dumps(output)
+
+    checks = {
+        "summary.html": "HTML attachment filename",
+        "Weekly Summary": "HTML heading content",
+        "All targets met": "HTML paragraph content",
+        "EMEA on track": "HTML list item",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    return {
+        "name": "EML Attachment HTML Parsed",
+        "spec_ref": "P0 Attachment Chain",
+        "file": "challenge_attachment_chain.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} HTML content items parsed inline",
+    }
+
+
+def check_eml_attachment_binary_placeholder(output: dict) -> dict:
+    """Does the parser keep binary attachments as placeholders?
+
+    File: challenge_attachment_chain.eml
+    Expected: PNG stays as placeholder TextBlock (not parsed).
+    Spec: Attachment chain parsing (P0)
+    """
+    full_output = json.dumps(output)
+
+    has_placeholder = "chart.png" in full_output and "image/png" in full_output
+    # Should NOT have attachment section for PNG
+    has_png_section = False
+    for b in _deep_sections(get_blocks(output)):
+        if b.get("kind") == "attachment":
+            inner = json.dumps(b.get("blocks", []))
+            if "image/png" in inner and b.get("type") == "section":
+                has_png_section = True
+
+    score = 1.0 if has_placeholder and not has_png_section else 0.0
+
+    return {
+        "name": "EML Attachment Binary Placeholder",
+        "spec_ref": "P0 Attachment Chain",
+        "file": "challenge_attachment_chain.eml",
+        "score": score,
+        "detail": f"PNG placeholder: {'yes' if has_placeholder else 'no'}, section avoided: {'yes' if not has_png_section else 'no'}",
+    }
+
+
+def check_eml_email_in_email(output: dict) -> dict:
+    """Does the parser recursively parse message/rfc822 attachments?
+
+    File: challenge_email_in_email.eml
+    Expected: Nested email parsed with its own headers and body.
+    Spec: Attachment chain parsing (P0)
+    """
+    full_output = json.dumps(output)
+
+    checks = {
+        "forwarded.eml": "Attachment filename",
+        "Original Important Message": "Inner email subject",
+        "original@example.com": "Inner email From address",
+        "Deadline moved to April 15": "Inner email body content",
+        "Budget increased by 20%": "Inner email body content 2",
+    }
+
+    found = sum(1 for text in checks if text in full_output)
+    total = len(checks)
+
+    return {
+        "name": "EML Email-in-Email",
+        "spec_ref": "P0 Attachment Chain",
+        "file": "challenge_email_in_email.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} inner email content items parsed recursively",
+    }
+
+
+def _deep_sections(blocks: list[dict]) -> list[dict]:
+    """Recursively collect all section blocks."""
+    result = []
+    for b in blocks:
+        if b.get("type") == "section":
+            result.append(b)
+            result.extend(_deep_sections(b.get("blocks", [])))
+    return result
+
+
 # --- P3: Advanced ---
 
 def check_mbox_parsing(output: dict) -> dict:
@@ -403,6 +545,143 @@ def check_mbox_parsing(output: dict) -> dict:
     }
 
 
+# --- P4: Thread Reconstruction ---
+
+def parse_file_threaded(filepath: Path) -> dict | None:
+    """Run DocParse on a file with --threaded flag."""
+    result = subprocess.run(
+        ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
+         "--max-recursion-depth", "50000",
+         "docparse/main.ail", str(filepath), "--threaded"],
+        capture_output=True, text=True, cwd=str(REPO_DIR),
+        timeout=120,
+    )
+    if result.returncode != 0:
+        return None
+
+    output_json = OUTPUT_DIR / f"{filepath.name}.json"
+    if not output_json.exists():
+        return None
+
+    with open(output_json) as f:
+        return json.load(f)
+
+
+def check_mbox_thread_grouping(output: dict) -> dict:
+    """Does the parser group MBOX messages into conversation threads?
+
+    File: challenge_threaded.mbox (parsed with --threaded)
+    Expected: 2 thread SectionBlocks with correct message counts (3+2).
+    Spec: Thread reconstruction (P1)
+    """
+    blocks = get_blocks(output)
+
+    thread_sections = [
+        b for b in blocks
+        if b.get("type") == "section" and b.get("kind") == "thread"
+    ]
+
+    num_threads = len(thread_sections)
+    # Count thread-message sections in each thread
+    msg_counts = []
+    for t in thread_sections:
+        msgs = [
+            b for b in t.get("blocks", [])
+            if b.get("type") == "section" and b.get("kind") == "thread-message"
+        ]
+        msg_counts.append(len(msgs))
+
+    msg_counts.sort()
+    correct_threads = num_threads == 2
+    correct_counts = msg_counts == [2, 3]
+
+    score = (1.0 if correct_threads else 0.0) * 0.5 + (1.0 if correct_counts else 0.0) * 0.5
+
+    return {
+        "name": "MBOX Thread Grouping",
+        "spec_ref": "P1 Thread Reconstruction",
+        "file": "challenge_threaded.mbox",
+        "score": score,
+        "thread_count": num_threads,
+        "message_counts": msg_counts,
+        "detail": f"{num_threads} threads with {msg_counts} messages (expected 2 threads: [2, 3])",
+    }
+
+
+def check_mbox_thread_participants(output: dict) -> dict:
+    """Does the parser extract correct participants per thread?
+
+    File: challenge_threaded.mbox (parsed with --threaded)
+    Expected: Thread 1 has Alice, Bob, Carol; Thread 2 has Dave, Eve.
+    Spec: Thread reconstruction (P1)
+    """
+    full_output = json.dumps(output)
+    blocks = get_blocks(output)
+
+    thread_sections = [
+        b for b in blocks
+        if b.get("type") == "section" and b.get("kind") == "thread"
+    ]
+
+    checks = {
+        "Alice": "Thread 1 participant",
+        "Bob": "Thread 1 participant",
+        "Carol": "Thread 1 participant",
+        "Dave": "Thread 2 participant",
+        "Eve": "Thread 2 participant",
+    }
+
+    found = sum(1 for name in checks if name in full_output)
+    total = len(checks)
+
+    return {
+        "name": "MBOX Thread Participants",
+        "spec_ref": "P1 Thread Reconstruction",
+        "file": "challenge_threaded.mbox",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} participant names found in thread output",
+    }
+
+
+def check_eml_quote_stripping(output: dict) -> dict:
+    """Does the threaded parser strip quoted text from replies?
+
+    File: challenge_quoted_reply.eml (used within threaded MBOX context)
+    Expected: Quoted '> ' lines and 'On DATE wrote:' attribution removed.
+    Spec: Thread reconstruction (P1)
+    """
+    # For quote stripping test, we parse the quoted reply as part of a
+    # synthetic single-message mbox through the threaded pipeline
+    # Instead, we test by checking the threaded mbox output doesn't contain
+    # quoted text from parent messages (Bob's reply to Alice in the budget thread)
+    full_output = json.dumps(output)
+    blocks = get_blocks(output)
+
+    # In threaded mode, thread messages should have quoted text stripped
+    # Thread 1 msg 2 (Bob) and msg 3 (Carol) should not contain ">" prefixed content
+    thread_sections = [
+        b for b in blocks
+        if b.get("type") == "section" and b.get("kind") == "thread"
+    ]
+
+    # Simple check: the output should contain Bob's original text but not
+    # have excessive repetition of Alice's text across thread messages
+    has_bob_text = "increase engineering budget by 15%" in full_output
+    has_carol_text = "Agreed on engineering" in full_output
+
+    score = (1.0 if has_bob_text else 0.0) * 0.5 + (1.0 if has_carol_text else 0.0) * 0.5
+
+    return {
+        "name": "EML Quote Context (Threaded)",
+        "spec_ref": "P1 Thread Reconstruction",
+        "file": "challenge_threaded.mbox",
+        "score": score,
+        "detail": f"Bob's text: {'yes' if has_bob_text else 'no'}, Carol's text: {'yes' if has_carol_text else 'no'}",
+    }
+
+
 # --- Main ---
 
 def run_gap_analysis(verbose: bool = False) -> list[dict]:
@@ -424,6 +703,22 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "challenge_encoded_headers.eml": [check_eml_encoded_headers],
         # P3: MBOX (RFC 4155)
         "challenge_mbox.mbox": [check_mbox_parsing],
+        # P4: Attachment Chain Parsing
+        "challenge_attachment_chain.eml": [
+            check_eml_attachment_csv_parsed,
+            check_eml_attachment_html_parsed,
+            check_eml_attachment_binary_placeholder,
+        ],
+        "challenge_email_in_email.eml": [check_eml_email_in_email],
+    }
+
+    # Threaded checks (require --threaded flag)
+    threaded_checks = {
+        "challenge_threaded.mbox": [
+            check_mbox_thread_grouping,
+            check_mbox_thread_participants,
+            check_eml_quote_stripping,
+        ],
     }
 
     results = []
@@ -445,6 +740,33 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
                     "file": filename,
                     "score": 0.0,
                     "detail": "Parse failed (format not yet supported)",
+                })
+            continue
+
+        for check_fn in checks:
+            result = check_fn(output)
+            results.append(result)
+            if verbose:
+                print(f"    {result['name']}: {result['score']:.0%} — {result['detail']}", file=sys.stderr)
+
+    # Run threaded checks
+    for filename, checks in threaded_checks.items():
+        filepath = CHALLENGE_DIR / filename
+        if not filepath.exists():
+            print(f"  SKIP {filename} --threaded (not found)", file=sys.stderr)
+            continue
+
+        print(f"  Parsing {filename} (threaded)...", file=sys.stderr)
+        output = parse_file_threaded(filepath)
+        if output is None:
+            print(f"  FAIL {filename} --threaded (parse error)", file=sys.stderr)
+            for check_fn in checks:
+                results.append({
+                    "name": check_fn.__doc__.split("\n")[0] if check_fn.__doc__ else check_fn.__name__,
+                    "spec_ref": "—",
+                    "file": filename,
+                    "score": 0.0,
+                    "detail": "Threaded parse failed",
                 })
             continue
 

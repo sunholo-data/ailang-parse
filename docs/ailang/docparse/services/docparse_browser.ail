@@ -29,7 +29,7 @@ import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
-import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata)
+import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
 import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert, documentToA2UI, a2ui_jsonToBlockList)
 
@@ -195,6 +195,11 @@ export pure func parseMboxContent(content: string) -> string {
 -- Parse MBOX metadata (from first message) -> JSON metadata object
 export pure func parseMboxMeta(content: string) -> string {
   encode(metadataToJson(parseMboxMetadata(content)))
+}
+
+-- Parse MBOX with thread reconstruction -> JSON array of thread blocks
+export pure func parseMboxThreadedContent(content: string) -> string {
+  encode(ja(blocksToJson(parseMboxThreaded(content))))
 }
 
 -- Convert block JSON (from parseDocxBody etc.) to A2UI component JSON.

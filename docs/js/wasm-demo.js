@@ -418,7 +418,7 @@
     if (ext === 'eml') {
       r = engine.call('parseEmlContent', content);
     } else if (ext === 'mbox') {
-      r = engine.call('parseMboxContent', content);
+      r = engine.call('parseMboxThreadedContent', content);
     } else if (ext === 'html' || ext === 'htm') {
       r = engine.call('parseHtmlContent', content);
     } else if (ext === 'csv') {

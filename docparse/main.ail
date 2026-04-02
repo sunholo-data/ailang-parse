@@ -17,7 +17,7 @@ import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStr
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
 import docparse/services/html_parser (parseHtml)
-import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata)
+import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
 import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeadersFooters)
 import docparse/services/odp_parser (parseOdp, parseOdpMetadata)
@@ -133,7 +133,7 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=30, Env} 
       "html" => parseHtmlDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "epub" => parseEpubDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "zip-odf" => parseOdfDocument(filepath, ext, useAI || doSummarize, doSummarize, convertTarget),
-      "email" => parseEmailDocument(filepath, ext),
+      "email" => parseEmailDocument(filepath, ext, hasFlag(args, "--threaded")),
       "text" => parseTextDocument(filepath),
       _ => println("Format '" ++ format ++ "' not yet supported in this demo.")
     }
@@ -931,15 +931,18 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 }
 
 -- Parse an email document (EML or MBOX)
-func parseEmailDocument(filepath: string, ext: string) -> () ! {IO, FS, AI, Env} {
+func parseEmailDocument(filepath: string, ext: string, threaded: bool) -> () ! {IO, FS, AI, Env} {
   println("--- Parsing Email (pure AILANG, RFC 5322) ---");
+  if threaded then println("Mode: threaded (grouping by conversation)") else ();
   println("");
 
   let content = readFile(filepath);
   println("Parsing " ++ show(length(content)) ++ " chars of email...");
 
   let isMbox = ext == "mbox";
-  let blocks = if isMbox then parseMbox(content) else parseEml(content);
+  let blocks = if isMbox && threaded then parseMboxThreaded(content)
+               else if isMbox then parseMbox(content)
+               else parseEml(content);
   let metadata = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
   println("Extracted " ++ show(countBlocks(blocks)) ++ " blocks.");
   println("");

@@ -16,6 +16,8 @@ import std/option (Some, None)
 import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
 import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata)
 import docparse/services/html_parser (parseHtml)
+import docparse/services/csv_parser (parseCsv)
+import docparse/services/markdown_parser (parseMarkdown)
 
 -- ============================================================
 -- Types
@@ -254,6 +256,26 @@ pure func emlFilterMultipartParts(parts: [string], pastFirst: bool) -> [string] 
     }
   }
 
+-- Check if a MIME type can be parsed inline (text-based attachments)
+pure func emlIsParseableMime(mimeType: string) -> bool {
+  let mt = toLower(mimeType);
+  mt == "text/csv" || mt == "text/tab-separated-values" ||
+  mt == "text/html" || mt == "text/markdown" || mt == "text/x-markdown" ||
+  mt == "text/plain" || mt == "message/rfc822"
+}
+
+-- Parse attachment content based on MIME type, returning typed blocks
+pure func emlParseAttachmentContent(decoded: string, mimeType: string) -> [Block] {
+  let mt = toLower(mimeType);
+  if mt == "text/csv" then parseCsv(decoded, ",")
+  else if mt == "text/tab-separated-values" then parseCsv(decoded, "\t")
+  else if mt == "text/html" then parseHtml(decoded)
+  else if mt == "text/markdown" || mt == "text/x-markdown" then parseMarkdown(decoded)
+  else if mt == "message/rfc822" then parseEml(decoded)
+  else if mt == "text/plain" then [TextBlock({text: decoded, style: "Normal", level: 0})]
+  else [TextBlock({text: decoded, style: "Normal", level: 0})]
+}
+
 -- Parse a single MIME part (has its own headers + body)
 pure func emlParseMimePart(part: string) -> [Block] {
   let splitResult = emlSplitHeaderBody(part);
@@ -264,10 +286,20 @@ pure func emlParseMimePart(part: string) -> [Block] {
   let lowerCt = toLower(partCt);
 
   if contains(toLower(disposition), "attachment") then {
-    -- Attachment: extract filename
+    -- Attachment: extract filename and MIME type
     let filename = emlExtractFilename(disposition, partCt);
     let mimeType = emlExtractMimeType(partCt);
-    [TextBlock({text: "[attachment: " ++ filename ++ ", " ++ mimeType ++ "]", style: "attachment", level: 0})]
+    if emlIsParseableMime(mimeType) then {
+      -- Text-based attachment: decode and parse inline
+      let decoded = emlDecodeBody(splitResult.body, partEnc);
+      let parsedBlocks = emlParseAttachmentContent(decoded, mimeType);
+      let metaBlock = TextBlock({text: filename ++ " (" ++ mimeType ++ ")", style: "attachment-meta", level: 0});
+      [SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks})]
+    }
+    else {
+      -- Binary attachment: placeholder
+      [TextBlock({text: "[attachment: " ++ filename ++ ", " ++ mimeType ++ "]", style: "attachment", level: 0})]
+    }
   }
   else if contains(lowerCt, "multipart/") then {
     -- Nested multipart
@@ -535,4 +567,189 @@ pure func emlAccumulateMboxMessages(lines: [string], current: string, acc: [stri
 pure func emlParseMboxMessage(msgContent: string) -> [Block] {
   let emlBlocks = parseEml(msgContent);
   [SectionBlock({kind: "mbox-message", blocks: emlBlocks})]
+}
+
+-- ============================================================
+-- Thread Reconstruction
+-- ============================================================
+
+type EmlThreadInfo = { messageId: string, inReplyTo: string, references: string, subject: string, from: string, date: string }
+type EmlMsgPair = { content: string, info: EmlThreadInfo }
+
+-- Parse MBOX with thread reconstruction: groups messages into conversation threads
+export pure func parseMboxThreaded(content: string) -> [Block] {
+  let normalized = join("\n", split(content, "\r\n"));
+  let messages = emlSplitMbox(normalized);
+  let pairs = map(\msg. { content: msg, info: emlExtractThreadInfo(msg) }, messages);
+  let threads = emlGroupByThread(pairs);
+  flatMap(emlThreadToSection, threads)
+}
+
+-- Extract thread-relevant headers from raw EML content
+pure func emlExtractThreadInfo(content: string) -> EmlThreadInfo {
+  let parts = emlSplitHeaderBody(content);
+  let headers = emlParseHeaders(parts.headers);
+  {
+    messageId: emlCleanMessageId(emlGetHeader(headers, "message-id")),
+    inReplyTo: emlCleanMessageId(emlGetHeader(headers, "in-reply-to")),
+    references: emlGetHeader(headers, "references"),
+    subject: emlDecodeHeaderValue(emlGetHeader(headers, "subject")),
+    from: emlDecodeHeaderValue(emlGetHeader(headers, "from")),
+    date: emlGetHeader(headers, "date")
+  }
+}
+
+-- Strip angle brackets from Message-ID: "<foo@bar>" → "foo@bar"
+pure func emlCleanMessageId(raw: string) -> string {
+  let trimmed = trim(raw);
+  if startsWith(trimmed, "<") then {
+    let inner = substring(trimmed, 1, length(trimmed));
+    let closePos = find(inner, ">");
+    if closePos < 0 then inner
+    else substring(inner, 0, closePos)
+  }
+  else trimmed
+}
+
+-- Normalize subject: strip Re:/Fwd: prefixes recursively
+pure func emlNormalizeSubject(subject: string) -> string {
+  let trimmed = trim(subject);
+  let lower = toLower(trimmed);
+  if startsWith(lower, "re:") then emlNormalizeSubject(trim(substring(trimmed, 3, length(trimmed))))
+  else if startsWith(lower, "re: ") then emlNormalizeSubject(trim(substring(trimmed, 4, length(trimmed))))
+  else if startsWith(lower, "fwd:") then emlNormalizeSubject(trim(substring(trimmed, 4, length(trimmed))))
+  else if startsWith(lower, "fwd: ") then emlNormalizeSubject(trim(substring(trimmed, 5, length(trimmed))))
+  else trimmed
+}
+
+-- Check if a message is a thread root (not a reply to any known message)
+pure func emlIsThreadRoot(info: EmlThreadInfo, allPairs: [EmlMsgPair]) -> bool {
+  length(info.inReplyTo) == 0 || emlFindByMessageId(info.inReplyTo, allPairs) == false
+}
+
+-- Check if any message in the list has the given messageId
+pure func emlFindByMessageId(targetId: string, pairs: [EmlMsgPair]) -> bool =
+  match pairs {
+    [] => false,
+    p :: rest =>
+      if p.info.messageId == targetId then true
+      else emlFindByMessageId(targetId, rest)
+  }
+
+-- Group messages into threads starting from root messages
+pure func emlGroupByThread(allPairs: [EmlMsgPair]) -> [{ subject: string, participants: [string], messages: [EmlMsgPair] }] {
+  let roots = filter(\p. emlIsThreadRoot(p.info, allPairs), allPairs);
+  map(\root. emlCollectThread(root, allPairs), roots)
+}
+
+-- Collect all messages in a thread starting from a root
+pure func emlCollectThread(root: EmlMsgPair, allPairs: [EmlMsgPair]) -> { subject: string, participants: [string], messages: [EmlMsgPair] } {
+  let descendants = emlFindDescendants([root], allPairs, [root]);
+  let participants = emlUniqueParticipants(descendants);
+  {
+    subject: emlNormalizeSubject(root.info.subject),
+    participants: participants,
+    messages: descendants
+  }
+}
+
+-- BFS: find all descendants of frontier messages in the thread
+pure func emlFindDescendants(frontier: [EmlMsgPair], allPairs: [EmlMsgPair], collected: [EmlMsgPair]) -> [EmlMsgPair] =
+  match frontier {
+    [] => collected,
+    _ => {
+      let frontierIds = map(\p. p.info.messageId, frontier);
+      let children = filter(\p. emlIsChildOfAny(p.info.inReplyTo, frontierIds), allPairs);
+      let newChildren = filter(\c. emlNotInList(c.info.messageId, collected), children);
+      match newChildren {
+        [] => collected,
+        _ => emlFindDescendants(newChildren, allPairs, concat(collected, newChildren))
+      }
+    }
+  }
+
+-- Check if inReplyTo matches any of the given message IDs
+pure func emlIsChildOfAny(inReplyTo: string, parentIds: [string]) -> bool =
+  match parentIds {
+    [] => false,
+    pid :: rest =>
+      if length(inReplyTo) > 0 && inReplyTo == pid then true
+      else emlIsChildOfAny(inReplyTo, rest)
+  }
+
+-- Check if a messageId is NOT already in the collected list
+pure func emlNotInList(msgId: string, collected: [EmlMsgPair]) -> bool =
+  match collected {
+    [] => true,
+    p :: rest =>
+      if p.info.messageId == msgId then false
+      else emlNotInList(msgId, rest)
+  }
+
+-- Extract unique participant display names from message pairs
+pure func emlUniqueParticipants(pairs: [EmlMsgPair]) -> [string] {
+  let names = map(\p. emlExtractDisplayName(p.info.from), pairs);
+  emlUnique(names)
+}
+
+-- Deduplicate a string list preserving order
+pure func emlUnique(items: [string]) -> [string] =
+  match items {
+    [] => [],
+    x :: rest =>
+      if emlStringInList(x, rest) then emlUnique(rest)
+      else x :: emlUnique(rest)
+  }
+
+-- Check if a string is in a list
+pure func emlStringInList(s: string, items: [string]) -> bool =
+  match items {
+    [] => false,
+    x :: rest => if x == s then true else emlStringInList(s, rest)
+  }
+
+-- Convert a thread group into SectionBlock output
+pure func emlThreadToSection(thread: { subject: string, participants: [string], messages: [EmlMsgPair] }) -> [Block] {
+  let subjectBlock = TextBlock({text: thread.subject, style: "thread-subject", level: 0});
+  let participantBlock = TextBlock({text: join(", ", thread.participants), style: "thread-participants", level: 0});
+  let msgBlocks = flatMap(\p. emlParseThreadMessage(p.content), thread.messages);
+  [SectionBlock({kind: "thread", blocks: subjectBlock :: participantBlock :: msgBlocks})]
+}
+
+-- Parse a single thread message with quote stripping
+pure func emlParseThreadMessage(msgContent: string) -> [Block] {
+  let blocks = parseEml(msgContent);
+  let strippedBlocks = map(emlStripQuotedBlock, blocks);
+  [SectionBlock({kind: "thread-message", blocks: strippedBlocks})]
+}
+
+-- Strip quoted text from a Block (only affects TextBlocks)
+pure func emlStripQuotedBlock(block: Block) -> Block =
+  match block {
+    TextBlock(t) =>
+      if t.style == "Normal" then TextBlock({text: emlStripQuotedText(t.text), style: t.style, level: t.level})
+      else block,
+    SectionBlock(s) => SectionBlock({kind: s.kind, blocks: map(emlStripQuotedBlock, s.blocks)}),
+    _ => block
+  }
+
+-- Strip quoted lines ("> " prefix) and attribution lines ("On DATE, PERSON wrote:")
+pure func emlStripQuotedText(text: string) -> string {
+  let lines = split(text, "\n");
+  let filtered = filter(emlIsNotQuotedLine, lines);
+  let noAttribution = filter(emlIsNotAttributionLine, filtered);
+  trim(join("\n", noAttribution))
+}
+
+-- Check if a line is NOT a quoted line (doesn't start with ">")
+pure func emlIsNotQuotedLine(line: string) -> bool {
+  let trimmed = trim(line);
+  startsWith(trimmed, ">") == false
+}
+
+-- Check if a line is NOT an attribution line ("On ... wrote:")
+pure func emlIsNotAttributionLine(line: string) -> bool {
+  let lower = toLower(trim(line));
+  if startsWith(lower, "on ") && endsWith(lower, "wrote:") then false
+  else true
 }

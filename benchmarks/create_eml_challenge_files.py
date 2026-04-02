@@ -333,6 +333,239 @@ def create_challenge_mbox():
     print("  Created challenge_mbox.mbox")
 
 
+def create_challenge_attachment_chain_eml():
+    """Email with multiple parseable attachments (CSV, HTML) and one binary (PNG).
+
+    Tests: Attachment chain parsing — text-based attachments decoded and parsed inline.
+    Expected: CSV → TableBlock, HTML → parsed blocks, PNG → placeholder.
+    """
+    boundary = "----=_Part_010_attachchain"
+
+    csv_content = "Region,Revenue,Target\r\nEMEA,125000,110000\r\nAPAC,143000,130000\r\nAmericas,198000,180000\r\n"
+    csv_b64 = base64.b64encode(csv_content.encode()).decode()
+
+    html_content = "<html><body><h1>Weekly Summary</h1><p>All targets met this quarter.</p><ul><li>EMEA on track</li><li>APAC exceeded</li></ul></body></html>"
+    html_b64 = base64.b64encode(html_content.encode()).decode()
+
+    # Fake PNG (just a small binary blob — not a real image)
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    png_b64 = base64.b64encode(png_bytes).decode()
+
+    eml = (
+        "From: Reports Bot <reports@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Q1 Regional Report with Attachments\r\n"
+        "Date: Mon, 01 Apr 2026 09:00:00 +0000\r\n"
+        "Message-ID: <attachchain010@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        f"Content-Type: multipart/mixed;\r\n"
+        f" boundary=\"{boundary}\"\r\n"
+        "\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Hi team,\r\n"
+        "\r\n"
+        "Please find the Q1 regional reports attached.\r\n"
+        "\r\n"
+        "Best,\r\n"
+        "Reports Bot\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/csv; name=\"revenue_q1.csv\"\r\n"
+        "Content-Disposition: attachment; filename=\"revenue_q1.csv\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{csv_b64}\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/html; name=\"summary.html\"\r\n"
+        "Content-Disposition: attachment; filename=\"summary.html\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{html_b64}\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: image/png; name=\"chart.png\"\r\n"
+        "Content-Disposition: attachment; filename=\"chart.png\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{png_b64}\r\n"
+        f"--{boundary}--\r\n"
+    )
+    (OUTPUT_DIR / "challenge_attachment_chain.eml").write_text(eml, newline="")
+    print("  Created challenge_attachment_chain.eml")
+
+
+def create_challenge_email_in_email_eml():
+    """Email with a message/rfc822 attachment (forwarded email).
+
+    Tests: Recursive email parsing — nested email parsed as SectionBlock.
+    Expected: Outer email headers + body, inner email parsed recursively.
+    """
+    boundary = "----=_Part_011_emailinemail"
+
+    inner_eml = (
+        "From: Original Sender <original@example.com>\r\n"
+        "To: First Recipient <first@example.com>\r\n"
+        "Subject: Original Important Message\r\n"
+        "Date: Sun, 30 Mar 2026 08:00:00 +0000\r\n"
+        "Message-ID: <original011@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "This is the original message that was forwarded.\r\n"
+        "It contains important project decisions:\r\n"
+        "- Deadline moved to April 15\r\n"
+        "- Budget increased by 20%\r\n"
+    )
+    inner_b64 = base64.b64encode(inner_eml.encode()).decode()
+
+    eml = (
+        "From: Forwarder <forwarder@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Fwd: Original Important Message\r\n"
+        "Date: Mon, 01 Apr 2026 10:00:00 +0000\r\n"
+        "Message-ID: <fwd011@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        f"Content-Type: multipart/mixed;\r\n"
+        f" boundary=\"{boundary}\"\r\n"
+        "\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "FYI — forwarding this for visibility.\r\n"
+        f"--{boundary}\r\n"
+        "Content-Type: message/rfc822\r\n"
+        "Content-Disposition: attachment; filename=\"forwarded.eml\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{inner_b64}\r\n"
+        f"--{boundary}--\r\n"
+    )
+    (OUTPUT_DIR / "challenge_email_in_email.eml").write_text(eml, newline="")
+    print("  Created challenge_email_in_email.eml")
+
+
+def create_challenge_threaded_mbox():
+    """MBOX with 5 messages forming 2 threads (3+2), interleaved chronologically.
+
+    Tests: Thread reconstruction via Message-ID / In-Reply-To / References.
+    Expected: 2 thread groups with correct participants and message ordering.
+    """
+    # Thread 1: Budget discussion (3 messages)
+    msg1 = (
+        "From alice@example.com Mon Mar 30 09:00:00 2026\r\n"
+        "From: Alice <alice@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Q2 Budget Planning\r\n"
+        "Date: Mon, 30 Mar 2026 09:00:00 +0000\r\n"
+        "Message-ID: <thread1-msg1@example.com>\r\n"
+        "\r\n"
+        "Team, let's start planning the Q2 budget.\r\n"
+        "Key areas: engineering, marketing, ops.\r\n"
+        "\r\n"
+    )
+
+    # Thread 2: Launch planning (2 messages) — interleaved
+    msg2 = (
+        "From dave@example.com Mon Mar 30 09:30:00 2026\r\n"
+        "From: Dave <dave@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Product Launch Timeline\r\n"
+        "Date: Mon, 30 Mar 2026 09:30:00 +0000\r\n"
+        "Message-ID: <thread2-msg1@example.com>\r\n"
+        "\r\n"
+        "Here's the proposed launch timeline for v2.0.\r\n"
+        "Target date: May 15.\r\n"
+        "\r\n"
+    )
+
+    # Thread 1: Reply from Bob
+    msg3 = (
+        "From bob@example.com Mon Mar 30 10:00:00 2026\r\n"
+        "From: Bob <bob@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Re: Q2 Budget Planning\r\n"
+        "Date: Mon, 30 Mar 2026 10:00:00 +0000\r\n"
+        "Message-ID: <thread1-msg2@example.com>\r\n"
+        "In-Reply-To: <thread1-msg1@example.com>\r\n"
+        "References: <thread1-msg1@example.com>\r\n"
+        "\r\n"
+        "I think we should increase engineering budget by 15%.\r\n"
+        "The new hires need equipment and training.\r\n"
+        "\r\n"
+    )
+
+    # Thread 2: Reply from Eve
+    msg4 = (
+        "From eve@example.com Mon Mar 30 10:30:00 2026\r\n"
+        "From: Eve <eve@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Re: Product Launch Timeline\r\n"
+        "Date: Mon, 30 Mar 2026 10:30:00 +0000\r\n"
+        "Message-ID: <thread2-msg2@example.com>\r\n"
+        "In-Reply-To: <thread2-msg1@example.com>\r\n"
+        "References: <thread2-msg1@example.com>\r\n"
+        "\r\n"
+        "May 15 works. Marketing materials will be ready by May 1.\r\n"
+        "\r\n"
+    )
+
+    # Thread 1: Reply from Carol
+    msg5 = (
+        "From carol@example.com Mon Mar 30 11:00:00 2026\r\n"
+        "From: Carol <carol@example.com>\r\n"
+        "To: team@example.com\r\n"
+        "Subject: Re: Q2 Budget Planning\r\n"
+        "Date: Mon, 30 Mar 2026 11:00:00 +0000\r\n"
+        "Message-ID: <thread1-msg3@example.com>\r\n"
+        "In-Reply-To: <thread1-msg2@example.com>\r\n"
+        "References: <thread1-msg1@example.com> <thread1-msg2@example.com>\r\n"
+        "\r\n"
+        "Agreed on engineering. Marketing should stay flat.\r\n"
+        "\r\n"
+    )
+
+    mbox = msg1 + msg2 + msg3 + msg4 + msg5
+    (OUTPUT_DIR / "challenge_threaded.mbox").write_text(mbox, newline="")
+    print("  Created challenge_threaded.mbox")
+
+
+def create_challenge_quoted_reply_eml():
+    """Reply email with quoted text and attribution line.
+
+    Tests: Quote stripping — removal of '> ' prefixed lines and 'On DATE, PERSON wrote:'.
+    Expected: Only the new reply content remains after stripping.
+    """
+    eml = (
+        "From: Bob <bob@example.com>\r\n"
+        "To: Alice <alice@example.com>\r\n"
+        "Subject: Re: Q1 Budget Review Meeting\r\n"
+        "Date: Tue, 16 Mar 2026 08:00:00 -0500\r\n"
+        "Message-ID: <reply012@example.com>\r\n"
+        "In-Reply-To: <msg001@example.com>\r\n"
+        "References: <msg001@example.com>\r\n"
+        "MIME-Version: 1.0\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Thursday at 2pm works for me. I'll prepare the Q2 projections.\r\n"
+        "\r\n"
+        "On Mon, 15 Mar 2026 at 09:30, Alice Smith <alice@example.com> wrote:\r\n"
+        "> Hi Bob,\r\n"
+        ">\r\n"
+        "> I wanted to follow up on our Q1 budget review. The key points are:\r\n"
+        ">\r\n"
+        "> 1. Revenue exceeded projections by 12%\r\n"
+        "> 2. Marketing spend was under budget by $15,000\r\n"
+        "> 3. Engineering headcount increased by 3 FTEs\r\n"
+        ">\r\n"
+        "> Can we schedule a meeting for Thursday at 2pm to discuss next steps?\r\n"
+        ">\r\n"
+        "> Best regards,\r\n"
+        "> Alice\r\n"
+    )
+    (OUTPUT_DIR / "challenge_quoted_reply.eml").write_text(eml, newline="")
+    print("  Created challenge_quoted_reply.eml")
+
+
 if __name__ == "__main__":
     print("Generating email challenge files...")
     create_challenge_basic_eml()
@@ -343,4 +576,8 @@ if __name__ == "__main__":
     create_challenge_qp_body_eml()
     create_challenge_encoded_headers_eml()
     create_challenge_mbox()
-    print(f"\nGenerated 8 challenge files in {OUTPUT_DIR}/")
+    create_challenge_attachment_chain_eml()
+    create_challenge_email_in_email_eml()
+    create_challenge_threaded_mbox()
+    create_challenge_quoted_reply_eml()
+    print(f"\nGenerated 12 challenge files in {OUTPUT_DIR}/")
