@@ -90,6 +90,16 @@ jobs:
           fi
           echo "Version $TAG_VERSION confirmed"
 
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          BENCH_VERSION=$(grep '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$BENCH_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml version ($BENCH_VERSION)"
+            exit 1
+          fi
+          echo "Benchmark version $TAG_VERSION confirmed"
+
       - name: Dry run (show what will be published)
         env:
           AILANG_REGISTRY_API_KEY: ${{ secrets.AILANG_REGISTRY_API_KEY }}
