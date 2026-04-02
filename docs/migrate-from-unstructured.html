@@ -22,10 +22,10 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Change the URL in your API call from the Unstructured endpoint to the AILANG Parse endpoint. AILANG Parse implements the same /general/v0/general route with the same multipart file upload format, so existing client code works with a one-line URL change. For Office documents (DOCX, PPTX, XLSX), you get 96.6% structural fidelity compared to Unstructured's 63.4%."}},
+    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Change the URL from the Unstructured endpoint to AILANG Parse. Same /general/v0/general route, same upload format, one-line change."}},
     {"@type": "Question", "name": "Is AILANG Parse a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office document parsing, yes. AILANG Parse implements the same /general/v0/general endpoint format that Unstructured uses, so you can switch by changing the URL. The response format is compatible. For PDFs and scanned documents, keep using Unstructured — its ML pipeline is purpose-built for those formats."}},
     {"@type": "Question", "name": "Can I use both Unstructured and AILANG Parse together?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and this is the recommended pattern. Route Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB) through AILANG Parse for deterministic structural parsing, and route PDFs and scanned images through Unstructured where its ML pipeline excels. A simple file-extension check in your routing layer is all you need."}},
-    {"@type": "Question", "name": "What Office formats does AILANG Parse support that Unstructured doesn't parse well?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse deterministically parses DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB with full structural fidelity. It preserves track changes, merged cells, comments with author attribution, headers and footers, text boxes, footnotes, and endnotes — all features that Unstructured loses because it converts Office files to PDF before parsing."}}
+    {"@type": "Question", "name": "What Office formats does AILANG Parse support that Unstructured doesn't parse well?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB — with full structural fidelity including track changes, merged cells, and comments."}}
   ]
 }
 </script>
@@ -59,17 +59,13 @@
     <main class="dp-docs-content">
 
       <h2 id="why-migrate">Why Migrate</h2>
-      <p>Unstructured is a capable document processing platform, but its Office parsing has a fundamental architectural limitation: it <strong>converts Office documents to PDF first</strong>, then applies its ML extraction pipeline to the rendered output. This intermediate conversion destroys structural information that exists in the source XML.</p>
+      <p>Unstructured converts Office documents to PDF before parsing, destroying structural data &mdash; track changes, merged cells, comments, headers, footers, text boxes &mdash; that exists in the source XML. AILANG Parse reads the XML directly. Deterministic, structural, fast.</p>
 
-      <p>Track changes, merged cells, comments with author attribution, headers and footers, text boxes, footnotes &mdash; all of this is present in the OOXML and ODF source formats, but lost once the document is flattened to a rendered PDF page.</p>
-
-      <p>AILANG Parse reads the source XML directly. No intermediate conversion, no rendering step, no ML inference. The result is deterministic, structural, and fast.</p>
-
-      <p>On the OfficeDocBench structural benchmark, AILANG Parse scores <strong>96.6%</strong> (eval-driven) compared to Unstructured's <strong>63.4%</strong> across DOCX, PPTX, and XLSX test files. These benchmarks are the eval targets the AI development loop optimizes against &mdash; <a href="benchmarks.html#eval-driven" style="color:var(--dp-blue)">high scores are a design outcome</a>, not cherry-picking.</p>
+      <p>On the <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> structural benchmark, AILANG Parse scores <strong>96.6%</strong> compared to Unstructured's <strong>63.4%</strong> across DOCX, PPTX, and XLSX test files.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>This is not a replacement &mdash; it's an upgrade for the Office portion of your pipeline. Keep Unstructured for PDFs and scanned documents where its ML pipeline excels.</div>
+        <div>Keep Unstructured for PDFs and scanned documents. Use AILANG Parse for Office formats.</div>
       </div>
 
       <h2 id="one-line-change">One-Line Change</h2>
@@ -180,7 +176,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I migrate from Unstructured to AILANG Parse?</summary>
-          <div class="dp-faq-answer"><p>Change the URL in your API call from the Unstructured endpoint to the AILANG Parse endpoint. AILANG Parse implements the same <code>/general/v0/general</code> route with the same multipart file upload format, so existing client code works with a one-line URL change. For Office documents (DOCX, PPTX, XLSX), you get 96.6% structural fidelity compared to Unstructured's 63.4%.</p></div>
+          <div class="dp-faq-answer"><p>Change the URL from the Unstructured endpoint to AILANG Parse. Same <code>/general/v0/general</code> route, same upload format, one-line change.</p></div>
         </details>
         <details>
           <summary>Is AILANG Parse a drop-in replacement for Unstructured?</summary>
@@ -192,7 +188,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
         </details>
         <details>
           <summary>What Office formats does AILANG Parse support that Unstructured doesn't parse well?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse deterministically parses DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB with full structural fidelity. It preserves track changes, merged cells, comments with author attribution, headers and footers, text boxes, footnotes, and endnotes &mdash; all features that Unstructured loses because it converts Office files to PDF before parsing.</p></div>
+          <div class="dp-faq-answer"><p>DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB &mdash; with full structural fidelity including track changes, merged cells, and comments.</p></div>
         </details>
       </div>
 

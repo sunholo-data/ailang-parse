@@ -51,7 +51,7 @@
     {"@type": "Question", "name": "How do I parse DOCX tables and preserve merged cells?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the w:gridSpan (horizontal merge) and w:vMerge (vertical merge) attributes directly from DOCX XML. The output uses standard colspan and rowspan semantics, so the table structure is structurally correct — not guessed from visual layout like PDF-first parsers."}},
     {"@type": "Question", "name": "Why do most document parsers break table structures from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "Most parsers convert DOCX to PDF first, which renders tables as positioned text blocks. ML models then try to reconstruct the table grid from visual coordinates, but merged cells, nested tables, and cells with multiple paragraphs create ambiguity that heuristics cannot resolve. AILANG Parse bypasses this entirely by reading the table XML directly."}},
     {"@type": "Question", "name": "How does AILANG Parse handle complex tables with nested content?", "acceptedAnswer": {"@type": "Answer", "text": "Each table cell in AILANG Parse's Block ADT can contain any block type — paragraphs, lists, nested tables, or even images. The parser reads the cell's XML subtree recursively, preserving the full content hierarchy. No flattening, no one-paragraph-per-cell limitation."}},
-    {"@type": "Question", "name": "How does AILANG Parse compare to Docling for DOCX table extraction?", "acceptedAnswer": {"@type": "Answer", "text": "On the OfficeDocBench benchmark, AILANG Parse scores 96.6% overall versus Docling's 63.4%. AILANG Parse uses OfficeDocBench as its eval target — the AI development loop optimizes against these tests — so high scores are a design outcome of the eval-first methodology. The gap is largest on tables with merged cells: Docling converts DOCX to PDF and then uses its Heron model for table detection, which cannot recover the merge attributes lost in conversion. AILANG Parse reads those attributes directly from the XML."}}
+    {"@type": "Question", "name": "How does AILANG Parse compare to other parsers for DOCX table extraction?", "acceptedAnswer": {"@type": "Answer", "text": "On OfficeDocBench, AILANG Parse scores 96.6% versus 63.4% for PDF-first parsers. The gap is largest on merged cells: PDF conversion destroys merge attributes that AILANG Parse reads directly from the XML."}}
   ]
 }
 </script>
@@ -89,7 +89,7 @@
       <h2 id="problem">The Problem</h2>
       <p>Tables are the hardest part of document parsing. Cells contain nested content, columns vary in width, and headers span multiple rows. But the real challenge is <strong>merged cells</strong> &mdash; a single cell that spans two columns, three rows, or both. Get the merge wrong and the data shifts: a revenue figure lands under the wrong quarter, a compliance field maps to the wrong entity.</p>
 
-      <p>Most document parsers convert Office files to PDF first, then use spatial analysis to guess where table borders are. This works for simple grids but fails on complex merges. A cell spanning columns 2&ndash;4 looks like three separate cells in the rendered image. A vertically merged cell that extends across five rows has no visible border to detect.</p>
+      <p>PDF-first parsers guess where table borders are from rendered pixels, which fails on complex merges. A cell spanning columns 2&ndash;4 looks like three separate cells in the rendered image. A vertically merged cell that extends across five rows has no visible border to detect.</p>
 
       <p>AILANG Parse takes a different approach: it reads the merge attributes directly from the Office XML. No guessing, no spatial analysis, no image processing. The structure is already there &mdash; encoded in <code>gridSpan</code>, <code>vMerge</code>, and <code>mergeCells</code> elements. We just read it.</p>
 
@@ -291,8 +291,8 @@
           <div class="dp-faq-answer"><p>Each table cell in AILANG Parse's Block ADT can contain any block type &mdash; paragraphs, lists, nested tables, or even images. The parser reads the cell's XML subtree recursively, preserving the full content hierarchy. No flattening, no one-paragraph-per-cell limitation.</p></div>
         </details>
         <details>
-          <summary>How does AILANG Parse compare to Docling for DOCX table extraction?</summary>
-          <div class="dp-faq-answer"><p>On the <a href="benchmarks.html">OfficeDocBench benchmark</a>, AILANG Parse scores 96.6% overall versus Docling's 63.4%. AILANG Parse uses OfficeDocBench as its <a href="benchmarks.html#eval-driven">eval target</a> &mdash; the AI development loop optimizes against these tests &mdash; so high scores are a design outcome of the eval-first methodology. The gap is largest on tables with merged cells: Docling converts DOCX to PDF and then uses its Heron model for table detection, which cannot recover the merge attributes lost in conversion. AILANG Parse reads those attributes directly from the XML.</p></div>
+          <summary>How does AILANG Parse compare to other parsers for DOCX table extraction?</summary>
+          <div class="dp-faq-answer"><p>On <a href="benchmarks.html">OfficeDocBench</a>, AILANG Parse scores 96.6% versus 63.4% for PDF-first parsers. The gap is largest on merged cells: PDF conversion destroys merge attributes that AILANG Parse reads directly from the XML.</p></div>
         </details>
       </div>
 

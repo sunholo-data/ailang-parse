@@ -55,9 +55,9 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I extract comments with author names from a DOCX file?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the comments.xml part of the DOCX package and matches each comment to its anchor position in the document body using w:commentRangeStart/w:commentRangeEnd markers. The output includes the comment text, author name, date, and the exact text range it references."}},
-    {"@type": "Question", "name": "Do PDF-based document parsers preserve DOCX comments?", "acceptedAnswer": {"@type": "Answer", "text": "No. When a DOCX is converted to PDF, comments are either rendered as margin annotations (which ML parsers struggle to associate with the correct text) or dropped entirely. AILANG Parse reads comments from the dedicated XML part where they are stored with full metadata — author, date, and anchored position."}},
-    {"@type": "Question", "name": "Can I extract both comments and track changes from the same document?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts all metadata in a single pass: track changes, comments, headers/footers, footnotes/endnotes, and text formatting. Each element type appears as a distinct structured type in the Block ADT output, so you can filter or process them independently."}}
+    {"@type": "Question", "name": "How do I extract comments with author names from a DOCX file?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads comments.xml and matches each comment to its anchor using w:commentRangeStart/w:commentRangeEnd markers, outputting text, author, date, and anchored range."}},
+    {"@type": "Question", "name": "Do PDF-based document parsers preserve DOCX comments?", "acceptedAnswer": {"@type": "Answer", "text": "No. PDF conversion either renders comments as margin annotations or drops them entirely. AILANG Parse reads them from the XML with full metadata."}},
+    {"@type": "Question", "name": "Can I extract both comments and track changes from the same document?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts all metadata in a single pass. Each element type is a distinct block type you can filter independently."}}
   ]
 }
 </script>
@@ -94,16 +94,11 @@
 
       <h2 id="problem">The Problem</h2>
       <p>Comments are the collaboration layer of Office documents. They carry the context that matters most: who raised a concern, when they raised it, what specific text they were responding to, and the threaded conversation that followed.</p>
-      <p>Every major document processing pipeline starts the same way: convert to PDF, then extract. But PDF has no concept of comments. The conversion step silently erases the entire review history &mdash; the legal objections, the compliance flags, the editorial feedback, the approval chain. Gone.</p>
+      <p>PDF has no concept of comments. Converting to PDF silently erases the entire review history.</p>
 
-      <div class="dp-callout">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Comments are the collaboration layer of Office documents. When you convert to PDF, you erase the conversation &mdash; who raised the concern, when they raised it, and what specific text they were responding to.</div>
-      </div>
+      <p>Comments are stored in dedicated XML parts (<code>word/comments.xml</code>, <code>xl/comments1.xml</code>, <code>ppt/comments/comment1.xml</code>) with range markers linking them to the exact content they annotate. No PDF-based parser can access them because they never survive the conversion.</p>
 
-      <p>Comments exist only in the Office XML. They are stored in dedicated XML parts (<code>word/comments.xml</code>, <code>xl/comments1.xml</code>, <code>ppt/comments/comment1.xml</code>) with range markers linking them to the exact content they annotate. No PDF-based parser can access them because they never survive the conversion.</p>
-
-      <p>No other parser in the market extracts Office comments with full attribution. Unstructured, Docling, LlamaParse, and MarkItDown all drop comments entirely.</p>
+      <p>No other parser extracts Office comments with full attribution. See the comparison table below.</p>
 
       <table class="dp-config-table" style="margin-top:16px">
         <thead>
@@ -246,15 +241,15 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I extract comments with author names from a DOCX file?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse reads the <code>comments.xml</code> part of the DOCX package and matches each comment to its anchor position in the document body using <code>w:commentRangeStart</code>/<code>w:commentRangeEnd</code> markers. The output includes the comment text, author name, date, and the exact text range it references.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse reads <code>comments.xml</code> and matches each comment to its anchor using <code>w:commentRangeStart</code>/<code>w:commentRangeEnd</code> markers, outputting text, author, date, and anchored range.</p></div>
         </details>
         <details>
           <summary>Do PDF-based document parsers preserve DOCX comments?</summary>
-          <div class="dp-faq-answer"><p>No. When a DOCX is converted to PDF, comments are either rendered as margin annotations (which ML parsers struggle to associate with the correct text) or dropped entirely. AILANG Parse reads comments from the dedicated XML part where they are stored with full metadata &mdash; author, date, and anchored position. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
+          <div class="dp-faq-answer"><p>No. PDF conversion either renders comments as margin annotations or drops them entirely. AILANG Parse reads them from the XML with full metadata. See the <a href="vs-pdf-conversion.html">comparison page</a>.</p></div>
         </details>
         <details>
           <summary>Can I extract both comments and track changes from the same document?</summary>
-          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts all metadata in a single pass: <a href="track-changes.html">track changes</a>, comments, headers/footers, footnotes/endnotes, and text formatting. Each element type appears as a distinct structured type in the Block ADT output, so you can filter or process them independently.</p></div>
+          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts all metadata in a single pass. Each element type is a distinct block type you can filter independently.</p></div>
         </details>
       </div>
 

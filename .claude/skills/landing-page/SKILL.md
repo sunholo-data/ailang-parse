@@ -130,6 +130,24 @@ If the page needs a NEW code example, create the file in `docs/examples/` and re
 - [ ] Page-specific `<style>` block for any custom CSS (use design system variables)
 - [ ] Mobile responsive — test with 768px breakpoint
 
+### Copywriting Standards
+
+Follow these rules for all prose on landing pages:
+
+1. **Lead with the differentiator.** Cut throat-clearing paragraphs. Don't spend 2-3 paragraphs framing the problem before stating what AILANG Parse does differently. The reader found this page because they already have the problem.
+
+2. **Genericize competitor references.** Prefer "PDF-first parsers", "other tools", or "most document processing pipelines" over naming specific competitors. Competitor names should only appear in: (a) data comparison tables on `vs-pdf-conversion.html` and `benchmarks.html`, (b) `migrate-from-unstructured.html` (inherent), (c) `integrations.html` (integration-specific code), (d) enhance/integration grid cards showing how to use AILANG Parse *with* other tools.
+
+3. **Callouts must add new information.** Never create a callout that restates the preceding paragraph. If the callout says the same thing differently, delete one or the other.
+
+4. **FAQ answers: 1-2 sentences max.** FAQ answers should be scannable. Keep both the HTML `<details>` content and the JSON-LD schema answers concise and matching.
+
+5. **No hedge language.** Avoid "This is not a replacement — it's an upgrade" or "This is not an either/or decision." State the value directly. One diplomatic positioning statement per page maximum.
+
+6. **One instance of competitive positioning per page.** The full comparison lives on `vs-pdf-conversion.html`. Other pages get one sentence about the architectural difference, then link to the comparison page. Don't repeat the "Unstructured converts to PDF, Docling converts to PDF" pattern on every page.
+
+7. **Confident, technical tone.** Short declarative sentences. Use specific numbers (11ms, 96.6%, 53 test files) over vague claims. Don't over-explain — trust the reader to be technical.
+
 ### Content Patterns That Work
 
 Study these existing pages for inspiration:

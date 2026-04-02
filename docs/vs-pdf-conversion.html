@@ -188,9 +188,9 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "What exactly is lost when converting DOCX to PDF before parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Converting DOCX to PDF destroys five categories of data: (1) track changes and revision history, (2) merge attributes on table cells, (3) comments and annotations with author metadata, (4) semantic heading levels (PDF has no heading concept), and (5) document metadata like custom properties. AILANG Parse preserves all five by reading Office XML directly."}},
-    {"@type": "Question", "name": "Why does MarkItDown have quality problems with DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "MarkItDown wraps the mammoth library for DOCX-to-HTML conversion, which was designed for display rendering, not structural extraction. It does not parse track changes, flattens merged cells, drops comments, and loses heading hierarchy. On the OfficeDocBench benchmark, MarkItDown scores 73.3% versus AILANG Parse's 96.6%."}},
+    {"@type": "Question", "name": "Why do wrapper-based parsers have quality problems with DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Most wrapper-based parsers use libraries designed for display rendering, not structural extraction. They miss track changes, flatten merged cells, and drop comments. On OfficeDocBench, the best alternative scores 73.3% versus AILANG Parse's 96.6%."}},
     {"@type": "Question", "name": "Is PDF parsing always worse than direct DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "When the original source is a DOCX, direct XML parsing is strictly better — faster, more accurate, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends for PDFs."}},
-    {"@type": "Question", "name": "How much faster is direct DOCX parsing compared to PDF conversion pipelines?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse parses a typical DOCX in under 11ms with zero dependencies. A PDF conversion pipeline typically takes 2-10 seconds: LibreOffice conversion (1-5s) plus ML table detection and layout analysis (1-5s). That is a 200-1000x speed difference, and the PDF path still loses structural metadata."}}
+    {"@type": "Question", "name": "How much faster is direct DOCX parsing compared to PDF conversion pipelines?", "acceptedAnswer": {"@type": "Answer", "text": "Under 11ms with zero dependencies versus 2-10 seconds for PDF conversion pipelines. 200-1000x faster, and the PDF path still loses structural metadata."}}
   ]
 }
 </script>
@@ -213,7 +213,6 @@
       <nav>
         <a href="#roundtrip" class="active">The Round-Trip Problem</a>
         <a href="#comparison">Feature Comparison</a>
-        <a href="#llamaparse">LlamaParse Note</a>
         <a href="#alongside">Using Alongside Other Tools</a>
         <a href="#try">Try It</a>
         <a href="#faq">FAQ</a>
@@ -226,8 +225,6 @@
       <h2 id="roundtrip">The Round-Trip Problem</h2>
 
       <p>A DOCX file is a ZIP archive of XML. Track changes, comments, merged cells, headers, footers, speaker notes &mdash; they are all right there in the markup, addressable and typed. Converting to PDF flattens this into a bitmap of positioned glyphs. Then an ML model has to <em>guess</em> the structure back from pixel positions.</p>
-
-      <p>This is the pipeline most tools use:</p>
 
       <div class="dp-roundtrip">
         <div class="dp-roundtrip-path dp-roundtrip-path--bad">
@@ -278,7 +275,7 @@
         </div>
       </div>
 
-      <p>The left path introduces two lossy steps. The right path has none. This is not a marginal improvement &mdash; it is a categorically different approach.</p>
+      <p>Two lossy steps versus zero. A categorically different approach.</p>
 
 
       <h2 id="comparison">Feature-by-Feature Comparison</h2>
@@ -379,20 +376,6 @@
       <p>Every row with a <span class="dp-cross">&#10005;</span> represents data that existed in the source file and was thrown away during conversion. For legal, compliance, and audit workflows, this is not acceptable.</p>
 
 
-      <h2 id="llamaparse">A Note on LlamaParse</h2>
-
-      <div class="dp-callout dp-callout--warn">
-        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <div>
-          <strong>LlamaParse is not included in the table above</strong> because it is cloud-only &mdash; there is no local library to benchmark head-to-head on the same files.
-          <br><br>
-          Key facts (as of v0.6.94, tested March 2026): ~54 seconds per document via cloud API. Cloud-only, no self-hosting option. The older Python package (<code>llama-parse</code>) is being deprecated in May 2026. LlamaIndex recently open-sourced <a href="https://github.com/run-llama/liteparse" style="color:var(--dp-blue)">LiteParse</a> as a lightweight local alternative.
-          <br><br>
-          On OfficeDocBench, LlamaParse scored <span class="dp-score dp-score--low">53.6%</span> &mdash; lowest among all tools tested.
-        </div>
-      </div>
-
-
       <h2 id="alongside">Using Alongside Other Tools</h2>
 
       <p>PDFs need ML &mdash; there is no XML to read. But <strong>Office documents are not PDFs</strong>, and routing them through a PDF pipeline destroys information for no reason.</p>
@@ -402,10 +385,10 @@
       <div class="dp-enhancer-split">
         <div class="dp-enhancer-card dp-enhancer-card--before">
           <h4>Before: everything through one ML pipeline</h4>
-          <pre><code class="language-python"># Everything through Unstructured
+          <pre><code class="language-python"># Everything through a PDF-first pipeline
 from unstructured.partition.auto import partition
 
-# This converts DOCX to PDF internally,
+# Converts DOCX to PDF internally,
 # then runs ML on the PDF.
 # Track changes, comments, merged cells: gone.
 elements = partition(filename="report.docx")</code></pre>
@@ -424,7 +407,7 @@ else:
         </div>
       </div>
 
-      <p>This is not an either/or decision. You keep your PDF pipeline exactly as it is. You add AILANG Parse for the formats where deterministic parsing produces categorically better results.</p>
+      <p>Keep your PDF pipeline exactly as it is. Add AILANG Parse for the formats where deterministic parsing produces categorically better results.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -450,8 +433,8 @@ else:
           <div class="dp-faq-answer"><p>Converting DOCX to PDF destroys five categories of data: (1) <a href="track-changes.html">track changes</a> and revision history, (2) merge attributes on <a href="tables.html">table cells</a>, (3) <a href="comments.html">comments</a> and annotations with author metadata, (4) semantic heading levels (PDF has no heading concept), and (5) document metadata like custom properties. AILANG Parse preserves all five by reading Office XML directly.</p></div>
         </details>
         <details>
-          <summary>Why does MarkItDown have quality problems with DOCX parsing?</summary>
-          <div class="dp-faq-answer"><p>MarkItDown (by Microsoft) wraps the mammoth library for DOCX-to-HTML conversion, which was designed for display rendering, not structural extraction. It does not parse track changes, flattens merged cells, drops comments, and loses heading hierarchy. On the <a href="benchmarks.html">OfficeDocBench benchmark</a>, MarkItDown scores 73.3% versus AILANG Parse's 96.6%.</p></div>
+          <summary>Why do wrapper-based parsers have quality problems with DOCX parsing?</summary>
+          <div class="dp-faq-answer"><p>Most wrapper-based parsers use libraries designed for display rendering, not structural extraction. They miss track changes, flatten merged cells, and drop comments. On <a href="benchmarks.html">OfficeDocBench</a>, the best alternative scores 73.3% versus AILANG Parse's 96.6%.</p></div>
         </details>
         <details>
           <summary>Is PDF parsing always worse than direct DOCX parsing?</summary>
@@ -459,7 +442,7 @@ else:
         </details>
         <details>
           <summary>How much faster is direct DOCX parsing compared to PDF conversion pipelines?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse parses a typical DOCX in under 11ms with zero dependencies. A PDF conversion pipeline typically takes 2&ndash;10 seconds: LibreOffice conversion (1&ndash;5s) plus ML table detection and layout analysis (1&ndash;5s). That is a 200&ndash;1000x speed difference, and the PDF path still loses structural metadata.</p></div>
+          <div class="dp-faq-answer"><p>Under 11ms with zero dependencies versus 2&ndash;10 seconds for PDF conversion pipelines. 200&ndash;1000x faster, and the PDF path still loses structural metadata.</p></div>
         </details>
       </div>
 

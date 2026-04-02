@@ -25,7 +25,7 @@
   "mainEntity": [
     {"@type": "Question", "name": "How do I improve DOCX parsing in my Unstructured pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "Route Office formats through AILANG Parse while keeping Unstructured for PDFs. AILANG Parse implements a compatible API, so you can swap the endpoint for Office files with a one-line change. Your pipeline gets full structural fidelity for DOCX/PPTX/XLSX while keeping Unstructured's ML-powered PDF parsing for scanned documents."}},
     {"@type": "Question", "name": "Is AILANG Parse an alternative to Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats, yes — AILANG Parse provides dramatically higher structural fidelity (96.6% vs 63.4% on OfficeDocBench). For PDFs and scanned documents, Unstructured's ML pipeline is still excellent. The recommended architecture is to use both: AILANG Parse for Office formats, Unstructured for PDFs."}},
-    {"@type": "Question", "name": "Can I use AILANG Parse instead of LlamaParse for Office documents?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. LlamaParse treats Office formats the same as PDFs — uploading them to a cloud API. In our testing (v0.6.94, March 2026) this took approximately 54 seconds per document. AILANG Parse parses Office formats locally in under 11ms with full structural fidelity. For teams concerned about latency, cost, or data leaving their infrastructure, AILANG Parse is a lightweight alternative for the Office portion of the pipeline."}},
+    {"@type": "Question", "name": "Can I use AILANG Parse instead of cloud-based parsers for Office documents?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Cloud-based parsers upload Office files to an API (~54s per doc). AILANG Parse parses them locally in under 11ms. Use AILANG Parse for Office formats, cloud parsers for PDFs."}},
     {"@type": "Question", "name": "Does AILANG Parse work with LangChain and LlamaIndex?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The REST API and MCP server integrate with any LangChain or LlamaIndex pipeline. You can use AILANG Parse as a custom document loader or register it as a tool in your agent chain. The /api/v1/tools endpoint serves tool definitions in Claude, OpenAI, and MCP formats for automatic agent discovery."}}
   ]
 }
@@ -128,7 +128,7 @@ def parse_document(filepath: str) -> dict:
     else:
         raise ValueError(f"Unsupported format: {ext}")</code></pre>
 
-      <p>This gives you the best of both worlds: AILANG Parse preserves Office XML structure that Docling would lose (track changes, comments, merged cells), while Docling handles PDFs with its specialized layout model.</p>
+      <p>This gives you structural Office parsing from AILANG Parse and layout-aware PDF parsing from Docling.</p>
 
       <h2 id="llamaparse">With LlamaParse</h2>
 
@@ -168,7 +168,7 @@ def parse_document(filepath: str) -> dict:
     else:
         raise ValueError(f"Unsupported format: {ext}")</code></pre>
 
-      <p>For teams already using LlamaIndex, this routing pattern keeps your existing PDF pipeline intact while adding structural Office parsing at zero marginal cost.</p>
+      <p>This routing pattern keeps your existing PDF pipeline intact while adding structural Office parsing at zero marginal cost.</p>
 
       <h2 id="claude-code">Claude Code Skill</h2>
 
@@ -244,7 +244,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
         </details>
         <details>
           <summary>Can I use AILANG Parse instead of LlamaParse for Office documents?</summary>
-          <div class="dp-faq-answer"><p>Yes. LlamaParse treats Office formats the same as PDFs &mdash; uploading them to a cloud API. In our testing (v0.6.94, March 2026) this took approximately 54 seconds per document. AILANG Parse parses Office formats locally in under 11ms with full structural fidelity. For teams concerned about latency, cost, or data leaving their infrastructure, AILANG Parse is a lightweight alternative for the Office portion of the pipeline.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Cloud-based parsers upload Office files to an API (~54s per doc). AILANG Parse parses them locally in under 11ms. Use AILANG Parse for Office formats, cloud parsers for PDFs.</p></div>
         </details>
         <details>
           <summary>Does AILANG Parse work with LangChain and LlamaIndex?</summary>

@@ -33,10 +33,10 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I extract track changes from a DOCX file programmatically?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the w:ins, w:del, and w:moveTo/w:moveFrom revision markup directly from the DOCX XML. Each revision includes the author name, ISO 8601 timestamp, and change type. A single API call or CLI command returns all tracked changes as structured data."}},
-    {"@type": "Question", "name": "Do other document parsers preserve track changes from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "No. Unstructured, Docling, LlamaParse, and MarkItDown all either convert DOCX to PDF first (which strips revision markup entirely) or use wrapper libraries like mammoth that ignore revision elements. AILANG Parse is the only parser that extracts track changes with full author attribution and timestamps."}},
-    {"@type": "Question", "name": "Can I get track change author and date information from a DOCX?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts the w:author and w:date attributes from every revision element in the DOCX XML. The output includes the author name as a string and the timestamp in ISO 8601 format, so you can filter by reviewer, sort by date, or build audit trails programmatically."}},
-    {"@type": "Question", "name": "What does deterministic document parsing mean?", "acceptedAnswer": {"@type": "Answer", "text": "Deterministic parsing means the same input always produces the exact same output, with no model inference variability. AILANG Parse reads Office XML using rule-based extraction verified by 63 Z3 formal contracts — no ML models, no probabilistic guessing. This makes it suitable for compliance workflows, regression testing, and reproducible data pipelines."}}
+    {"@type": "Question", "name": "How do I extract track changes from a DOCX file programmatically?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads w:ins, w:del, and w:moveTo/w:moveFrom revision markup directly from the DOCX XML, returning each revision with author, timestamp, and change type."}},
+    {"@type": "Question", "name": "Do other document parsers preserve track changes from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "No. All major parsers either convert to PDF (stripping revisions) or use libraries that ignore revision elements."}},
+    {"@type": "Question", "name": "Can I get track change author and date information from a DOCX?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts w:author and w:date from every revision element, with ISO 8601 timestamps for filtering, sorting, or audit trails."}},
+    {"@type": "Question", "name": "What does deterministic document parsing mean?", "acceptedAnswer": {"@type": "Answer", "text": "Same input always produces the same output. AILANG Parse uses rule-based extraction verified by Z3 formal contracts — no ML models, no variability."}}
   ]
 }
 </script>
@@ -72,17 +72,13 @@
 
       <h2 id="the-problem">The Problem</h2>
 
-      <p>Track changes are the negotiation history of a document. In legal contract review, every insertion and deletion carries meaning: who changed what, when, and why. In compliance workflows, the revision trail is the audit trail. In collaborative editing, track changes are the source of truth for what happened between drafts.</p>
+      <p>Track changes are the negotiation history of a document. In legal contract review, every insertion and deletion carries meaning: who changed what, when, and why.</p>
 
       <p>Yet every document parser on the market throws them away.</p>
 
-      <p>The moment you convert a DOCX to PDF &mdash; whether for parsing, archiving, or sharing &mdash; track changes vanish. The PDF renderer must choose: show the accepted version or the rejected version. Either way, the revision history is gone. The author attributions are gone. The timestamps are gone. The distinction between an insertion and a deletion is gone.</p>
-
-      <p>For legal teams, this is not a minor inconvenience. A contract with 47 tracked changes from three authors contains critical information about the negotiation process: which party proposed which clause, when counterproposals were made, and which terms survived. Flattening that into a single accepted view destroys evidence that may be required for dispute resolution, regulatory compliance, or internal audit.</p>
-
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Track changes are critical for legal document review, contract negotiation, and audit trails.</strong> Losing them is not a quality tradeoff &mdash; it is data destruction. Any document processing pipeline that handles contracts, policies, or regulated documents must preserve revision markup or risk losing legally significant information.</div>
+        <div>Track changes in contracts are legally significant data. Losing them is data destruction, not a quality tradeoff.</div>
       </div>
 
       <h2 id="how-it-works">How It Works</h2>
@@ -219,12 +215,7 @@
         </tbody>
       </table>
 
-      <p>The reason is architectural. PDF-first parsers lose track changes in the rendering step, and text extraction libraries (python-docx, pandoc) do not handle revision markup. AILANG Parse reads the OOXML revision elements directly.</p>
-
-      <div class="dp-callout">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>This is a structural advantage, not an incremental one.</strong> Track changes cannot be recovered from a PDF or a plain-text extraction. If your pipeline handles contracts, regulatory filings, or any document where revision history matters, the data is either preserved at parse time or it is gone.</div>
-      </div>
+      <p>The reason is architectural. PDF-first parsers lose track changes in the rendering step, and text extraction libraries do not handle revision markup. AILANG Parse reads the OOXML revision elements directly.</p>
 
       <h2 id="try-it">Try It</h2>
 
@@ -245,19 +236,19 @@
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I extract track changes from a DOCX file programmatically?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse reads the <code>w:ins</code>, <code>w:del</code>, and <code>w:moveTo</code>/<code>w:moveFrom</code> revision markup directly from the DOCX XML. Each revision includes the author name, ISO 8601 timestamp, and change type (insertion, deletion, move, format change). A single <a href="api.html">API call</a> or CLI command returns all tracked changes as structured data.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse reads <code>w:ins</code>, <code>w:del</code>, and <code>w:moveTo</code>/<code>w:moveFrom</code> revision markup directly from the DOCX XML, returning each revision with author, timestamp, and change type.</p></div>
         </details>
         <details>
           <summary>Do other document parsers preserve track changes from DOCX files?</summary>
-          <div class="dp-faq-answer"><p>No. Unstructured, Docling, LlamaParse, and MarkItDown all either convert DOCX to PDF first (which strips revision markup entirely) or use wrapper libraries like mammoth that ignore revision elements. AILANG Parse is the only parser that extracts track changes with full author attribution and timestamps. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
+          <div class="dp-faq-answer"><p>No. All major parsers either convert to PDF (stripping revisions) or use libraries that ignore revision elements. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
         </details>
         <details>
           <summary>Can I get track change author and date information from a DOCX?</summary>
-          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts the <code>w:author</code> and <code>w:date</code> attributes from every revision element in the DOCX XML. The output includes the author name as a string and the timestamp in ISO 8601 format, so you can filter by reviewer, sort by date, or build audit trails programmatically.</p></div>
+          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts <code>w:author</code> and <code>w:date</code> from every revision element, with ISO 8601 timestamps for filtering, sorting, or audit trails.</p></div>
         </details>
         <details>
           <summary>What does deterministic document parsing mean?</summary>
-          <div class="dp-faq-answer"><p>Deterministic parsing means the same input always produces the exact same output, with no model inference variability. AILANG Parse reads Office XML using rule-based extraction verified by 63 Z3 formal contracts &mdash; no ML models, no probabilistic guessing. This makes it suitable for compliance workflows, regression testing, and reproducible data pipelines.</p></div>
+          <div class="dp-faq-answer"><p>Same input always produces the same output. AILANG Parse uses rule-based extraction verified by Z3 formal contracts &mdash; no ML models, no variability.</p></div>
         </details>
       </div>
 
