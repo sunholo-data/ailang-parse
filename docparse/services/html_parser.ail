@@ -46,13 +46,50 @@ export pure func parseHtml(content: string) -> [Block]
 -- ============================================================
 
 -- Sanitize HTML so it can be parsed by a strict XML parser.
--- Handles: void elements, HTML entities, DOCTYPE, CDATA-like content.
+-- Handles: void elements, HTML entities, DOCTYPE, style blocks, zero-width chars.
 pure func htmlSanitize(content: string) -> string
   ensures { length(result) >= 0 }
 {
   let noDoctype = htmlStripDoctype(content);
-  let entitiesFixed = htmlReplaceEntities(noDoctype);
+  let noStyles = htmlStripStyleBlocks(noDoctype);
+  let noZeroWidth = htmlStripZeroWidthChars(noStyles);
+  let entitiesFixed = htmlReplaceEntities(noZeroWidth);
   htmlCloseVoidElements(entitiesFixed)
+}
+
+-- Strip <style>...</style> blocks (CSS content often breaks XML parsing)
+-- Uses split on "<style" then finds matching </style> to remove each block
+pure func htmlStripStyleBlocks(content: string) -> string
+  ensures { length(result) <= length(content) }
+{
+  let lower = toLower(content);
+  let stylePos = find(lower, "<style");
+  if stylePos < 0 then content
+  else {
+    let before = substring(content, 0, stylePos);
+    let afterStyle = substring(content, stylePos, length(content));
+    let lowerAfter = toLower(afterStyle);
+    let closePos = find(lowerAfter, "</style>");
+    if closePos < 0 then content
+    else {
+      let rest = substring(afterStyle, closePos + 8, length(afterStyle));
+      htmlStripStyleBlocks(before ++ rest)
+    }
+  }
+}
+
+-- Strip zero-width Unicode characters that waste tokens in AI pipelines.
+-- Common in HTML email preheaders: ZWSP, ZWNJ, ZWJ, LRM, RLM, BOM.
+pure func htmlStripZeroWidthChars(content: string) -> string {
+  replaceMany(content, [
+    (bytesToStr(fromInts([226, 128, 139])), ""),
+    (bytesToStr(fromInts([226, 128, 140])), ""),
+    (bytesToStr(fromInts([226, 128, 141])), ""),
+    (bytesToStr(fromInts([226, 128, 142])), ""),
+    (bytesToStr(fromInts([226, 128, 143])), ""),
+    (bytesToStr(fromInts([239, 187, 191])), ""),
+    (bytesToStr(fromInts([194, 173])), "")
+  ])
 }
 
 -- Strip <!DOCTYPE ...> declarations
