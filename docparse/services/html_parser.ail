@@ -321,11 +321,39 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     else []
 }
 
--- Extract all text from a node and its children (deep text)
--- getText() in AILANG's std/xml returns the full recursive text of a node,
--- so we just use it directly — no need to walk children manually.
-pure func htmlDeepText(node: XmlNode) -> string =
-  getText(node)
+-- Extract all text from a node and its children (deep text).
+-- Inserts newlines around block-level child elements so that
+-- "SummaryMaria reported..." becomes "Summary\nMaria reported...".
+-- For leaf nodes (no children), falls back to getText().
+pure func htmlDeepText(node: XmlNode) -> string {
+  let children = getChildren(node);
+  if listLength(children) == 0 then getText(node)
+  else {
+    let texts = map(htmlChildTextWithSpacing, children);
+    join("", texts)
+  }
+}
+
+-- Render a child node's text, adding newline boundaries around block-level tags.
+-- Text nodes (tag == "") pass through as-is to preserve inline spacing.
+pure func htmlChildTextWithSpacing(node: XmlNode) -> string {
+  let tag = getTag(node);
+  let text = htmlDeepText(node);
+  if length(trim(text)) == 0 then ""
+  else if tag == "br" then "\n"
+  else if htmlIsBlockTag(tag) then "\n" ++ text ++ "\n"
+  else text
+}
+
+-- Is a tag a block-level HTML element that should have whitespace around it?
+pure func htmlIsBlockTag(tag: string) -> bool =
+  tag == "div" || tag == "p" || tag == "h1" || tag == "h2" || tag == "h3" ||
+  tag == "h4" || tag == "h5" || tag == "h6" || tag == "table" || tag == "tr" ||
+  tag == "td" || tag == "th" || tag == "ul" || tag == "ol" || tag == "li" ||
+  tag == "blockquote" || tag == "pre" || tag == "section" || tag == "article" ||
+  tag == "header" || tag == "footer" || tag == "nav" || tag == "aside" ||
+  tag == "figure" || tag == "figcaption" || tag == "dl" || tag == "dt" ||
+  tag == "dd" || tag == "hr"
 
 -- Parse an HTML <table> into a TableBlock
 -- Handles <thead>/<tbody> structure or flat <tr> rows
