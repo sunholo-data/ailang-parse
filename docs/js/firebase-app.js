@@ -52,6 +52,9 @@
     }
   };
 
+  // Only @sunholo.com users can access non-prod environments
+  var ENV_ALLOWED_DOMAINS = ['sunholo.com'];
+
   var envCfg = ENV_CONFIG[env] || ENV_CONFIG.dev;
   var firebaseConfig = envCfg.firebase;
   var API_BASE = envCfg.apiBase;
@@ -136,6 +139,17 @@
     var headerUserEmail = document.getElementById('header-user-email');
 
     if (user) {
+      // Non-prod env: verify user's email domain is allowed
+      if (env !== 'prod' && envParam) {
+        var emailDomain = (user.email || '').split('@')[1];
+        if (ENV_ALLOWED_DOMAINS.indexOf(emailDomain) === -1) {
+          console.warn('Unauthorized for ' + env + ' environment — redirecting to prod');
+          auth.signOut();
+          window.location.search = '';
+          return;
+        }
+      }
+
       // Signed in — hide any FirebaseUI containers
       if (dashPlaceholder) dashPlaceholder.style.display = 'none';
       if (dashActive) {
