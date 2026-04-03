@@ -66,12 +66,14 @@ usage() {
   cat <<'EOF'
 AILANG Parse — Universal Document Parsing
 
-Usage: docparse <file> [options]
+Usage: docparse <file|folder> [file2 ...] [options]
        docparse --check
        docparse --test
 
 Examples:
   docparse report.docx                  Parse Office document
+  docparse *.eml                        Batch parse (compile once)
+  docparse ~/inbox/                     Parse all files in folder
   docparse slides.pptx --describe       With AI image descriptions
   docparse report.docx --summarize      With AI summary
   docparse scan.pdf                     PDF (auto-enables AI)
@@ -216,7 +218,7 @@ do_prove() {
 
 # --- Parse arguments ---
 
-FILE=""
+FILES=()
 DESCRIBE=false
 SUMMARIZE=false
 AI_MODEL="$DEFAULT_AI_MODEL"
@@ -280,42 +282,70 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     *)
-      if [ -z "$FILE" ]; then
-        FILE="$1"
-      else
-        EXTRA_FLAGS+=("$1")
-      fi
+      FILES+=("$1")
       shift
       ;;
   esac
 done
 
-if [ -z "$FILE" ]; then
+if [ ${#FILES[@]} -eq 0 ]; then
   usage
   exit 1
 fi
 
-# Resolve file path
-if [[ ! "$FILE" = /* ]]; then
-  FILE="$(pwd)/$FILE"
-fi
+# Resolve file paths to absolute (files and directories)
+RESOLVED_FILES=()
+for f in "${FILES[@]}"; do
+  if [[ ! "$f" = /* ]]; then
+    f="$(pwd)/$f"
+  fi
+  if [ ! -f "$f" ] && [ ! -d "$f" ]; then
+    echo "Error: File or folder not found: $f"
+    exit 1
+  fi
+  RESOLVED_FILES+=("$f")
+done
 
-if [ ! -f "$FILE" ]; then
-  echo "Error: File not found: $FILE"
+# --- Expand folders into file lists ---
+# Supported extensions for folder scanning
+SUPPORTED_EXTS_PATTERN='.*\.\(docx\|pptx\|xlsx\|odt\|odp\|ods\|html\|htm\|md\|csv\|epub\|eml\|mbox\|pdf\|png\|jpg\|jpeg\|gif\|bmp\|webp\|tiff\|tif\|mp3\|wav\|ogg\|flac\|mp4\|mov\|avi\|mkv\)$'
+
+expand_folder() {
+  local dir="$1"
+  find "$dir" -maxdepth 1 -type f | grep -i "${SUPPORTED_EXTS_PATTERN}" | sort
+}
+
+# Expand any directories in RESOLVED_FILES
+EXPANDED_FILES=()
+for f in "${RESOLVED_FILES[@]}"; do
+  if [ -d "$f" ]; then
+    while IFS= read -r entry; do
+      [ -n "$entry" ] && EXPANDED_FILES+=("$entry")
+    done < <(expand_folder "$f")
+  else
+    EXPANDED_FILES+=("$f")
+  fi
+done
+
+if [ ${#EXPANDED_FILES[@]} -eq 0 ]; then
+  echo "Error: No supported files found."
   exit 1
 fi
 
-# --- Detect if AI is needed ---
+RESOLVED_FILES=("${EXPANDED_FILES[@]}")
 
-EXT="${FILE##*.}"
-EXT_LOWER="$(echo "$EXT" | tr '[:upper:]' '[:lower:]')"
+# --- Detect if AI is needed (check all files) ---
 
 NEEDS_AI=false
-case "$EXT_LOWER" in
-  pdf|png|jpg|jpeg|gif|bmp|webp|tiff|tif|mp3|wav|ogg|flac|mp4|mov|avi|mkv)
-    NEEDS_AI=true
-    ;;
-esac
+for f in "${RESOLVED_FILES[@]}"; do
+  EXT="${f##*.}"
+  EXT_LOWER="$(echo "$EXT" | tr '[:upper:]' '[:lower:]')"
+  case "$EXT_LOWER" in
+    pdf|png|jpg|jpeg|gif|bmp|webp|tiff|tif|mp3|wav|ogg|flac|mp4|mov|avi|mkv)
+      NEEDS_AI=true
+      ;;
+  esac
+done
 
 USE_AI=false
 if $NEEDS_AI || $DESCRIBE || $SUMMARIZE; then
@@ -329,7 +359,16 @@ if $USE_AI; then
   CAPS="IO,FS,Env,AI"
 fi
 
-CMD=(ailang run --entry main --caps "$CAPS" --max-recursion-depth 50000)
+USE_BATCH=false
+if [ ${#RESOLVED_FILES[@]} -gt 1 ]; then
+  USE_BATCH=true
+fi
+
+CMD=(ailang run)
+if $USE_BATCH; then
+  CMD+=(--batch)
+fi
+CMD+=(--entry main --caps "$CAPS" --max-recursion-depth 50000)
 
 if $USE_AI; then
   CMD+=(--ai "$AI_MODEL")
@@ -344,7 +383,7 @@ if $BUDGET; then
 fi
 
 CMD+=("${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}")
-CMD+=("$MAIN_AIL" "$FILE")
+CMD+=("$MAIN_AIL")
 
 # Pass flags to AILANG main
 AILANG_ARGS=()
@@ -354,7 +393,6 @@ fi
 if $SUMMARIZE; then
   AILANG_ARGS+=(summarize)
 fi
-CMD+=("${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
 
 # --- Resolve output dir to absolute path before cd ---
 
@@ -370,26 +408,59 @@ cd "$PROJECT_DIR"
 
 OUTPUT_BASE="docparse/data"
 
-if [ -n "$OUTPUT_DIR" ]; then
-  # Run (not exec) so we can copy output files afterwards
-  if $USE_AI; then
-    env GOOGLE_API_KEY="" "${CMD[@]}"
-  else
-    "${CMD[@]}"
-  fi
-  # Copy output files to the requested directory
-  local input_basename
-  input_basename="$(basename "$FILE")"
-  mkdir -p "$OUTPUT_DIR"
-  for f in "$OUTPUT_BASE/${input_basename}.json" "$OUTPUT_BASE/${input_basename}.md" "$OUTPUT_BASE/${input_basename}_summary.txt"; do
-    [ -f "$f" ] && cp "$f" "$OUTPUT_DIR/"
-  done
+if $USE_BATCH; then
+  echo "Batch mode: parsing ${#RESOLVED_FILES[@]} files (compile once)..."
   echo ""
-  echo "Output copied to $OUTPUT_DIR/"
-else
+  START=$(date +%s)
+  # Batch: pass all files after the main.ail entry
+  FULL_CMD=("${CMD[@]}")
+  for f in "${RESOLVED_FILES[@]}"; do
+    FULL_CMD+=("$f" "${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
+  done
   if $USE_AI; then
-    exec env GOOGLE_API_KEY="" "${CMD[@]}"
+    env GOOGLE_API_KEY="" "${FULL_CMD[@]}"
   else
-    exec "${CMD[@]}"
+    "${FULL_CMD[@]}"
+  fi
+  END=$(date +%s)
+  ELAPSED=$((END - START))
+  echo ""
+  echo "Batch complete: ${#RESOLVED_FILES[@]} files in ${ELAPSED}s"
+
+  # Copy output files if --output-dir
+  if [ -n "$OUTPUT_DIR" ]; then
+    mkdir -p "$OUTPUT_DIR"
+    for f in "${RESOLVED_FILES[@]}"; do
+      input_basename="$(basename "$f")"
+      for out in "$OUTPUT_BASE/${input_basename}.json" "$OUTPUT_BASE/${input_basename}.md" "$OUTPUT_BASE/${input_basename}_summary.txt"; do
+        [ -f "$out" ] && cp "$out" "$OUTPUT_DIR/"
+      done
+    done
+    echo "Output copied to $OUTPUT_DIR/"
+  fi
+else
+  # Single file
+  FILE="${RESOLVED_FILES[0]}"
+  CMD+=("$FILE" "${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
+
+  if [ -n "$OUTPUT_DIR" ]; then
+    if $USE_AI; then
+      env GOOGLE_API_KEY="" "${CMD[@]}"
+    else
+      "${CMD[@]}"
+    fi
+    input_basename="$(basename "$FILE")"
+    mkdir -p "$OUTPUT_DIR"
+    for f in "$OUTPUT_BASE/${input_basename}.json" "$OUTPUT_BASE/${input_basename}.md" "$OUTPUT_BASE/${input_basename}_summary.txt"; do
+      [ -f "$f" ] && cp "$f" "$OUTPUT_DIR/"
+    done
+    echo ""
+    echo "Output copied to $OUTPUT_DIR/"
+  else
+    if $USE_AI; then
+      exec env GOOGLE_API_KEY="" "${CMD[@]}"
+    else
+      exec "${CMD[@]}"
+    fi
   fi
 fi

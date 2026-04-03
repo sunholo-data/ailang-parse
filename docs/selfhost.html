@@ -230,7 +230,7 @@ ailang run --entry main --caps IO,FS,Env \
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Want the convenience wrapper?</strong> Clone the repo for the <code>./bin/docparse</code> shortcut, test files, and benchmarks:
+        <div><strong>Want the convenience wrapper?</strong> Clone the repo for the <code>docparse</code> CLI (<code>./bin/docparse</code> on macOS/Linux, <code>bin\docparse.cmd</code> on Windows), test files, and benchmarks:
           <pre style="margin:8px 0 0"><code class="language-bash">git clone https://github.com/sunholo-data/ailang-parse.git
 cd ailang-parse
 ./bin/docparse data/test_files/sample.docx</code></pre>
@@ -260,10 +260,12 @@ ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
       <h3>Step 1: Install the AILANG CLI</h3>
       <p>AILANG is a single binary with no dependencies. Install it for your platform:</p>
       <pre><code class="language-bash"># macOS / Linux
-curl -fsSL https://ailang.sunholo.com/install.sh | bash
+curl -fsSL https://ailang.sunholo.com/install.sh | bash</code></pre>
 
-# Or download directly from GitHub releases
-# https://github.com/sunholo-data/ailang/releases</code></pre>
+      <pre><code class="language-powershell"># Windows (PowerShell)
+irm https://ailang.sunholo.com/install.ps1 | iex</code></pre>
+
+      <p>Or download directly from <a href="https://github.com/sunholo-data/ailang/releases" style="color:var(--dp-blue)">GitHub releases</a> for any platform.</p>
 
       <p>Verify the installation:</p>
       <pre><code class="language-bash">ailang --version
@@ -276,14 +278,32 @@ curl -fsSL https://ailang.sunholo.com/install.sh | bash
 
       <h3>Optional: Clone the Source</h3>
       <p>For development, testing, and benchmarks, clone the repository:</p>
-      <pre><code class="language-bash">git clone https://github.com/sunholo-data/ailang-parse.git
+      <pre><code class="language-bash"># macOS / Linux
+git clone https://github.com/sunholo-data/ailang-parse.git
 cd ailang-parse
+./bin/docparse data/test_files/sample.docx
 
 # Type-check all modules
-./bin/docparse --check
+./bin/docparse --check</code></pre>
 
-# Run inline tests
-./bin/docparse --test</code></pre>
+      <pre><code class="language-powershell"># Windows
+git clone https://github.com/sunholo-data/ailang-parse.git
+cd ailang-parse
+bin\docparse.cmd data\test_files\sample.docx
+
+# Type-check all modules
+bin\docparse.cmd --check</code></pre>
+
+      <h3>Batch Mode &amp; Folder Parsing</h3>
+      <p>Parse multiple files in one command. The CLI compiles once and runs all inputs &mdash; 5&ndash;15x faster than parsing sequentially:</p>
+      <pre><code class="language-bash"># Parse all emails in a directory
+docparse ~/inbox/
+
+# Parse specific files (auto-detects batch mode)
+docparse report.docx slides.pptx data.xlsx
+
+# Glob patterns work too
+docparse *.eml</code></pre>
 
       <h2 id="about-ailang">What is AILANG?</h2>
       <p>AILANG is a general-purpose programming language designed for AI-powered applications. It treats AI calls as a first-class <strong>effect</strong> &mdash; just like file I/O or network access &mdash; with hard capability budgets that cap how many AI calls, file reads, or network requests a program can make. These limits are enforced at compile time, not just by convention.</p>
