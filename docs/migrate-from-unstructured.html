@@ -22,7 +22,7 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Change the URL from the Unstructured endpoint to AILANG Parse. Same /general/v0/general route, same upload format, one-line change."}},
+    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Use POST /api/v1/parse with multipart file upload (-F filepath=@file.docx). The response format is compatible with Unstructured client code. See the Quick Migration section for curl and Python examples."}},
     {"@type": "Question", "name": "Is AILANG Parse a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office document parsing, yes. AILANG Parse implements the same /general/v0/general endpoint format that Unstructured uses, so you can switch by changing the URL. The response format is compatible. For PDFs and scanned documents, keep using Unstructured — its ML pipeline is purpose-built for those formats."}},
     {"@type": "Question", "name": "Can I use both Unstructured and AILANG Parse together?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and this is the recommended pattern. Route Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB) through AILANG Parse for deterministic structural parsing, and route PDFs and scanned images through Unstructured where its ML pipeline excels. A simple file-extension check in your routing layer is all you need."}},
     {"@type": "Question", "name": "What Office formats does AILANG Parse support that Unstructured doesn't parse well?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB — with full structural fidelity including track changes, merged cells, and comments."}}
@@ -68,18 +68,20 @@
         <div>Keep Unstructured for PDFs and scanned documents. Use AILANG Parse for Office formats.</div>
       </div>
 
-      <h2 id="one-line-change">One-Line Change</h2>
-      <p>AILANG Parse implements the same <code>/general/v0/general</code> endpoint that Unstructured uses. Switch by changing the URL.</p>
+      <h2 id="one-line-change">Quick Migration</h2>
+      <p>AILANG Parse supports the same response format as Unstructured. Upload files directly via <code>/api/v1/parse</code> with multipart/form-data:</p>
 
-      <h3>curl</h3>
+      <h3>curl &mdash; Recommended (native API with file upload)</h3>
       <pre><code class="language-bash"># Before: Unstructured
 curl -X POST "https://api.unstructured.io/general/v0/general" \
   -H "unstructured-api-key: $UNSTRUCTURED_KEY" \
   -F "files=@report.docx"
 
-# After: AILANG Parse (same API format)
-curl -X POST "https://docparse.ailang.sunholo.com/general/v0/general" \
-  -F "files=@report.docx"</code></pre>
+# After: AILANG Parse (file upload, all tiers)
+curl -X POST "https://docparse.ailang.sunholo.com/api/v1/parse" \
+  -F "filepath=@report.docx" \
+  -F "outputFormat=blocks" \
+  -F "apiKey=$DOCPARSE_API_KEY"</code></pre>
 
       <h3>Python</h3>
       <pre><code class="language-python"># Before: Unstructured
@@ -89,13 +91,19 @@ resp = requests.post(
     files={"files": open("report.docx", "rb")}
 )
 
-# After: AILANG Parse (same API format)
+# After: AILANG Parse (file upload, all tiers)
 resp = requests.post(
-    "https://docparse.ailang.sunholo.com/general/v0/general",
-    files={"files": open("report.docx", "rb")}
+    "https://docparse.ailang.sunholo.com/api/v1/parse",
+    files={"filepath": open("report.docx", "rb")},
+    data={"outputFormat": "blocks", "apiKey": DOCPARSE_API_KEY}
 )</code></pre>
 
-      <p>No SDK changes, no new dependencies, no schema migration. The response format is compatible with existing Unstructured client code.</p>
+      <div class="dp-callout" style="margin:16px 0">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>
+          <strong>Note:</strong> The <code>/general/v0/general</code> compatibility endpoint works with JSON body requests (e.g. <code>{"filepath": "sample_docx_basic"}</code>) but does not yet support multipart file upload. For file uploads, use <code>/api/v1/parse</code> as shown above. The response format from both endpoints is compatible with existing Unstructured client code.
+        </div>
+      </div>
 
       <h2 id="routing-pattern">Routing Pattern</h2>
       <p>For mixed-format pipelines, the recommended approach is to route Office formats through AILANG Parse and PDFs through Unstructured. A simple file-extension check is all you need:</p>
@@ -119,8 +127,9 @@ def parse_document(filepath: str) -> dict:
     if ext in OFFICE_EXTENSIONS:
         # Deterministic structural parsing — 11ms, no AI needed
         resp = requests.post(
-            f"{AILANG_PARSE_URL}/general/v0/general",
-            files={"files": open(filepath, "rb")}
+            f"{AILANG_PARSE_URL}/api/v1/parse",
+            files={"filepath": open(filepath, "rb")},
+            data={"outputFormat": "blocks", "apiKey": DOCPARSE_API_KEY}
         )
     else:
         # PDFs, scanned images — Unstructured ML pipeline
@@ -176,7 +185,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I migrate from Unstructured to AILANG Parse?</summary>
-          <div class="dp-faq-answer"><p>Change the URL from the Unstructured endpoint to AILANG Parse. Same <code>/general/v0/general</code> route, same upload format, one-line change.</p></div>
+          <div class="dp-faq-answer"><p>Use <code>POST /api/v1/parse</code> with <code>-F "filepath=@file.docx"</code> for file uploads. The response format is compatible with Unstructured client code. See the <a href="#one-line-change">Quick Migration</a> section for curl and Python examples.</p></div>
         </details>
         <details>
           <summary>Is AILANG Parse a drop-in replacement for Unstructured?</summary>
