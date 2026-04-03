@@ -1,0 +1,630 @@
+Delivered-To: mark@aitanalabs.com
+Received: by 2002:a05:6402:438c:b0:660:a501:422 with SMTP id 12csp2130167edp;
+        Tue, 17 Mar 2026 05:25:26 -0700 (PDT)
+X-Received: by 2002:ad4:5bc9:0:b0:89c:543a:2aed with SMTP id 6a1803df08f44-89c543a357emr87890426d6.5.1773750326256;
+        Tue, 17 Mar 2026 05:25:26 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1773750326; cv=none;
+        d=google.com; s=arc-20240605;
+        b=daZ4QFyr8XEpdzNcIioAvacVTKEtE4QLe2xrXIgW5nu/j6yeKu9XSE6HZZSKZPeuT/
+         KuQWBe8lHqp023LsOMyi+efwGgN+hjdLiqIlX3hQN5VW6tddz1TEkjufSTKb2lcOwz75
+         bPvYDYCG+m+jeSTvtdq9L9Ilob0ithy4IoZ3sUe8z9Q3Hahe+YrHCece6sqIDjgRdY7h
+         HdK2u0vzrBbRQhLnVyizj521obl4sdmrQqqX4AoTneCn1xba6D8ixOhxBsKSwLz9Efti
+         41HvvkrGuo0rX4CRgfPSqds/Val2UCFv+g1Y0hrHDdWnJxsLxNy+5xxIEOWWCZK0fh+P
+         fipA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=to:subject:message-id:mime-version:from:date
+         :content-transfer-encoding:dkim-signature;
+        bh=ID0XhQc9hJD53gT3dlK/6V7Px36Vh92TMbkVLURdTvo=;
+        fh=SRjkx62oZphqvwfL/XT9ljZ+gBDSLDggRAxs1I2r/5M=;
+        b=izMJkZoiIBXnoKpLemlo1cMzC0MO1kLwWP19HjspqFEOMZRCFcqX2pGyPlXQACeuxU
+         noKua59jjoWjyEb7k3SLprsuhR60N2A8qLdx2mp5havkKYKcxuIyewGe85LBw6IbS+LT
+         GrGHESyFPbI/HdcRENVmBd1AD0rmL9zXHSYcTKDHazDtkAXnDKnHdkV48CdVmEei0LRp
+         FYbhrKK43i1XIEDUUpafTymlSUy336NwxUf0Ry1FaP5l6aq27P3uDHXKPf4nCT7Et5zq
+         idrZBc90CBLHflR0LIritLRu6VhF1zY9PniCX0S98siF4xOaGqkvIDr00qboTcRgMkrp
+         O1nw==;
+        dara=google.com
+ARC-Authentication-Results: i=1; mx.google.com;
+       dkim=pass header.i=@sana.ai header.s=s1 header.b=f50fi4XC;
+       spf=pass (google.com: domain of bounces+34871424-0acf-mark=aitanalabs.com@em4396.sana.ai designates 159.183.230.249 as permitted sender) smtp.mailfrom="bounces+34871424-0acf-mark=aitanalabs.com@em4396.sana.ai";
+       dmarc=pass (p=QUARANTINE sp=QUARANTINE dis=NONE) header.from=sana.ai
+Return-Path: <bounces+34871424-0acf-mark=aitanalabs.com@em4396.sana.ai>
+Received: from wfbtzsfw.outbound-mail.sendgrid.net (wfbtzsfw.outbound-mail.sendgrid.net. [159.183.230.249])
+        by mx.google.com with ESMTPS id 6a1803df08f44-89c4cc938basi67105976d6.167.2026.03.17.05.25.25
+        for <mark@aitanalabs.com>
+        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);
+        Tue, 17 Mar 2026 05:25:26 -0700 (PDT)
+Received-SPF: pass (google.com: domain of bounces+34871424-0acf-mark=aitanalabs.com@em4396.sana.ai designates 159.183.230.249 as permitted sender) client-ip=159.183.230.249;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@sana.ai header.s=s1 header.b=f50fi4XC;
+       spf=pass (google.com: domain of bounces+34871424-0acf-mark=aitanalabs.com@em4396.sana.ai designates 159.183.230.249 as permitted sender) smtp.mailfrom="bounces+34871424-0acf-mark=aitanalabs.com@em4396.sana.ai";
+       dmarc=pass (p=QUARANTINE sp=QUARANTINE dis=NONE) header.from=sana.ai
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=sana.ai;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:from:subject:to;
+	s=s1; t=1773750324; bh=ID0XhQc9hJD53gT3dlK/6V7Px36Vh92TMbkVLURdTvo=;
+	b=f50fi4XCVrx/eTkRMs+fqPfy57Et2vZhjRQi+6UYuygcXZJ9r4Ofxw0kiyZyyo0tPTUA
+	3V6DSqdeCqUKtGKwyA4kiAIbqe6Eo1WKSb/nOO4sS7wST8dGVVZZTpYszFzM9Hh7T421N7
+	ggyQvSHeHi8NqyaVJ9bO4dWQzJFfP2WneChcGfnQMy2/rFf+vkTVihp4pvlgklHStMrj5+
+	yYShOBSqZh8LqExXfmOmyMeI0vkVp1hv+DB7A61/6AFUvU6tPhl3nBKcfKYR68rWPW89Nx
+	+wupPrYLW1tskcnp6ptNov39yV3zf4qYzLczcCh6dsiW4v5EFQLebWwKVQhy7wrQ==
+Received: by recvd-b46664489-jfbbw with SMTP id recvd-b46664489-jfbbw-1-69B94834-6
+	2026-03-17 12:25:24.033338539 +0000 UTC m=+666573.042389029
+Received: from MzQ4NzE0MjQ (unknown)
+	by geopod-ismtpd-1 (SG) with HTTP
+	id 0ztYYldFTBiR_VOWS0pEZg
+	Tue, 17 Mar 2026 12:25:23.990 +0000 (UTC)
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset=utf-8
+Date: Tue, 17 Mar 2026 12:25:24 +0000 (UTC)
+From: Sana <noreply@sana.ai>
+Mime-Version: 1.0
+Message-ID: <0ztYYldFTBiR_VOWS0pEZg@geopod-ismtpd-1>
+Subject: Your summary of Aitana dev
+X-SG-EID: 
+ =?us-ascii?Q?u001=2EcreqdyCf=2Fc8KgmTreairq+o5cF=2FTrLPmJ=2FRXdBEN0Xi4P=2F8ay+OhwH7nw?=
+ =?us-ascii?Q?Apvdl=2FIShpUfW7vxWuSnPzsgIC7eM=2F7mU5DPs83?=
+ =?us-ascii?Q?jLjh+6P6meF1e=2FH=2FoAhZcgX1VPqcY+=2F6f4l2hdQ?=
+ =?us-ascii?Q?wEL9Mj+2SXhrp5Orq5XTy5APoeVd6lydHUBEZBD?=
+ =?us-ascii?Q?I=2FAeBd29+0yuawwyPo6RGV21nlcwqNBOc4c3Koh?=
+ =?us-ascii?Q?peyOGjfhGifNGWcOK3dcvg=3D?=
+To: mark@aitanalabs.com
+X-Entity-ID: u001.mf/UVisdaxeRoJj4jBKaAg==
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.=
+w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><div style=3D"display:none;ov=
+erflow:hidden;line-height:1px;opacity:0;max-height:0;max-width:0" data-skip=
+-in-text=3D"true">Your summary of Aitana dev<div>=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=
+=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=
+=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=
+=8E=E2=80=8F=EF=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=
+=BB=BF=C2=A0=E2=80=8C=E2=80=8B=E2=80=8D=E2=80=8E=E2=80=8F=EF=BB=BF</div></d=
+iv><html dir=3D"ltr" lang=3D"en"><head><meta content=3D"text/html; charset=
+=3DUTF-8" http-equiv=3D"Content-Type"/><meta name=3D"x-apple-disable-messag=
+e-reformatting"/><meta name=3D"color-scheme" content=3D"only"/><meta name=
+=3D"supported-color-schemes" content=3D"light"/><style>
+    @font-face {
+      font-family: 'Sana Sans';
+      font-style: normal;
+      font-weight: 400;
+      mso-font-alt: 'Helvetica Neue';
+      src: url(https://sana.ai/public-static/sana-ai-static/email-assets/fo=
+nts/SanaSans-Regular.woff2) format('woff2');
+    }
+
+    * {
+      font-family: 'Sana Sans', Helvetica Neue, Helvetica, Arial, Roboto, s=
+ans-serif;
+    }
+  </style><style>
+    @font-face {
+      font-family: 'Sana Sans';
+      font-style: medium;
+      font-weight: 500;
+      mso-font-alt: 'Helvetica Neue';
+      src: url(https://sana.ai/public-static/sana-ai-static/email-assets/fo=
+nts/SanaSans-Medium.woff2) format('woff2');
+    }
+
+    * {
+      font-family: 'Sana Sans', Helvetica Neue, Helvetica, Arial, Roboto, s=
+ans-serif;
+    }
+  </style><style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+     =20
+  .sai-themed-centered-layout {
+    padding: 20px 8px;
+  }
+
+  .sai-themed-centered-layout-container {
+    padding: 28px 8px 8px;
+  }
+
+ =20
+  @media (min-width: 480px) {
+   =20
+    .sai-themed-centered-layout {
+      padding: 60px 16px;
+    }
+
+    .sai-themed-centered-layout-container {
+      padding: 24px 16px 16px;
+    }
+ =20
+  }
+
+
+     =20
+  .sai-footer {
+    padding: 18px;
+  }
+
+ =20
+  @media (min-width: 480px) {
+    .sai-footer {
+      padding: 24px 42px 22px;
+    }
+  }
+
+
+  .sai-footer a {
+    color: #bbb !important;
+    transition: color 0.15s ease;
+  }
+
+  .sai-footer a:hover {
+    color: #888 !important;
+  }
+
+     =20
+  .sai-video,
+  .sai-video-outlook-fallback {
+    max-width: 375px;
+  }
+
+ =20
+  @media (min-width: 480px) {
+   =20
+    .sai-video,
+    .sai-video-outlook-fallback {
+      max-width: none;
+    }
+ =20
+  }
+
+
+      </style><style>
+          .sai-themed-centered-layout {
+            padding: 20px 8px;
+          }
+
+          .sai-themed-centered-layout-container {
+            padding: 0px 8px 8px;
+            table-layout: fixed;
+          }
+
+          .sai-header {
+            margin-bottom: 28px;
+          }
+
+          .sai-follow-up-button {
+            background: rgba(255, 255, 255, 0);
+            transition: background 0.15s ease;
+          }
+
+          .sai-follow-up-button:hover {
+            border: 1px solid rgba(0, 0, 0, 0.2) !important;
+          }
+
+         =20
+  @media (min-width: 480px) {
+   =20
+            .sai-themed-centered-layout {
+              padding: 60px 16px;
+              background-color: rgba(245, 248, 249, 1);
+            }
+
+            .sai-themed-centered-layout-container {
+              padding: 29px 56px 56px;
+            }
+
+            .sai-header {
+              margin-bottom: 48px;
+            }
+         =20
+  }
+
+        </style></head><table align=3D"center" width=3D"100%" class=3D"sai-=
+themed-centered-layout" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" ro=
+le=3D"presentation" style=3D"max-width:none"><tbody><tr style=3D"width:100%=
+"><td><table align=3D"center" width=3D"100%" class=3D"sai-themed-centered-l=
+ayout-container" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" role=3D"p=
+resentation" style=3D"max-width:677px;border-radius:16px;background-color:#=
+fff;overflow:hidden"><tbody><tr style=3D"width:100%"><td><table align=3D"ce=
+nter" width=3D"100%" class=3D"sai-header" border=3D"0" cellPadding=3D"0" ce=
+llSpacing=3D"0" role=3D"presentation" style=3D"max-width:none"><tbody><tr s=
+tyle=3D"width:100%"><td><table align=3D"center" width=3D"100%" border=3D"0"=
+ cellPadding=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D"=
+width:100%"><tr style=3D"width:100%"><td align=3D"left" data-id=3D"__react-=
+email-column" style=3D"height:36px"><img src=3D"https://sana.ai/public-stat=
+ic/sana-ai-static/email-assets/sana-logo-black-high-res.png" style=3D"width=
+:28px"/></td><td align=3D"right" data-id=3D"__react-email-column" style=3D"=
+height:36px"><img src=3D"https://sana.ai/public-static/sana-ai-static/email=
+-assets/sana-wordmark-black-high-res.png" style=3D"width:48px"/></td></tr><=
+/tbody></table></td></tr></tbody></table><h1 style=3D"font-size:18px;font-w=
+eight:500;line-height:24px;letter-spacing:-0.24px;margin:0;max-width:360px;=
+margin-bottom:2px">Aitana dev</h1><p style=3D"font-size:15px;line-height:22=
+.5px;margin:0;opacity:0.4;margin-top:0;margin-bottom:0;margin-left:0;margin=
+-right:0">Tuesday, March 17</p><div style=3D"height:22px"></div><head><meta=
+ content=3D"text/html; charset=3DUTF-8" http-equiv=3D"Content-Type"/><meta =
+name=3D"x-apple-disable-message-reformatting"/><style>
+            .sai-video,
+            .sai-video-outlook-fallback {
+              max-width: 375px;
+            }
+
+           =20
+  @media (min-width: 480px) {
+   =20
+              .sai-video,
+              .sai-video-outlook-fallback {
+                max-width: none;
+              }
+           =20
+  }
+
+          </style></head><video class=3D"sai-video" src=3D"https://storage.=
+googleapis.com/sana-ai-prod-meeting-recording/tPY42LkHRN2k/aJPecEDV1b88/ccb=
+e6ee6-1e56-434c-9446-31fe01f1ea19.mp4?X-Goog-Algorithm=3DGOOG4-RSA-SHA256&a=
+mp;X-Goog-Credential=3Dplatform-indexing-orchestrator%40sana-search-378713.=
+iam.gserviceaccount.com%2F20260317%2Fauto%2Fstorage%2Fgoog4_request&amp;X-G=
+oog-Date=3D20260317T122523Z&amp;X-Goog-Expires=3D604800&amp;X-Goog-SignedHe=
+aders=3Dhost&amp;X-Goog-Signature=3D35b6e7172adb4747a6ba43e68267489e0d573ed=
+bf885c550dd2922c18df668edc42c20995e2bea87323a52a2b7481c06a4e81564ad2998ccad=
+977afa7d58878c7b9e41ce2c2524f04848ed8bec165a599df78bd34c0292888b3fe7cf5ed92=
+7cf065885cfb30527825cd3697fdb96e0d0d20264809eaa759ccd9836beac181de1944b85e6=
+8a2fddf7c8d56759b88f68bee68f97f48e91b8f58525efe603b4f5e6757572f84277dcacbad=
+8e7f5991ba70d5ee7768dab94dddc2441f615c9f0dfefbd0c400c56fbd96d1071757787b5fd=
+dd4a83ed66610425bb90b89828a1ec34d326e2f7459dfbe0db9e38d99bab64cbb7c55757b67=
+00c498984d80ce144ca8326" width=3D"100%" height=3D"100%" controls=3D"" style=
+=3D"mso-hide:all;display:block;width:100%;height:auto;max-height:none;objec=
+t-fit:cover;border-radius:8px;overflow:hidden"><a class=3D"sai-video-outloo=
+k-fallback" href=3D"https://sana.ai/tPY42LkHRN2k/agent#with=3DR1vlcT5rjoSVu=
+Gr8" target=3D"_blank" rel=3D"noreferrer" alt=3D"Redirect" style=3D"mso-hid=
+e:all;display:block;width:inherit;max-height:inherit;max-width:344px;paddin=
+g-top:72px;padding-bottom:72px;background-image:url(https://sana.ai/public-=
+static/sana-ai-static/email-assets/locked-background.png);background-size:c=
+over;background-position:center;background-repeat:no-repeat;border-radius:2=
+0px"><img src=3D"https://sana.ai/public-static/sana-ai-static/email-assets/=
+play-icon.png" style=3D"display:block;outline:none;border:none;text-decorat=
+ion:none;margin:0 auto;opacity:0.8" width=3D"28"/></a></video><div style=3D=
+"height:24px"></div><h1 style=3D"font-size:18px;font-weight:500;line-height=
+:24px;letter-spacing:-0.24px;margin:0">Summary</h1><div style=3D"height:8px=
+"></div><p style=3D"font-size:15px;line-height:22.5px;margin:0;margin-top:0=
+;margin-bottom:0;margin-left:0;margin-right:0">Maria reported terminal issu=
+es resolved in Aitana. She hit local authentication failures when enabling =
+Vertex AI Search for folder selection and file=E2=80=91limit overflows. Mar=
+k advised testing the Aitana CLI and re-establishing application default cr=
+edentials via gcloud. Gemini 2.5 Pro (Thinking) in C3PO is timing out; Mari=
+a will update backend model names to the latest production Gemini and open =
+a PR. The team will prototype the new Skills UI from Miguel=E2=80=99s mock-=
+ups and explore BigQuery MCP integration.</p><div style=3D"height:24px"></d=
+iv><div style=3D"height:8px"></div><h1 style=3D"font-size:18px;font-weight:=
+500;line-height:24px;letter-spacing:-0.24px;margin:0">Record your next meet=
+ing</h1><div style=3D"height:8px"></div><head><meta content=3D"text/html; c=
+harset=3DUTF-8" http-equiv=3D"Content-Type"/><meta name=3D"x-apple-disable-=
+message-reformatting"/><style>
+        .sai-button {
+          background: rgba(0,0,0,0.06);
+          transition: background 0.15s ease;
+        }
+
+        .sai-button:hover {
+          background: rgba(0,0,0,0.1) !important;
+        }
+      </style></head><a class=3D"sai-button" href=3D"https://sana.ai/&amp;u=
+tm_source=3Dsanaai&amp;utm_medium=3Demail&amp;utm_campaign=3Dmeeting_recap&=
+amp;utm_content=3Dmeeting_recap" style=3D"line-height:20px;text-decoration:=
+none;display:inline-block;max-width:100%;mso-padding-alt:0px;padding:12px 2=
+0px 12px 20px;cursor:pointer;font-size:14px;font-weight:500;border-radius:1=
+00px;color:black;min-width:0" target=3D"_blank"><span><!--[if mso]><i style=
+=3D"mso-font-width:500%;mso-text-raise:18" hidden>&#8202;&#8202;</i><![endi=
+f]--></span><span style=3D"max-width:100%;display:inline-block;line-height:=
+120%;mso-padding-alt:0px;mso-text-raise:9px">Join Sana</span><span><!--[if =
+mso]><i style=3D"mso-font-width:500%" hidden>&#8202;&#8202;&#8203;</i><![en=
+dif]--></span></a><div style=3D"height:28px"></div><hr style=3D"width:100%;=
+border:none;border-top:1px solid #eaeaea;border-color:#f2f2f2;margin:0"/><d=
+iv style=3D"height:28px"></div><h1 style=3D"font-size:18px;font-weight:500;=
+line-height:24px;letter-spacing:-0.24px;margin:0">Key topics</h1><div style=
+=3D"height:8px"></div><ul style=3D"list-style-type:none;padding:0;margin:0"=
+><li style=3D"margin:0"><table align=3D"center" width=3D"100%" border=3D"0"=
+ cellPadding=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D"=
+width:100%"><tr style=3D"width:100%"><td valign=3D"top" width=3D"16" data-i=
+d=3D"__react-email-column" style=3D"padding-top:8px"><div style=3D"width:4p=
+x;height:4px;border-radius:2px;background-color:#808080"></div></td><td dat=
+a-id=3D"__react-email-column"><p style=3D"font-size:15px;line-height:22.5px=
+;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0"><span =
+style=3D"font-weight:500">Vertex AI Search authentication (local dev)</span=
+>: Maria gets authentication errors when calling Vertex AI Search from loca=
+lhost in the Aitana project; likely missing/expired Application Default Cre=
+dentials=E2=80=94run `gcloud auth application-default login` (and set a quo=
+ta project) and use the Aitana CLI to invoke the AI Search tool directly to=
+ isolate whether the issue is local auth vs. UI pass-through; she has admin=
+ rights, so fixing local auth should unblock work.</p><div style=3D"height:=
+16px"></div></td></tr></tbody></table></li><li style=3D"margin:0"><table al=
+ign=3D"center" width=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D=
+"0" role=3D"presentation"><tbody style=3D"width:100%"><tr style=3D"width:10=
+0%"><td valign=3D"top" width=3D"16" data-id=3D"__react-email-column" style=
+=3D"padding-top:8px"><div style=3D"width:4px;height:4px;border-radius:2px;b=
+ackground-color:#808080"></div></td><td data-id=3D"__react-email-column"><p=
+ style=3D"font-size:15px;line-height:22.5px;margin:0;margin-top:0;margin-bo=
+ttom:0;margin-left:0;margin-right:0"><span style=3D"font-weight:500">Gemini=
+ model failures in Aitana (C3PO)</span>: Calls to Gemini 2.5 Pro/Plus are t=
+iming out while Anthropic works, likely due to a deprecated/preview model s=
+tring; update the backend model mapping to the current production Gemini mo=
+del (or Gemini 3) in the shared model config and open a PR=E2=80=94this one=
+-line change should restore reliability.</p><div style=3D"height:16px"></di=
+v></td></tr></tbody></table></li><li style=3D"margin:0"><table align=3D"cen=
+ter" width=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" role=
+=3D"presentation"><tbody style=3D"width:100%"><tr style=3D"width:100%"><td =
+valign=3D"top" width=3D"16" data-id=3D"__react-email-column" style=3D"paddi=
+ng-top:8px"><div style=3D"width:4px;height:4px;border-radius:2px;background=
+-color:#808080"></div></td><td data-id=3D"__react-email-column"><p style=3D=
+"font-size:15px;line-height:22.5px;margin:0;margin-top:0;margin-bottom:0;ma=
+rgin-left:0;margin-right:0"><span style=3D"font-weight:500">Skills UI plan<=
+/span>: Await Miguel=E2=80=99s mock-up, then quickly build a static HTML/Re=
+act mock-up (e.g., via Cloud Code/AI assist) to iterate on layout and inter=
+actions before wiring to existing APIs, reducing rework and accelerating al=
+ignment on the design.</p><div style=3D"height:16px"></div></td></tr></tbod=
+y></table></li><li style=3D"margin:0"><table align=3D"center" width=3D"100%=
+" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" role=3D"presentation"><t=
+body style=3D"width:100%"><tr style=3D"width:100%"><td valign=3D"top" width=
+=3D"16" data-id=3D"__react-email-column" style=3D"padding-top:8px"><div sty=
+le=3D"width:4px;height:4px;border-radius:2px;background-color:#808080"></di=
+v></td><td data-id=3D"__react-email-column"><p style=3D"font-size:15px;line=
+-height:22.5px;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-r=
+ight:0"><span style=3D"font-weight:500">BigQuery MCP integration</span>: Th=
+e MCP tool is already in Aitana; configure it with the BigQuery MCP server =
+URL (may not need extra tokens in the Google environment), test via Aitana =
+search/queries, and then package it as a new Skill in the upcoming UI.</p><=
+div style=3D"height:16px"></div></td></tr></tbody></table></li><li style=3D=
+"margin:0"><table align=3D"center" width=3D"100%" border=3D"0" cellPadding=
+=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D"width:100%">=
+<tr style=3D"width:100%"><td valign=3D"top" width=3D"16" data-id=3D"__react=
+-email-column" style=3D"padding-top:8px"><div style=3D"width:4px;height:4px=
+;border-radius:2px;background-color:#808080"></div></td><td data-id=3D"__re=
+act-email-column"><p style=3D"font-size:15px;line-height:22.5px;margin:0;ma=
+rgin-top:0;margin-bottom:0;margin-left:0;margin-right:0"><span style=3D"fon=
+t-weight:500">Status and next steps</span>: Maria fixed prior terminal issu=
+es; next she will re-auth locally and test the Aitana tool path, then submi=
+t a PR to update the Gemini model name for review.</p><div style=3D"height:=
+16px"></div></td></tr></tbody></table></li></ul><div style=3D"height:8px"><=
+/div><h1 style=3D"font-size:18px;font-weight:500;line-height:24px;letter-sp=
+acing:-0.24px;margin:0">Actions for Maria Santana Catal=C3=A1</h1><div styl=
+e=3D"height:8px"></div><ul style=3D"list-style-type:none;padding:0;margin:0=
+"><li style=3D"margin:0"><table align=3D"center" width=3D"100%" border=3D"0=
+" cellPadding=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D=
+"width:100%"><tr style=3D"width:100%"><td valign=3D"top" width=3D"16" data-=
+id=3D"__react-email-column" style=3D"padding-top:8px"><div style=3D"width:4=
+px;height:4px;border-radius:2px;background-color:#808080"></div></td><td da=
+ta-id=3D"__react-email-column"><p style=3D"font-size:15px;line-height:22.5p=
+x;margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">Use t=
+he Aitana CLI to invoke the Vertex AI Search tool directly to reproduce/dia=
+gnose the authentication error</p><div style=3D"height:4px"></div></td></tr=
+></tbody></table></li><li style=3D"margin:0"><table align=3D"center" width=
+=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" role=3D"presenta=
+tion"><tbody style=3D"width:100%"><tr style=3D"width:100%"><td valign=3D"to=
+p" width=3D"16" data-id=3D"__react-email-column" style=3D"padding-top:8px">=
+<div style=3D"width:4px;height:4px;border-radius:2px;background-color:#8080=
+80"></div></td><td data-id=3D"__react-email-column"><p style=3D"font-size:1=
+5px;line-height:22.5px;margin:0;margin-top:0;margin-bottom:0;margin-left:0;=
+margin-right:0">Re-authenticate local Google Cloud application default cred=
+entials for the Aitana project (e.g., gcloud auth application-default login=
+)</p><div style=3D"height:4px"></div></td></tr></tbody></table></li><li sty=
+le=3D"margin:0"><table align=3D"center" width=3D"100%" border=3D"0" cellPad=
+ding=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D"width:10=
+0%"><tr style=3D"width:100%"><td valign=3D"top" width=3D"16" data-id=3D"__r=
+eact-email-column" style=3D"padding-top:8px"><div style=3D"width:4px;height=
+:4px;border-radius:2px;background-color:#808080"></div></td><td data-id=3D"=
+__react-email-column"><p style=3D"font-size:15px;line-height:22.5px;margin:=
+0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">Update the Gem=
+ini model names in the Aitana backend to the latest production identifiers =
+(replace any preview names) and open a pull request</p><div style=3D"height=
+:4px"></div></td></tr></tbody></table></li><li style=3D"margin:0"><table al=
+ign=3D"center" width=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D=
+"0" role=3D"presentation"><tbody style=3D"width:100%"><tr style=3D"width:10=
+0%"><td valign=3D"top" width=3D"16" data-id=3D"__react-email-column" style=
+=3D"padding-top:8px"><div style=3D"width:4px;height:4px;border-radius:2px;b=
+ackground-color:#808080"></div></td><td data-id=3D"__react-email-column"><p=
+ style=3D"font-size:15px;line-height:22.5px;margin:0;margin-top:0;margin-bo=
+ttom:0;margin-left:0;margin-right:0">Create an initial HTML/React mock-up o=
+f the new Skills UI based on Miguel=E2=80=99s design (using Cloud Code or s=
+imilar)</p><div style=3D"height:4px"></div></td></tr></tbody></table></li><=
+li style=3D"margin:0"><table align=3D"center" width=3D"100%" border=3D"0" c=
+ellPadding=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D"wi=
+dth:100%"><tr style=3D"width:100%"><td valign=3D"top" width=3D"16" data-id=
+=3D"__react-email-column" style=3D"padding-top:8px"><div style=3D"width:4px=
+;height:4px;border-radius:2px;background-color:#808080"></div></td><td data=
+-id=3D"__react-email-column"><p style=3D"font-size:15px;line-height:22.5px;=
+margin:0;margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">Integra=
+te BigQuery via the MCP tool in Aitana: configure the BigQuery MCP server U=
+RL, test authentication, and implement an internal MCP server if required</=
+p><div style=3D"height:4px"></div></td></tr></tbody></table></li><li style=
+=3D"margin:0"><table align=3D"center" width=3D"100%" border=3D"0" cellPaddi=
+ng=3D"0" cellSpacing=3D"0" role=3D"presentation"><tbody style=3D"width:100%=
+"><tr style=3D"width:100%"><td valign=3D"top" width=3D"16" data-id=3D"__rea=
+ct-email-column" style=3D"padding-top:8px"><div style=3D"width:4px;height:4=
+px;border-radius:2px;background-color:#808080"></div></td><td data-id=3D"__=
+react-email-column"><p style=3D"font-size:15px;line-height:22.5px;margin:0;=
+margin-top:0;margin-bottom:0;margin-left:0;margin-right:0">Add BigQuery as =
+a new skill in the upcoming Skills UI</p><div style=3D"height:4px"></div></=
+td></tr></tbody></table></li></ul><div style=3D"height:8px"></div><h1 style=
+=3D"font-size:18px;font-weight:500;line-height:24px;letter-spacing:-0.24px;=
+margin:0">Actions for Mark Edmondson</h1><div style=3D"height:8px"></div><u=
+l style=3D"list-style-type:none;padding:0;margin:0"><li style=3D"margin:0">=
+<table align=3D"center" width=3D"100%" border=3D"0" cellPadding=3D"0" cellS=
+pacing=3D"0" role=3D"presentation"><tbody style=3D"width:100%"><tr style=3D=
+"width:100%"><td valign=3D"top" width=3D"16" data-id=3D"__react-email-colum=
+n" style=3D"padding-top:8px"><div style=3D"width:4px;height:4px;border-radi=
+us:2px;background-color:#808080"></div></td><td data-id=3D"__react-email-co=
+lumn"><p style=3D"font-size:15px;line-height:22.5px;margin:0;margin-top:0;m=
+argin-bottom:0;margin-left:0;margin-right:0">Review Maria=E2=80=99s pull re=
+quest for the Gemini model updates</p><div style=3D"height:4px"></div></td>=
+</tr></tbody></table></li></ul><div style=3D"height:8px"></div><h1 style=3D=
+"font-size:18px;font-weight:500;line-height:24px;letter-spacing:-0.24px;mar=
+gin:0">Actions for Miguel</h1><div style=3D"height:8px"></div><ul style=3D"=
+list-style-type:none;padding:0;margin:0"><li style=3D"margin:0"><table alig=
+n=3D"center" width=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0=
+" role=3D"presentation"><tbody style=3D"width:100%"><tr style=3D"width:100%=
+"><td valign=3D"top" width=3D"16" data-id=3D"__react-email-column" style=3D=
+"padding-top:8px"><div style=3D"width:4px;height:4px;border-radius:2px;back=
+ground-color:#808080"></div></td><td data-id=3D"__react-email-column"><p st=
+yle=3D"font-size:15px;line-height:22.5px;margin:0;margin-top:0;margin-botto=
+m:0;margin-left:0;margin-right:0">Send the Skills UI mock-up for the new in=
+terface</p><div style=3D"height:4px"></div></td></tr></tbody></table></li><=
+/ul><div style=3D"height:40px"></div><h1 style=3D"font-size:18px;font-weigh=
+t:500;line-height:24px;letter-spacing:-0.24px;margin:0">Record your next me=
+eting</h1><div style=3D"height:8px"></div><head><meta content=3D"text/html;=
+ charset=3DUTF-8" http-equiv=3D"Content-Type"/><meta name=3D"x-apple-disabl=
+e-message-reformatting"/><style>
+        .sai-button {
+          background: rgba(0,0,0,0.06);
+          transition: background 0.15s ease;
+        }
+
+        .sai-button:hover {
+          background: rgba(0,0,0,0.1) !important;
+        }
+      </style></head><a class=3D"sai-button" href=3D"https://sana.ai/&amp;u=
+tm_source=3Dsanaai&amp;utm_medium=3Demail&amp;utm_campaign=3Dmeeting_recap&=
+amp;utm_content=3Dmeeting_recap" style=3D"line-height:20px;text-decoration:=
+none;display:inline-block;max-width:100%;mso-padding-alt:0px;padding:12px 2=
+0px 12px 20px;cursor:pointer;font-size:14px;font-weight:500;border-radius:1=
+00px;color:black;min-width:0" target=3D"_blank"><span><!--[if mso]><i style=
+=3D"mso-font-width:500%;mso-text-raise:18" hidden>&#8202;&#8202;</i><![endi=
+f]--></span><span style=3D"max-width:100%;display:inline-block;line-height:=
+120%;mso-padding-alt:0px;mso-text-raise:9px">Join Sana</span><span><!--[if =
+mso]><i style=3D"mso-font-width:500%" hidden>&#8202;&#8202;&#8203;</i><![en=
+dif]--></span></a><div style=3D"height:56px"></div><table align=3D"center" =
+width=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" role=3D"pre=
+sentation"><tbody style=3D"width:100%"><tr style=3D"width:100%"><td align=
+=3D"center" data-id=3D"__react-email-column"><hr style=3D"width:100%;border=
+:none;border-top:1px solid #eaeaea;border-color:#f2f2f2;margin:0"/><div sty=
+le=3D"height:40px"></div><p style=3D"font-size:14px;line-height:19px;margin=
+:0;color:#c0c0c0;letter-spacing:-0.5px;margin-top:0;margin-bottom:0;margin-=
+left:0;margin-right:0">Powered by Sana</p><div style=3D"height:32px"></div>=
+</td></tr></tbody></table><div class=3D"sai-footer" style=3D"color:#909090;=
+background-color:#f9f9f9;border-radius:12px"><table align=3D"center" width=
+=3D"100%" border=3D"0" cellPadding=3D"0" cellSpacing=3D"0" role=3D"presenta=
+tion" style=3D"max-width:340px"><tbody style=3D"width:100%"><tr style=3D"wi=
+dth:100%"><td align=3D"center" data-id=3D"__react-email-column"><p style=3D=
+"font-size:12px;line-height:17px;text-align:center;margin:0;margin-top:0;ma=
+rgin-bottom:0;margin-left:0;margin-right:0">You=E2=80=99re getting this ema=
+il because a person in the meeting recorded it with Sana Agents.<wbr/> Sana=
+ Agents is a knowledge assistant that helps everyone work faster, think big=
+ger, and achieve more.</p></td></tr></tbody></table><div style=3D"height:14=
+px"></div><table align=3D"center" width=3D"100%" border=3D"0" cellPadding=
+=3D"0" cellSpacing=3D"0" role=3D"presentation" style=3D"max-width:300px"><t=
+body style=3D"width:100%"><tr style=3D"width:100%"><td align=3D"center" dat=
+a-id=3D"__react-email-column" style=3D"width:100px"><a href=3D"https://supp=
+ort.sana.ai/" style=3D"color:#067df7;text-decoration-line:none;text-align:c=
+enter;font-weight:500;font-size:12px;line-height:17px" target=3D"_blank">He=
+lp center</a></td><td align=3D"center" data-id=3D"__react-email-column" sty=
+le=3D"width:100px"><a href=3D"https://www.sanalabs.com/about-us" style=3D"c=
+olor:#067df7;text-decoration-line:none;font-weight:500;font-size:12px;line-=
+height:17px" target=3D"_blank">About us</a></td><td align=3D"center" data-i=
+d=3D"__react-email-column" style=3D"width:100px"><a href=3D"https://www.san=
+alabs.com/legal" style=3D"color:#067df7;text-decoration-line:none;text-alig=
+n:center;font-weight:500;font-size:12px;line-height:17px" target=3D"_blank"=
+>Legal</a></td></tr></tbody></table></div></td></tr></tbody></table></td></=
+tr></tbody></table><img src=3D"https://u34871424.ct.sendgrid.net/wf/open?up=
+n=3Du001.Pzizfe4tfI6Q-2FTNrF-2FFuSdY-2BYQVqSvttpte8V1J8gmPAAGti-2FQKUaf9HSy=
+Ylr0mayDuvkn8qzXybP39ffhSEhEetePKO-2FMqMHxPa1Y7WnpjBw1coPePH-2Bx8G42u6LUZVM=
+XaiDwHzkHvA4aISEVPH6tPc4NO4qdNGrNGOjkKMvagY3WdVMgoyd9dDVu4j8Ug-2F6A6iqPpmUe=
+J0k08fRXyvhA-3D-3D" alt=3D"" width=3D"1" height=3D"1" border=3D"0" style=3D=
+"height:1px !important;width:1px !important;border-width:0 !important;margi=
+n-top:0 !important;margin-bottom:0 !important;margin-right:0 !important;mar=
+gin-left:0 !important;padding-top:0 !important;padding-bottom:0 !important;=
+padding-right:0 !important;padding-left:0 !important;"/></html>

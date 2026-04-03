@@ -104,94 +104,75 @@ pure func htmlReplaceEntities(content: string) -> string
 }
 
 -- Close HTML5 void elements so XML parser accepts them.
--- Handles: <br>, <meta ...>, <img ...>, <hr>, <input ...>, etc.
+-- Optimized: single pass via split on "<", check each fragment against all void tags.
 -- Converts <tag ...> to <tag .../> and <tag> to <tag/>
 pure func htmlCloseVoidElements(content: string) -> string
   ensures { length(result) >= length(content) }
 {
-  let s = htmlCloseVoidTag(content, "br");
-  let s2 = htmlCloseVoidTag(s, "hr");
-  let s3 = htmlCloseVoidTag(s2, "meta");
-  let s4 = htmlCloseVoidTag(s3, "img");
-  let s5 = htmlCloseVoidTag(s4, "input");
-  let s6 = htmlCloseVoidTag(s5, "link");
-  let s7 = htmlCloseVoidTag(s6, "col");
-  let s8 = htmlCloseVoidTag(s7, "area");
-  let s9 = htmlCloseVoidTag(s8, "base");
-  let s10 = htmlCloseVoidTag(s9, "embed");
-  let s11 = htmlCloseVoidTag(s10, "source");
-  let s12 = htmlCloseVoidTag(s11, "track");
-  htmlCloseVoidTag(s12, "wbr")
+  -- Split on "<" — first fragment is before any tag, rest start with tag content
+  let parts = split(content, "<");
+  match parts {
+    [] => content,
+    first :: rest => {
+      let fixed = map(htmlFixVoidFragment, rest);
+      first ++ join("", fixed)
+    }
+  }
 }
 
--- Close all instances of a specific void tag in the content.
--- Finds <tagname ...> (not already self-closed) and adds />
-pure func htmlCloseVoidTag(content: string, tagName: string) -> string
-  ensures { length(result) >= length(content) }
-{
-  -- Handle both <tag> and <tag ...> forms, case-insensitive
-  htmlCloseVoidTagFrom(content, tagName, 0)
-}
-
--- Scan content from position, closing void tags as found
-pure func htmlCloseVoidTagFrom(content: string, tagName: string, startPos: int) -> string {
-  if startPos >= length(content) then content
+-- Process one fragment that was preceded by "<" in the original content.
+-- If it starts with a void tag name, ensure the tag is self-closed.
+-- Always prepends "<" back since we split on it.
+pure func htmlFixVoidFragment(fragment: string) -> string {
+  let lower = toLower(fragment);
+  let voidTag = htmlMatchVoidTag(lower);
+  if length(voidTag) == 0 then "<" ++ fragment
   else {
-    let remaining = substring(content, startPos, length(content));
-    -- Find next occurrence of <tagName (case-insensitive search)
-    let tagPos = htmlFindTagCI(remaining, tagName);
-    if tagPos < 0 then content
+    -- Found a void tag — check if it needs closing
+    let closeAngle = find(fragment, ">");
+    if closeAngle < 0 then "<" ++ fragment
     else {
-      let absPos = startPos + tagPos;
-      -- Find the closing > for this tag
-      let afterTag = substring(content, absPos, length(content));
-      let closeAngle = find(afterTag, ">");
-      if closeAngle < 0 then content
+      let beforeClose = substring(fragment, 0, closeAngle);
+      if endsWith(trim(beforeClose), "/") then "<" ++ fragment
       else {
-        -- Check if already self-closed (ends with />)
-        let beforeClose = substring(afterTag, 0, closeAngle);
-        if endsWith(trim(beforeClose), "/") then {
-          -- Already self-closed, skip past it
-          htmlCloseVoidTagFrom(content, tagName, absPos + closeAngle + 1)
-        }
-        else {
-          -- Not self-closed — insert / before >
-          let before = substring(content, 0, absPos + closeAngle);
-          let after = substring(content, absPos + closeAngle, length(content));
-          let fixed = before ++ "/" ++ after;
-          htmlCloseVoidTagFrom(fixed, tagName, absPos + closeAngle + 2)
-        }
+        -- Insert / before >
+        "<" ++ beforeClose ++ "/" ++ substring(fragment, closeAngle, length(fragment))
       }
     }
   }
 }
 
--- Case-insensitive search for <tagName within content
--- Returns position of the < or -1
-pure func htmlFindTagCI(content: string, tagName: string) -> int
-  ensures { result >= -1 }
-{
-  let lower = toLower(content);
-  let searchLower = "<" ++ tagName;
-  let pos = find(lower, searchLower);
-  if pos < 0 then -1
-  else {
-    -- Verify it's actually the tag (next char must be space, >, /)
-    let afterTagLen = length(searchLower);
-    if pos + afterTagLen >= length(lower) then pos
+-- Check if a lowercased fragment starts with a void tag name.
+-- Returns the tag name if matched, empty string if not.
+-- Validates word boundary (next char must be space, >, /, tab, newline, or end of string).
+pure func htmlMatchVoidTag(lower: string) -> string {
+  if htmlIsVoidTagAt(lower, "br") then "br"
+  else if htmlIsVoidTagAt(lower, "hr") then "hr"
+  else if htmlIsVoidTagAt(lower, "meta") then "meta"
+  else if htmlIsVoidTagAt(lower, "img") then "img"
+  else if htmlIsVoidTagAt(lower, "input") then "input"
+  else if htmlIsVoidTagAt(lower, "link") then "link"
+  else if htmlIsVoidTagAt(lower, "col") then "col"
+  else if htmlIsVoidTagAt(lower, "area") then "area"
+  else if htmlIsVoidTagAt(lower, "base") then "base"
+  else if htmlIsVoidTagAt(lower, "embed") then "embed"
+  else if htmlIsVoidTagAt(lower, "source") then "source"
+  else if htmlIsVoidTagAt(lower, "track") then "track"
+  else if htmlIsVoidTagAt(lower, "wbr") then "wbr"
+  else ""
+}
+
+-- Check if a lowercased string starts with tagName followed by a word boundary
+pure func htmlIsVoidTagAt(lower: string, tagName: string) -> bool {
+  if startsWith(lower, tagName) then {
+    let tagLen = length(tagName);
+    if tagLen >= length(lower) then true
     else {
-      let nextChar = charAt(lower, pos + afterTagLen);
-      if nextChar == " " || nextChar == ">" || nextChar == "/" || nextChar == "\t" || nextChar == "\n" then pos
-      else {
-        -- False match (e.g., <breaking> when searching for <br>)
-        -- Skip past and search again
-        let rest = substring(content, pos + afterTagLen, length(content));
-        let nextPos = htmlFindTagCI(rest, tagName);
-        if nextPos < 0 then -1
-        else pos + afterTagLen + nextPos
-      }
+      let next = charAt(lower, tagLen);
+      next == " " || next == ">" || next == "/" || next == "\t" || next == "\n"
     }
   }
+  else false
 }
 
 -- Extract blocks from an HTML root element
