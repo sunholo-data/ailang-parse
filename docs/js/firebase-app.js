@@ -11,29 +11,50 @@
 (function () {
   'use strict';
 
-  // Auto-detect environment from hostname
-  var isProd = window.location.hostname === 'www.sunholo.com' || window.location.hostname === 'sunholo.com';
+  // ── Environment detection ──
+  // Override with ?env=dev|test|prod in URL, otherwise auto-detect from hostname
+  var envParam = new URLSearchParams(window.location.search).get('env');
+  var env = envParam || ((window.location.hostname === 'www.sunholo.com' || window.location.hostname === 'sunholo.com') ? 'prod' : 'dev');
 
-  // ── Firebase Config — prod vs dev ──
-  var firebaseConfig = isProd ? {
-    apiKey: "AIzaSyBwWZIwSFe59kcYvdcEHKw1gTf07xytKgM",
-    authDomain: "ailang-multivac.firebaseapp.com",
-    projectId: "ailang-multivac",
-    storageBucket: "ailang-multivac.appspot.com",
-    messagingSenderId: "1032908249524",
-    appId: "1:1032908249524:web:fb3aae1b3626df6b957ae1"
-  } : {
-    apiKey: "AIzaSyCkvFxVilpZkqao1ntOPQbhwMy2GJI0FIE",
-    authDomain: "ailang-multivac-dev.firebaseapp.com",
-    projectId: "ailang-multivac-dev",
-    storageBucket: "ailang-multivac-dev.appspot.com",
-    messagingSenderId: "812435936917",
-    appId: "1:812435936917:web:2dcf2a315dfc7cb2b66d9c"
+  var ENV_CONFIG = {
+    dev: {
+      firebase: {
+        apiKey: "AIzaSyCkvFxVilpZkqao1ntOPQbhwMy2GJI0FIE",
+        authDomain: "ailang-multivac-dev.firebaseapp.com",
+        projectId: "ailang-multivac-dev",
+        storageBucket: "ailang-multivac-dev.appspot.com",
+        messagingSenderId: "812435936917",
+        appId: "1:812435936917:web:2dcf2a315dfc7cb2b66d9c"
+      },
+      apiBase: 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app'
+    },
+    test: {
+      firebase: {
+        apiKey: "AIzaSyBoYNEqZi5eGVzFGhdIyRKXlM4JRgIuso4",
+        authDomain: "ailang-multivac-test.firebaseapp.com",
+        projectId: "ailang-multivac-test",
+        storageBucket: "ailang-multivac-test.firebasestorage.app",
+        messagingSenderId: "561862474304",
+        appId: "1:561862474304:web:0ae7fce7db097377f17da5"
+      },
+      apiBase: 'https://ailang-test-docparse-api-rrmdhcxo4a-ew.a.run.app'
+    },
+    prod: {
+      firebase: {
+        apiKey: "AIzaSyBwWZIwSFe59kcYvdcEHKw1gTf07xytKgM",
+        authDomain: "ailang-multivac.firebaseapp.com",
+        projectId: "ailang-multivac",
+        storageBucket: "ailang-multivac.appspot.com",
+        messagingSenderId: "1032908249524",
+        appId: "1:1032908249524:web:fb3aae1b3626df6b957ae1"
+      },
+      apiBase: 'https://ailang-docparse-api-ao6kuhcibq-ew.a.run.app'
+    }
   };
 
-  var API_BASE = isProd
-    ? 'https://ailang-docparse-api-ao6kuhcibq-ew.a.run.app'
-    : 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
+  var envCfg = ENV_CONFIG[env] || ENV_CONFIG.dev;
+  var firebaseConfig = envCfg.firebase;
+  var API_BASE = envCfg.apiBase;
 
   var app = null;
   var auth = null;
