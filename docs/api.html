@@ -848,10 +848,29 @@
   <!-- Quick Start -->
   <section class="dp-api-section reveal">
     <h2 id="quick-start">Quick Start</h2>
-    <pre><code class="language-bash" data-src="examples/api/curl-parse.sh">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+
+    <p style="font-size:14px;color:var(--text-primary);font-weight:600;margin-bottom:16px">Parse your own file in one command:</p>
+    <pre><code class="language-bash"># Upload and parse your file (all tiers — Free, Pro, Business)
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -F "filepath=@your-document.docx" \
+  -F "outputFormat=markdown" \
+  -F "apiKey=dp_YOUR_KEY"</code></pre>
+
+    <div class="dp-callout" style="margin:16px 0">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <div>
+        <strong>File upload works on all tiers</strong> (Free: up to 10 MB, Pro: 25 MB, Business: 50 MB). Use <code>-F "filepath=@file"</code> &mdash; the field name must be <code>filepath</code>.
+        Supported formats: DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB, EML, MBOX, PDF, PNG, JPG.
+      </div>
+    </div>
+
+    <p style="font-size:13px;color:var(--text-muted);margin-top:12px"><strong>Or test with a built-in sample</strong> (no file needed):</p>
+    <pre><code class="language-bash" data-src="examples/api/curl-parse.sh"># Parse a built-in sample — 26 samples available via GET /api/v1/samples
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"filepath":"sample_docx_formatting","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
-    <p style="font-size:13px;color:var(--text-muted)">No file to upload — use any of 22 built-in <code>sample_*</code> IDs to test immediately. <a href="#agent-guide" style="color:var(--dp-blue)">See full agent guide below</a>.</p>
+  -d '{"sample_id":"sample_docx_basic","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
+
+    <p style="font-size:13px;color:var(--text-muted)"><strong>Need an API key?</strong> Get one in seconds via <a href="#agent-guide" style="color:var(--dp-blue)">device auth</a> &mdash; no account creation needed. <a href="#agent-guide" style="color:var(--dp-blue)">See full agent guide below</a>.</p>
     <p style="font-size:12px;color:var(--text-muted);margin-top:8px"><strong>Tip:</strong> Add <code>?api=http://localhost:8080</code> to any docs page URL to rewrite all examples to point at your local or self-hosted instance.</p>
   </section>
 
@@ -1320,7 +1339,7 @@ for block in result.blocks:
 
 # Unstructured migration — one import change:
 from ailang_parse import UnstructuredClient
-client = UnstructuredClient(server_url="https://ailang-dev-docparse-api-...")
+client = UnstructuredClient(server_url="https://docparse.ailang.sunholo.com")
 elements = client.general.partition(file="report.docx")</code></pre>
       </div>
       <div class="dp-lang-panel" data-group="sdk" data-lang="JavaScript">
@@ -1337,7 +1356,7 @@ for (const block of result.blocks) {
 
 // Unstructured migration — one import change:
 import { UnstructuredClient } from '@ailang/parse';
-const uc = new UnstructuredClient({ serverUrl: 'https://ailang-dev-docparse-api-...' });
+const uc = new UnstructuredClient({ serverUrl: 'https://docparse.ailang.sunholo.com' });
 const elements = await uc.general.partition({ file: 'report.docx' });</code></pre>
       </div>
       <div class="dp-lang-panel" data-group="sdk" data-lang="Go">
@@ -1356,7 +1375,7 @@ for _, block := range result.Blocks {
 }
 
 // Unstructured migration:
-uc := docparse.NewUnstructuredClient("https://ailang-dev-docparse-api-...")
+uc := docparse.NewUnstructuredClient("https://docparse.ailang.sunholo.com")
 elements, _ := uc.Partition(ctx, "report.docx")</code></pre>
       </div>
     </div>

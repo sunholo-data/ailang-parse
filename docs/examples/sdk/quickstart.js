@@ -11,5 +11,5 @@ for (const block of result.blocks) {
 
 // Unstructured migration — one import change:
 import { UnstructuredClient } from '@ailang/parse';
-const uc = new UnstructuredClient({ serverUrl: 'https://ailang-dev-docparse-api-...' });
+const uc = new UnstructuredClient({ serverUrl: 'https://docparse.ailang.sunholo.com' });
 const elements = await uc.general.partition({ file: 'report.docx' });

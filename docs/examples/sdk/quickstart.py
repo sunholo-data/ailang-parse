@@ -13,5 +13,5 @@ for block in result.blocks:
 
 # Unstructured migration — one import change:
 from ailang_parse import UnstructuredClient
-client = UnstructuredClient(server_url="https://ailang-dev-docparse-api-...")
+client = UnstructuredClient(server_url="https://docparse.ailang.sunholo.com")
 elements = client.general.partition(file="report.docx")
