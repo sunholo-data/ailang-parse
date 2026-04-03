@@ -756,9 +756,25 @@
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">Build With AILANG <span class="dp-accent">Parse</span></h1>
     <p class="subtitle reveal reveal-delay-1">Parse <span data-dp="formats.input_count">13</span> formats, generate <span data-dp="formats.output_count">9</span> &mdash; one API, zero dependencies. <span data-dp="pricing.tiers.free.requests_per_month">1,000</span> requests/month free.</p>
+    <div class="reveal reveal-delay-2" style="text-align:center;margin-bottom:8px">
+      <a href="pricing.html" style="font-size:12px;color:var(--dp-blue);text-decoration:none;font-weight:600">View Pricing &amp; Upgrade Plans &rarr;</a>
+    </div>
     <div class="dp-hero-ctas reveal reveal-delay-2">
-      <a id="dp-swagger-link" href="#" target="_blank" class="dp-btn dp-btn--secondary">API Capabilities &rarr;</a>
-      <a id="dp-health-link" href="#" target="_blank" class="dp-btn dp-btn--ghost">Health Check</a>
+      <!-- Signed-out state (default) -->
+      <div id="hero-cta-signedout" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <button class="dp-btn dp-btn--primary" onclick="dpSignIn()">Sign In to Get Started</button>
+        <a href="#quick-start" class="dp-btn dp-btn--ghost" style="text-decoration:none">Read the Docs</a>
+      </div>
+      <!-- Signed-in, no key -->
+      <div id="hero-cta-nokey" style="display:none;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="#api-key-panel" class="dp-btn dp-btn--primary" style="text-decoration:none" onclick="document.getElementById('api-key-panel').scrollIntoView({behavior:'smooth'})">Generate API Key &darr;</a>
+        <a href="#api-explorer" class="dp-btn dp-btn--secondary" style="text-decoration:none">API Explorer</a>
+      </div>
+      <!-- Signed-in, has key -->
+      <div id="hero-cta-ready" style="display:none;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="#api-explorer" class="dp-btn dp-btn--primary" style="text-decoration:none">Open API Explorer</a>
+        <a href="/docparse/dashboard.html" class="dp-btn dp-btn--secondary" style="text-decoration:none">Dashboard</a>
+      </div>
     </div>
   </section>
 
@@ -1073,6 +1089,10 @@ bash skills/docparse/scripts/samples.sh</code></pre>
   <section class="dp-api-section reveal">
     <h2 id="agent-guide">Agent Integration Guide</h2>
     <p>Step-by-step workflow for AI agents integrating with AILANG Parse. Expand for the full guide.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <a id="dp-swagger-link" href="#" target="_blank" class="dp-btn dp-btn--ghost" style="font-size:12px;text-decoration:none">API Capabilities (JSON) &rarr;</a>
+      <a id="dp-health-link" href="#" target="_blank" class="dp-btn dp-btn--ghost" style="font-size:12px;text-decoration:none">Health Check (JSON)</a>
+    </div>
 
     <details class="dp-agent-details">
       <summary style="cursor:pointer;font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--dp-blue);padding:8px 0;user-select:none">
@@ -1381,13 +1401,39 @@ document.querySelectorAll('pre code[class*="language-"]').forEach(function(el) {
 
 // API_BASE is defined in components.js (supports ?api= override)
 
-// ── Wire up hero links to use API_BASE ──
+// ── Wire up agent links (now in Agent Integration Guide section) ──
 (function() {
   var swaggerLink = document.getElementById('dp-swagger-link');
   var healthLink = document.getElementById('dp-health-link');
   if (swaggerLink) swaggerLink.href = API_BASE + '/api/v1/capabilities';
   if (healthLink) healthLink.href = API_BASE + '/api/v1/health';
 })();
+
+// ── Hero CTA auth-aware toggling ──
+function updateHeroCTA() {
+  var ctaOut = document.getElementById('hero-cta-signedout');
+  var ctaNokey = document.getElementById('hero-cta-nokey');
+  var ctaReady = document.getElementById('hero-cta-ready');
+  if (!ctaOut) return;
+
+  var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+  var storedKey = localStorage.getItem('dp_api_key');
+
+  ctaOut.style.display = 'none';
+  ctaNokey.style.display = 'none';
+  ctaReady.style.display = 'none';
+
+  if (!user) {
+    ctaOut.style.display = 'flex';
+  } else if (storedKey && /^dp_[0-9a-f]{32}$/.test(storedKey)) {
+    ctaReady.style.display = 'flex';
+  } else {
+    ctaNokey.style.display = 'flex';
+  }
+}
+
+updateHeroCTA();
+window.addEventListener('dp-auth-change', function() { updateHeroCTA(); });
 
 // ── Global caches ──
 var dpSamples = [];
