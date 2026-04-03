@@ -337,27 +337,16 @@
   line-height: 1.4;
 }
 
-/* QnA */
-.dp-qna-item {
-  border-bottom: 1px solid var(--border);
-  padding: 16px 0;
-}
-.dp-qna-item:first-child { padding-top: 0; }
-.dp-qna-item:last-child { border-bottom: none; }
-.dp-qna-q {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 6px;
-}
-.dp-qna-a {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.7;
-  margin: 0;
-}
-.dp-qna-a strong { color: var(--text-primary); }
+/* FAQ (matches site-wide dp-faq pattern) */
+.dp-faq { max-width: 800px; margin: 48px auto 0; padding-top: 24px; border-top: 2px solid var(--border); }
+.dp-faq details { border-bottom: 1px solid var(--border); }
+.dp-faq summary { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text-primary); padding: 14px 0; cursor: pointer; list-style: none; }
+.dp-faq summary::-webkit-details-marker { display: none; }
+.dp-faq summary::after { content: '+'; float: right; font-size: 18px; color: var(--text-muted); transition: transform .2s; }
+.dp-faq details[open] summary::after { content: '\2212'; }
+.dp-faq-answer { font-size: 13px; color: var(--text-secondary); line-height: 1.7; padding: 0 0 16px; }
+.dp-faq-answer p { margin: 0; }
+.dp-faq-answer strong { color: var(--text-primary); }
 
 /* Value callout */
 .dp-value-box {
@@ -705,98 +694,48 @@
       </ul>
 
       <!-- ═══ FAQ ═══ -->
-      <h2 id="faq">Questions &amp; answers</h2>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">Is pricing really per document, not per page?</h3>
-        <p class="dp-qna-a">
-          <strong>Yes. One request = one document, regardless of page count.</strong>
-          A 1-page DOCX and a 1,000-page DOCX each consume one request from your monthly quota.
-          There are no per-page fees, no page-count multipliers, no hidden charges based on document length.
-          This applies to all formats &mdash; Office, PDF, images, everything.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">When should I use AILANG Parse?</h3>
-        <p class="dp-qna-a">
-          When your AI system ingests <strong>Office documents</strong> (DOCX, PPTX, XLSX, ODT)
-          and you need structured, accurate output. We read Office XML directly &mdash; no PDF conversion,
-          no OCR, no information loss. Track changes, merged table cells, comments, and formatting
-          are all preserved. If your RAG pipeline or agent system processes business documents,
-          this is built for you.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">When should I NOT use AILANG Parse?</h3>
-        <p class="dp-qna-a">
-          If you only parse <strong>scanned PDFs</strong> or <strong>handwritten documents</strong>,
-          a dedicated OCR service may be more appropriate.
-          Our AI parsing handles PDFs, but our structural advantage is in Office formats where we
-          bypass the PDF-then-OCR pipeline entirely. For pure scan workloads, we add an AI
-          layer but don't offer a unique cost or quality advantage.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">Why is it so much cheaper than competitors?</h3>
-        <p class="dp-qna-a">
-          Competitors convert your DOCX to PDF, render it as images, then run OCR or vision models
-          to recover the text &mdash; expensive compute <strong>for every page</strong>.
-          We read Office XML directly. A 200-page DOCX takes ~50ms to parse deterministically.
-          No AI model needed, no per-page cost. The cost to us is the same for 1 page or 1,000 pages.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">What are "AI parses" vs regular requests?</h3>
-        <p class="dp-qna-a">
-          <strong>Regular requests</strong> use our deterministic parser &mdash; fast, cheap, and reliable for
-          Office formats, CSV, Markdown, HTML, EPUB. No AI model involved.
-          <strong>AI parses</strong> invoke a multimodal AI model for PDFs and images.
-          Metered separately because AI inference costs significantly more than deterministic parsing.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">What does "daily rate limit" mean?</h3>
-        <p class="dp-qna-a">
-          A burst-protection cap &mdash; the maximum documents you can parse in one calendar day.
-          Prevents runaway scripts from exhausting your monthly quota in one burst.
-          The monthly limit is the binding constraint for most users.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">Do you support the Unstructured API format?</h3>
-        <p class="dp-qna-a">
-          Yes. Drop-in compatible endpoint at <code>/general/v0/general</code>.
-          Change the base URL and get higher accuracy at a fraction of the cost. All tiers.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">What output formats are available?</h3>
-        <p class="dp-qna-a">
-          <strong>All tiers</strong>: JSON (Block ADT with 9 variants), Markdown, plain text, HTML,
-          Quarto (.qmd), A2UI (agent-to-UI protocol), and Unstructured-compatible output.
-          No output formats are gated by tier.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">Can I self-host?</h3>
-        <p class="dp-qna-a">
-          Yes. <a href="selfhost.html">Run locally</a> via Docker or CLI with unlimited deterministic parsing, no API key needed.
-        </p>
-      </div>
-
-      <div class="dp-qna-item">
-        <h3 class="dp-qna-q">Need higher limits or custom pricing?</h3>
-        <p class="dp-qna-a">
-          Contact <a href="mailto:docparse@sunholo.com">docparse@sunholo.com</a> for enterprise volume, SLAs, or dedicated deployments.
-        </p>
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>Is pricing really per document, not per page?</summary>
+          <div class="dp-faq-answer"><p><strong>Yes. One request = one document, regardless of page count.</strong> A 1-page DOCX and a 1,000-page DOCX each consume one request from your monthly quota. There are no per-page fees, no page-count multipliers, no hidden charges based on document length. This applies to all formats &mdash; Office, PDF, images, everything.</p></div>
+        </details>
+        <details>
+          <summary>When should I use AILANG Parse?</summary>
+          <div class="dp-faq-answer"><p>When your AI system ingests <strong>Office documents</strong> (DOCX, PPTX, XLSX, ODT) and you need structured, accurate output. We read Office XML directly &mdash; no PDF conversion, no OCR, no information loss. Track changes, merged table cells, comments, and formatting are all preserved. If your RAG pipeline or agent system processes business documents, this is built for you.</p></div>
+        </details>
+        <details>
+          <summary>When should I NOT use AILANG Parse?</summary>
+          <div class="dp-faq-answer"><p>If you only parse <strong>scanned PDFs</strong> or <strong>handwritten documents</strong>, a dedicated OCR service may be more appropriate. Our AI parsing handles PDFs, but our structural advantage is in Office formats where we bypass the PDF-then-OCR pipeline entirely. For pure scan workloads, we add an AI layer but don't offer a unique cost or quality advantage.</p></div>
+        </details>
+        <details>
+          <summary>Why is it so much cheaper than competitors?</summary>
+          <div class="dp-faq-answer"><p>Competitors convert your DOCX to PDF, render it as images, then run OCR or vision models to recover the text &mdash; expensive compute <strong>for every page</strong>. We read Office XML directly. A 200-page DOCX takes ~50ms to parse deterministically. No AI model needed, no per-page cost. The cost to us is the same for 1 page or 1,000 pages.</p></div>
+        </details>
+        <details>
+          <summary>What are &ldquo;AI parses&rdquo; vs regular requests?</summary>
+          <div class="dp-faq-answer"><p><strong>Regular requests</strong> use our deterministic parser &mdash; fast, cheap, and reliable for Office formats, CSV, Markdown, HTML, EPUB. No AI model involved. <strong>AI parses</strong> invoke a multimodal AI model for PDFs and images. Metered separately because AI inference costs significantly more than deterministic parsing.</p></div>
+        </details>
+        <details>
+          <summary>What does &ldquo;daily rate limit&rdquo; mean?</summary>
+          <div class="dp-faq-answer"><p>A burst-protection cap &mdash; the maximum documents you can parse in one calendar day. Prevents runaway scripts from exhausting your monthly quota in one burst. The monthly limit is the binding constraint for most users.</p></div>
+        </details>
+        <details>
+          <summary>Do you support the Unstructured API format?</summary>
+          <div class="dp-faq-answer"><p>Yes. Drop-in compatible endpoint at <code>/general/v0/general</code>. Change the base URL and get higher accuracy at a fraction of the cost. All tiers.</p></div>
+        </details>
+        <details>
+          <summary>What output formats are available?</summary>
+          <div class="dp-faq-answer"><p><strong>All tiers</strong>: JSON (Block ADT with 9 variants), Markdown, plain text, HTML, Quarto (.qmd), A2UI (agent-to-UI protocol), and Unstructured-compatible output. No output formats are gated by tier.</p></div>
+        </details>
+        <details>
+          <summary>Can I self-host?</summary>
+          <div class="dp-faq-answer"><p>Yes. <a href="selfhost.html">Run locally</a> via Docker or CLI with unlimited deterministic parsing, no API key needed.</p></div>
+        </details>
+        <details>
+          <summary>Need higher limits or custom pricing?</summary>
+          <div class="dp-faq-answer"><p>Contact <a href="mailto:docparse@sunholo.com">docparse@sunholo.com</a> for enterprise volume, SLAs, or dedicated deployments.</p></div>
+        </details>
       </div>
 
       <!-- ═══ CTA ═══ -->
