@@ -497,7 +497,7 @@
         </div>
 
         <!-- Pro -->
-        <div class="dp-tier-card dp-tier-card--featured">
+        <div class="dp-tier-card dp-tier-card--featured" id="pro">
           <div class="dp-tier-name">Pro</div>
           <div class="dp-tier-price">&euro;29<span class="dp-tier-price-period"> / month</span></div>
           <div class="dp-tier-unit">&euro;0.00029 per document at full usage</div>
@@ -515,7 +515,7 @@
         </div>
 
         <!-- Business -->
-        <div class="dp-tier-card">
+        <div class="dp-tier-card" id="business">
           <div class="dp-tier-name">Business</div>
           <div class="dp-tier-price">&euro;99<span class="dp-tier-price-period"> / month</span></div>
           <div class="dp-tier-unit">&euro;0.000198 per document at full usage</div>
@@ -815,7 +815,39 @@
 
 <div id="footer-mount"></div>
 
+<script src="vendor/firebase/firebase-app-compat.js"></script>
+<script src="vendor/firebase/firebase-auth-compat.js"></script>
+<script src="js/firebase-app.js"></script>
+<script src="js/checkout.js"></script>
 <script src="js/site-data.js"></script>
 <script src="js/components.js"></script>
+<script>
+// ── Smart checkout buttons: signed-in users go directly to Stripe ──
+if (window.dpCheckout) {
+  dpCheckout.init();
+
+  var proBtn = document.querySelector('#pro .dp-btn');
+  var bizBtn = document.querySelector('#business .dp-btn');
+
+  if (proBtn) {
+    proBtn.addEventListener('click', function (e) {
+      var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+      if (user && dpCheckout.isReady()) {
+        e.preventDefault();
+        dpCheckout.start('pro', proBtn);
+      }
+    });
+  }
+  if (bizBtn) {
+    bizBtn.addEventListener('click', function (e) {
+      var user = window.dpGetCurrentUser ? window.dpGetCurrentUser() : null;
+      if (user && dpCheckout.isReady()) {
+        e.preventDefault();
+        dpCheckout.start('business', bizBtn);
+      }
+    });
+  }
+}
+</script>
 </body>
 </html>

@@ -132,9 +132,25 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
       '</header>';
   }
 
-  // ── Inject Footer ──
+  // ── Inject Pre-Footer CTA Band (feature pages only) ──
   var footerMount = document.getElementById('footer-mount');
   if (footerMount) {
+    var page = location.pathname.split('/').pop() || 'index.html';
+    var noCta = ['index.html', 'api.html', 'pricing.html', 'privacy.html', 'terms.html', 'docs.html'];
+    var showCta = noCta.indexOf(page) === -1 && !document.querySelector('[data-no-cta]');
+    if (showCta) {
+      var ctaBand = document.createElement('div');
+      ctaBand.style.cssText = 'max-width:700px;margin:40px auto 0;padding:20px 24px;border-radius:var(--radius);background:var(--dp-blue-faded,rgba(37,99,235,0.04));border:1px solid var(--dp-blue-border,rgba(37,99,235,0.15));text-align:center';
+      ctaBand.innerHTML =
+        '<div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Ready to parse at scale?</div>' +
+        '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px">Free tier: <span data-dp="pricing.tiers.free.requests_per_month">1,000</span> documents/month. Pro from &euro;<span data-dp="pricing.tiers.pro.price_eur">29</span>/mo.</div>' +
+        '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">' +
+          '<a href="pricing.html" class="dp-btn dp-btn--primary" style="font-size:12px;padding:6px 16px;text-decoration:none">See Pricing</a>' +
+          '<a href="api.html#getting-started" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:6px 16px;text-decoration:none">Get API Key</a>' +
+        '</div>';
+      footerMount.parentNode.insertBefore(ctaBand, footerMount);
+    }
+
     footerMount.outerHTML =
       '<footer class="footer">' +
         '<div class="footer-brand">' +
