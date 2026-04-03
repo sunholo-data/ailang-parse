@@ -1,13 +1,18 @@
 /**
  * @ailang/parse — JavaScript/TypeScript client for AILANG Parse.
  *
- * @example
+ * @example Upload and parse a local file
  * ```typescript
  * import { DocParse } from '@ailang/parse';
  *
  * const client = new DocParse({ apiKey: 'dp_a1b2c3d4...' });
- * const result = await client.parse('report.docx');
+ * const result = await client.parseFile('report.docx');
  * console.log(result.blocks);
+ * ```
+ *
+ * @example Parse a sample or server-side file
+ * ```typescript
+ * const result = await client.parse('sample_docx_basic');
  * ```
  *
  * @example Unstructured migration

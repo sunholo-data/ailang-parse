@@ -124,9 +124,39 @@ class DocParse:
     # ── Core API methods ──
 
     def parse(self, filepath: str, output_format: str = "blocks") -> ParseResult:
-        """Parse a document file. Returns structured blocks."""
+        """Parse a document by sample ID or server-side filepath. Returns structured blocks.
+
+        For uploading local files, use :meth:`parse_file` instead.
+        """
         data = self._call("POST", "/api/v1/parse", args=[filepath, output_format])
         return ParseResult.from_dict(data)
+
+    def parse_file(self, filepath: str, output_format: str = "blocks") -> ParseResult:
+        """Upload a local file and parse it. Returns structured blocks.
+
+        Uses multipart/form-data to upload the file directly to the API.
+        Works on all tiers (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+
+        Usage::
+
+            result = client.parse_file("report.docx")
+            print(result.blocks)
+        """
+        url = self.base_url + "/api/v1/parse"
+        with open(filepath, "rb") as f:
+            resp = self._session.post(
+                url,
+                files={"filepath": (Path(filepath).name, f)},
+                data={"outputFormat": output_format, "apiKey": self.api_key},
+                timeout=self.timeout,
+            )
+        if resp.status_code == 401:
+            raise AuthError("Invalid or missing API key", 401)
+        if resp.status_code == 429:
+            raise QuotaError("Quota exceeded", status_code=429)
+        if resp.status_code >= 400:
+            raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
+        return ParseResult.from_dict(self._unwrap(resp.json()))
 
     def health(self) -> HealthResult:
         """Check API health."""

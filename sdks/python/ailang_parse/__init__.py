@@ -1,12 +1,16 @@
 """AILANG Parse — Python client for the AILANG Parse document parsing API.
 
-Usage::
+Upload and parse a local file::
 
     from ailang_parse import DocParse
 
     client = DocParse(api_key="dp_a1b2c3d4...")
-    result = client.parse("report.docx")
+    result = client.parse_file("report.docx")
     print(result.blocks)
+
+Parse a sample or server-side file::
+
+    result = client.parse("sample_docx_basic")
 
 Unstructured migration::
 

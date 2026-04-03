@@ -96,9 +96,71 @@ export class DocParse {
     this.keys = new KeyManager(this);
   }
 
-  /** Parse a document file. Returns structured blocks. */
+  /** Parse a document by sample ID or server-side filepath. Returns structured blocks.
+   *  For uploading local files, use {@link parseFile} instead. */
   async parse(filepath: string, outputFormat = "blocks"): Promise<ParseResult> {
     return this._call("POST", "/api/v1/parse", [filepath, outputFormat]) as Promise<ParseResult>;
+  }
+
+  /**
+   * Upload a local file and parse it. Returns structured blocks.
+   *
+   * Uses multipart/form-data to upload the file directly to the API.
+   * Works on all tiers (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+   *
+   * @example
+   * ```ts
+   * const result = await client.parseFile("report.docx");
+   * console.log(result.blocks);
+   * ```
+   */
+  async parseFile(filepath: string, outputFormat = "blocks"): Promise<ParseResult> {
+    const url = this.baseUrl + "/api/v1/parse";
+    let form: any;
+
+    // Node.js: read file from disk
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const { FormData: NodeFormData } = require("undici");
+      const { Blob } = require("buffer");
+
+      const fileData = fs.readFileSync(filepath);
+      const blob = new Blob([fileData]);
+      form = new NodeFormData();
+      form.append("filepath", blob, path.basename(filepath));
+      form.append("outputFormat", outputFormat);
+      if (this.apiKey) form.append("apiKey", this.apiKey);
+    } catch {
+      // Browser: expect a File object or use native FormData
+      form = new FormData();
+      form.append("filepath", filepath as any);
+      form.append("outputFormat", outputFormat);
+      if (this.apiKey) form.append("apiKey", this.apiKey);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const headers: Record<string, string> = {};
+      if (this.apiKey) headers["x-api-key"] = this.apiKey;
+
+      const resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body: form,
+        signal: controller.signal,
+      });
+
+      if (resp.status === 401) throw new AuthError();
+      if (resp.status === 429) throw new QuotaError("Quota exceeded");
+      if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
+
+      return this._unwrap(await resp.json()) as ParseResult;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Check API health. */
