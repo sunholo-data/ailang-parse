@@ -172,7 +172,9 @@
       if (headerUserName) headerUserName.textContent = user.displayName || user.email || '';
       if (headerUserEmail) headerUserEmail.textContent = user.email || '';
     } else {
-      // Signed out
+      // Signed out — clear cached API key so it doesn't leak to another account
+      localStorage.removeItem('dp_api_key');
+
       if (dashPlaceholder) dashPlaceholder.style.display = 'block';
       if (dashActive) dashActive.style.display = 'none';
       if (signinBtn) signinBtn.style.display = 'inline-flex';
