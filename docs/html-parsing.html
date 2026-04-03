@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML Parsing API — Parse HTML to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse HTML to structured JSON. Extract tables, headings, lists, and semantic structure from web pages and email bodies. Same Block ADT as Office formats.">
+<meta property="og:title" content="HTML Parsing API — AILANG Parse">
+<meta property="og:description" content="Parse HTML to structured JSON. Tables, headings, lists, semantic structure — all extracted into typed blocks. Deterministic, no AI needed.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/html-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0 28px;
+}
+.dp-compare-grid > div {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.dp-compare-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dp-compare-label--raw {
+  background: #2d1b1b;
+  color: #f08080;
+}
+.dp-compare-label--structured {
+  background: #1b2d1b;
+  color: #80f080;
+}
+.dp-compare-grid pre {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  background: var(--bg-card);
+  max-height: 340px;
+}
+.dp-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-feature-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-feature-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-usecase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-usecase-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-usecase-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-usecase-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .dp-compare-grid,
+  .dp-feature-grid,
+  .dp-usecase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse HTML to structured JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the HTML file or content to the AILANG Parse API or use the Python/JS/Go SDK. The parser extracts semantic structure — headings, paragraphs, tables, lists — into typed blocks."}},
+    {"@type": "Question", "name": "Does HTML parsing handle messy or malformed HTML?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The parser handles unclosed tags, nested tables, inline styles, and real-world email HTML. It sanitizes the input while preserving semantic structure."}},
+    {"@type": "Question", "name": "Are HTML tables extracted with structure?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. HTML tables are extracted with headers (from thead or first row), rows, colspan/rowspan merges, and cell content. Nested tables are flattened into the parent structure."}},
+    {"@type": "Question", "name": "Can I parse email HTML bodies?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Email HTML (from multipart/alternative emails) is parsed the same way. Use with EML parsing for full email extraction — the HTML body becomes structured blocks alongside headers and attachments."}},
+    {"@type": "Question", "name": "Is the output the same as Office format parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. HTML parsing produces the same Block ADT as DOCX, XLSX, and PPTX parsing. Headings, text, tables, and lists are all typed blocks. Your downstream code handles all formats identically."}},
+    {"@type": "Question", "name": "How fast is HTML parsing?", "acceptedAnswer": {"@type": "Answer", "text": "HTML parsing is deterministic and runs in milliseconds. No AI needed, no external dependencies. Even complex email HTML with deeply nested tables parses in under 100ms."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">HTML Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Parse HTML to structured JSON. Tables, headings, lists, semantic structure &mdash; extracted into the same typed blocks as Office formats. Deterministic, no AI needed.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#email-html">Email HTML</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">HTML Varies Wildly</h2>
+      <p>Clean semantic HTML with proper <code>&lt;h1&gt;</code>, <code>&lt;table&gt;</code>, and <code>&lt;article&gt;</code> tags is easy to parse. Real-world HTML is not. Email clients generate deeply nested table layouts with inline styles. CMS exports mix semantic markup with presentation markup. Web scrapes contain navigation, ads, and boilerplate alongside content.</p>
+
+      <p>AILANG Parse strips the presentation layer and extracts semantic structure: headings, paragraphs, tables, and lists become typed blocks. The same Block ADT output as <a href="docx-parsing.html">DOCX</a> and <a href="xlsx-parsing.html">XLSX</a> parsing &mdash; your pipeline handles all formats identically.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>HTML parsing is fully deterministic &mdash; no AI calls, no API keys needed. Even complex email HTML with nested tables and inline styles parses in under 100ms.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw HTML vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw HTML (email newsletter)</div>
+<pre><code>&lt;html&gt;
+&lt;body style="margin:0;padding:0"&gt;
+&lt;table width="100%" cellpadding="0"&gt;
+  &lt;tr&gt;&lt;td align="center"&gt;
+    &lt;table width="600"&gt;
+      &lt;tr&gt;&lt;td&gt;
+        &lt;h2 style="font-family:Arial;
+          color:#333;font-size:24px;
+          margin:0 0 16px"&gt;
+          Weekly Report
+        &lt;/h2&gt;
+        &lt;p style="font-family:Arial;
+          font-size:14px;color:#666;
+          line-height:1.5"&gt;
+          Here are this week's metrics:
+        &lt;/p&gt;
+        &lt;table border="1" cellpadding="8"
+          style="border-collapse:collapse;
+          width:100%"&gt;
+          &lt;tr style="background:#f5f5f5"&gt;
+            &lt;th&gt;Metric&lt;/th&gt;
+            &lt;th&gt;Value&lt;/th&gt;
+            &lt;th&gt;Change&lt;/th&gt;
+          &lt;/tr&gt;
+          &lt;tr&gt;
+            &lt;td&gt;Revenue&lt;/td&gt;
+            &lt;td&gt;$142K&lt;/td&gt;
+            &lt;td&gt;+12%&lt;/td&gt;
+          &lt;/tr&gt;
+        &lt;/table&gt;
+      &lt;/td&gt;&lt;/tr&gt;
+    &lt;/table&gt;
+  &lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;/body&gt;&lt;/html&gt;</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output</div>
+<pre><code class="language-json">{
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Weekly Report"
+    },
+    {
+      "type": "text",
+      "text": "Here are this week's metrics:"
+    },
+    {
+      "type": "table",
+      "headers": [
+        {"text": "Metric"},
+        {"text": "Value"},
+        {"text": "Change"}
+      ],
+      "rows": [
+        [
+          {"text": "Revenue"},
+          {"text": "$142K"},
+          {"text": "+12%"}
+        ]
+      ]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Heading Hierarchy</h4>
+          <p>HTML heading tags (<code>&lt;h1&gt;</code> through <code>&lt;h6&gt;</code>) are extracted with their level preserved. Headings created with CSS styling (large bold text in <code>&lt;div&gt;</code> or <code>&lt;span&gt;</code>) are normalized when identifiable.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables with Merges</h4>
+          <p>HTML tables are extracted with headers (from <code>&lt;thead&gt;</code> or first row), rows, and <code>colspan</code>/<code>rowspan</code> resolved into <code>gridSpan</code>/<code>vMerge</code> metadata. Nested layout tables are collapsed. <a href="tables.html">Deep dive &rarr;</a></p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Lists</h4>
+          <p>Ordered (<code>&lt;ol&gt;</code>) and unordered (<code>&lt;ul&gt;</code>) lists are extracted as text blocks with list styling preserved. Nested lists maintain their hierarchy.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Content Extraction</h4>
+          <p>Navigation, headers, footers, ads, and boilerplate are stripped. The parser identifies main content areas and extracts meaningful text, tables, and structure.</p>
+        </div>
+      </div>
+
+      <h2 id="email-html">Email HTML</h2>
+      <p>Email HTML is its own challenge. Email clients require table-based layouts with inline styles for compatibility across Outlook, Gmail, Apple Mail, and dozens of other renderers. A simple newsletter can be 500+ lines of nested <code>&lt;table&gt;</code> tags wrapping a few paragraphs and a data table.</p>
+
+      <p>AILANG Parse distinguishes layout tables (used for positioning) from data tables (containing actual tabular data). Layout tables are collapsed; data tables are extracted with full structure. Combined with <a href="email-parsing.html">EML parsing</a>, you get headers, metadata, and the HTML body all as structured blocks.</p>
+
+<pre><code class="language-bash"># Parse an HTML file directly
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail newsletter.html
+
+# Parse an EML with HTML body — both are extracted
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail newsletter.eml</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Web Scraping Pipelines</h4>
+          <p>Parse scraped web pages into structured blocks for indexing, analysis, or RAG. Content extraction strips navigation and boilerplate. Tables are structured, not flattened to text. Headings provide document hierarchy for chunking strategies.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>CMS Content Migration</h4>
+          <p>Export content from WordPress, Drupal, or other CMS platforms as HTML, then parse into structured JSON for migration to a new system. Heading hierarchy, tables, and lists transfer cleanly. Inline styles and CMS-specific markup are stripped.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Email HTML Body Parsing</h4>
+          <p>Extract content from HTML email bodies: newsletter data tables, receipts, shipping notifications. Combined with <a href="email-parsing.html">EML parsing</a>, you get a complete structured view of the email &mdash; headers, plain text, HTML content, and attachments.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Documentation Conversion</h4>
+          <p>Convert HTML documentation to Markdown, Quarto, or other formats. Heading hierarchy, code blocks, tables, and lists transfer with structure preserved. Ideal for docs-as-code migrations or multi-format publishing.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>AI Knowledge Ingestion</h4>
+          <p>Feed structured blocks to LLMs instead of raw HTML. The model processes typed headings, paragraphs, and tables &mdash; not tag soup. Token efficiency improves dramatically when you strip <code>&lt;div class="wrapper-outer-inner"&gt;</code> wrappers.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Report Standardization</h4>
+          <p>Normalize HTML reports from different sources into a consistent Block ADT. Whether the input is a well-structured report or an email-style table layout, the output is the same typed blocks your pipeline expects.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse an HTML file
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail page.html
+
+# Convert HTML to Markdown
+./bin/docparse page.html --convert output.md
+
+# Convert HTML to DOCX
+./bin/docparse page.html --convert output.docx</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_html","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <h3>Python SDK</h3>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="YOUR_API_KEY")
+result = client.parse("newsletter.html", output_format="json")
+
+for block in result.blocks:
+    if block.type == "heading":
+        print(f"H{block.level}: {block.text}")
+    if block.type == "table":
+        print(f"Table: {len(block.rows)} rows, {len(block.headers)} columns")
+</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse HTML to structured JSON?</summary>
+          <div class="dp-faq-answer"><p>Send the HTML file to the <a href="api.html">AILANG Parse API</a> or use the Python/JS/Go SDK. The parser extracts semantic structure into typed blocks.</p></div>
+        </details>
+        <details>
+          <summary>Does HTML parsing handle messy or malformed HTML?</summary>
+          <div class="dp-faq-answer"><p>Yes. Unclosed tags, nested tables, inline styles, and real-world email HTML are all handled. The parser sanitizes input while preserving semantic structure.</p></div>
+        </details>
+        <details>
+          <summary>Are HTML tables extracted with structure?</summary>
+          <div class="dp-faq-answer"><p>Yes. Headers, rows, <code>colspan</code>/<code>rowspan</code> merges are all extracted. Layout tables are collapsed; data tables are preserved. See <a href="tables.html">table extraction docs</a>.</p></div>
+        </details>
+        <details>
+          <summary>Can I parse email HTML bodies?</summary>
+          <div class="dp-faq-answer"><p>Yes. Use with <a href="email-parsing.html">EML parsing</a> for full email extraction, or parse HTML files directly. Layout tables from email clients are collapsed automatically.</p></div>
+        </details>
+        <details>
+          <summary>Is the output the same as Office format parsing?</summary>
+          <div class="dp-faq-answer"><p>Yes. Same Block ADT: headings, text, tables, lists. Your downstream code handles <a href="docx-parsing.html">DOCX</a>, <a href="xlsx-parsing.html">XLSX</a>, <a href="pptx-parsing.html">PPTX</a>, and HTML identically.</p></div>
+        </details>
+        <details>
+          <summary>How fast is HTML parsing?</summary>
+          <div class="dp-faq-answer"><p>Deterministic, under 100ms for complex email HTML. No AI needed, no external dependencies.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

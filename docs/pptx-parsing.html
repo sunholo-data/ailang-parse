@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPTX Parsing API — Parse PowerPoint to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse PPTX files to structured JSON. Extract slide text, speaker notes, tables, shapes, and layouts from PowerPoint presentations. Deterministic, no AI needed.">
+<meta property="og:title" content="PPTX Parsing API — AILANG Parse">
+<meta property="og:description" content="Parse PowerPoint presentations to structured JSON. Slides, speaker notes, tables, shapes — all extracted. Milliseconds, not seconds.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/pptx-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0 28px;
+}
+.dp-compare-grid > div {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.dp-compare-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dp-compare-label--raw {
+  background: #2d1b1b;
+  color: #f08080;
+}
+.dp-compare-label--structured {
+  background: #1b2d1b;
+  color: #80f080;
+}
+.dp-compare-grid pre {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  background: var(--bg-card);
+  max-height: 340px;
+}
+.dp-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-feature-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-feature-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-usecase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-usecase-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-usecase-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-usecase-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .dp-compare-grid,
+  .dp-feature-grid,
+  .dp-usecase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse a PPTX file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .pptx file to the AILANG Parse API or use the Python/JS/Go SDK. The parser reads PresentationML directly and returns structured JSON with slide content, speaker notes, tables, and metadata."}},
+    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Speaker notes from notesSlide XML are extracted as separate blocks associated with their slide. The notes content is fully preserved with formatting."}},
+    {"@type": "Question", "name": "How are tables in slides handled?", "acceptedAnswer": {"@type": "Answer", "text": "Tables within slides are extracted with full row/column structure, merged cells (gridSpan/vMerge), and cell content. They appear as table blocks within their parent slide section."}},
+    {"@type": "Question", "name": "Does PPTX parsing preserve slide order?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Slides are parsed in presentation order as defined in presentation.xml. Each slide becomes a section block numbered by its position."}},
+    {"@type": "Question", "name": "What about shapes and text boxes in slides?", "acceptedAnswer": {"@type": "Answer", "text": "All text-bearing shapes (titles, subtitles, content placeholders, freeform text boxes) are extracted. Shape text is ordered by placeholder type then position on the slide."}},
+    {"@type": "Question", "name": "How fast is PPTX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical presentations parse in under 50ms. The parser reads PresentationML directly with no rendering engine or LibreOffice dependency. 96.6% accuracy on OfficeDocBench."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">PPTX Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Parse PowerPoint presentations to structured JSON. Slide text, speaker notes, tables, shapes &mdash; extracted per slide with full metadata.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#speaker-notes">Speaker Notes</a>
+        <a href="#slide-tables">Tables in Slides</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Presentations Are Visual Containers That Defeat Text Extraction</h2>
+      <p>A .pptx file is a zip archive containing PresentationML &mdash; XML that encodes slides, shapes, text frames, tables, and speaker notes. Most parsers render slides to images or flatten them to plain text, losing the distinction between title, body, notes, and table content.</p>
+
+      <p>AILANG Parse reads PresentationML directly. Each slide becomes a section block with typed content: titles, body text, tables, and speaker notes are all separate blocks. The parser extracts from shape placeholders in layout order, so content appears in reading sequence.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Speaker notes often contain more substance than the slide itself &mdash; talking points, data sources, follow-up actions. PDF-first parsers drop them entirely because notes aren't part of the rendered slide.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw PresentationML vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw slide1.xml + notesSlide1.xml</div>
+<pre><code>&lt;p:sld&gt;
+  &lt;p:cSld&gt;
+    &lt;p:spTree&gt;
+      &lt;p:sp&gt;
+        &lt;p:nvSpPr&gt;&lt;p:nvPr&gt;
+          &lt;p:ph type="title"/&gt;
+        &lt;/p:nvPr&gt;&lt;/p:nvSpPr&gt;
+        &lt;p:txBody&gt;
+          &lt;a:p&gt;&lt;a:r&gt;
+            &lt;a:t&gt;Q1 Results&lt;/a:t&gt;
+          &lt;/a:r&gt;&lt;/a:p&gt;
+        &lt;/p:txBody&gt;
+      &lt;/p:sp&gt;
+      &lt;p:sp&gt;
+        &lt;p:nvSpPr&gt;&lt;p:nvPr&gt;
+          &lt;p:ph idx="1"/&gt;
+        &lt;/p:nvPr&gt;&lt;/p:nvSpPr&gt;
+        &lt;p:txBody&gt;
+          &lt;a:p&gt;&lt;a:r&gt;
+            &lt;a:t&gt;Revenue up 15% YoY&lt;/a:t&gt;
+          &lt;/a:r&gt;&lt;/a:p&gt;
+          &lt;a:p&gt;&lt;a:r&gt;
+            &lt;a:t&gt;New markets: APAC, LATAM&lt;/a:t&gt;
+          &lt;/a:r&gt;&lt;/a:p&gt;
+        &lt;/p:txBody&gt;
+      &lt;/p:sp&gt;
+    &lt;/p:spTree&gt;
+  &lt;/p:cSld&gt;
+&lt;/p:sld&gt;
+
+&lt;!-- notesSlide1.xml --&gt;
+&lt;p:notes&gt;
+  &lt;p:cSld&gt;
+    &lt;p:spTree&gt;
+      &lt;p:sp&gt;&lt;p:txBody&gt;
+        &lt;a:p&gt;&lt;a:r&gt;
+          &lt;a:t&gt;Mention APAC expansion
+timeline: Q3 launch&lt;/a:t&gt;
+        &lt;/a:r&gt;&lt;/a:p&gt;
+      &lt;/p:txBody&gt;&lt;/p:sp&gt;
+    &lt;/p:spTree&gt;
+  &lt;/p:cSld&gt;
+&lt;/p:notes&gt;</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output</div>
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "Q1 Results",
+    "author": "Marketing Team",
+    "slides": 24
+  },
+  "blocks": [
+    {
+      "type": "section",
+      "kind": "slide",
+      "blocks": [
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "Q1 Results"
+        },
+        {
+          "type": "text",
+          "text": "Revenue up 15% YoY"
+        },
+        {
+          "type": "text",
+          "text": "New markets: APAC, LATAM"
+        },
+        {
+          "type": "text",
+          "style": "speaker-notes",
+          "text": "Mention APAC expansion
+timeline: Q3 launch"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Slide Text &amp; Titles</h4>
+          <p>Title and subtitle placeholders are extracted as headings. Body content placeholders become text blocks. Text is ordered by placeholder type (title first) then by position on the slide.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Speaker Notes</h4>
+          <p>Notes from <code>notesSlide</code> XML are extracted as text blocks with <code>style: "speaker-notes"</code>, associated with their parent slide. The content that presenters actually say &mdash; not just what the audience sees.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables within Slides</h4>
+          <p>Slide-embedded tables are extracted with full row/column structure, merged cells, and cell content. They appear as <code>table</code> blocks within their parent slide section. <a href="tables.html">Deep dive &rarr;</a></p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Shape &amp; Text Box Content</h4>
+          <p>All text-bearing shapes are extracted: content placeholders, freeform text boxes, callout shapes. Text within grouped shapes is flattened into reading order.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Slide Ordering</h4>
+          <p>Slides are parsed in presentation order as defined in <code>presentation.xml</code>. Each slide becomes a numbered <code>SectionBlock</code> with <code>kind: "slide"</code>.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Comments &amp; Metadata</h4>
+          <p>Slide-level comments are extracted with author and date. Presentation metadata (title, author, slide count, created date) comes from core properties. <a href="comments.html">Comment details &rarr;</a></p>
+        </div>
+      </div>
+
+      <h2 id="speaker-notes">Speaker Notes</h2>
+      <p>PPTX stores speaker notes in separate <code>notesSlide</code> XML files, one per slide. These contain the presenter's talking points, data sources, and context that doesn't appear on the projected slide. AILANG Parse extracts notes as text blocks with <code>style: "speaker-notes"</code>.</p>
+
+      <p>This is critical for AI applications: the notes often contain more actionable content than the slide bullet points. A training deck's slide says "Security Best Practices" &mdash; the notes contain the actual procedures and exceptions.</p>
+
+<pre><code class="language-json">[
+  {"type": "heading", "level": 1, "text": "Security Best Practices"},
+  {"type": "text", "text": "Follow the principle of least privilege"},
+  {"type": "text", "text": "Rotate credentials every 90 days"},
+  {"type": "text", "style": "speaker-notes",
+   "text": "Exception: service accounts in prod-critical path use 180-day rotation per SEC-2024-003. Mention the incident from January if anyone pushes back on rotation frequency."}
+]</code></pre>
+
+      <h2 id="slide-tables">Tables in Slides</h2>
+      <p>Presentation slides frequently contain data tables &mdash; quarterly results, comparison matrices, feature lists. These use the same <code>a:tbl</code> markup as DOCX tables, with <code>gridSpan</code> for horizontal merges and <code>vMerge</code> for vertical merges.</p>
+
+<pre><code class="language-json">{
+  "type": "table",
+  "headers": [
+    {"text": "Feature"},
+    {"text": "Free"},
+    {"text": "Pro"},
+    {"text": "Business"}
+  ],
+  "rows": [
+    [{"text": "API Requests"}, {"text": "1K/mo"}, {"text": "100K/mo"}, {"text": "500K/mo"}],
+    [{"text": "File Size"}, {"text": "10 MB"}, {"text": "25 MB"}, {"text": "50 MB"}],
+    [{"text": "Support"}, {"text": "Community"}, {"text": "Email"}, {"text": "Dedicated"}]
+  ]
+}</code></pre>
+
+      <p>See <a href="tables.html">Tables &amp; Merged Cells</a> for the full specification.</p>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Training Material Indexing</h4>
+          <p>Parse corporate training decks into structured blocks. Speaker notes contain the detailed procedures and context that slides only summarize. Index both slide content and notes for enterprise search and knowledge base systems.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Meeting Deck Summarization</h4>
+          <p>Feed structured slide JSON to an LLM for meeting prep summaries. The model sees title hierarchy, bullet points, data tables, and speaker notes as separate typed blocks &mdash; producing better summaries than working from flattened text.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Compliance Presentation Review</h4>
+          <p>Regulatory presentations (board reports, audit findings, risk assessments) need systematic review. Structured parsing enables automated checks: required sections present, data tables match expected formats, comments from reviewers captured.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Sales Enablement Search</h4>
+          <p>Sales teams maintain hundreds of decks. Parse them into structured JSON for semantic search: find slides about specific products, pricing tables, competitive comparisons. Speaker notes surface the positioning and objection handling that isn't on the slide.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Presentation-to-Document</h4>
+          <p>Convert PPTX to Markdown, HTML, or Quarto for documentation. Slide titles become headings, bullet points become lists, tables are preserved, and speaker notes can be included as annotations or footnotes.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>AI Slide Analysis</h4>
+          <p>Give LLMs the full slide context: title, body, table data, and speaker notes as typed blocks. The model can identify key messages, extract action items from notes, and cross-reference data tables across slides &mdash; tasks impossible with flat text extraction.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse a PPTX file
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail presentation.pptx
+
+# Convert PPTX to Markdown
+./bin/docparse presentation.pptx --convert output.md
+
+# Convert PPTX to HTML
+./bin/docparse presentation.pptx --convert output.html</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_pptx_formatting","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <h3>Python SDK</h3>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="YOUR_API_KEY")
+result = client.parse("presentation.pptx", output_format="json")
+
+# Iterate slides
+for block in result.blocks:
+    if block.kind == "slide":
+        for child in block.blocks:
+            if child.type == "heading":
+                print(f"Slide: {child.text}")
+            if child.style == "speaker-notes":
+                print(f"  Notes: {child.text[:80]}...")
+</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse a PPTX file to JSON?</summary>
+          <div class="dp-faq-answer"><p>Send the <code>.pptx</code> file to the <a href="api.html">AILANG Parse API</a> or use the Python/JS/Go SDK. The parser reads PresentationML directly and returns structured JSON with slide content, notes, and tables.</p></div>
+        </details>
+        <details>
+          <summary>Are speaker notes extracted from PPTX files?</summary>
+          <div class="dp-faq-answer"><p>Yes. Notes from <code>notesSlide</code> XML are extracted as text blocks with <code>style: "speaker-notes"</code>, associated with their parent slide.</p></div>
+        </details>
+        <details>
+          <summary>How are tables in slides handled?</summary>
+          <div class="dp-faq-answer"><p>Tables are extracted with full row/column structure, merged cells, and cell content. See <a href="tables.html">table extraction docs</a>.</p></div>
+        </details>
+        <details>
+          <summary>Does PPTX parsing preserve slide order?</summary>
+          <div class="dp-faq-answer"><p>Yes. Slides are parsed in presentation order from <code>presentation.xml</code>. Each slide becomes a numbered section block.</p></div>
+        </details>
+        <details>
+          <summary>What about shapes and text boxes in slides?</summary>
+          <div class="dp-faq-answer"><p>All text-bearing shapes (titles, subtitles, content placeholders, freeform text boxes) are extracted and ordered by placeholder type then position.</p></div>
+        </details>
+        <details>
+          <summary>How fast is PPTX parsing?</summary>
+          <div class="dp-faq-answer"><p>Typical presentations parse in under 50ms. No rendering engine or LibreOffice dependency. 96.6% accuracy on <a href="benchmarks.html">OfficeDocBench</a>.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

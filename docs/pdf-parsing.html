@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Parsing API — AI-Powered PDF to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse PDF files to structured JSON using any AI provider. Gemini, Claude, OpenAI, or Ollama for fully local. Tables, images, and text extracted into typed blocks.">
+<meta property="og:title" content="PDF Parsing API — AILANG Parse">
+<meta property="og:description" content="Parse PDFs to structured JSON with any AI provider. Gemini, Claude, OpenAI, or Ollama. No vendor lock-in, same Block ADT output as Office formats.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/pdf-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0 28px;
+}
+.dp-compare-grid > div {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.dp-compare-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dp-compare-label--raw {
+  background: #2d1b1b;
+  color: #f08080;
+}
+.dp-compare-label--structured {
+  background: #1b2d1b;
+  color: #80f080;
+}
+.dp-compare-grid pre {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  background: var(--bg-card);
+  max-height: 340px;
+}
+.dp-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-feature-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-feature-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-usecase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-usecase-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-usecase-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-usecase-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-provider-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-provider-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-provider-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-provider-card code {
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .dp-compare-grid,
+  .dp-feature-grid,
+  .dp-usecase-grid,
+  .dp-provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the PDF to the AILANG Parse API with an AI provider specified (Gemini, Claude, OpenAI, or Ollama). The AI extracts content into the same structured JSON Block ADT used for Office formats."}},
+    {"@type": "Question", "name": "Which AI providers are supported for PDF parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Gemini (gemini-2.5-flash, gemini-2.5-pro), Claude (claude-sonnet-4-5-20250514), OpenAI (gpt-4o), and Ollama for fully local processing. Switch providers with a single flag — no code changes."}},
+    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use Ollama as the AI backend for fully local PDF processing. No data leaves your machine. Set --ai ollama/llama3.2-vision or any vision-capable Ollama model."}},
+    {"@type": "Question", "name": "Why does PDF parsing require AI?", "acceptedAnswer": {"@type": "Answer", "text": "PDFs are a visual format — they encode where to draw glyphs on a page, not document structure. Extracting semantic structure (headings, tables, reading order) requires visual understanding that rule-based parsers can't reliably provide."}},
+    {"@type": "Question", "name": "Is the output format the same as Office parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. PDF parsing produces the same Block ADT (headings, text, tables, images) as DOCX, XLSX, and PPTX parsing. Your downstream code handles all formats identically."}},
+    {"@type": "Question", "name": "How much does PDF parsing cost?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse charges per API request. The AI provider costs are separate — you use your own API key. Gemini Flash is the most cost-effective option for high-volume PDF processing."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">PDF Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Parse PDFs to structured JSON using any AI provider. Gemini, Claude, OpenAI, or Ollama for fully local. Same typed blocks as Office formats &mdash; no vendor lock-in.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#providers">AI Providers</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#local-processing">Local Processing</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">PDFs Have No Semantic Structure</h2>
+      <p>A PDF encodes where to draw glyphs on a page. It has no concept of "heading", "paragraph", or "table cell". Extracting document structure from PDF requires visual understanding &mdash; recognizing that larger bold text at the top of a page is a heading, that aligned columns of text form a table, that reading order flows left-to-right then top-to-bottom.</p>
+
+      <p>AILANG Parse delegates this visual understanding to the AI provider of your choice, then normalizes the output into the same Block ADT used for <a href="docx-parsing.html">DOCX</a>, <a href="xlsx-parsing.html">XLSX</a>, and <a href="pptx-parsing.html">PPTX</a> parsing. Your downstream code handles all formats identically.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>If your source document is a DOCX that was converted to PDF, parse the DOCX directly instead. You'll get track changes, comments, merged cells, and metadata that the PDF lost. <a href="vs-pdf-conversion.html">See why DOCX &gt; PDF for parsing</a>.</div>
+      </div>
+
+      <h2 id="how-it-works">How It Works</h2>
+      <p>AILANG Parse sends the PDF to the configured AI provider with a structured extraction prompt. The AI returns content in a normalized format, which AILANG Parse validates and converts into typed blocks. The result is the same Block ADT &mdash; headings, text, tables, images &mdash; regardless of which AI provider performed the extraction.</p>
+
+      <p>Switch providers with a single flag. No code changes, no output format differences.</p>
+
+<pre><code class="language-bash"># Gemini (fastest, most cost-effective)
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+  docparse/main.ail document.pdf
+
+# Claude
+ailang run --entry main --caps IO,FS,Env,AI --ai claude-sonnet-4-5-20250514 \
+  docparse/main.ail document.pdf
+
+# Ollama (fully local)
+ailang run --entry main --caps IO,FS,Env,AI --ai ollama/llama3.2-vision \
+  docparse/main.ail document.pdf</code></pre>
+
+      <h2 id="providers">AI Providers</h2>
+
+      <div class="dp-provider-grid">
+        <div class="dp-provider-card">
+          <h4>Gemini</h4>
+          <p>Best for high-volume processing. <code>gemini-2.5-flash</code> offers the fastest response times and lowest per-page cost. <code>gemini-2.5-pro</code> for complex documents with dense tables or multi-column layouts.</p>
+        </div>
+        <div class="dp-provider-card">
+          <h4>Claude</h4>
+          <p>Strong on nuanced document understanding. <code>claude-sonnet-4-5-20250514</code> excels at extracting meaning from complex layouts and academic papers. Good for documents where context matters.</p>
+        </div>
+        <div class="dp-provider-card">
+          <h4>OpenAI</h4>
+          <p>Solid general-purpose extraction. <code>gpt-4o</code> handles standard business documents well. Use when your team already has an OpenAI API key and wants a single provider.</p>
+        </div>
+        <div class="dp-provider-card">
+          <h4>Ollama (Local)</h4>
+          <p>Fully local processing &mdash; no data leaves your machine. Use any vision-capable model: <code>llama3.2-vision</code>, <code>llava</code>, etc. Ideal for sensitive documents, air-gapped environments, or cost-zero development.</p>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Headings &amp; Text</h4>
+          <p>The AI identifies heading hierarchy and body text from visual cues (font size, weight, position). Extracted as <code>heading</code> and <code>text</code> blocks with inferred levels.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables</h4>
+          <p>Visually aligned data is extracted as structured tables with headers and rows. Multi-page tables spanning page breaks are handled by the AI's visual context window.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Images &amp; Figures</h4>
+          <p>Embedded images are identified with their captions and alt text. The AI describes figure content for downstream indexing or accessibility.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Uniform Output</h4>
+          <p>Regardless of AI provider, the output is the same Block ADT: <code>heading</code>, <code>text</code>, <code>table</code>, <code>image</code>. Your pipeline code never changes when you switch providers.</p>
+        </div>
+      </div>
+
+      <h2 id="local-processing">Local Processing with Ollama</h2>
+      <p>For sensitive documents that can't leave your network, use Ollama as the AI backend. Install Ollama, pull a vision-capable model, and point AILANG Parse at it. Zero cloud calls.</p>
+
+<pre><code class="language-bash"># Install Ollama and pull a vision model
+ollama pull llama3.2-vision
+
+# Parse PDF fully locally
+ailang run --entry main --caps IO,FS,Env,AI \
+  --ai ollama/llama3.2-vision \
+  docparse/main.ail confidential-report.pdf</code></pre>
+
+      <p>The output format is identical to cloud providers. You can develop locally with Ollama and deploy to production with Gemini or Claude &mdash; same code, same output structure.</p>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Scanned Document Digitization</h4>
+          <p>OCR-level extraction from scanned PDFs using AI vision. The model reads handwritten notes, stamp marks, and degraded print that rule-based OCR struggles with. Output is structured JSON, not raw text.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Invoice Processing</h4>
+          <p>Extract line items, totals, dates, and vendor details from PDF invoices. The AI identifies table structure from visual layout, handling the wide variation in invoice formats across vendors.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Academic Paper Ingestion</h4>
+          <p>Parse research papers into structured sections: abstract, methodology, results, references. The AI handles multi-column layouts, figure captions, and equation blocks that trip up rule-based PDF parsers.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Legacy Archive Migration</h4>
+          <p>Convert PDF archives to structured JSON for database ingestion or knowledge base population. Process thousands of documents with batch mode, using the most cost-effective AI provider for your volume.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Compliance Document Review</h4>
+          <p>Parse regulatory filings, audit reports, and policy documents from PDF into structured blocks. Feed to an LLM for automated compliance checking, clause extraction, or cross-document comparison.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Air-Gapped Environments</h4>
+          <p>Process classified or restricted documents entirely on-premises using Ollama. No internet connection required after initial model download. The same Block ADT output integrates with your existing pipeline.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse with Gemini (set GOOGLE_API_KEY)
+GOOGLE_API_KEY="your-key" ailang run --entry main \
+  --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+  docparse/main.ail report.pdf
+
+# Parse with Ollama (fully local)
+ailang run --entry main --caps IO,FS,Env,AI \
+  --ai ollama/llama3.2-vision \
+  docparse/main.ail report.pdf</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"YOUR_API_KEY","ai":"gemini-2.5-flash"}'</code></pre>
+
+      <h3>Python SDK</h3>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="YOUR_API_KEY")
+
+# Parse with AI provider
+result = client.parse("report.pdf", output_format="json", ai="gemini-2.5-flash")
+
+# Same Block ADT as Office formats
+for block in result.blocks:
+    if block.type == "table":
+        print(f"Table: {len(block.rows)} rows")
+    if block.type == "heading":
+        print(f"H{block.level}: {block.text}")
+</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse a PDF to JSON?</summary>
+          <div class="dp-faq-answer"><p>Send the PDF to the <a href="api.html">AILANG Parse API</a> with an AI provider specified. The AI extracts content into the same structured JSON used for <a href="docx-parsing.html">Office formats</a>.</p></div>
+        </details>
+        <details>
+          <summary>Which AI providers are supported for PDF parsing?</summary>
+          <div class="dp-faq-answer"><p>Gemini (gemini-2.5-flash, gemini-2.5-pro), Claude (claude-sonnet-4-5-20250514), OpenAI (gpt-4o), and Ollama for fully local processing. Switch with a single flag.</p></div>
+        </details>
+        <details>
+          <summary>Can I parse PDFs locally without sending data to the cloud?</summary>
+          <div class="dp-faq-answer"><p>Yes. Use Ollama as the AI backend. Set <code>--ai ollama/llama3.2-vision</code> or any vision-capable model. No data leaves your machine.</p></div>
+        </details>
+        <details>
+          <summary>Why does PDF parsing require AI?</summary>
+          <div class="dp-faq-answer"><p>PDFs encode glyph positions, not document structure. Extracting headings, tables, and reading order requires visual understanding. For structured source files, <a href="docx-parsing.html">parse the DOCX directly</a>.</p></div>
+        </details>
+        <details>
+          <summary>Is the output format the same as Office parsing?</summary>
+          <div class="dp-faq-answer"><p>Yes. Same Block ADT (headings, text, tables, images) regardless of provider. Your downstream code handles all formats identically.</p></div>
+        </details>
+        <details>
+          <summary>How much does PDF parsing cost?</summary>
+          <div class="dp-faq-answer"><p>AILANG Parse charges per API request. AI provider costs are separate (your own key). Gemini Flash is the most cost-effective for volume. Ollama is free (your hardware).</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

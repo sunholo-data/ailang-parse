@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XLSX Parsing API — Parse Excel Spreadsheets to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse XLSX files to structured JSON. Extract tables with merged cells, multi-sheet workbooks, formulas, shared strings, and cell types. Deterministic, no AI needed.">
+<meta property="og:title" content="XLSX Parsing API — AILANG Parse">
+<meta property="og:description" content="Parse Excel spreadsheets to structured JSON. Merged cells, multi-sheet, formulas, shared strings — all resolved. Milliseconds, not seconds.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/xlsx-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0 28px;
+}
+.dp-compare-grid > div {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.dp-compare-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dp-compare-label--raw {
+  background: #2d1b1b;
+  color: #f08080;
+}
+.dp-compare-label--structured {
+  background: #1b2d1b;
+  color: #80f080;
+}
+.dp-compare-grid pre {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  background: var(--bg-card);
+  max-height: 340px;
+}
+.dp-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-feature-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-feature-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-usecase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-usecase-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-usecase-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-usecase-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .dp-compare-grid,
+  .dp-feature-grid,
+  .dp-usecase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse an XLSX file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .xlsx file to the AILANG Parse API or use the Python/JS/Go SDK. The parser reads SpreadsheetML directly and returns structured JSON with tables, merged cells, and metadata per sheet."}},
+    {"@type": "Question", "name": "How are merged cells handled in XLSX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Merged cell ranges from the mergeCell elements are resolved into explicit gridSpan and vMerge metadata on each cell. No visual heuristics — the merge topology comes directly from the XML."}},
+    {"@type": "Question", "name": "Does XLSX parsing support multi-sheet workbooks?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each sheet becomes a separate section block with the sheet name as a heading. All sheets are parsed in workbook order with their full table structure preserved."}},
+    {"@type": "Question", "name": "Are formulas extracted from XLSX files?", "acceptedAnswer": {"@type": "Answer", "text": "Formula expressions are captured alongside their cached values. You get both the formula string (e.g. SUM(B2:B10)) and the last computed result."}},
+    {"@type": "Question", "name": "What about shared strings in XLSX?", "acceptedAnswer": {"@type": "Answer", "text": "XLSX stores repeated text in a shared string table (sharedStrings.xml). AILANG Parse resolves all shared string references to their actual text values automatically."}},
+    {"@type": "Question", "name": "How fast is XLSX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical spreadsheets parse in under 50ms. The parser reads SpreadsheetML directly with no external dependencies. 96.6% accuracy on OfficeDocBench."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">XLSX Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Parse Excel spreadsheets to structured JSON. Merged cells, multi-sheet workbooks, formulas, shared strings &mdash; all resolved deterministically.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#merged-cells">Merged Cells</a>
+        <a href="#multi-sheet">Multi-Sheet</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Spreadsheets Are Structured Data Trapped in a Visual Layout</h2>
+      <p>An .xlsx file is a zip archive containing SpreadsheetML &mdash; XML that encodes cells, types, formulas, merge ranges, and shared strings. Most parsers flatten this into CSV or plain text, destroying merged cells, multi-sheet structure, and cell type information.</p>
+
+      <p>AILANG Parse reads SpreadsheetML directly. Merged cells get explicit <code>gridSpan</code>/<code>vMerge</code> metadata from the <code>mergeCell</code> elements. Shared string references are resolved. Each sheet becomes a separate section with its full table structure intact.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>XLSX merged cells are the #1 structural feature that other parsers drop. A financial report with merged region headers becomes an unreadable flat grid. AILANG Parse preserves the merge topology. <a href="tables.html">See table extraction details</a>.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw SpreadsheetML vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw sheet1.xml + sharedStrings.xml</div>
+<pre><code>&lt;!-- sharedStrings.xml --&gt;
+&lt;sst count="6"&gt;
+  &lt;si&gt;&lt;t&gt;Region&lt;/t&gt;&lt;/si&gt;
+  &lt;si&gt;&lt;t&gt;Q1&lt;/t&gt;&lt;/si&gt;
+  &lt;si&gt;&lt;t&gt;Q2&lt;/t&gt;&lt;/si&gt;
+  &lt;si&gt;&lt;t&gt;EMEA&lt;/t&gt;&lt;/si&gt;
+  &lt;si&gt;&lt;t&gt;APAC&lt;/t&gt;&lt;/si&gt;
+&lt;/sst&gt;
+
+&lt;!-- sheet1.xml --&gt;
+&lt;mergeCells count="1"&gt;
+  &lt;mergeCell ref="A1:A2"/&gt;
+&lt;/mergeCells&gt;
+&lt;sheetData&gt;
+  &lt;row r="1"&gt;
+    &lt;c r="A1" t="s"&gt;&lt;v&gt;0&lt;/v&gt;&lt;/c&gt;
+    &lt;c r="B1" t="s"&gt;&lt;v&gt;1&lt;/v&gt;&lt;/c&gt;
+    &lt;c r="C1" t="s"&gt;&lt;v&gt;2&lt;/v&gt;&lt;/c&gt;
+  &lt;/row&gt;
+  &lt;row r="2"&gt;
+    &lt;c r="B2"&gt;&lt;v&gt;125000&lt;/v&gt;&lt;/c&gt;
+    &lt;c r="C2"&gt;&lt;v&gt;140000&lt;/v&gt;&lt;/c&gt;
+  &lt;/row&gt;
+  &lt;row r="3"&gt;
+    &lt;c r="A3" t="s"&gt;&lt;v&gt;4&lt;/v&gt;&lt;/c&gt;
+    &lt;c r="B3"&gt;&lt;v&gt;143000&lt;/v&gt;&lt;/c&gt;
+    &lt;c r="C3"&gt;
+      &lt;f&gt;SUM(B2:B3)&lt;/f&gt;
+      &lt;v&gt;268000&lt;/v&gt;
+    &lt;/c&gt;
+  &lt;/row&gt;
+&lt;/sheetData&gt;</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output</div>
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "Q1-Q2 Revenue",
+    "sheets": ["Revenue", "Summary"]
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Revenue"
+    },
+    {
+      "type": "table",
+      "headers": [
+        {"text": "Region", "vMerge": "restart"},
+        {"text": "Q1"},
+        {"text": "Q2"}
+      ],
+      "rows": [
+        [
+          {"text": "EMEA"},
+          {"text": "125000"},
+          {"text": "140000"}
+        ],
+        [
+          {"text": "APAC"},
+          {"text": "143000"},
+          {"text": "268000",
+           "formula": "SUM(B2:B3)"}
+        ]
+      ]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Tables with Cell Types</h4>
+          <p>Every cell preserves its type: string, number, boolean, date, or formula. Shared string references are resolved to actual text. Empty cells are handled correctly in sparse sheets.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Merged Cells</h4>
+          <p>Horizontal and vertical merges from <code>mergeCell</code> elements are resolved into <code>gridSpan</code> and <code>vMerge</code> metadata. The merge topology comes directly from the XML, not visual heuristics. <a href="tables.html">Deep dive &rarr;</a></p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Multi-Sheet Workbooks</h4>
+          <p>Each worksheet becomes a separate <code>SectionBlock</code> with the sheet name as a heading. All sheets are parsed in workbook order. Sheet-level metadata (visibility, tab color) is preserved.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Formulas &amp; Cached Values</h4>
+          <p>Formula expressions are extracted alongside their last computed values. You get both <code>"formula": "SUM(B2:B10)"</code> and <code>"text": "268000"</code> for downstream processing.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Shared Strings</h4>
+          <p>XLSX stores repeated text values in <code>sharedStrings.xml</code> and references them by index. AILANG Parse resolves all references automatically &mdash; you see the actual text, not index numbers.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Comments &amp; Metadata</h4>
+          <p>Cell-level comments are extracted with author attribution. Workbook metadata (title, author, created date) comes from the core properties. <a href="comments.html">Comment details &rarr;</a></p>
+        </div>
+      </div>
+
+      <h2 id="merged-cells">Merged Cells</h2>
+      <p>Financial reports, inventory sheets, and regulatory filings use merged cells extensively for group headers and category labels. XLSX stores these as <code>mergeCell</code> elements with cell range references (e.g., <code>A1:A3</code>). AILANG Parse resolves each range into per-cell <code>gridSpan</code> (horizontal) and <code>vMerge</code> (vertical) attributes.</p>
+
+<pre><code class="language-json">{
+  "type": "table",
+  "headers": [
+    {"text": "Department", "vMerge": "restart"},
+    {"text": "H1", "gridSpan": 2},
+    {"text": "H2", "gridSpan": 2}
+  ],
+  "rows": [
+    [{"text": ""}, {"text": "Q1"}, {"text": "Q2"}, {"text": "Q3"}, {"text": "Q4"}],
+    [{"text": "Engineering"}, {"text": "$450K"}, {"text": "$480K"}, {"text": "$510K"}, {"text": "$520K"}],
+    [{"text": "Sales"}, {"text": "$320K"}, {"text": "$340K"}, {"text": "$355K"}, {"text": "$370K"}]
+  ]
+}</code></pre>
+
+      <p>See <a href="tables.html">Tables &amp; Merged Cells</a> for the full specification.</p>
+
+      <h2 id="multi-sheet">Multi-Sheet Workbooks</h2>
+      <p>A single XLSX file often contains multiple worksheets: raw data, summaries, pivot tables, configuration. AILANG Parse processes all sheets in workbook order, each becoming a <code>SectionBlock</code> with the sheet name as a heading and the sheet's table data as nested blocks.</p>
+
+<pre><code class="language-json">{
+  "blocks": [
+    {"type": "heading", "level": 2, "text": "Raw Data"},
+    {"type": "table", "headers": [...], "rows": [...]},
+    {"type": "heading", "level": 2, "text": "Summary"},
+    {"type": "table", "headers": [...], "rows": [...]},
+    {"type": "heading", "level": 2, "text": "Config"},
+    {"type": "table", "headers": [...], "rows": [...]}
+  ]
+}</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Financial Report Extraction</h4>
+          <p>Parse budget spreadsheets, P&amp;L statements, and revenue models with merged category headers intact. Formulas are preserved alongside computed values, so downstream systems can verify calculations or flag anomalies.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Data Pipeline Ingestion</h4>
+          <p>Convert XLSX uploads to structured JSON for database ingestion. Cell types (number, date, string) are preserved, so your pipeline doesn't need to guess whether "42736" is a number or an Excel date serial. Multi-sheet workbooks are handled in a single call.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Regulatory Filing Analysis</h4>
+          <p>Financial regulatory filings (XBRL supplements, risk reports, capital adequacy schedules) rely heavily on merged cells for hierarchical categorization. Flat CSV export destroys this structure. Structured parsing preserves it.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Inventory &amp; ERP Data</h4>
+          <p>Warehouse inventory sheets, BOM spreadsheets, and ERP exports use multi-sheet workbooks with cross-references. Parse the entire workbook into typed blocks, then feed to an LLM for procurement analysis, stock reconciliation, or demand forecasting.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>AI Spreadsheet Understanding</h4>
+          <p>Feed structured table JSON to LLMs instead of CSV dumps. The model sees typed cells, merge topology, and formula expressions &mdash; enabling it to reason about table structure, not just cell values. Token efficiency improves when the model doesn't need to infer column boundaries.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Format Conversion</h4>
+          <p>Convert XLSX to Markdown tables, HTML, or Quarto for documentation and reporting. Merged cells are expanded or annotated in the output format. Multi-sheet workbooks produce sectioned output with clear sheet boundaries.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse an XLSX file
+ailang run --entry main --caps IO,FS,Env \
+  docparse/main.ail financials.xlsx
+
+# Convert XLSX to Markdown tables
+./bin/docparse financials.xlsx --convert output.md
+
+# Convert XLSX to HTML
+./bin/docparse financials.xlsx --convert output.html</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_xlsx_formatting","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <h3>Python SDK</h3>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="YOUR_API_KEY")
+result = client.parse("financials.xlsx", output_format="json")
+
+# Iterate sheets (each is a section block)
+for block in result.blocks:
+    if block.type == "heading":
+        print(f"Sheet: {block.text}")
+    if block.type == "table":
+        print(f"  {len(block.rows)} rows, {len(block.headers)} columns")
+        if block.has_merges:
+            print("  Contains merged cells")
+</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse an XLSX file to JSON?</summary>
+          <div class="dp-faq-answer"><p>Send the <code>.xlsx</code> file to the <a href="api.html">AILANG Parse API</a> or use the Python/JS/Go SDK. The parser reads SpreadsheetML directly and returns structured JSON with tables, merged cells, and metadata per sheet.</p></div>
+        </details>
+        <details>
+          <summary>How are merged cells handled in XLSX parsing?</summary>
+          <div class="dp-faq-answer"><p>Merged cell ranges are resolved into explicit <code>gridSpan</code> and <code>vMerge</code> metadata on each cell. The merge topology comes directly from the XML. See <a href="tables.html">table extraction docs</a>.</p></div>
+        </details>
+        <details>
+          <summary>Does XLSX parsing support multi-sheet workbooks?</summary>
+          <div class="dp-faq-answer"><p>Yes. Each sheet becomes a separate section block with the sheet name as a heading. All sheets are parsed in workbook order.</p></div>
+        </details>
+        <details>
+          <summary>Are formulas extracted from XLSX files?</summary>
+          <div class="dp-faq-answer"><p>Yes. Formula expressions are captured alongside their cached values. You get both the formula string and the last computed result.</p></div>
+        </details>
+        <details>
+          <summary>What about shared strings in XLSX?</summary>
+          <div class="dp-faq-answer"><p>XLSX stores repeated text in a shared string table. AILANG Parse resolves all references to their actual text values automatically.</p></div>
+        </details>
+        <details>
+          <summary>How fast is XLSX parsing?</summary>
+          <div class="dp-faq-answer"><p>Typical spreadsheets parse in under 50ms. No external dependencies, no subprocess spawning. 96.6% accuracy on <a href="benchmarks.html">OfficeDocBench</a>.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
