@@ -24,6 +24,14 @@ class _GeneralApi:
         Usage (identical to unstructured-client)::
 
             elements = client.general.partition(file="report.docx")
+
+        Note: ``file`` must be a sample ID or server-side path, not a local
+        file path.  The ``/general/v0/general`` endpoint does not yet support
+        multipart file upload.  To upload local files, use
+        :class:`~ailang_parse.DocParse` with :meth:`~ailang_parse.DocParse.parse_file`::
+
+            from ailang_parse import DocParse
+            result = DocParse(api_key="dp_...").parse_file("report.docx")
         """
         url = f"{self._base_url}/general/v0/general"
         resp = self._session.post(

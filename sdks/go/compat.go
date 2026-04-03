@@ -31,6 +31,10 @@ func NewUnstructuredClient(serverURL string, apiKey ...string) *UnstructuredClie
 }
 
 // Partition partitions a document into Unstructured-format elements.
+//
+// Note: filepath must be a sample ID or server-side path, not a local file path.
+// The /general/v0/general endpoint does not yet support multipart file upload.
+// To upload local files, use [Client.ParseFile] instead.
 func (uc *UnstructuredClient) Partition(ctx context.Context, filepath string, strategy ...string) ([]Element, error) {
 	strat := "auto"
 	if len(strategy) > 0 {

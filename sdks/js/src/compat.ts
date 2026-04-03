@@ -16,7 +16,16 @@ class GeneralApi {
     this.timeout = timeout;
   }
 
-  /** Partition a document — returns Unstructured-format elements. */
+  /**
+   * Partition a document — returns Unstructured-format elements.
+   *
+   * Note: `file` must be a sample ID or server-side path, not a local file path.
+   * The `/general/v0/general` endpoint does not yet support multipart file upload.
+   * To upload local files, use {@link DocParse.parseFile} instead:
+   * ```ts
+   * const result = await new DocParse({ apiKey: "dp_..." }).parseFile("report.docx");
+   * ```
+   */
   async partition(opts: { file: string; strategy?: string }): Promise<Element[]> {
     const url = `${this.baseUrl}/general/v0/general`;
     const headers: Record<string, string> = {
