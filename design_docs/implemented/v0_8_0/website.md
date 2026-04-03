@@ -1,5 +1,7 @@
 # DocParse Website — Three-Area Static Site Design
 
+**Status**: Implemented (19 pages shipped, only try.html WASM demo page remaining)
+
 ## Context
 
 DocParse has a deployed API (Cloud Run), WASM browser module, API key management, and a landing page — but no interactive website for users to try parsing, manage API keys, or learn self-hosting. The website needs three areas serving different user personas, all as static HTML on GitHub Pages (no build system).

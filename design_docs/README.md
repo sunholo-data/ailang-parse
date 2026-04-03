@@ -4,52 +4,51 @@
 
 ```
 design_docs/
-├── implemented/              # Features that have been built
-│   ├── v0_1_0/              # Initial release (March 2026)
-│   ├── v0_3_0/              # Parser coverage & format expansion
-│   ├── v0_5_0/              # Ecosystem & competitor benchmarks (partial)
-│   ├── v0_6_0/              # Document generation (8 formats)
-│   ├── v0_7_0/              # API server & Unstructured compat
-│   ├── v0_8_0/              # API keys & Cloud deployment
-│   ├── v0_9_0/              # Agent-friendly API (capabilities, device auth, etc.)
-│   └── v0_10_0/             # Auth security & agent onboarding
-├── planned/                  # Future features and designs
-│   ├── v0_2_0/              # PDF pipeline improvements
-│   ├── v0_4_0/              # Go binary compilation (blocked)
-│   ├── v0_9_0/              # Website, playground, SDKs, WASM images (remaining)
-│   ├── v0_10_0/             # Quarto integration
-│   ├── v0_11_0/             # User-defined structured extraction
-│   ├── v0_12_0/             # AILANG package registry integration
-│   ├── v0_13_0/             # RAG pipeline features (chunking, hierarchy, embeddings)
-│   └── gtm_strategy/        # Go-to-Market strategy & positioning (AILANG Parse rebrand)
-├── archive/                  # Obsolete/superseded designs
-└── README.md                 # This file
+├── implemented/              # Changelog — grouped by the version features shipped in
+│   ├── v0_1_0/              # Office parsing, PDF pipeline, benchmarks
+│   ├── v0_3_0/              # 13 format parsers, ODT/ODP/ODS, eval module
+│   ├── v0_5_0/              # Spec audit, external benchmarks, large file perf
+│   ├── v0_6_0/              # Document generation (8 formats), verification loop
+│   ├── v0_7_0/              # API server & Unstructured compatibility
+│   └── v0_8_0/              # API keys, auth, agent API, SDKs, website, playground,
+│                            #   ecosystem benchmarks, Gemini Files API, WASM threat model
+├── planned/                  # Future features (> v0.8.2)
+│   ├── v0_9_0/              # PDF pipeline, Ollama, email follow-ups, auth providers,
+│   │                        #   WASM images, manifest API page
+│   ├── v0_10_0/             # Quarto integration, API privacy & trust
+│   ├── v0_11_0/             # Structured extraction (FAST-TRACK)
+│   ├── v0_12_0/             # AILANG package registry
+│   ├── v0_13_0/             # RAG pipeline (chunking, hierarchy, embeddings)
+│   └── v0_4_0_go_binary.md  # Go binary — blocked on AILANG compiler bugs
+├── archive/                  # Superseded or abandoned designs
+│   ├── authalla_evaluation.md     # Superseded by Firebase Auth
+│   ├── responsibility-docparse.md # Superseded by v0.8.0 billing
+│   └── xlsx_deep_performance.md   # 99% resolved, remaining is edge case
+└── README.md
 ```
 
-> **Note**: No GitHub releases or git tags exist yet. Version numbers below are
-> design milestones, not published releases. Everything is on `main`.
+> **Current version**: v0.8.2 (`ailang.toml`). Folders in `implemented/` reflect
+> the version each feature actually shipped in. Folders in `planned/` are target
+> versions for upcoming work.
 
 ## Document Organization
 
-### Implemented Features
-When a feature is completed, its design doc moves to `implemented/` with:
-- **Version number folder** (e.g., `v0_1_0/`) — use underscores
-- Implementation report with what was built
-- Benchmark results and coverage metrics
-- Known limitations
+### Implemented (Changelog)
+When a feature ships, move its design doc to `implemented/vX_Y_Z/` where X.Y.Z is
+the **actual release version** it shipped in. Update the Status header. This creates
+a changelog showing what was built in each release.
 
-### Planned Features
-Active design documents for features not yet built:
-- Feature specifications
-- Architecture proposals
-- Benchmark improvement plans
+### Planned
+Design docs for features not yet built, organized by target version.
 
 ### Archive
-Old designs that have been superseded or abandoned.
+Designs that were superseded or abandoned (never delete — move here).
 
-## Roadmap
+---
 
-### v0.1.0 — Initial Release (March 2026) `DONE`
+## Changelog (Implemented)
+
+### v0.1.0 — Initial Release (March 2026)
 - Deterministic Office parsing (DOCX, PPTX, XLSX)
 - AI-powered PDF extraction via pluggable models
 - 18 golden benchmarks at 100% baseline
@@ -58,135 +57,103 @@ Old designs that have been superseded or abandoned.
 - Competitor adapter framework (Docling, LlamaParse, Unstructured)
 - [Implementation Report](implemented/v0_1_0/v0_1_0_implementation_report.md)
 
-### v0.2.0 — PDF Pipeline Improvements `PLANNED`
-- Two-stage PDF pipeline (OCR → heuristic structuring) for Ollama models
-- Expand PDF test corpus from 3 to 10+ diverse documents
-- Multi-model benchmark matrix (`--matrix` flag)
-- Target: local Ollama models score >50% on PDF benchmark
-- [Design Doc](planned/v0_2_0/v0_2_0_pdf_pipeline.md)
-- [Ollama Prompting Design](planned/v0_2_0/ollama_model_aware_prompting.md)
-
-### v0.3.0 — Parser Coverage & Format Expansion `DONE`
-- 10 format parsers: DOCX, PPTX, XLSX, CSV, TSV, Markdown, HTML, EPUB, ODT, ODP, ODS
-- All parsers implemented in pure AILANG (zero runtime dependencies)
-- 53 golden benchmark files at 100% baseline (expanded from 18)
-- AILANG eval module (eval.ail) — 8 structural checks with contracts
+### v0.3.0 — Parser Coverage & Format Expansion
+- 13 format parsers (DOCX, PPTX, XLSX, CSV, TSV, Markdown, HTML, EPUB, ODT, ODP, ODS, EML, MBOX)
+- All parsers in pure AILANG (zero runtime dependencies)
+- 53 golden benchmark files at 100% baseline
+- AILANG eval module — 8 structural checks with contracts
 - ODT/ODP/ODS native parsing — strategic gap, nobody else does this
-- [Format Expansion](implemented/v0_3_0/format_expansion.md)
-- [Parser Coverage](implemented/v0_3_0/v0_3_0_parser_coverage.md)
-- [AILANG Benchmark Eval](implemented/v0_3_0/ailang_benchmark_eval.md)
+- [Format Expansion](implemented/v0_3_0/format_expansion.md) | [Parser Coverage](implemented/v0_3_0/v0_3_0_parser_coverage.md) | [Eval](implemented/v0_3_0/ailang_benchmark_eval.md)
 
-### v0.4.0 — Go Binary `BLOCKED ON 3 CODEGEN BUGS`
-- All 19 modules compile to Go (406 declarations, 16K lines)
-- `go build` fails on: function name collisions, constant redeclaration, markdown codegen
-- Effect handler interfaces are clean — harness is ~200 lines (same pattern as stapledon's_voyage)
-- `--with-default-handlers` is nice-to-have, NOT a blocker
-- Target: 10-100x faster parsing, single binary distribution
-- [Design Doc](planned/v0_4_0/v0_4_0_go_binary.md)
+### v0.5.0 — Spec Coverage & Benchmarks
+- ECMA-376 spec coverage audit — 19 gaps closed across Rounds 1-3
+- OmniDocBench integration (Text ED 0.183, Table TEDS 0.871)
+- Large file performance — DOCX/PPTX/XLSX within tier limits
+- [Spec Audit](implemented/v0_5_0/spec_coverage_audit.md) | [External Benchmarks](implemented/v0_5_0/external_benchmarks.md) | [Large File Perf](implemented/v0_5_0/large_file_performance.md)
 
-### v0.5.0 — Ecosystem & Competitor Benchmarks `PARTIAL`
-- OmniDocBench integration done (Text ED 0.183, Table TEDS 0.871, Gemini 2.5 Flash)
-- Competitor adapters written (Docling, LlamaParse, Unstructured)
-- Python SDK wrapper deferred (depends on v0.4.0 Go binary)
-- Integration guides deferred (LangChain, LlamaIndex, Haystack)
-- OfficeDocBench formalization still TODO (first-of-its-kind Office structural benchmark)
-- [Design Doc](planned/v0_5_0/v0_5_0_ecosystem.md)
-- [External Benchmarks](planned/v0_5_0/external_benchmarks.md)
-
-### v0.6.0 — Document Generation `DONE`
-- Block ADT → file output for all 8 formats (HTML, DOCX, PPTX, XLSX, ODT, ODP, ODS, Markdown)
+### v0.6.0 — Document Generation
+- Block ADT → file output for 8 formats (HTML, DOCX, PPTX, XLSX, ODT, ODP, ODS, Markdown)
 - AI-assisted generation: `--generate output.docx --prompt "Q1 sales report"`
 - Cross-format conversion via `--convert` flag
-- All roundtrips verified, generated files recognized by Office apps
-- [Design Doc](implemented/v0_6_0/v0_6_0_document_generation.md)
-- [Features](implemented/v0_6_0/features.md)
-- [Verification Loop](implemented/v0_6_0/verification_loop.md)
+- [Generation](implemented/v0_6_0/v0_6_0_document_generation.md) | [Features](implemented/v0_6_0/features.md) | [Verification](implemented/v0_6_0/verification_loop.md)
 
-### v0.7.0 — API Server & Unstructured Compatibility `DONE`
-- REST API via `ailang serve-api` with custom `@route` annotations
+### v0.7.0 — API Server
+- REST API via `ailang serve-api` with `@route` annotations
 - Unstructured API drop-in compatibility (`POST /general/v0/general`)
-- Auto-generated OpenAPI spec + Swagger UI
-- 25 smoke tests, all passing
-- Concurrency confirmed working (Cloud Run `concurrency=80` safe)
+- Auto-generated OpenAPI spec + Swagger UI, 25 smoke tests
+- Cloud Run `concurrency=80` safe
 - [Design Doc](implemented/v0_7_0/v0_7_0_api_server.md)
 
-### v0.8.0 — Per-User API Keys & Cloud Deployment `DONE`
-- Self-service API key management via static website dashboard
-- Two-layer enforcement: AILANG capability budgets (per-request) + Firestore quotas (cumulative)
-- Free/Pro/Enterprise tiers with upgrade path
-- Terraform in YOUR_GCP_PROJECT: Cloud Run, Firestore, Firebase Auth, IAM
-- CI/CD trigger for docparse repo pushes
-- Note: `/api/v1/keys/generate` removed in v0.10.0 — device auth flow only
-- [Design Doc](implemented/v0_8_0/v0_8_0_api_keys_cloud_deployment.md)
+### v0.8.0 — Current Release (v0.8.2)
+- Per-user API keys & Cloud deployment (Terraform, Firestore, Firebase Auth)
+- Agent-friendly API: capabilities manifest, typed errors, device auth, pricing, tools
+- Firebase JWT verification, removed unauthenticated key generation
+- Python SDK v0.1.3 (PyPI), JS SDK v0.1.3 (npm), Go SDK
+- Static website: 19 pages on GitHub Pages
+- In-browser API playground with Firebase auth, code generation, response panel
+- OfficeDocBench published: AILANG Parse 96.6% vs Unstructured 63.4%, Docling 63.4%, LlamaParse 53.6%
+- Gemini Files API: upload once, reference by URI (large PDF optimization)
+- WASM threat model: keep open, Office parsing is costless funnel
+- [API Keys](implemented/v0_8_0/api_keys_cloud_deployment.md) | [Agent API](implemented/v0_8_0/agent_friendly_api.md) | [Auth](implemented/v0_8_0/auth_security.md)
+- [SDKs](implemented/v0_8_0/sdks.md) | [Website](implemented/v0_8_0/website.md) | [Playground](implemented/v0_8_0/api_playground.md)
+- [Ecosystem](implemented/v0_8_0/ecosystem.md) | [Gemini Files API](implemented/v0_8_0/gemini_files_api/gemini_files_api.md) | [WASM Threat Model](implemented/v0_8_0/wasm_threat_model.md)
 
-### v0.9.0 — Agent-Friendly API `DONE` / SDKs & Website `PARTIAL`
-- Agent-friendly API: capabilities manifest, typed errors, device auth, request replay, pricing, samples, tools, estimate — all implemented
-- [Agent-Friendly API Design](implemented/v0_9_0/v0_9_0_agent_friendly_api.md)
-- Python, JavaScript/TypeScript, Go client SDKs — basic implementations done
-- Static website with dashboard — partially done
-- [SDKs Design](planned/v0_9_0/v0_9_0_sdks.md)
-- [Website Design](planned/v0_9_0/v0_9_0_website.md)
+---
 
-### v0.10.0 — Auth Security `DONE` / Quarto Integration `PLANNED`
-- Firebase JWT verification on device auth approve (sunholo/firebase_auth package)
-- Removed unauthenticated `/api/v1/keys/generate` endpoint
-- ALLOW_SELF_APPROVE dev mode for local testing
-- display_message/display_code in device auth response for agent UX
-- [Auth Security Design](implemented/v0_10_0/v0_10_0_auth_security.md)
-- Quarto integration: QMD generator, two rendering engines — still planned
-- [Quarto Design](planned/v0_10_0/v0_10_0_quarto_integration.md)
+## Roadmap (Planned)
 
-### v0.11.0 — User-Defined Structured Extraction `PLANNED — FAST-TRACK`
-- Users supply a JSON Schema describing what they want extracted
-- Two-stage pipeline: deterministic parse → AI-powered schema extraction
-- Built-in template library (invoice, resume, contract, receipt, form, meeting notes, table)
-- CLI: `--extract --schema`, `--template invoice`, `--hints "..."`
-- API: `POST /api/v1/extract` + template endpoint + batch extraction
-- Competitive moat: JSON Schema (not NL), two-stage (cheaper/more accurate), Office advantage
-- **Prior art**: Already demonstrated in ailang-demos DocParse demo (contract obligations, structured output)
-- **Competitive pressure**: Eagle-Doc, Nanonets, Mindee, Rossum all charge for field extraction from PDFs — our two-stage pipeline + Office support is the differentiator
+### v0.9.0 — PDF Pipeline, Email & Platform Polish
+- Two-stage PDF pipeline (OCR → heuristic structuring) for Ollama models
+- Ollama model-aware prompting (target: local models >50%)
+- Email follow-ups: calendar invite parsing (P4), inbox monitoring (P2), Outlook .msg (P3), S/MIME (P5)
+- Additional auth providers: Microsoft, Phone SMS, Apple, SAML/OIDC
+- WASM image rendering (currently placeholder-only)
+- Manifest-driven API page (3 missing endpoints: formats, pricing, capabilities)
+- [PDF Pipeline](planned/v0_9_0/pdf_pipeline.md) | [Ollama](planned/v0_9_0/ollama_model_aware_prompting.md)
+- [Email Follow-ups](planned/v0_9_0/email-parsing-followups.md) | [Auth Providers](planned/v0_9_0/v0_9_0_auth_providers.md)
+- [WASM Images](planned/v0_9_0/v0_9_0_wasm_images.md) | [Manifest API](planned/v0_9_0/v0_9_0_manifest_driven_api_page.md)
+
+### v0.10.0 — Quarto & Trust
+- Quarto Markdown generation with two rendering engines
+- API privacy & trust commitments for hosted API
+- [Quarto](planned/v0_10_0/v0_10_0_quarto_integration.md) | [Privacy & Trust](planned/v0_10_0/api_privacy_trust.md)
+
+### v0.11.0 — Structured Extraction `FAST-TRACK`
+- JSON Schema-driven extraction: `--extract --schema`, `--template invoice`
+- Two-stage pipeline: deterministic parse → AI extraction
+- Built-in templates (invoice, resume, contract, receipt, form, meeting notes, table)
 - [Design Doc](planned/v0_11_0/v0_11_0_structured_extraction.md)
 
-### v0.12.0 — AILANG Package Registry `PLANNED`
-- Publish DocParse as a versioned AILANG package via the new registry
-- `ailang.pkg` manifest with capability declarations, exports, and metadata
-- Public vs internal module boundary (24 exported, 7 internal)
-- Migrate `xml_helpers` to use `std/xml` directly (stop wrapping stdlib), rename remainder to `docx_xml_helpers`
-- Extract reusable utilities into standalone packages:
-  - `ailang-office-zip` — generic ZIP read/list, MIME detection (used by 5 modules)
-  - `ailang-doc-eval` — Jaccard similarity, structural scoring (extract when second consumer appears)
-- CI/CD publish workflow: type-check → test → benchmark → `ailang pkg publish`
-- Consumers install with `ailang pkg add docparse` and import modules directly
-- Lock file (`ailang.lock`) for reproducible builds
+### v0.12.0 — AILANG Package Registry
+- Publish as versioned AILANG package (`ailang pkg add docparse`)
+- `ailang.pkg` manifest, CI/CD publish workflow, lock file
 - [Design Doc](planned/v0_12_0/v0_12_0_package_registry.md)
 
-### v0.13.0 — RAG Pipeline Features `PLANNED`
-- Built-in document chunking (fixed-size, structural, section-based, semantic)
-- Hierarchy metadata: parent-child block relationships, heading paths, section kinds
-- Optional embedding generation using existing AI API keys (Gemini, Ollama, OpenAI-compat)
-- Full pipeline in one API call: parse → chunk → embed → vector-ready JSON
-- Unstructured API chunking parameter compatibility
-- Context-enhanced embeddings (heading paths prepended for better retrieval)
-- [Chunking Design](planned/v0_13_0/v0_13_0_chunking.md)
-- [Hierarchy Metadata Design](planned/v0_13_0/v0_13_0_hierarchy_metadata.md)
-- [Embeddings Design](planned/v0_13_0/v0_13_0_embeddings.md)
+### v0.13.0 — RAG Pipeline
+- Document chunking (fixed-size, structural, section-based, semantic)
+- Hierarchy metadata (parent-child blocks, heading paths)
+- Embedding generation via AI API keys
+- [Chunking](planned/v0_13_0/v0_13_0_chunking.md) | [Hierarchy](planned/v0_13_0/v0_13_0_hierarchy_metadata.md) | [Embeddings](planned/v0_13_0/v0_13_0_embeddings.md)
 
-### Go-to-Market Strategy — AILANG Parse Rebrand `PLANNED`
-- Rename from "DocParse" to "AILANG Parse" (zero search competition)
-- Positioning: enhancer to PDF-first tools (Unstructured, Docling, LlamaParse), not competitor
-- Messaging: "Stop parsing photos of your documents"
-- Website: 13 indexable pages with SEO keyword strategy
-- Distribution: AI-native (Claude Code skill, MCP server, npm/PyPI) + traditional SEO
-- Integration opportunity: SuperDoc for legal AI read/write workflow
-- Pricing: usage-based tier (1K free, then EUR 0.001/doc), WASM commercial license
-- Pre-launch DX issues: response envelope, dual API surface, internal endpoints exposed
-- [GTM Strategy](planned/gtm_strategy/gtm_strategy.md)
-- [Source DOCX](planned/gtm_strategy/AILANG_Parse_GTM_Strategy.docx)
+### Go Binary — Blocked on AILANG Compiler
+- All 19 modules compile to Go (406 declarations, 16K lines)
+- `go build` fails on 3 codegen bugs (function collisions, constant redeclaration, markdown syntax)
+- Target: 10-100x faster parsing, single binary distribution
+- [Design Doc](planned/v0_4_0_go_binary.md)
+
+### Go-to-Market Strategy
+- Rebrand from "DocParse" to "AILANG Parse"
+- Positioning: enhancer to PDF-first tools, not competitor
+- AI-native distribution (Claude Code skill, MCP server, npm/PyPI)
+- *Design docs not yet created — roadmap planning only*
+
+---
 
 ## Guidelines
 
-1. **Before Implementation**: Create design doc in `planned/vX_Y_Z/`
-2. **After Implementation**: Move to `implemented/vX_Y_Z/` with report
-3. **Version Numbering**: Semantic versioning, underscores in folder names (`v0_1_0`)
-4. **Always Update**: This README when features ship or plans change
-5. **Archiving**: Move superseded docs to `archive/`
+1. **Before implementation**: Create design doc in `planned/vX_Y_Z/`
+2. **After implementation**: Move to `implemented/vX_Y_Z/` using the **actual shipped version**, update Status header
+3. **Version folders**: Use underscores (`v0_8_0`), match `ailang.toml` version
+4. **Always update**: This README when features ship or plans change
+5. **Archiving**: Move superseded docs to `archive/`, never delete
+6. **Audit**: Run `bash .claude/skills/audit-design-docs/scripts/audit.sh` to check consistency

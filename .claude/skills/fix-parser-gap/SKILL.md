@@ -1,5 +1,5 @@
 ---
-name: Fix Parser Gap
+name: fix-parser-gap
 description: Fix a parser gap identified in the spec coverage audit. Use when user says 'fix a gap', 'implement X parsing', 'improve parser coverage', 'close a gap', 'next P1', or references a specific ECMA-376 spec section like '§17.9'. Also use when the user asks to improve DOCX/XLSX/PPTX parsing quality, add support for a missing Office feature, or mentions numbering, styles, hyperlinks, formatting, fields, merged cells, equations, or speaker notes in the context of parser improvement.
 ---
 

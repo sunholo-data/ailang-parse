@@ -1,6 +1,6 @@
 # DocParse v0.3.0 — Parser Coverage Expansion
 
-**Status**: Planned
+**Status**: Implemented
 **Theme**: Extract everything competitors miss from Office documents
 
 ## Goals

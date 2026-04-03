@@ -1,6 +1,6 @@
 # DocParse v0.5.0 — Ecosystem & Competitor Benchmarks
 
-**Status**: Planned
+**Status**: Implemented (OfficeDocBench published, competitor adapters done, OmniDocBench integrated)
 **Theme**: Prove DocParse's value with published benchmark results and integrations
 
 ## Goals

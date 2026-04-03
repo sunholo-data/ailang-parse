@@ -1,6 +1,6 @@
 # Gemini Files API for Large PDF Optimization
 
-**Status**: PLANNED
+**Status**: Implemented (commit 5160a38 — upload once, reference by URI)
 **Version**: v0.9.0+
 **Date**: 2026-03-31
 

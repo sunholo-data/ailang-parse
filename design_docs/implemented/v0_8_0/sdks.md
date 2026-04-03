@@ -1,6 +1,6 @@
 # DocParse SDKs — Client Libraries Design
 
-**Status**: PLANNED (2026-03-20)
+**Status**: Implemented — Python v0.1.3 (PyPI), JS v0.1.3 (npm), Go module shipped
 **Theme**: Thin HTTP wrappers for Python, JavaScript/TypeScript, and Go — Unstructured-client compatible
 **Depends on**: v0.8.0 (API server, key management)
 

@@ -1,6 +1,6 @@
 # Design: Expanded Format Support & Benchmark Corpus
 
-**Status**: Planned
+**Status**: Implemented
 **Priority**: Medium
 **Target**: v0.3.0
 **Principle**: All parsing logic must be implemented in AILANG. No Python dependency wrapping.

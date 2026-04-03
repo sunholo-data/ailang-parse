@@ -1,6 +1,6 @@
 # DocParse v0.7.0 — API Server & Unstructured Compatibility
 
-**Status**: Phase 1-2 IMPLEMENTED (2026-03-18). Phase 3-5 planned.
+**Status**: Implemented (Phase 1-2 shipped 2026-03-18; Phase 3-5 rolled into v0.9.0 planned)
 **Theme**: Deploy DocParse as a production API on Cloud Run with native + Unstructured-compatible endpoints
 
 ## Motivation

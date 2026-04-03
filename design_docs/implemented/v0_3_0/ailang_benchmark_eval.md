@@ -1,6 +1,6 @@
 # Design: Migrate Benchmark Evaluation to AILANG
 
-**Status**: Planned
+**Status**: Implemented
 **Priority**: Medium
 **Target**: v0.3.0
 **Principle**: All DocParse logic must exercise AILANG code paths

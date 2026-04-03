@@ -1,4 +1,6 @@
-# v0.9.0 — In-Browser API Playground
+# In-Browser API Playground
+
+**Status**: Implemented (fully built in docs/api.html with Firebase auth, code generation, response panel)
 
 ## Summary
 
