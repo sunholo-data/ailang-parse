@@ -1,8 +1,8 @@
 /**
  * AILANG Parse — Firebase Auth + API Key Management
  *
- * Reuses the ailang-multivac-dev Firebase project (same as website-builder).
- * AILANG Parse uses its own Firestore database ("docparse") — not the default.
+ * Firebase Auth + API Key Management for AILANG Parse.
+ * Auto-detects prod vs dev from hostname.
  *
  * Auth uses FirebaseUI — providers are configured in the Firebase console.
  * Adding a new provider (GitHub, Microsoft, etc.) only requires enabling it
@@ -11,8 +11,18 @@
 (function () {
   'use strict';
 
-  // ── Firebase Config (same project as website-builder) ──
-  var firebaseConfig = {
+  // Auto-detect environment from hostname
+  var isProd = window.location.hostname === 'www.sunholo.com' || window.location.hostname === 'sunholo.com';
+
+  // ── Firebase Config — prod vs dev ──
+  var firebaseConfig = isProd ? {
+    apiKey: "AIzaSyBwWZIwSFe59kcYvdcEHKw1gTf07xytKgM",
+    authDomain: "ailang-multivac.firebaseapp.com",
+    projectId: "ailang-multivac",
+    storageBucket: "ailang-multivac.appspot.com",
+    messagingSenderId: "1032908249524",
+    appId: "1:1032908249524:web:fb3aae1b3626df6b957ae1"
+  } : {
     apiKey: "AIzaSyCkvFxVilpZkqao1ntOPQbhwMy2GJI0FIE",
     authDomain: "ailang-multivac-dev.firebaseapp.com",
     projectId: "ailang-multivac-dev",
@@ -21,7 +31,9 @@
     appId: "1:812435936917:web:2dcf2a315dfc7cb2b66d9c"
   };
 
-  var API_BASE = 'https://docparse.ailang.sunholo.com';
+  var API_BASE = isProd
+    ? 'https://ailang-docparse-api-ao6kuhcibq-ew.a.run.app'
+    : 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app';
 
   var app = null;
   var auth = null;
