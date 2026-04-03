@@ -67,7 +67,7 @@
         '<div style="font-family:var(--font-display,system-ui,sans-serif);font-size:16px;font-weight:700;color:var(--text-primary,#111);margin-bottom:12px">Subscribe to ' + tierLabel + '</div>' +
         '<label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--text-secondary,#555);cursor:pointer;line-height:1.5">' +
           '<input type="checkbox" id="dp-tos-agree" style="margin-top:3px;accent-color:var(--dp-blue,#2563eb)">' +
-          '<span>I agree to the <a href="/docparse/terms.html" target="_blank" style="color:var(--dp-blue,#2563eb)">Terms of Service</a> and <a href="/docparse/privacy.html" target="_blank" style="color:var(--dp-blue,#2563eb)">Privacy Policy</a></span>' +
+          '<span>I agree to the <a href="https://www.sunholo.com/ailang-parse/terms.html" target="_blank" style="color:var(--dp-blue,#2563eb)">Terms of Service</a> and <a href="https://www.sunholo.com/ailang-parse/privacy.html" target="_blank" style="color:var(--dp-blue,#2563eb)">Privacy Policy</a></span>' +
         '</label>' +
         '<div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">' +
           '<button id="dp-tos-cancel" class="dp-btn dp-btn--ghost" style="font-size:13px;padding:6px 16px;cursor:pointer">Cancel</button>' +
