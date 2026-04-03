@@ -10,7 +10,7 @@ module docparse/services/eml_parser
 -- P2: Encoding (base64, quoted-printable, RFC 2047 encoded-words)
 -- P3: MBOX (multi-message archives)
 
-import std/string (length, substring, find, split, join, trim, toLower, startsWith, endsWith, contains, chars, foldChars, charAt, intToStr, replace)
+import std/string (length, substring, find, split, join, trim, toLower, startsWith, endsWith, contains, chars, foldChars, charAt, intToStr, replace, decodeQuotedPrintable as builtinDecodeQP)
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
 import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
@@ -434,93 +434,9 @@ pure func emlDecodeBase64(encoded: string) -> string {
 }
 
 -- Decode quoted-printable body (RFC 2045 §6.7)
--- =XX → hex byte, soft line break (=\n) removed
--- Optimized: process line-by-line (each line ≤76 chars per RFC) to keep
--- string operations on small inputs. foldl over lines, decode each line
--- individually, accumulate in reverse, join once at end.
+-- Uses native builtin for O(n) performance (80μs/37KB vs infinite with AILANG recursion)
 pure func emlDecodeQuotedPrintable(text: string) -> string {
-  let lines = split(text, "\n");
-  -- foldl over lines: join soft-wrapped lines, decode =XX in each complete line
-  let result = foldl(emlQpProcessLine, { revDecoded: [], pending: "" }, lines);
-  -- Flush any remaining pending content
-  let final = if length(result.pending) > 0
-    then emlDecodeQpLine(result.pending) :: result.revDecoded
-    else result.revDecoded;
-  join("\n", reverse(final))
-}
-
--- QP line processing state
-type EmlQpLineState = { revDecoded: [string], pending: string }
-
--- Process one raw QP line: handle soft line breaks, decode complete lines
-pure func emlQpProcessLine(state: EmlQpLineState, line: string) -> EmlQpLineState {
-  if endsWith(line, "=") then {
-    -- Soft line break: strip trailing = and accumulate in pending
-    let stripped = substring(line, 0, length(line) - 1);
-    { revDecoded: state.revDecoded, pending: state.pending ++ stripped }
-  }
-  else {
-    -- Complete line: flush pending + decode
-    let full = state.pending ++ line;
-    { revDecoded: emlDecodeQpLine(full) :: state.revDecoded, pending: "" }
-  }
-}
-
--- Decode =XX hex escapes in a single QP line (typically ≤200 chars after soft-join)
--- Uses split on "=" — only a few parts per line, so foldl is fast
-pure func emlDecodeQpLine(line: string) -> string {
-  let parts = split(line, "=");
-  match parts {
-    [] => "",
-    [only] => only,
-    first :: rest => {
-      let state = foldl(emlDecodeQpOneChunk, { revChunks: [], pendingBytes: [] }, rest);
-      let final = if listLength(state.pendingBytes) > 0
-        then bytesToString(fromInts(state.pendingBytes)) :: state.revChunks
-        else state.revChunks;
-      first ++ join("", reverse(final))
-    }
-  }
-}
-
--- QP fold state: accumulated string chunks (in reverse) and pending multi-byte UTF-8 bytes
-type EmlQpState = { revChunks: [string], pendingBytes: [int] }
-
--- Process one QP chunk during foldl (chunk was preceded by "=" in original)
-pure func emlDecodeQpOneChunk(state: EmlQpState, chunk: string) -> EmlQpState {
-  if length(chunk) < 2 then {
-    -- Incomplete escape — flush pending bytes, keep literal "="
-    let flushed = if listLength(state.pendingBytes) > 0
-      then ("=" ++ chunk) :: bytesToString(fromInts(state.pendingBytes)) :: state.revChunks
-      else ("=" ++ chunk) :: state.revChunks;
-    { revChunks: flushed, pendingBytes: [] }
-  }
-  else {
-    let hex1 = charAt(chunk, 0);
-    let hex2 = charAt(chunk, 1);
-    let v1 = emlHexVal(hex1);
-    let v2 = emlHexVal(hex2);
-    let afterHex = substring(chunk, 2, length(chunk));
-    if v1 < 0 || v2 < 0 then {
-      -- Not valid hex — flush pending, keep literal
-      let flushed = if listLength(state.pendingBytes) > 0
-        then ("=" ++ hex1 ++ hex2 ++ afterHex) :: bytesToString(fromInts(state.pendingBytes)) :: state.revChunks
-        else ("=" ++ hex1 ++ hex2 ++ afterHex) :: state.revChunks;
-      { revChunks: flushed, pendingBytes: [] }
-    }
-    else {
-      let byteVal = v1 * 16 + v2;
-      let newBytes = concat(state.pendingBytes, [byteVal]);
-      if length(afterHex) == 0 then {
-        -- Nothing after hex — next chunk might continue the byte sequence
-        { revChunks: state.revChunks, pendingBytes: newBytes }
-      }
-      else {
-        -- Literal text after hex — flush bytes, emit text
-        { revChunks: afterHex :: bytesToString(fromInts(newBytes)) :: state.revChunks, pendingBytes: [] }
-      }
-    }
-  }
+  builtinDecodeQP(text)
 }
 
 -- Convert a hex nibble character to its integer value
@@ -597,7 +513,7 @@ export pure func emlDecodeHeaderValue(value: string) -> string
 -- Same as QP but underscore = space, no soft line breaks
 pure func emlDecodeQEncoding(text: string) -> string {
   let withSpaces = join(" ", split(text, "_"));
-  emlDecodeQpLine(withSpaces)
+  builtinDecodeQP(withSpaces)
 }
 
 -- ============================================================

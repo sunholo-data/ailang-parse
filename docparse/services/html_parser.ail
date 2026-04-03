@@ -3,7 +3,7 @@ module docparse/services/html_parser
 import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
-import std/string (length, trim, contains, startsWith, find, substring, replace, toLower, split, join, charAt, endsWith)
+import std/string (length, trim, contains, startsWith, find, substring, replace, toLower, split, join, charAt, endsWith, replaceMany, startsWithIgnoreCase)
 import std/list (map, flatMap, filter, concat, length as listLength)
 import std/bytes (fromInts, toString as bytesToStr)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell)
@@ -73,34 +73,37 @@ pure func htmlStripDoctype(content: string) -> string
   }
 }
 
--- Replace common HTML entities with Unicode equivalents via UTF-8 bytes.
+-- Replace common HTML entities with Unicode equivalents via Aho-Corasick multi-pattern replace.
 -- XML only supports &amp; &lt; &gt; &apos; &quot; — everything else must be replaced.
+-- Uses native replaceMany for single-pass O(n) performance.
 pure func htmlReplaceEntities(content: string) -> string
   ensures { length(result) >= 0 }
 {
-  let s = replace(content, "&nbsp;", bytesToStr(fromInts([194, 160])));
-  let s2 = replace(s, "&mdash;", bytesToStr(fromInts([226, 128, 148])));
-  let s3 = replace(s2, "&ndash;", bytesToStr(fromInts([226, 128, 147])));
-  let s4 = replace(s3, "&lsquo;", bytesToStr(fromInts([226, 128, 152])));
-  let s5 = replace(s4, "&rsquo;", bytesToStr(fromInts([226, 128, 153])));
-  let s6 = replace(s5, "&ldquo;", bytesToStr(fromInts([226, 128, 156])));
-  let s7 = replace(s6, "&rdquo;", bytesToStr(fromInts([226, 128, 157])));
-  let s8 = replace(s7, "&bull;", bytesToStr(fromInts([226, 128, 162])));
-  let s9 = replace(s8, "&hellip;", bytesToStr(fromInts([226, 128, 166])));
-  let s10 = replace(s9, "&copy;", bytesToStr(fromInts([194, 169])));
-  let s11 = replace(s10, "&reg;", bytesToStr(fromInts([194, 174])));
-  let s12 = replace(s11, "&trade;", bytesToStr(fromInts([226, 132, 162])));
-  let s13 = replace(s12, "&euro;", bytesToStr(fromInts([226, 130, 172])));
-  let s14 = replace(s13, "&pound;", bytesToStr(fromInts([194, 163])));
-  let s15 = replace(s14, "&yen;", bytesToStr(fromInts([194, 165])));
-  let s16 = replace(s15, "&cent;", bytesToStr(fromInts([194, 162])));
-  let s17 = replace(s16, "&deg;", bytesToStr(fromInts([194, 176])));
-  let s18 = replace(s17, "&times;", bytesToStr(fromInts([195, 151])));
-  let s19 = replace(s18, "&divide;", bytesToStr(fromInts([195, 183])));
-  let s20 = replace(s19, "&laquo;", bytesToStr(fromInts([194, 171])));
-  let s21 = replace(s20, "&raquo;", bytesToStr(fromInts([194, 187])));
-  let s22 = replace(s21, "&iexcl;", bytesToStr(fromInts([194, 161])));
-  replace(s22, "&iquest;", bytesToStr(fromInts([194, 191])))
+  replaceMany(content, [
+    ("&nbsp;", bytesToStr(fromInts([194, 160]))),
+    ("&mdash;", bytesToStr(fromInts([226, 128, 148]))),
+    ("&ndash;", bytesToStr(fromInts([226, 128, 147]))),
+    ("&lsquo;", bytesToStr(fromInts([226, 128, 152]))),
+    ("&rsquo;", bytesToStr(fromInts([226, 128, 153]))),
+    ("&ldquo;", bytesToStr(fromInts([226, 128, 156]))),
+    ("&rdquo;", bytesToStr(fromInts([226, 128, 157]))),
+    ("&bull;", bytesToStr(fromInts([226, 128, 162]))),
+    ("&hellip;", bytesToStr(fromInts([226, 128, 166]))),
+    ("&copy;", bytesToStr(fromInts([194, 169]))),
+    ("&reg;", bytesToStr(fromInts([194, 174]))),
+    ("&trade;", bytesToStr(fromInts([226, 132, 162]))),
+    ("&euro;", bytesToStr(fromInts([226, 130, 172]))),
+    ("&pound;", bytesToStr(fromInts([194, 163]))),
+    ("&yen;", bytesToStr(fromInts([194, 165]))),
+    ("&cent;", bytesToStr(fromInts([194, 162]))),
+    ("&deg;", bytesToStr(fromInts([194, 176]))),
+    ("&times;", bytesToStr(fromInts([195, 151]))),
+    ("&divide;", bytesToStr(fromInts([195, 183]))),
+    ("&laquo;", bytesToStr(fromInts([194, 171]))),
+    ("&raquo;", bytesToStr(fromInts([194, 187]))),
+    ("&iexcl;", bytesToStr(fromInts([194, 161]))),
+    ("&iquest;", bytesToStr(fromInts([194, 191])))
+  ])
 }
 
 -- Close HTML5 void elements so XML parser accepts them.
@@ -124,8 +127,7 @@ pure func htmlCloseVoidElements(content: string) -> string
 -- If it starts with a void tag name, ensure the tag is self-closed.
 -- Always prepends "<" back since we split on it.
 pure func htmlFixVoidFragment(fragment: string) -> string {
-  let lower = toLower(fragment);
-  let voidTag = htmlMatchVoidTag(lower);
+  let voidTag = htmlMatchVoidTag(fragment);
   if length(voidTag) == 0 then "<" ++ fragment
   else {
     -- Found a void tag — check if it needs closing
@@ -142,33 +144,33 @@ pure func htmlFixVoidFragment(fragment: string) -> string {
   }
 }
 
--- Check if a lowercased fragment starts with a void tag name.
+-- Check if a fragment starts with a void tag name (case-insensitive).
 -- Returns the tag name if matched, empty string if not.
--- Validates word boundary (next char must be space, >, /, tab, newline, or end of string).
-pure func htmlMatchVoidTag(lower: string) -> string {
-  if htmlIsVoidTagAt(lower, "br") then "br"
-  else if htmlIsVoidTagAt(lower, "hr") then "hr"
-  else if htmlIsVoidTagAt(lower, "meta") then "meta"
-  else if htmlIsVoidTagAt(lower, "img") then "img"
-  else if htmlIsVoidTagAt(lower, "input") then "input"
-  else if htmlIsVoidTagAt(lower, "link") then "link"
-  else if htmlIsVoidTagAt(lower, "col") then "col"
-  else if htmlIsVoidTagAt(lower, "area") then "area"
-  else if htmlIsVoidTagAt(lower, "base") then "base"
-  else if htmlIsVoidTagAt(lower, "embed") then "embed"
-  else if htmlIsVoidTagAt(lower, "source") then "source"
-  else if htmlIsVoidTagAt(lower, "track") then "track"
-  else if htmlIsVoidTagAt(lower, "wbr") then "wbr"
+-- Uses startsWithIgnoreCase to avoid toLower on the entire fragment.
+pure func htmlMatchVoidTag(fragment: string) -> string {
+  if htmlIsVoidTagAt(fragment, "br") then "br"
+  else if htmlIsVoidTagAt(fragment, "hr") then "hr"
+  else if htmlIsVoidTagAt(fragment, "meta") then "meta"
+  else if htmlIsVoidTagAt(fragment, "img") then "img"
+  else if htmlIsVoidTagAt(fragment, "input") then "input"
+  else if htmlIsVoidTagAt(fragment, "link") then "link"
+  else if htmlIsVoidTagAt(fragment, "col") then "col"
+  else if htmlIsVoidTagAt(fragment, "area") then "area"
+  else if htmlIsVoidTagAt(fragment, "base") then "base"
+  else if htmlIsVoidTagAt(fragment, "embed") then "embed"
+  else if htmlIsVoidTagAt(fragment, "source") then "source"
+  else if htmlIsVoidTagAt(fragment, "track") then "track"
+  else if htmlIsVoidTagAt(fragment, "wbr") then "wbr"
   else ""
 }
 
--- Check if a lowercased string starts with tagName followed by a word boundary
-pure func htmlIsVoidTagAt(lower: string, tagName: string) -> bool {
-  if startsWith(lower, tagName) then {
+-- Check if fragment starts with tagName (case-insensitive) followed by a word boundary
+pure func htmlIsVoidTagAt(fragment: string, tagName: string) -> bool {
+  if startsWithIgnoreCase(fragment, tagName) then {
     let tagLen = length(tagName);
-    if tagLen >= length(lower) then true
+    if tagLen >= length(fragment) then true
     else {
-      let next = charAt(lower, tagLen);
+      let next = charAt(fragment, tagLen);
       next == " " || next == ">" || next == "/" || next == "\t" || next == "\n"
     }
   }
