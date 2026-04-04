@@ -88,6 +88,9 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Upgrade npm (OIDC trusted publishing requires >=11.5)
+        run: npm install -g npm@11.5.0 && npm --version
+
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
@@ -104,8 +107,6 @@ jobs:
           echo "Version $TAG_VERSION confirmed"
 
       - name: Publish to npm (trusted publishing via OIDC)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: cd sdks/js && npm publish --access public --provenance
 
   publish-go:
