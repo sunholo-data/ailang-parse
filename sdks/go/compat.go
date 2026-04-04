@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 )
 
 // UnstructuredClient is a drop-in replacement for the Unstructured API client.
@@ -35,22 +38,48 @@ func NewUnstructuredClient(serverURL string, apiKey ...string) *UnstructuredClie
 
 // Partition partitions a document into Unstructured-format elements.
 //
-// Note: filepath must be a sample ID or server-side path, not a local file path.
-// The /general/v0/general endpoint does not yet support multipart file upload.
-// To upload local files, use [Client.ParseFile] instead.
-func (uc *UnstructuredClient) Partition(ctx context.Context, filepath string, strategy ...string) ([]Element, error) {
+// Accepts a local file path (uploaded via multipart) or a sample ID (sent as JSON).
+// Usage is identical to the Unstructured client.
+func (uc *UnstructuredClient) Partition(ctx context.Context, filePath string, strategy ...string) ([]Element, error) {
 	strat := "auto"
 	if len(strategy) > 0 {
 		strat = strategy[0]
 	}
 
-	body := map[string]string{"filepath": filepath, "strategy": strat}
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, "POST", uc.client.BaseURL+"/general/v0/general", bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+	url := uc.client.BaseURL + "/general/v0/general"
+	var req *http.Request
+
+	// Check if filePath is a local file — if so, upload via multipart
+	if f, err := os.Open(filePath); err == nil {
+		defer f.Close()
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("files", filepath.Base(filePath))
+		if err != nil {
+			return nil, fmt.Errorf("create form file: %w", err)
+		}
+		if _, err := io.Copy(part, f); err != nil {
+			return nil, fmt.Errorf("copy file data: %w", err)
+		}
+		writer.WriteField("strategy", strat)
+		writer.Close()
+
+		req, err = http.NewRequestWithContext(ctx, "POST", url, &body)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+	} else {
+		// Sample ID or server-side path — send as JSON
+		jsonBody := map[string]string{"filepath": filePath, "strategy": strat}
+		b, _ := json.Marshal(jsonBody)
+		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(b))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("Content-Type", "application/json")
+
 	if uc.client.APIKey != "" {
 		req.Header.Set("unstructured-api-key", uc.client.APIKey)
 	}

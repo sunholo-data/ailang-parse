@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import os
+from pathlib import Path
 from typing import List, Optional
 
 import requests
@@ -22,24 +23,29 @@ class _GeneralApi:
     def partition(self, file: str = "", strategy: str = "auto", **kwargs) -> List[Element]:
         """Partition a document — returns Unstructured-format elements.
 
-        Usage (identical to unstructured-client)::
+        Accepts a local file path (uploaded via multipart) or a sample ID
+        (sent as JSON).  Usage is identical to unstructured-client::
 
             elements = client.general.partition(file="report.docx")
-
-        Note: ``file`` must be a sample ID or server-side path, not a local
-        file path.  The ``/general/v0/general`` endpoint does not yet support
-        multipart file upload.  To upload local files, use
-        :class:`~ailang_parse.DocParse` with :meth:`~ailang_parse.DocParse.parse_file`::
-
-            from ailang_parse import DocParse
-            result = DocParse(api_key="dp_...").parse_file("report.docx")
         """
         url = f"{self._base_url}/general/v0/general"
-        resp = self._session.post(
-            url,
-            json={"filepath": file, "strategy": strategy},
-            timeout=self._timeout,
-        )
+        file_path = Path(file)
+        if file_path.is_file():
+            # Local file — upload via multipart (same as Unstructured)
+            with open(file, "rb") as f:
+                resp = self._session.post(
+                    url,
+                    files={"files": (file_path.name, f)},
+                    data={"strategy": strategy},
+                    timeout=self._timeout,
+                )
+        else:
+            # Sample ID or server-side path — send as JSON
+            resp = self._session.post(
+                url,
+                json={"filepath": file, "strategy": strategy},
+                timeout=self._timeout,
+            )
 
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code}", resp.status_code)

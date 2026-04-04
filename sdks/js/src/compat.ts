@@ -19,27 +19,42 @@ class GeneralApi {
   /**
    * Partition a document — returns Unstructured-format elements.
    *
-   * Note: `file` must be a sample ID or server-side path, not a local file path.
-   * The `/general/v0/general` endpoint does not yet support multipart file upload.
-   * To upload local files, use {@link DocParse.parseFile} instead:
-   * ```ts
-   * const result = await new DocParse({ apiKey: "dp_..." }).parseFile("report.docx");
-   * ```
+   * Accepts a local file path (uploaded via multipart, Node.js only) or a
+   * sample ID (sent as JSON). Usage is identical to unstructured-client.
    */
   async partition(opts: { file: string; strategy?: string }): Promise<Element[]> {
     const url = `${this.baseUrl}/general/v0/general`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    const headers: Record<string, string> = {};
     if (this.apiKey) {
       headers["unstructured-api-key"] = this.apiKey;
     }
 
-    const resp = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ filepath: opts.file, strategy: opts.strategy || "auto" }),
-    });
+    let resp: Response;
+    // Node.js: check if file exists on disk → multipart upload
+    let isLocalFile = false;
+    try {
+      const fs = require("fs");
+      isLocalFile = fs.existsSync(opts.file) && fs.statSync(opts.file).isFile();
+    } catch { /* browser */ }
+
+    if (isLocalFile) {
+      const fs = require("fs");
+      const path = require("path");
+      const { FormData: NodeFormData } = require("undici");
+      const { Blob } = require("buffer");
+      const fileData = fs.readFileSync(opts.file);
+      const form = new NodeFormData();
+      form.append("files", new Blob([fileData]), path.basename(opts.file));
+      if (opts.strategy) form.append("strategy", opts.strategy);
+      resp = await fetch(url, { method: "POST", headers, body: form });
+    } else {
+      headers["Content-Type"] = "application/json";
+      resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ filepath: opts.file, strategy: opts.strategy || "auto" }),
+      });
+    }
 
     if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
 
