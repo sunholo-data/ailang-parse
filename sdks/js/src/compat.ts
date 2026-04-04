@@ -3,7 +3,7 @@
 import type { Element } from "./types.js";
 import { DocParseError } from "./types.js";
 
-const DEFAULT_BASE_URL = "https://api.parse.sunholo.com";
+const DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com";
 
 class GeneralApi {
   private baseUrl: string;
@@ -38,7 +38,7 @@ class GeneralApi {
     const resp = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ args: [opts.file, opts.strategy || "auto"] }),
+      body: JSON.stringify({ filepath: opts.file, strategy: opts.strategy || "auto" }),
     });
 
     if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
@@ -48,9 +48,16 @@ class GeneralApi {
 
     const resultStr = outer.result || "[]";
     try {
-      const elements = JSON.parse(resultStr);
-      return Array.isArray(elements) ? elements : [];
-    } catch {
+      const parsed = JSON.parse(resultStr);
+      // Check for error in inner result
+      if (parsed?.error) {
+        const err = parsed.error;
+        const msg = typeof err === "object" ? err.message || JSON.stringify(err) : String(err);
+        throw new DocParseError(msg);
+      }
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      if (e instanceof DocParseError) throw e;
       return [];
     }
   }
@@ -77,6 +84,11 @@ export class UnstructuredClient {
 
   constructor(opts: { serverUrl?: string; apiKey?: string; timeout?: number }) {
     const baseUrl = (opts.serverUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
-    this.general = new GeneralApi(baseUrl, opts.apiKey || "", opts.timeout || 60000);
+    // Resolve key: explicit > env var
+    let key = opts.apiKey || "";
+    if (!key) {
+      try { key = process.env.DOCPARSE_API_KEY || ""; } catch { /* browser */ }
+    }
+    this.general = new GeneralApi(baseUrl, key, opts.timeout || 60000);
   }
 }

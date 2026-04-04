@@ -1,13 +1,14 @@
 """Unstructured API compatibility — drop-in replacement for unstructured-client."""
 from __future__ import annotations
 import json
+import os
 from typing import List, Optional
 
 import requests
 
 from .types import Element, DocParseError
 
-DEFAULT_BASE_URL = "https://api.parse.sunholo.com"
+DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com"
 
 
 class _GeneralApi:
@@ -36,7 +37,7 @@ class _GeneralApi:
         url = f"{self._base_url}/general/v0/general"
         resp = self._session.post(
             url,
-            json={"args": [file, strategy]},
+            json={"filepath": file, "strategy": strategy},
             timeout=self._timeout,
         )
 
@@ -52,6 +53,12 @@ class _GeneralApi:
             elements_raw = json.loads(result_str)
         except (json.JSONDecodeError, TypeError):
             return []
+
+        # Check for error in inner result
+        if isinstance(elements_raw, dict) and "error" in elements_raw:
+            err = elements_raw["error"]
+            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise DocParseError(msg)
 
         if isinstance(elements_raw, list):
             return [Element.from_dict(e) for e in elements_raw]
@@ -83,6 +90,14 @@ class UnstructuredClient:
         **kwargs,  # Accept extra args for compat
     ):
         self._session = requests.Session()
+        # Resolve key: explicit > env var > saved credentials
+        if not api_key:
+            api_key = os.environ.get("DOCPARSE_API_KEY", "")
+        if not api_key:
+            from .client import _load_saved_key
+            saved = _load_saved_key(server_url.rstrip("/"))
+            if saved:
+                api_key = saved["api_key"]
         if api_key:
             self._session.headers["unstructured-api-key"] = api_key
         self._base_url = server_url.rstrip("/")

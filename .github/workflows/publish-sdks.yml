@@ -7,8 +7,36 @@ on:
       - 'sdk-v*'
 
 jobs:
+  test-sdks:
+    name: Test SDKs before publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Python SDK tests
+        run: cd sdks/python && uv run pytest tests/ -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JS SDK tests
+        run: cd sdks/js && npx --yes tsx --test tests/client.test.ts
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Go SDK tests
+        run: cd sdks/go && go test -v ./...
+
   publish-python:
     name: Publish Python SDK to PyPI
+    needs: test-sdks
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # PyPI trusted publishing
@@ -46,6 +74,7 @@ jobs:
 
   publish-npm:
     name: Publish JS SDK to npm
+    needs: test-sdks
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # npm provenance attestation
@@ -82,6 +111,7 @@ jobs:
 
   publish-go:
     name: Publish Go SDK
+    needs: test-sdks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

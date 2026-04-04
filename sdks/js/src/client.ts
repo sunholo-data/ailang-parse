@@ -7,7 +7,7 @@ import type { ParseResult, HealthResult, FormatsResult, DocParseOptions } from "
 import { DocParseError, AuthError, QuotaError } from "./types.js";
 import { KeyManager } from "./keys.js";
 
-const DEFAULT_BASE_URL = "https://api.parse.sunholo.com";
+const DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com";
 const CONFIG_DIR_NAME = "ailang-parse";
 const CREDENTIALS_FILE = "credentials.json";
 
@@ -99,7 +99,28 @@ export class DocParse {
   /** Parse a document by sample ID or server-side filepath. Returns structured blocks.
    *  For uploading local files, use {@link parseFile} instead. */
   async parse(filepath: string, outputFormat = "blocks"): Promise<ParseResult> {
-    return this._call("POST", "/api/v1/parse", [filepath, outputFormat]) as Promise<ParseResult>;
+    const url = this.baseUrl + "/api/v1/parse";
+    const body: Record<string, string> = { filepath, outputFormat };
+    if (this.apiKey) body.apiKey = this.apiKey;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (this.apiKey) headers["x-api-key"] = this.apiKey;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (resp.status === 401) throw new AuthError();
+      if (resp.status === 429) throw new QuotaError("Quota exceeded");
+      if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
+      return this._unwrap(await resp.json()) as ParseResult;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -251,8 +272,16 @@ export class DocParse {
     const resultStr = outer.result || "";
     if (!resultStr) return outer;
     try {
-      return JSON.parse(resultStr);
-    } catch {
+      const inner = JSON.parse(resultStr);
+      // Check for error in inner result (API wraps errors in envelope too)
+      if (inner?.error) {
+        const err = inner.error;
+        const msg = typeof err === "object" ? err.message || JSON.stringify(err) : String(err);
+        throw new DocParseError(msg);
+      }
+      return inner;
+    } catch (e) {
+      if (e instanceof DocParseError) throw e;
       return { raw: resultStr };
     }
   }

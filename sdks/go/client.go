@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const DefaultBaseURL = "https://api.parse.sunholo.com"
+const DefaultBaseURL = "https://docparse.ailang.sunholo.com"
 
 const configDirName = "ailang-parse"
 const credentialsFile = "credentials.json"
@@ -269,7 +269,25 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 	if outer.Error != "" {
 		return nil, fmt.Errorf("API error: %s", outer.Error)
 	}
-	return []byte(outer.Result), nil
+	inner := []byte(outer.Result)
+	// If no result field, return the raw response (e.g. health, formats)
+	if len(inner) == 0 {
+		return data, nil
+	}
+	// Check for error in inner result (API wraps errors in envelope too)
+	var innerObj struct {
+		Error json.RawMessage `json:"error,omitempty"`
+	}
+	if json.Unmarshal(inner, &innerObj) == nil && len(innerObj.Error) > 0 && string(innerObj.Error) != "null" {
+		var errObj struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(innerObj.Error, &errObj) == nil && errObj.Message != "" {
+			return nil, fmt.Errorf("API error: %s", errObj.Message)
+		}
+		return nil, fmt.Errorf("API error: %s", string(innerObj.Error))
+	}
+	return inner, nil
 }
 
 // call makes an API request and unwraps the serve-api response envelope.

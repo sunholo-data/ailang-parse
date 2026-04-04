@@ -18,19 +18,60 @@ type ParseOptions struct {
 }
 
 // Parse parses a document file and returns structured blocks.
-func (c *Client) Parse(ctx context.Context, filepath string, opts ...ParseOptions) (*ParseResult, error) {
+func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOptions) (*ParseResult, error) {
 	format := "blocks"
 	if len(opts) > 0 && opts[0].OutputFormat != "" {
 		format = opts[0].OutputFormat
 	}
 
-	data, err := c.call(ctx, "POST", "/api/v1/parse", []string{filepath, format})
+	body := map[string]string{
+		"filepath":     filePath,
+		"outputFormat": format,
+	}
+	if c.APIKey != "" {
+		body["apiKey"] = c.APIKey
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/parse", bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.APIKey != "" {
+		req.Header.Set("x-api-key", c.APIKey)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode == 401 {
+		return nil, fmt.Errorf("auth error: invalid or missing API key")
+	}
+	if resp.StatusCode == 429 {
+		return nil, fmt.Errorf("quota exceeded")
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
+	}
+
+	inner, err := c.unwrap(data)
 	if err != nil {
 		return nil, err
 	}
 
 	var result ParseResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(inner, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal parse result: %w", err)
 	}
 	return &result, nil

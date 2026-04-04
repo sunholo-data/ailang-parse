@@ -15,7 +15,7 @@ from .types import (
     ParseResult, HealthResult, FormatsResult,
 )
 
-DEFAULT_BASE_URL = "https://api.parse.sunholo.com"
+DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com"
 _CONFIG_DIR_NAME = "ailang-parse"
 _CREDENTIALS_FILE = "credentials.json"
 
@@ -128,8 +128,18 @@ class DocParse:
 
         For uploading local files, use :meth:`parse_file` instead.
         """
-        data = self._call("POST", "/api/v1/parse", args=[filepath, output_format])
-        return ParseResult.from_dict(data)
+        url = self.base_url + "/api/v1/parse"
+        body: Dict[str, Any] = {"filepath": filepath, "outputFormat": output_format}
+        if self.api_key:
+            body["apiKey"] = self.api_key
+        resp = self._session.post(url, json=body, timeout=self.timeout)
+        if resp.status_code == 401:
+            raise AuthError("Invalid or missing API key", 401)
+        if resp.status_code == 429:
+            raise QuotaError("Quota exceeded")
+        if resp.status_code >= 400:
+            raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
+        return ParseResult.from_dict(self._unwrap(resp.json()))
 
     def parse_file(self, filepath: str, output_format: str = "blocks") -> ParseResult:
         """Upload a local file and parse it. Returns structured blocks.
@@ -153,7 +163,7 @@ class DocParse:
         if resp.status_code == 401:
             raise AuthError("Invalid or missing API key", 401)
         if resp.status_code == 429:
-            raise QuotaError("Quota exceeded", status_code=429)
+            raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
         return ParseResult.from_dict(self._unwrap(resp.json()))
@@ -243,7 +253,11 @@ class DocParse:
                 return result
 
             err = poll_data.get("error", "")
-            if err and err != "AUTHORIZATION_PENDING":
+            if isinstance(err, dict):
+                err_code = err.get("code", "")
+                if err_code and err_code != "AUTHORIZATION_PENDING":
+                    raise DocParseError(err.get("message", str(err)))
+            elif err and err != "AUTHORIZATION_PENDING":
                 raise DocParseError(poll_data.get("message", err))
 
         raise DocParseError("Device authorization timed out")
@@ -252,14 +266,24 @@ class DocParse:
     def _unwrap(outer: Dict[str, Any]) -> Dict[str, Any]:
         """Unwrap serve-api response envelope."""
         if "error" in outer and outer["error"]:
-            raise DocParseError(str(outer["error"]))
+            err = outer["error"]
+            if isinstance(err, str):
+                raise DocParseError(err)
+            # Dict errors (e.g. device auth poll) — return as-is for caller handling
+            return outer
         result_str = outer.get("result", "")
         if not result_str:
             return outer
         try:
-            return json.loads(result_str)
+            inner = json.loads(result_str)
         except (json.JSONDecodeError, TypeError):
             return {"raw": result_str}
+        # Check for error in inner result (API wraps errors in envelope too)
+        if isinstance(inner, dict) and "error" in inner and inner["error"]:
+            err = inner["error"]
+            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise DocParseError(msg)
+        return inner
 
     # ── HTTP layer ──
 
@@ -278,7 +302,7 @@ class DocParse:
         if resp.status_code == 401:
             raise AuthError("Invalid or missing API key", 401)
         if resp.status_code == 429:
-            raise QuotaError("Quota exceeded", status_code=429)
+            raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
 

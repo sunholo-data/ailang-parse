@@ -1,6 +1,8 @@
 // Package docparse provides a Go client for the AILANG Parse document parsing API.
 package docparse
 
+import "encoding/json"
+
 // Block represents a parsed content block (9 variants discriminated by Type).
 type Block struct {
 	Type string `json:"type"` // text, heading, table, list, image, audio, video, section, change
@@ -39,6 +41,28 @@ type Cell struct {
 	Text    string `json:"text"`
 	ColSpan int    `json:"colSpan,omitempty"`
 	Merged  bool   `json:"merged,omitempty"`
+}
+
+// UnmarshalJSON handles both string ("A") and object ({"text":"A","colSpan":2}) forms.
+func (c *Cell) UnmarshalJSON(data []byte) error {
+	// Try string first
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		c.Text = s
+		c.ColSpan = 1
+		return nil
+	}
+	// Otherwise unmarshal as struct
+	type cellAlias Cell
+	var alias cellAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*c = Cell(alias)
+	if c.ColSpan == 0 {
+		c.ColSpan = 1
+	}
+	return nil
 }
 
 // DocMetadata contains document metadata.
