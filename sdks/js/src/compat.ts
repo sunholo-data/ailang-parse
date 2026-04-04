@@ -30,21 +30,21 @@ class GeneralApi {
     }
 
     let resp: Response;
-    // Node.js: check if file exists on disk → multipart upload
+    // Detect Node.js vs browser for local file upload
+    const isNode = typeof process !== "undefined" && process.versions?.node;
     let isLocalFile = false;
-    try {
-      const fs = require("fs");
-      isLocalFile = fs.existsSync(opts.file) && fs.statSync(opts.file).isFile();
-    } catch { /* browser */ }
+    if (isNode) {
+      const { existsSync, statSync } = await import("fs");
+      isLocalFile = existsSync(opts.file) && statSync(opts.file).isFile();
+    }
 
     if (isLocalFile) {
-      const fs = require("fs");
-      const path = require("path");
-      const { FormData: NodeFormData } = require("undici");
-      const { Blob } = require("buffer");
-      const fileData = fs.readFileSync(opts.file);
-      const form = new NodeFormData();
-      form.append("files", new Blob([fileData]), path.basename(opts.file));
+      const { readFileSync } = await import("fs");
+      const { basename } = await import("path");
+      const fileData = readFileSync(opts.file);
+      const blob = new Blob([fileData]);
+      const form = new FormData();
+      form.append("files", blob, basename(opts.file));
       if (opts.strategy) form.append("strategy", opts.strategy);
       resp = await fetch(url, { method: "POST", headers, body: form });
     } else {

@@ -139,20 +139,21 @@ export class DocParse {
     const url = this.baseUrl + "/api/v1/parse";
     let form: any;
 
-    // Node.js: read file from disk
-    try {
-      const fs = require("fs");
-      const path = require("path");
-      const { FormData: NodeFormData } = require("undici");
-      const { Blob } = require("buffer");
+    // Detect Node.js vs browser
+    const isNode = typeof process !== "undefined" && process.versions?.node;
 
-      const fileData = fs.readFileSync(filepath);
+    if (isNode) {
+      // Node.js: read file from disk using native FormData/Blob (Node 18+)
+      const { readFileSync } = await import("fs");
+      const { basename } = await import("path");
+
+      const fileData = readFileSync(filepath);
       const blob = new Blob([fileData]);
-      form = new NodeFormData();
-      form.append("filepath", blob, path.basename(filepath));
+      form = new FormData();
+      form.append("filepath", blob, basename(filepath));
       form.append("outputFormat", outputFormat);
       if (this.apiKey) form.append("apiKey", this.apiKey);
-    } catch {
+    } else {
       // Browser: expect a File object or use native FormData
       form = new FormData();
       form.append("filepath", filepath as any);
