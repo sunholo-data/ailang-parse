@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Benchmarks — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="OfficeDocBench: eval-driven structural benchmarks for document parsing. AILANG Parse scores 96.6% vs MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, LlamaParse 53.6%. AI writes code against these evals. Open-source methodology.">
+<meta name="description" content="OfficeDocBench: eval-driven structural benchmarks for document parsing. AILANG Parse scores 97.8% vs Kreuzberg 77.2%, MarkItDown 73.2%, Unstructured 67.6%, Docling 67.6%. AI writes code against these evals. Open-source methodology.">
 <meta property="og:title" content="Benchmarks — AILANG Parse">
-<meta property="og:description" content="OfficeDocBench: eval-driven structural benchmarks. AILANG Parse 96.6% vs MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, LlamaParse 53.6%.">
+<meta property="og:description" content="OfficeDocBench: eval-driven structural benchmarks. AILANG Parse 97.8% vs Kreuzberg 77.2%, MarkItDown 73.2%, Unstructured 67.6%, Docling 67.6%.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/docparse/benchmarks.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -341,7 +341,7 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How does AILANG Parse compare to other document parsers on benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "On the OfficeDocBench benchmark, AILANG Parse scores 96.6% versus MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, and LlamaParse 53.6%. The benchmark tests table structure, merged cells, track changes, comments, and heading hierarchy across DOCX, PPTX, and XLSX files."}},
+    {"@type": "Question", "name": "How does AILANG Parse compare to other document parsers on benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "On the OfficeDocBench benchmark (67 files, 10 formats), AILANG Parse scores 97.8% versus Kreuzberg 77.2%, MarkItDown 73.2%, Unstructured 67.6%, and Docling 67.6%. The benchmark tests table structure, merged cells, track changes, comments, and heading hierarchy across DOCX, PPTX, XLSX, and 7 additional formats."}},
     {"@type": "Question", "name": "Is the OfficeDocBench benchmark open source?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The benchmark suite, golden output files, and scoring scripts are all open source. You can run the full comparison on your own machine. The methodology uses structural diff scoring, not text similarity, so it measures actual structural fidelity."}},
     {"@type": "Question", "name": "Why do Docling and Unstructured score the same on OfficeDocBench?", "acceptedAnswer": {"@type": "Answer", "text": "Both Docling and Unstructured use the same fundamental approach for Office formats: convert to PDF first, then apply ML-based layout detection. Since the same structural information is lost during PDF conversion — merge attributes, track changes, comments — both tools hit the same ceiling. AILANG Parse bypasses this ceiling entirely by reading Office XML directly."}},
     {"@type": "Question", "name": "How fast is AILANG Parse compared to other parsers?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse processes a typical DOCX in under 11ms on an Apple M2, with zero dependencies. In our testing (v0.6.94, March 2026), LlamaParse took approximately 54 seconds per document via cloud API. Unstructured and Docling typically take 2-10 seconds depending on document complexity and model configuration."}},
@@ -434,14 +434,15 @@
         <tr><td>MarkItDown</td><td>v0.1.5 (Microsoft)</td><td>68.9%</td><td>75.4%</td><td>75.8%</td><td>75.5%</td><td class="fail">2.5%</td></tr>
         <tr><td>Unstructured</td><td>v0.21.5</td><td>67.6%</td><td>72.2%</td><td>68.6%</td><td>90.3%</td><td class="fail">2.4%</td></tr>
         <tr><td>Docling</td><td>v2.80.0 (IBM)</td><td>67.6%</td><td>71.9%</td><td>71.2%</td><td>84.6%</td><td class="fail">2.5%</td></tr>
+        <tr><td>Kreuzberg</td><td>v4.7.2 (Rust)</td><td>74.8%</td><td>66.7%</td><td>65.4%</td><td>91.7%</td><td class="pass">96.9%</td></tr>
       </tbody>
     </table>
     </div>
-    <p style="font-size:12px;color:var(--text-muted)">41 shared files, 3 shared formats (DOCX/PPTX/XLSX). AILANG Parse leads by &gt;29 points on even ground. Ground truth is hand-verified for challenge files. Other parser versions were the latest stable releases as of 2026-03-28.</p>
+    <p style="font-size:12px;color:var(--text-muted)">41 shared files, 3 shared formats (DOCX/PPTX/XLSX). AILANG Parse leads by &gt;22 points on even ground. Ground truth is hand-verified for challenge files. Other parser versions were the latest stable releases as of 2026-03-28 (Kreuzberg: 2026-04-04).</p>
 
     <div class="dp-bench-callout" style="margin-top:16px">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Why the 29-point gap?</strong> AILANG Parse parses Office XML directly &mdash; it reads <code>w:tbl</code>, <code>w:p</code>, and <code>w:r</code> nodes from the ZIP archive and maps them to typed blocks. Other parsers (including Microsoft's MarkItDown) convert documents to Markdown or plain text as an intermediate step, losing structural information (table headers, merged cells, list nesting, metadata). The gap isn't about polish &mdash; it's an architectural difference in how the XML is consumed.</div>
+      <div><strong>Why the 22-point gap?</strong> AILANG Parse parses Office XML directly &mdash; it reads <code>w:tbl</code>, <code>w:p</code>, and <code>w:r</code> nodes from the ZIP archive and maps them to typed blocks. Even Kreuzberg (Rust-core, 91+ format support) scores 22 points behind because it uses Markdown as an intermediate representation, losing structural features like track changes, comments, and text boxes. The gap isn't about polish &mdash; it's an architectural difference in how the XML is consumed.</div>
     </div>
   </section>
 
@@ -450,7 +451,7 @@
   <!-- Full Suite: OfficeDocBench -->
   <section class="dp-bench-section reveal">
     <h2 id="full-suite">Full Suite: OfficeDocBench (67 Files, 10 Formats)</h2>
-    <p>AILANG Parse supports 7 additional formats not covered by other parsers tested (ODT, ODP, ODS, EPUB, HTML, CSV, Markdown). The full suite includes 54 core files plus 13 challenge files designed to test harder features.</p>
+    <p>The full suite spans 10 formats and includes 54 core files plus 13 challenge files designed to test harder features. Kreuzberg supports 10 formats (all except ODP); MarkItDown supports 6; Unstructured and Docling support 3.</p>
 
     <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-radius:8px;background:var(--dp-blue-faded);border:1px solid var(--dp-blue-border);margin-bottom:20px;font-size:13px;color:var(--text-secondary);line-height:1.6">
       <svg viewBox="0 0 24 24" style="width:18px;height:18px;min-width:18px;margin-top:1px;stroke:var(--dp-blue);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
@@ -464,6 +465,7 @@
       </thead>
       <tbody>
         <tr><td style="font-weight:600">AILANG Parse</td><td>67</td><td class="pass">10</td><td class="pass">97.8%</td><td class="pass">96.5%</td><td class="pass">97.8%</td><td class="pass">97.9%</td><td class="pass">100.0%</td></tr>
+        <tr><td>Kreuzberg</td><td>63</td><td>10</td><td>77.2%</td><td>73.7%</td><td>71.7%</td><td>88.4%</td><td class="pass">83.7%</td></tr>
         <tr><td>MarkItDown</td><td>50</td><td>6</td><td>73.2%</td><td>80.3%</td><td>80.0%</td><td>75.4%</td><td class="fail">16.0%</td></tr>
         <tr><td>Unstructured</td><td>41</td><td>3</td><td>67.6%</td><td>72.2%</td><td>68.6%</td><td>90.3%</td><td class="fail">2.4%</td></tr>
         <tr><td>Docling</td><td>40</td><td>3</td><td>67.6%</td><td>71.9%</td><td>71.2%</td><td>84.6%</td><td class="fail">2.5%</td></tr>
@@ -484,7 +486,7 @@
       <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">CSV</div><div class="dp-format-chip-count">2 files</div><div class="dp-format-chip-status">100%</div></div>
       <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">MD</div><div class="dp-format-chip-count">3 files</div><div class="dp-format-chip-status">100%</div></div>
     </div>
-    <p style="font-size:12px;color:var(--text-muted)">Formats with blue borders are not supported by most other parsers tested. MarkItDown supports HTML, CSV, and EPUB but not ODF formats (ODT/ODP/ODS) or Markdown.</p>
+    <p style="font-size:12px;color:var(--text-muted)">Formats with blue borders are not supported by most other parsers tested. Kreuzberg supports all formats except ODP. MarkItDown supports HTML, CSV, and EPUB but not ODF formats (ODT/ODP/ODS) or Markdown.</p>
   </section>
 
   <hr class="dp-divider">
@@ -492,19 +494,19 @@
   <!-- Exclusive Features -->
   <section class="dp-bench-section reveal">
     <h2 id="exclusive-features">Exclusive Features <span class="dp-exclusive-badge">AILANG Parse Only</span></h2>
-    <p>These structural features are extracted by AILANG Parse but <strong>not by any other parser tested</strong>. They are scored separately from the head-to-head comparison to keep that comparison fair, but they represent real capabilities that matter for document understanding.</p>
+    <p>These structural features are extracted by AILANG Parse but <strong>missed by most or all other parsers tested</strong>. Kreuzberg partially detects headers/footers but misses all other features below. They represent real capabilities that matter for document understanding.</p>
 
     <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
     <table class="dp-results-table">
       <thead>
-        <tr><th>Feature</th><th>AILANG Parse</th><th>MarkItDown</th><th>Unstructured</th><th>Docling</th><th>Why It Matters</th></tr>
+        <tr><th>Feature</th><th>AILANG Parse</th><th>Kreuzberg</th><th>MarkItDown</th><th>Unstructured</th><th>Docling</th><th>Why It Matters</th></tr>
       </thead>
       <tbody>
-        <tr><td>Track Changes</td><td class="pass">3/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td style="font-size:12px">Legal review, contract redlining, audit trails</td></tr>
-        <tr><td>Comments</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td style="font-size:12px">Review feedback, annotation extraction</td></tr>
-        <tr><td>Headers/Footers</td><td class="pass">3/3</td><td class="fail">0/2</td><td class="partial">1/2</td><td class="fail">0/2</td><td style="font-size:12px">Document metadata, page numbering, letterheads</td></tr>
-        <tr><td>Text Boxes</td><td class="pass">2/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td style="font-size:12px">Callouts, sidebars, floating content</td></tr>
-        <tr><td>Merged Cells</td><td class="pass">Yes</td><td class="fail">No</td><td class="fail">No</td><td class="fail">No</td><td style="font-size:12px">Complex tables, financial reports, schedules</td></tr>
+        <tr><td>Track Changes</td><td class="pass">3/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td style="font-size:12px">Legal review, contract redlining, audit trails</td></tr>
+        <tr><td>Comments</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td style="font-size:12px">Review feedback, annotation extraction</td></tr>
+        <tr><td>Headers/Footers</td><td class="pass">3/3</td><td class="partial">2/3</td><td class="fail">0/2</td><td class="partial">1/2</td><td class="fail">0/2</td><td style="font-size:12px">Document metadata, page numbering, letterheads</td></tr>
+        <tr><td>Text Boxes</td><td class="pass">2/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td style="font-size:12px">Callouts, sidebars, floating content</td></tr>
+        <tr><td>Merged Cells</td><td class="pass">Yes</td><td class="fail">No</td><td class="fail">No</td><td class="fail">No</td><td class="fail">No</td><td style="font-size:12px">Complex tables, financial reports, schedules</td></tr>
       </tbody>
     </table>
     </div>
@@ -520,22 +522,22 @@
     <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
     <table class="dp-results-table">
       <thead>
-        <tr><th>Feature</th><th>AILANG Parse</th><th>MarkItDown</th><th>Unstructured</th><th>Docling</th></tr>
+        <tr><th>Feature</th><th>AILANG Parse</th><th>Kreuzberg</th><th>MarkItDown</th><th>Unstructured</th><th>Docling</th></tr>
       </thead>
       <tbody>
-        <tr><td>Headings</td><td class="pass">26/27</td><td class="pass">20/21</td><td>16/18</td><td>16/18</td></tr>
-        <tr><td>Tables</td><td class="pass">37/37</td><td class="pass">25/25</td><td>14/17</td><td>13/16</td></tr>
-        <tr><td>Track Changes</td><td class="pass">3/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td class="fail">0/3</td></tr>
-        <tr><td>Comments</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr><td>Headers/Footers</td><td class="pass">3/3</td><td class="fail">0/2</td><td class="partial">1/2</td><td class="fail">0/2</td></tr>
-        <tr><td>Text Boxes</td><td class="pass">2/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td></tr>
-        <tr><td>Images</td><td class="pass">8/8</td><td class="partial">3/5</td><td class="fail">0/4</td><td class="partial">2/4</td></tr>
-        <tr><td>Lists</td><td>12/14</td><td>6/7</td><td>3/3</td><td>1/3</td></tr>
-        <tr><td>Sheet Names</td><td>4/5</td><td>0/1</td><td>0/1</td><td>0/1</td></tr>
+        <tr><td>Headings</td><td class="pass">26/27</td><td>21/26</td><td class="pass">20/21</td><td>16/18</td><td>16/18</td></tr>
+        <tr><td>Tables</td><td class="pass">37/37</td><td>29/34</td><td class="pass">25/25</td><td>14/17</td><td>13/16</td></tr>
+        <tr><td>Track Changes</td><td class="pass">3/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td class="fail">0/3</td></tr>
+        <tr><td>Comments</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
+        <tr><td>Headers/Footers</td><td class="pass">3/3</td><td class="partial">2/3</td><td class="fail">0/2</td><td class="partial">1/2</td><td class="fail">0/2</td></tr>
+        <tr><td>Text Boxes</td><td class="pass">2/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td></tr>
+        <tr><td>Images</td><td class="pass">8/8</td><td class="partial">3/7</td><td class="partial">3/5</td><td class="fail">0/4</td><td class="partial">2/4</td></tr>
+        <tr><td>Lists</td><td>12/14</td><td>8/12</td><td>6/7</td><td>3/3</td><td>1/3</td></tr>
+        <tr><td>Sheet Names</td><td>4/5</td><td class="pass">4/4</td><td>0/1</td><td>0/1</td><td>0/1</td></tr>
       </tbody>
     </table>
     </div>
-    <p style="font-size:12px;color:var(--text-muted)">AILANG Parse is the only tool that detects track changes, comments, headers/footers, and text boxes. These are critical for legal review, contract analysis, and document understanding.</p>
+    <p style="font-size:12px;color:var(--text-muted)">AILANG Parse is the only tool that detects track changes, comments, and text boxes. Kreuzberg partially detects headers/footers but misses all other exclusive features. These are critical for legal review, contract analysis, and document understanding.</p>
   </section>
 
   <hr class="dp-divider">
@@ -678,7 +680,7 @@ export pure func detectFormat(ext: string) -> string
   <!-- Help Us Find Our Gaps -->
   <section class="dp-bench-section reveal" id="submit-document">
     <h2>Help Us Find Our Gaps</h2>
-    <p>We score 96.6% today, but document specs are vast &mdash; ECMA-376 alone is over 5,000 pages, and we're expanding into email, calendar, and more formats. There are documents in the wild that will break our parser. <strong>We want to find them.</strong></p>
+    <p>We score 97.8% today, but document specs are vast &mdash; ECMA-376 alone is over 5,000 pages, and we're expanding into email, calendar, and more formats. There are documents in the wild that will break our parser. <strong>We want to find them.</strong></p>
 
     <p>If you have a document that AILANG Parse doesn't handle well, send it to us. If it reveals a gap that gets added to our eval corpus, you get <strong>1 month of Business tier free</strong> (worth &euro;99).</p>
 
@@ -770,7 +772,7 @@ bash benchmarks/generate_golden.sh</code></pre>
     <h2>Frequently Asked Questions</h2>
     <details>
       <summary>How does AILANG Parse compare to other document parsers on benchmarks?</summary>
-      <div class="dp-faq-answer"><p>On the OfficeDocBench benchmark, AILANG Parse scores 96.6% versus MarkItDown 73.3%, Unstructured 63.4%, Docling 63.4%, and LlamaParse 53.6%. The benchmark tests table structure, <a href="tables.html">merged cells</a>, <a href="track-changes.html">track changes</a>, <a href="comments.html">comments</a>, and heading hierarchy across DOCX, PPTX, and XLSX files.</p></div>
+      <div class="dp-faq-answer"><p>On the OfficeDocBench benchmark (67 files, 10 formats), AILANG Parse scores 97.8% versus Kreuzberg 77.2%, MarkItDown 73.2%, Unstructured 67.6%, and Docling 67.6%. The benchmark tests table structure, <a href="tables.html">merged cells</a>, <a href="track-changes.html">track changes</a>, <a href="comments.html">comments</a>, and heading hierarchy across DOCX, PPTX, XLSX, and 7 additional formats.</p></div>
     </details>
     <details>
       <summary>Is the OfficeDocBench benchmark open source?</summary>
@@ -786,7 +788,7 @@ bash benchmarks/generate_golden.sh</code></pre>
     </details>
     <details>
       <summary>Why does AILANG Parse score so much higher than competitors?</summary>
-      <div class="dp-faq-answer"><p>AILANG Parse is built with an <a href="#eval-driven">eval-first methodology</a>: we define structural benchmark tests with hand-verified ground truth, then an AI agent writes AILANG parsing code specifically to pass them. Other parsers are hand-coded and then measured against benchmarks written independently. The 29-point gap reflects fundamentally different development approaches, not cherry-picked test files. Every result is <a href="#run-benchmarks">fully reproducible</a> &mdash; and we actively test for structural features (track changes, merged cells, comments) that other parsers skip entirely.</p></div>
+      <div class="dp-faq-answer"><p>AILANG Parse is built with an <a href="#eval-driven">eval-first methodology</a>: we define structural benchmark tests with hand-verified ground truth, then an AI agent writes AILANG parsing code specifically to pass them. Other parsers are hand-coded and then measured against benchmarks written independently. The 20+ point gap reflects fundamentally different development approaches, not cherry-picked test files. Every result is <a href="#run-benchmarks">fully reproducible</a> &mdash; and we actively test for structural features (track changes, merged cells, comments) that other parsers skip entirely.</p></div>
     </details>
     <details>
       <summary>How can I submit a document that doesn't parse correctly?</summary>

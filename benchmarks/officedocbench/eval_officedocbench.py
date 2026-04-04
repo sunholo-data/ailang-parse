@@ -90,6 +90,12 @@ def load_adapter(name: str):
             return MarkItDownAdapter()
         except Exception:
             return None
+    elif name == "kreuzberg":
+        try:
+            from adapters.kreuzberg_adapter import KreuzbergAdapter
+            return KreuzbergAdapter()
+        except Exception:
+            return None
     return None
 
 
@@ -181,7 +187,7 @@ def evaluate_adapter(
 
 def main():
     parser = argparse.ArgumentParser(description="OfficeDocBench Evaluation")
-    parser.add_argument("--adapter", help="Evaluate a single adapter (docparse, unstructured, docling, llamaparse, markitdown)")
+    parser.add_argument("--adapter", help="Evaluate a single adapter (docparse, unstructured, docling, llamaparse, markitdown, kreuzberg)")
     parser.add_argument("--all", action="store_true", help="Evaluate all installed adapters")
     parser.add_argument("--format", help="Filter by format (docx, pptx, xlsx, etc.)")
     parser.add_argument("--json", action="store_true", help="JSON output")
@@ -200,7 +206,7 @@ def main():
     if args.adapter:
         adapter_names = [args.adapter]
     elif args.all:
-        adapter_names = ["docparse", "unstructured", "docling", "llamaparse", "markitdown"]
+        adapter_names = ["docparse", "unstructured", "docling", "llamaparse", "markitdown", "kreuzberg"]
     else:
         adapter_names = ["docparse"]
 
