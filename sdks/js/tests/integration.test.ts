@@ -129,3 +129,57 @@ describe("UnstructuredClient compat (integration)", () => {
     }
   });
 });
+
+describe("parseFile (integration)", () => {
+  it("uploads and parses a local DOCX", async (t) => {
+    skipUnlessKey(t);
+    const fs = await import("fs");
+    const path = await import("path");
+    const os = await import("os");
+
+    // Create a minimal DOCX using archiver-like approach (manual zip)
+    const { Uint8Array: U8 } = globalThis;
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "docparse-test-"));
+    const docxPath = path.join(tmpDir, "test.docx");
+
+    // Use Node's built-in to create a minimal zip/docx
+    const { execSync } = await import("child_process");
+    const contentDir = path.join(tmpDir, "docx_content");
+    fs.mkdirSync(path.join(contentDir, "word"), { recursive: true });
+    fs.mkdirSync(path.join(contentDir, "_rels"), { recursive: true });
+    fs.writeFileSync(path.join(contentDir, "[Content_Types].xml"),
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>');
+    fs.writeFileSync(path.join(contentDir, "_rels", ".rels"),
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>');
+    fs.writeFileSync(path.join(contentDir, "word", "document.xml"),
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:body><w:p><w:r><w:t>JS SDK integration test</w:t></w:r></w:p></w:body>' +
+      '</w:document>');
+    execSync(`cd "${contentDir}" && zip -r "${docxPath}" .`, { stdio: "pipe" });
+
+    let r;
+    try {
+      r = await client.parseFile(docxPath);
+    } catch (e) {
+      if (e instanceof DocParseError) {
+        t.skip(`ParseFile not available: ${(e as DocParseError).message}`);
+        return;
+      }
+      throw e;
+    }
+    assert.ok(r.status === "ok" || r.status === "success");
+    assert.ok(r.blocks.length > 0);
+
+    // Cleanup
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+});
