@@ -49,6 +49,7 @@
         <a href="#what-is-mcp" class="active">What is MCP?</a>
         <a href="#quick-start">Quick Start</a>
         <a href="#available-tools">Available Tools</a>
+        <a href="#configuration">Configuration</a>
         <a href="#tool-discovery">Tool Discovery</a>
         <a href="#claude-code">With Claude Code</a>
         <a href="#other-agents">With Other Agents</a>
@@ -61,58 +62,45 @@
 
       <h2 id="what-is-mcp">What is MCP?</h2>
       <p>The <strong>Model Context Protocol</strong> (MCP) is an open standard for connecting AI assistants to external tools and data sources. Instead of hardcoding integrations, agents discover what tools are available, what parameters they accept, and how to call them &mdash; all at runtime.</p>
-      <p>AILANG Parse exposes its parsing capabilities as MCP tools that Claude, ChatGPT, and other MCP-compatible agents can discover and use. Any agent that speaks MCP can parse documents, convert between formats, and estimate costs without custom integration code.</p>
+      <p>AILANG Parse ships as a native MCP server. Claude, Cursor, VS Code, and any MCP-compatible agent can discover and call 3 document tools: <strong>parse</strong>, <strong>convert</strong>, and <strong>formats</strong>. Office formats are parsed deterministically; PDFs and images use pluggable AI.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>MCP tools are auto-discovered from the <code>/api/v1/tools</code> endpoint. No manual configuration of tool schemas required &mdash; agents read the manifest and know what AILANG Parse can do.</div>
-      </div>
-
-      <div class="dp-callout dp-callout--warning">
-        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <div><strong>Preview feature.</strong> The MCP server interface is stabilizing. Tool names and parameters may change before the 1.0 release. Pin to a specific API version in production integrations.</div>
+        <div>Two transports: <strong>stdio</strong> (for Claude Desktop, Cursor, VS Code) and <strong>HTTP</strong> (Streamable HTTP at <code>/mcp/</code> for hosted deployments). Both expose the same 3 tools with named parameters and human-readable descriptions.</div>
       </div>
 
       <h2 id="quick-start">Quick Start</h2>
-      <p>AILANG Parse's API server already speaks MCP. The tool definitions endpoint at <code>GET /api/v1/tools</code> returns schemas in Claude, OpenAI, and MCP formats. Point your agent at the server and it discovers available tools automatically.</p>
 
-      <h3>Start the Server</h3>
-      <pre><code class="language-bash"># Start AILANG Parse as an API server
-ailang serve-api --caps IO,FS,Env,AI,Net,Rand,Clock \
-  --ai gemini-2.5-flash --routes-only --port 8080 docparse/</code></pre>
+      <h3>Local &mdash; stdio (recommended)</h3>
+      <p>For Claude Desktop, Cursor, and VS Code. The agent launches the server automatically:</p>
+      <pre><code class="language-bash"># No manual server start needed — the MCP client launches this:
+ailang serve-api --mcp --routes-only --caps IO,FS,Env docparse/</code></pre>
 
-      <p>Or use the hosted version:</p>
-      <pre><code class="language-bash"># Hosted endpoint (no setup required)
-curl https://docparse.ailang.sunholo.com/api/v1/tools</code></pre>
+      <h3>Local &mdash; HTTP</h3>
+      <p>For MCP clients that connect over HTTP:</p>
+      <pre><code class="language-bash"># Start with MCP HTTP endpoint at /mcp/
+ailang serve-api --mcp-http --routes-only --caps IO,FS,Env --port 8080 docparse/
 
-      <h3>Claude Desktop</h3>
-      <p>Add AILANG Parse to Claude Desktop by editing your <code>claude_desktop_config.json</code>:</p>
-      <pre><code class="language-json" data-src="examples/mcp/claude-desktop-config.json">{
-  "mcpServers": {
-    "ailang-parse": {
-      "url": "http://localhost:8080/api/v1/tools",
-      "apiKey": "dp_your_api_key_here"
-    }
-  }
-}</code></pre>
-
-      <h3>Generic MCP Client</h3>
-      <p>Any MCP-compatible client can connect to AILANG Parse. Fetch tool definitions and call tools via the REST API:</p>
-      <pre><code class="language-bash"># Discover available tools
-curl -s http://localhost:8080/api/v1/tools | jq '.tools'
-
-# Parse a document (example tool call)
-curl -X POST http://localhost:8080/api/v1/parse \
+# Test it
+curl -X POST http://localhost:8080/mcp/ \
   -H "Content-Type: application/json" \
-  -d '{"filepath": "report.docx", "apiKey": "dp_your_api_key_here"}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'</code></pre>
 
-# Estimate cost before parsing
-curl -X POST http://localhost:8080/api/v1/estimate \
+      <h3>Hosted</h3>
+      <p>No local install required. Connect to the hosted endpoint (API key required):</p>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/mcp/ \
   -H "Content-Type: application/json" \
-  -d '{"filepath": "report.docx", "outputFormat": "blocks"}'</code></pre>
+  -H "Authorization: Bearer dp_your_api_key" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}'</code></pre>
+
+      <h3>With AI parsing</h3>
+      <p>To parse PDFs, images, audio, or video, add AI capabilities:</p>
+      <pre><code class="language-bash"># Add AI model for non-Office formats
+ailang serve-api --mcp --routes-only \
+  --caps IO,FS,Env,AI,Net --ai gemini-2.5-flash docparse/</code></pre>
 
       <h2 id="available-tools">Available Tools</h2>
-      <p>AILANG Parse exposes the following tools via MCP:</p>
+      <p>AILANG Parse exposes 3 tools via MCP. Agents discover these automatically from <code>tools/list</code>:</p>
 
       <table class="dp-config-table">
         <thead>
@@ -120,72 +108,123 @@ curl -X POST http://localhost:8080/api/v1/estimate \
         </thead>
         <tbody>
           <tr>
-            <td>ailang_parse</td>
-            <td>Parse a document file and return structured blocks (headings, tables, images, text, lists, changes). Accepts a file path or base64-encoded content.</td>
-            <td><code>file</code> (path or base64), <code>format</code> (optional, auto-detected)</td>
+            <td><code>mcpParse</code></td>
+            <td>Parse any document into structured blocks, Markdown, or HTML. Office formats are deterministic; PDF/images use AI.</td>
+            <td><code>filepath</code> (path or sample_id), <code>outputFormat</code> (<code>blocks</code> | <code>markdown</code> | <code>html</code>)</td>
           </tr>
           <tr>
-            <td>ailang_convert</td>
-            <td>Convert a document from one format to another. Supports all 13 input formats and 9 output formats including Quarto Markdown.</td>
-            <td><code>input</code> (path or base64), <code>output_format</code> (e.g. <code>html</code>, <code>docx</code>, <code>pptx</code>)</td>
+            <td><code>mcpConvert</code></td>
+            <td>Convert a document from one format to another. Parses input to blocks, then generates the target format.</td>
+            <td><code>input</code> (path or sample_id), <code>outputFormat</code> (docx, pptx, xlsx, odt, odp, ods, html, md, qmd), <code>outputPath</code> (optional)</td>
           </tr>
           <tr>
-            <td>ailang_formats</td>
-            <td>List all supported input and output formats with their capabilities (deterministic vs AI-required, features).</td>
+            <td><code>mcpFormats</code></td>
+            <td>List all 17 input and 9 output formats with feature metadata: AI required, deterministic, tables, track changes, comments, images.</td>
             <td>None</td>
-          </tr>
-          <tr>
-            <td>ailang_estimate</td>
-            <td>Estimate the cost and latency for parsing a document before committing to the operation.</td>
-            <td><code>filename</code>, <code>size_bytes</code></td>
           </tr>
         </tbody>
       </table>
 
-      <p>Each tool includes full JSON Schema parameter definitions, examples, and error types. Agents receive all of this from the <code>/api/v1/tools</code> endpoint &mdash; no hardcoding required.</p>
+      <p>Each tool has named parameters with JSON Schema types. Agents receive full schemas via <code>tools/list</code> &mdash; no hardcoding required.</p>
+
+      <h2 id="configuration">Configuration</h2>
+
+      <h3>Claude Desktop (local)</h3>
+      <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows):</p>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "ailang",
+      "args": ["serve-api", "--mcp", "--routes-only", "--caps", "IO,FS,Env", "docparse/"],
+      "cwd": "/path/to/ailang-parse"
+    }
+  }
+}</code></pre>
+
+      <h3>Claude Desktop (hosted)</h3>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "url": "https://docparse.ailang.sunholo.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer dp_your_api_key_here"
+      }
+    }
+  }
+}</code></pre>
+
+      <h3>Claude Code</h3>
+      <p>Add to your project's <code>.claude/settings.json</code> or global settings:</p>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "ailang",
+      "args": ["serve-api", "--mcp", "--routes-only", "--caps", "IO,FS,Env", "docparse/"],
+      "cwd": "/path/to/ailang-parse"
+    }
+  }
+}</code></pre>
+
+      <h3>Cursor</h3>
+      <p>Add to <code>.cursor/mcp.json</code> in your project root:</p>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "ailang",
+      "args": ["serve-api", "--mcp", "--routes-only", "--caps", "IO,FS,Env", "docparse/"],
+      "cwd": "/path/to/ailang-parse"
+    }
+  }
+}</code></pre>
+
+      <h3>VS Code</h3>
+      <p>Add to <code>.vscode/settings.json</code>:</p>
+      <pre><code class="language-json">{
+  "mcp": {
+    "servers": {
+      "ailang-parse": {
+        "command": "ailang",
+        "args": ["serve-api", "--mcp", "--routes-only", "--caps", "IO,FS,Env", "docparse/"],
+        "cwd": "/path/to/ailang-parse"
+      }
+    }
+  }
+}</code></pre>
 
       <h2 id="tool-discovery">Tool Discovery</h2>
-      <p>AILANG Parse follows an <strong>agent-first design</strong> philosophy. Two endpoints power automatic discovery:</p>
+      <p>AILANG Parse follows an <strong>agent-first design</strong>. Two discovery mechanisms:</p>
 
-      <h3>Capability Manifest</h3>
-      <p>The <code>GET /api/v1/capabilities</code> endpoint returns a machine-readable manifest describing everything AILANG Parse can do &mdash; supported formats, determinism flags, cost metadata, and rate limits.</p>
-      <pre><code class="language-bash">curl -s http://localhost:8080/api/v1/capabilities | jq '.'</code></pre>
-      <p>Agents use this to decide <em>whether</em> AILANG Parse can handle a task before making a tool call.</p>
+      <h3>MCP tools/list</h3>
+      <p>MCP clients call <code>tools/list</code> and receive the 3 tools with full JSON Schema input definitions. This is automatic &mdash; no configuration needed once the server is connected.</p>
 
-      <h3>Tool Definitions</h3>
-      <p>The <code>GET /api/v1/tools</code> endpoint returns tool schemas in three formats:</p>
-      <ul>
-        <li><strong>Claude format</strong> &mdash; <code>input_schema</code> with JSON Schema parameters</li>
-        <li><strong>OpenAI format</strong> &mdash; function-calling compatible <code>parameters</code> object</li>
-        <li><strong>MCP format</strong> &mdash; Model Context Protocol standard tool definitions</li>
-      </ul>
-      <p>Agents use this to know <em>how</em> to call each tool, what parameters are required, and what response shapes to expect.</p>
+      <h3>REST /api/v1/tools</h3>
+      <p>Non-MCP clients can fetch tool definitions via REST:</p>
+      <pre><code class="language-bash">curl -s http://localhost:8080/api/v1/tools | jq '.tools[0]'
 
-      <pre><code class="language-bash"># Get tool definitions in MCP format
-curl -s http://localhost:8080/api/v1/tools?format=mcp | jq '.tools[0]'
-
-# Example response (abbreviated)
+# Response:
 # {
-#   "name": "ailang_parse",
-#   "description": "Parse a document file into structured blocks",
+#   "name": "mcpParse",
+#   "description": "Parse any document into structured blocks...",
+#   "endpoint": "POST /mcp/v1/parse",
+#   "mcp_tool": "docparse.services.mcp_tools.mcpParse",
 #   "inputSchema": {
 #     "type": "object",
 #     "properties": {
-#       "file": { "type": "string", "description": "File path or base64 content" },
-#       "format": { "type": "string", "description": "File format (auto-detected if omitted)" }
+#       "filepath": { "type": "string", "description": "Absolute file path, or a sample_id..." },
+#       "outputFormat": { "type": "string", "enum": ["blocks", "markdown", "html"], "default": "blocks" }
 #     },
-#     "required": ["file"]
+#     "required": ["filepath"]
 #   }
 # }</code></pre>
 
       <h2 id="claude-code">With Claude Code</h2>
-      <p>If you use <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code</a>, you have two options for document parsing:</p>
+      <p>Two options for document parsing in <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code</a>:</p>
 
-      <h3>Option 1: MCP Server</h3>
-      <p>Configure AILANG Parse as an MCP server in your Claude Code settings. Claude will discover the tools automatically and use them when you ask it to parse or convert documents.</p>
+      <h3>Option 1: MCP Server (recommended)</h3>
+      <p>Add the config above to your settings. Claude discovers the tools automatically and uses them when you ask it to parse or convert documents.</p>
 
       <h3>Option 2: Claude Code Skill</h3>
-      <p>Install the AILANG Parse skill directly into Claude Code. This gives Claude native access to document parsing without running a separate server. See the <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code integration page</a> for installation instructions.</p>
+      <p>Install the AILANG Parse skill for zero-config local parsing without running a separate server. See the <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code integration page</a>.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -194,48 +233,54 @@ curl -s http://localhost:8080/api/v1/tools?format=mcp | jq '.tools[0]'
 
       <h2 id="other-agents">With Other Agents</h2>
 
-      <h3>ChatGPT</h3>
-      <p>ChatGPT supports MCP via plugins. Point your MCP plugin configuration at the AILANG Parse <code>/api/v1/tools</code> endpoint. ChatGPT will discover the available tools and present them as actions in the conversation.</p>
+      <h3>Any MCP Client</h3>
+      <p>Any client that speaks MCP can connect via stdio or HTTP. The server advertises its tools, resources, and capabilities via the standard MCP protocol.</p>
 
-      <h3>Custom Agents</h3>
-      <p>Any agent framework can use AILANG Parse via the REST API directly. The <code>/api/v1/parse</code> and <code>/api/v1/estimate</code> endpoints accept standard HTTP requests &mdash; no MCP client library required.</p>
-      <pre><code class="language-python"># Python example — call AILANG Parse from any agent
+      <h3>REST API</h3>
+      <p>Non-MCP agents can call the same tools via REST endpoints at <code>/mcp/v1/parse</code>, <code>/mcp/v1/convert</code>, and <code>/mcp/v1/formats</code>:</p>
+      <pre><code class="language-python"># Python example
 import requests
 
-# Parse a document
 response = requests.post(
-    "http://localhost:8080/api/v1/parse",
-    json={"filepath": "report.docx", "apiKey": "dp_your_api_key_here"}
+    "http://localhost:8080/api/docparse/services/mcp_tools/mcpParse",
+    json={"args": ["report.docx", "markdown"]}
 )
-blocks = response.json()</code></pre>
+markdown = response.json()["result"]</code></pre>
 
       <h3>LangChain / LlamaIndex</h3>
-      <p>AILANG Parse works as a document loader in LangChain and LlamaIndex pipelines. Wrap the REST API in a custom loader or use the MCP tool definitions to register AILANG Parse as a tool in your agent chain.</p>
-      <pre><code class="language-python"># LangChain custom tool example
-from langchain.tools import StructuredTool
+      <p>Register AILANG Parse as a tool in your agent chain using the REST API or an MCP client library:</p>
+      <pre><code class="language-python">from langchain.tools import StructuredTool
 
 ailang_parse = StructuredTool.from_function(
-    func=lambda file_path: requests.post(
-        "http://localhost:8080/api/v1/parse",
-        json={"filepath": file_path, "apiKey": "dp_your_api_key_here"}
-    ).json(),
+    func=lambda filepath, output_format="blocks": requests.post(
+        "http://localhost:8080/api/docparse/services/mcp_tools/mcpParse",
+        json={"args": [filepath, output_format]}
+    ).json()["result"],
     name="ailang_parse",
-    description="Parse a document into structured blocks"
+    description="Parse a document into structured blocks, markdown, or HTML"
 )</code></pre>
 
       <div class="dp-faq" id="faq">
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>What is the AILANG Parse MCP server?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse exposes its document parsing capabilities as an MCP (Model Context Protocol) server, allowing Claude, ChatGPT, and any MCP-compatible AI agent to parse documents as a tool call. The agent sends a file, AILANG Parse returns structured blocks, and the agent can reason over the document's actual structure &mdash; not a flat text dump.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse ships as a native MCP server with 3 tools: <code>mcpParse</code> (parse any document), <code>mcpConvert</code> (convert between formats), and <code>mcpFormats</code> (list supported formats). Agents discover these via the standard MCP <code>tools/list</code> method. Office formats are deterministic; PDF/images use AI.</p></div>
         </details>
         <details>
           <summary>How do AI agents discover AILANG Parse as a tool?</summary>
-          <div class="dp-faq-answer"><p>The <code>/api/v1/tools</code> endpoint returns machine-readable tool definitions in Claude, OpenAI, and MCP formats. An MCP-compatible agent automatically discovers the <code>ailang_parse</code>, <code>ailang_convert</code>, and <code>ailang_formats</code> tools. No manual configuration needed &mdash; the agent reads the tool schema and knows how to call AILANG Parse.</p></div>
+          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code> which returns full JSON Schema definitions for all 3 tools. No manual schema configuration needed.</p></div>
         </details>
         <details>
           <summary>Which AI agents work with the AILANG Parse MCP server?</summary>
-          <div class="dp-faq-answer"><p>Any MCP-compatible agent works: Claude (via <a href="claude-code.html">Claude Code</a> or Claude Desktop), ChatGPT (via the Actions/tool-use protocol), custom LangChain agents, and LlamaIndex agent pipelines. The MCP server also works with Cursor, Windsurf, and other IDE-integrated AI tools that support MCP.</p></div>
+          <div class="dp-faq-answer"><p>Any MCP-compatible agent: <a href="claude-code.html">Claude Code</a>, Claude Desktop, Cursor, VS Code Copilot, Windsurf, and custom agents using MCP client libraries. Non-MCP agents can use the REST API directly.</p></div>
+        </details>
+        <details>
+          <summary>Do I need an API key for local use?</summary>
+          <div class="dp-faq-answer"><p>No. Local MCP (stdio or localhost HTTP) works without authentication. The hosted version at <code>docparse.ailang.sunholo.com</code> requires a <code>dp_</code> API key, which you can get via the <a href="pricing.html">free tier</a>.</p></div>
+        </details>
+        <details>
+          <summary>What about PDF and image parsing?</summary>
+          <div class="dp-faq-answer"><p>Add <code>--caps AI,Net --ai gemini-2.5-flash</code> to enable AI parsing. You need your own <code>GOOGLE_API_KEY</code> for local use. The hosted version includes AI parsing in all tiers.</p></div>
         </details>
         <details>
           <summary>Why is structured document parsing better for AI agents than flat text extraction?</summary>

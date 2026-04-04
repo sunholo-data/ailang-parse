@@ -3,51 +3,82 @@ module docparse/services/tools
 import std/json (encode, jo, kv, js, ja, jb)
 import std/list (map)
 
--- Tool Definitions Endpoint
---
--- Returns canonical tool definitions for major agent frameworks:
--- Claude, OpenAI, MCP, and A2A.
-
+-- Returns canonical tool definitions for Claude, OpenAI, MCP, and A2A agent frameworks.
+-- Each format includes input schemas so agents can auto-discover how to call AILANG Parse.
 @nowrap
 @route("GET", "/api/v1/tools")
 export pure func tools() -> string {
   encode(jo([
-    kv("claude", jo([
-      kv("name", js("ailang_parse")),
-      kv("description", js("Parse any document (DOCX, PPTX, XLSX, PDF, images, audio, video) into structured blocks. Returns blocks, markdown, HTML, or A2UI format. Office formats are deterministic; PDF/images use AI.")),
-      kv("input_schema", toolsParseInputSchema())
-    ])),
-    kv("openai", jo([
-      kv("type", js("function")),
-      kv("function", jo([
-        kv("name", js("ailang_parse")),
-        kv("description", js("Parse any document into structured blocks. Supports DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, PDF, PNG, JPG, MP3, MP4.")),
-        kv("parameters", toolsParseInputSchema())
-      ]))
+    kv("tools", ja([
+      mcpParseToolDef(),
+      mcpConvertToolDef(),
+      mcpFormatsToolDef()
     ])),
     kv("mcp", js("/mcp/")),
     kv("a2a", js("/.well-known/agent.json"))
   ]))
 }
 
-pure func toolsParseInputSchema() -> Json =
+pure func mcpParseToolDef() -> Json =
   jo([
-    kv("type", js("object")),
-    kv("properties", jo([
-      kv("filepath", jo([
-        kv("type", js("string")),
-        kv("description", js("File path to parse or sample_id from /api/v1/samples"))
+    kv("name", js("mcpParse")),
+    kv("description", js("Parse any document into structured blocks, markdown, or HTML. Accepts a file path or sample_id. Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are deterministic and instant. PDF, images, audio, video require AI.")),
+    kv("endpoint", js("POST /mcp/v1/parse")),
+    kv("mcp_tool", js("docparse.services.mcp_tools.mcpParse")),
+    kv("inputSchema", jo([
+      kv("type", js("object")),
+      kv("properties", jo([
+        kv("filepath", jo([
+          kv("type", js("string")),
+          kv("description", js("Absolute file path, or a sample_id (e.g. sample_docx_formatting) from the samples endpoint"))
+        ])),
+        kv("outputFormat", jo([
+          kv("type", js("string")),
+          kv("enum", ja(map(js, ["blocks", "markdown", "html"]))),
+          kv("default", js("blocks")),
+          kv("description", js("blocks = structured JSON with typed Block ADT; markdown = rendered Markdown; html = rendered HTML"))
+        ]))
       ])),
-      kv("sample_id", jo([
-        kv("type", js("string")),
-        kv("description", js("Sample document ID from /api/v1/samples"))
+      kv("required", ja([js("filepath")]))
+    ]))
+  ])
+
+pure func mcpConvertToolDef() -> Json =
+  jo([
+    kv("name", js("mcpConvert")),
+    kv("description", js("Convert a document from one format to another. Parses the input, then generates the output. Supports: DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto).")),
+    kv("endpoint", js("POST /mcp/v1/convert")),
+    kv("mcp_tool", js("docparse.services.mcp_tools.mcpConvert")),
+    kv("inputSchema", jo([
+      kv("type", js("object")),
+      kv("properties", jo([
+        kv("input", jo([
+          kv("type", js("string")),
+          kv("description", js("Path to input file, or a sample_id"))
+        ])),
+        kv("outputFormat", jo([
+          kv("type", js("string")),
+          kv("enum", ja(map(js, ["docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"]))),
+          kv("description", js("Target format for conversion"))
+        ])),
+        kv("outputPath", jo([
+          kv("type", js("string")),
+          kv("description", js("Path to write output file. If omitted, uses input filename with new extension."))
+        ]))
       ])),
-      kv("outputFormat", jo([
-        kv("type", js("string")),
-        kv("enum", ja(map(js, ["blocks", "markdown", "html", "a2ui"]))),
-        kv("default", js("blocks")),
-        kv("description", js("Output format: blocks (structured JSON), markdown, html, or a2ui (cross-platform UI)"))
-      ]))
-    ])),
-    kv("required", ja([]))
+      kv("required", ja([js("input"), js("outputFormat")]))
+    ]))
+  ])
+
+pure func mcpFormatsToolDef() -> Json =
+  jo([
+    kv("name", js("mcpFormats")),
+    kv("description", js("List all supported input and output formats with metadata: which require AI, which are deterministic, supported features (tables, track changes, comments, images).")),
+    kv("endpoint", js("GET /mcp/v1/formats")),
+    kv("mcp_tool", js("docparse.services.mcp_tools.mcpFormats")),
+    kv("inputSchema", jo([
+      kv("type", js("object")),
+      kv("properties", jo([])),
+      kv("required", ja([]))
+    ]))
   ])

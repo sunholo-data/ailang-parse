@@ -1,6 +1,6 @@
 # @ailang/parse
 
-JavaScript/TypeScript client for the [AILANG Parse](https://www.sunholo.com/docparse) document parsing API. Parse 13 formats, generate 8 — zero dependencies, native fetch.
+JavaScript/TypeScript client for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — zero dependencies, native fetch.
 
 ## Install
 
@@ -156,6 +156,6 @@ Apache 2.0 — see [LICENSE](../../LICENSE) for details.
 
 ## Links
 
-- [AILANG Parse Website](https://www.sunholo.com/docparse)
-- [API Documentation](https://www.sunholo.com/docparse/api.html)
-- [GitHub](https://github.com/sunholo-data/docparse)
+- [AILANG Parse Website](https://www.sunholo.com/ailang-parse/)
+- [API Documentation](https://www.sunholo.com/ailang-parse//api.html)
+- [GitHub](https://github.com/sunholo-data/ailang-parse)
