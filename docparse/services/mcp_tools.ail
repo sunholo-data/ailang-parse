@@ -3,8 +3,11 @@ module docparse/services/mcp_tools
 import std/string (length, intToStr, toLower, split, contains)
 import std/list (concat, last, map, filter)
 import std/option (Some, None)
-import std/json (encode, jo, kv, js, ja, jb)
+import std/json (encode, decode, jo, kv, js, ja, jb, getString)
 import std/fs (readFile, writeFile, fileExists)
+import std/env (getEnvOr)
+import std/net (httpGet, httpPost)
+import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages)
 import docparse/services/format_router (detectFormat, getExtension, needsAI, strategyDescription)
 import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxImages)
@@ -34,8 +37,45 @@ import docparse/services/samples (sampleResolvePath)
 -- Accepts a file path or sample_id (e.g. sample_docx_formatting).
 -- Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are deterministic.
 -- PDF, images, audio, video require AI.
+-- In hosted mode, pass an apiKey (from mcpAuth) or use Bearer token auth.
+-- Pass a requestId from a previous parse to replay it.
 @route("POST", "/mcp/v1/parse")
-export func mcpParse(filepath: string, outputFormat: string) -> string ! {AI, Env, FS, IO, Net} {
+export func mcpParse(filepath: string, outputFormat: string, apiKey: string, requestId: string) -> string ! {AI, Env, FS, IO, Net} {
+  let mode = getEnvOr("DOCPARSE_MODE", "local");
+
+  if mode == "hosted" then
+    mcpParseHosted(filepath, outputFormat, apiKey, requestId)
+  else
+    mcpParseLocal(filepath, outputFormat)
+}
+
+-- Hosted mode: call the docparse API with auth.
+func mcpParseHosted(filepath: string, outputFormat: string, apiKey: string, requestId: string) -> string ! {Env, Net} {
+  if length(apiKey) == 0 then
+    encode(jo([
+      kv("error", js("AUTH_REQUIRED")),
+      kv("message", js("An API key is required for hosted parsing. Use mcpAuth to get one via device authorization.")),
+      kv("suggested_fix", js("Call mcpAuth to start device authorization and get an API key."))
+    ]))
+  else {
+    let baseUrl = getEnvOr("DOCPARSE_API_URL", "https://docparse.ailang.sunholo.com");
+    let fmt = if length(outputFormat) > 0 then toLower(outputFormat) else "blocks";
+
+    -- Build request body
+    let body = if length(requestId) > 0 then
+      "{\"request_id\":\"" ++ requestId ++ "\",\"outputFormat\":\"" ++ fmt ++ "\",\"apiKey\":\"" ++ apiKey ++ "\"}"
+    else if contains(filepath, ".") then
+      "{\"filepath\":\"" ++ filepath ++ "\",\"outputFormat\":\"" ++ fmt ++ "\",\"apiKey\":\"" ++ apiKey ++ "\"}"
+    else
+      "{\"sample_id\":\"" ++ filepath ++ "\",\"outputFormat\":\"" ++ fmt ++ "\",\"apiKey\":\"" ++ apiKey ++ "\"}";
+
+    let resp = httpPost(baseUrl ++ "/api/v1/parse", body);
+    resp
+  }
+}
+
+-- Local mode: parse directly from filesystem.
+func mcpParseLocal(filepath: string, outputFormat: string) -> string ! {AI, Env, FS, IO, Net} {
   -- Resolve sample IDs
   let resolved = if contains(filepath, ".") then filepath
                  else sampleResolvePath(filepath);
@@ -45,7 +85,7 @@ export func mcpParse(filepath: string, outputFormat: string) -> string ! {AI, En
     encode(jo([
       kv("error", js("FILE_NOT_FOUND")),
       kv("message", js("File not found: " ++ resolved)),
-      kv("suggested_fix", js("Check the file path or use a sample_id from ailang_formats"))
+      kv("suggested_fix", js("Check the file path or use a sample_id from mcpFormats"))
     ]))
   else {
     let ext = getExtension(resolved);
@@ -222,8 +262,18 @@ func mcpParseVideoDoc(filepath: string, ext: string) -> ParsedDocument ! {FS, AI
 -- Convert a document from one format to another.
 -- Parses the input file, then generates the output in the target format.
 -- Returns the output file path on success.
+-- In hosted mode, pass an apiKey (from mcpAuth) for authenticated access.
 @route("POST", "/mcp/v1/convert")
-export func mcpConvert(input: string, outputFormat: string, outputPath: string) -> string ! {AI, Env, FS, IO, Net} {
+export func mcpConvert(input: string, outputFormat: string, outputPath: string, apiKey: string) -> string ! {AI, Env, FS, IO, Net} {
+  let mode = getEnvOr("DOCPARSE_MODE", "local");
+
+  if mode == "hosted" && length(apiKey) == 0 then
+    encode(jo([
+      kv("error", js("AUTH_REQUIRED")),
+      kv("message", js("An API key is required for hosted conversion. Use mcpAuth to get one via device authorization.")),
+      kv("suggested_fix", js("Call mcpAuth to start device authorization and get an API key."))
+    ]))
+  else {
   -- Resolve sample IDs
   let resolved = if contains(input, ".") then input
                  else sampleResolvePath(input);
@@ -267,6 +317,7 @@ export func mcpConvert(input: string, outputFormat: string, outputPath: string) 
 
     -- Generate
     mcpGenerate(sourceDoc, outFmt, outPath)
+  }
   }
 }
 
@@ -337,8 +388,10 @@ pure func mcpJoinButLast(parts: [string]) -> string =
     head :: rest => head ++ "." ++ mcpJoinButLast(rest)
   }
 
--- List all supported input and output formats with metadata.
--- Returns which formats are deterministic, which need AI, and supported features.
+-- List all supported formats, features, samples, and service capabilities.
+-- Returns input/output formats, output modes, sample files for testing,
+-- and service info including pricing and auth details.
+-- This is the main discovery tool for agents to understand what AILANG Parse can do.
 @route("GET", "/mcp/v1/formats")
 export pure func mcpFormats() -> string {
   encode(jo([
@@ -366,6 +419,48 @@ export pure func mcpFormats() -> string {
       jo([kv("id", js("blocks")), kv("description", js("Structured JSON with typed Block ADT (Heading, Text, Table, Image, Change, Comment, Section, Code)"))]),
       jo([kv("id", js("markdown")), kv("description", js("Rendered Markdown suitable for LLM consumption"))]),
       jo([kv("id", js("html")), kv("description", js("Rendered HTML with semantic structure"))])
+    ])),
+    kv("samples", ja([
+      mcpSampleEntry("sample_docx_formatting", "docx", "Rich formatting with styles, bold, italic, nested lists", false),
+      mcpSampleEntry("sample_docx_tables", "docx", "Tables with merged cells and column spans", false),
+      mcpSampleEntry("sample_docx_comments", "docx", "Comments with author attribution and track changes", false),
+      mcpSampleEntry("sample_docx_track_changes", "docx", "Track changes with insertions, deletions, and moves", false),
+      mcpSampleEntry("sample_docx_footnotes", "docx", "Footnotes and endnotes", false),
+      mcpSampleEntry("sample_docx_hyperlinks", "docx", "Hyperlinks with URLs and anchors", false),
+      mcpSampleEntry("sample_docx_real_world", "docx", "Complex real-world document", false),
+      mcpSampleEntry("sample_pptx_notes", "pptx", "Slides with speaker notes", false),
+      mcpSampleEntry("sample_pptx_formatting", "pptx", "Rich text formatting in slides", false),
+      mcpSampleEntry("sample_xlsx_merged", "xlsx", "Merged cell ranges", false),
+      mcpSampleEntry("sample_xlsx_formulas", "xlsx", "Formulas with cached values", false),
+      mcpSampleEntry("sample_xlsx_formats", "xlsx", "Number formatting (currency, percentages, dates)", false),
+      mcpSampleEntry("sample_csv", "csv", "Format capabilities matrix", false),
+      mcpSampleEntry("sample_markdown", "md", "Architecture guide with tables and code", false),
+      mcpSampleEntry("sample_html", "html", "Getting started guide with rich structure", false),
+      mcpSampleEntry("sample_odt", "odt", "Styled tables", false),
+      mcpSampleEntry("sample_odp", "odp", "Text frames", false),
+      mcpSampleEntry("sample_ods", "ods", "Merged cells", false),
+      mcpSampleEntry("sample_epub", "epub", "Alice in Wonderland (full book)", false),
+      mcpSampleEntry("sample_eml_welcome", "eml", "Welcome email with HTML and CSV attachment", false),
+      mcpSampleEntry("sample_eml_release", "eml", "Release notes with text and HTML", false),
+      mcpSampleEntry("sample_eml_bug", "eml", "Bug report with encoded headers and attachments", false),
+      mcpSampleEntry("sample_mbox_thread", "mbox", "4-message reply thread", false),
+      mcpSampleEntry("sample_pdf", "pdf", "Report with tables (AI required)", true),
+      mcpSampleEntry("sample_mp3", "mp3", "Audio transcription (AI required)", true),
+      mcpSampleEntry("sample_mp4", "mp4", "Video extraction (AI required)", true)
+    ])),
+    kv("service", jo([
+      kv("name", js("AILANG Parse")),
+      kv("description", js("Universal document parsing and generation. Per-document pricing, not per-page.")),
+      kv("api_url", js("https://docparse.ailang.sunholo.com")),
+      kv("auth_method", js("RFC 8628 Device Authorization — call mcpAuth to get started")),
+      kv("pricing_model", js("per-document (1 request = 1 document, any page count)")),
+      kv("tiers", ja([
+        jo([kv("name", js("Free")), kv("price", js("EUR 0")), kv("requests_month", js("1,000")), kv("ai_parses_month", js("50")), kv("daily_limit", js("500")), kv("max_file_mb", js("10"))]),
+        jo([kv("name", js("Pro")), kv("price", js("EUR 29/month")), kv("requests_month", js("100,000")), kv("ai_parses_month", js("500")), kv("daily_limit", js("5,000")), kv("max_file_mb", js("25"))]),
+        jo([kv("name", js("Business")), kv("price", js("EUR 99/month")), kv("requests_month", js("500,000")), kv("ai_parses_month", js("2,000")), kv("daily_limit", js("20,000")), kv("max_file_mb", js("50"))])
+      ])),
+      kv("tools_available", ja([js("mcpParse"), js("mcpConvert"), js("mcpFormats"), js("mcpEstimate"), js("mcpAuth"), js("mcpAuthPoll"), js("mcpAccount")])),
+      kv("docs_url", js("https://www.sunholo.com/docparse/"))
     ]))
   ]))
 }
@@ -382,4 +477,12 @@ pure func mcpFormatEntry(ext: string, name: string, aiRequired: bool, tables: bo
       kv("comments", jb(comments)),
       kv("images", jb(images))
     ]))
+  ])
+
+pure func mcpSampleEntry(id: string, format: string, description: string, aiRequired: bool) -> Json =
+  jo([
+    kv("id", js(id)),
+    kv("format", js(format)),
+    kv("description", js(description)),
+    kv("ai_required", jb(aiRequired))
   ])
