@@ -150,6 +150,10 @@ Works in browsers with native `fetch`:
 </script>
 ```
 
+## License
+
+Apache 2.0 — see [LICENSE](../../LICENSE) for details.
+
 ## Links
 
 - [AILANG Parse Website](https://www.sunholo.com/docparse)

@@ -143,6 +143,10 @@ All 9 block types in the `Block` struct:
 | `section` | `Kind`, `Children` ([]Block) |
 | `change` | `ChangeType`, `Author`, `Date`, `Text` |
 
+## License
+
+Apache 2.0 — see [LICENSE](../../LICENSE) for details.
+
 ## Links
 
 - [AILANG Parse Website](https://www.sunholo.com/docparse)
