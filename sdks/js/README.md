@@ -1,12 +1,29 @@
 # @ailang/parse
 
-JavaScript/TypeScript client for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — zero dependencies, native fetch.
+JavaScript/TypeScript client and MCP server for the [AILANG Parse](https://www.sunholo.com/docparse/) document parsing API. Parse 17 formats, generate 9 — zero dependencies, native fetch.
 
 ## Install
 
 ```bash
 npm install @ailang/parse
 ```
+
+## MCP Server (Claude Desktop, Cursor, VS Code)
+
+Run as a stdio MCP server that bridges to the hosted AILANG Parse API. Requires Node.js >= 18.
+
+```json
+{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "npx",
+      "args": ["-y", "@ailang/parse", "mcp"]
+    }
+  }
+}
+```
+
+Add to `claude_desktop_config.json` (Claude Desktop), `.cursor/mcp.json` (Cursor), or `.vscode/settings.json` (VS Code). Provides 7 tools: parse, convert, formats, estimate, auth, auth-poll, and account.
 
 ## Quick Start
 

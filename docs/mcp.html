@@ -172,8 +172,20 @@ ailang serve-api --mcp --routes-only \
 
       <h2 id="configuration">Configuration</h2>
 
+      <h3>Claude Desktop (hosted &mdash; recommended)</h3>
+      <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows). <strong>Requires Node.js &ge; 18.</strong></p>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "npx",
+      "args": ["-y", "@ailang/parse", "mcp"]
+    }
+  }
+}</code></pre>
+      <p style="font-size:13px;color:var(--text-secondary)">This runs our npm package as a local stdio MCP server that bridges to the hosted API. No API key needed upfront &mdash; the agent handles device auth automatically.</p>
+
       <h3>Claude Desktop (local)</h3>
-      <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows):</p>
+      <p>For local-only parsing without the hosted API, add to <code>claude_desktop_config.json</code>:</p>
       <pre><code class="language-json">{
   "mcpServers": {
     "ailang-parse": {
@@ -184,20 +196,18 @@ ailang serve-api --mcp --routes-only \
   }
 }</code></pre>
 
-      <h3>Claude Desktop (hosted)</h3>
+      <h3>Claude Code</h3>
+      <p>Install the plugin for automatic MCP registration:</p>
+      <pre><code class="language-bash">claude install github:sunholo-data/docparse-skill</code></pre>
+      <p>Or add to <code>.mcp.json</code> (project or global):</p>
       <pre><code class="language-json">{
   "mcpServers": {
     "ailang-parse": {
-      "url": "https://docparse.ailang.sunholo.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer dp_your_api_key_here"
-      }
+      "url": "https://docparse.ailang.sunholo.com/mcp/"
     }
   }
 }</code></pre>
-
-      <h3>Claude Code</h3>
-      <p>Add to your project's <code>.claude/settings.json</code> or global settings:</p>
+      <p>For local-only mode, use the <code>command</code> form instead:</p>
       <pre><code class="language-json">{
   "mcpServers": {
     "ailang-parse": {

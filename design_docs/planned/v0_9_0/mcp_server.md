@@ -390,21 +390,31 @@ Hosted (HTTP):
 ```
 
 ```json
-// Claude Desktop — Hosted
+// Claude Desktop — Hosted (via @ailang/parse npm package, requires Node >= 18)
 {
   "mcpServers": {
     "ailang-parse": {
-      "url": "https://docparse.ailang.sunholo.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer dp_your_api_key"
-      }
+      "command": "npx",
+      "args": ["-y", "@ailang/parse", "mcp"]
     }
   }
 }
 ```
 
-```json
-// Claude Code — settings.json
+```bash
+// Claude Code — install plugin (recommended)
+claude install github:sunholo-data/docparse-skill
+
+// Or add to .mcp.json (hosted)
+{
+  "mcpServers": {
+    "ailang-parse": {
+      "url": "https://docparse.ailang.sunholo.com/mcp/"
+    }
+  }
+}
+
+// Or add to .mcp.json (local)
 {
   "mcpServers": {
     "ailang-parse": {
