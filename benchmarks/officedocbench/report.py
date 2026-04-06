@@ -54,24 +54,33 @@ def _aggregate_by_format(adapter_result: dict) -> dict[str, dict]:
 def print_summary(all_results: list[dict]) -> None:
     """Print a comparative summary table."""
     print("\n# OfficeDocBench Results\n")
-    print("| Tool | Files | Composite | Feat. Det. | Struct. Recall | Struct. Quality | Content Fidelity | Text Jaccard | Elem. Count | Metadata |")
-    print("|------|-------|-----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|")
+    print("| Tool | Files | Coverage | Composite | Adjusted | Feat. Det. | Struct. Recall | Struct. Quality | Content Fidelity | Text Jaccard | Elem. Count | Metadata |")
+    print("|------|-------|----------|-----------|----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|")
 
     for ar in all_results:
         agg = _aggregate_scores(ar)
+        total = len(ar["results"])
+        ok = agg["count"]
         unsupported = sum(1 for r in ar["results"] if r["status"] == "UNSUPPORTED")
         errors = sum(1 for r in ar["results"] if r["status"] == "ERROR")
 
+        # Format coverage: fraction of benchmark files the adapter can handle
+        coverage = ok / total if total > 0 else 0
+        # Coverage-adjusted composite: penalizes tools that skip formats
+        adjusted = agg["composite"] * coverage
+
         suffix = ""
         if unsupported:
-            suffix += f" ({unsupported} unsupported)"
+            suffix += f" ({unsupported} unsup.)"
         if errors:
-            suffix += f" ({errors} errors)"
+            suffix += f" ({errors} err)"
 
         print(
             f"| {ar['adapter']} "
-            f"| {agg['count']}{suffix} "
+            f"| {ok}/{total}{suffix} "
+            f"| {coverage:.0%} "
             f"| **{agg['composite']:.1%}** "
+            f"| {adjusted:.1%} "
             f"| {agg['feature_detection']:.1%} "
             f"| {agg['structural_recall']:.1%} "
             f"| {agg['structural_quality']:.1%} "
@@ -120,6 +129,8 @@ def print_feature_heatmap(all_results: list[dict]) -> None:
         "headings", "tables", "track_changes", "comments",
         "headers_footers", "footnotes_endnotes", "speaker_notes",
         "text_boxes", "images", "lists", "sheets",
+        "hyperlinks", "styles", "equations", "bookmarks",
+        "fields", "section_breaks",
     ]
 
     header = "| Feature | " + " | ".join(ar["adapter"] for ar in all_results) + " |"

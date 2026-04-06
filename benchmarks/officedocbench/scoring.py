@@ -3,9 +3,11 @@
 Seven metric categories:
 1. Feature Detection Rate (weight 0.15) — binary per feature
 2. Structural Recall (weight 0.20) — completeness of extraction
-3. Structural Quality (weight 0.15) — heading levels, author attribution, list types
+3. Structural Quality (weight 0.15) — heading levels, author attribution, list types,
+   merge span accuracy, section breaks, comment ranges, heading text match
 4. Content Fidelity (weight 0.15) — key phrases, paragraph structure, element ordering,
-   hyperlinks, style preservation (aspirational: scores what GT data is available)
+   hyperlinks, style preservation, equation text, field display text, footnote text,
+   bookmark detection (aspirational: scores what GT data is available)
 5. Text Jaccard (weight 0.10) — word-level overlap
 6. Element Count Accuracy (weight 0.15) — count precision across all feature types
 7. Metadata Accuracy (weight 0.10) — exact match on fields + sheet names
@@ -36,9 +38,11 @@ def score_file(ground_truth: dict, adapter_output: dict) -> dict[str, Any]:
     features = ground_truth.get("features", {})
     gt_words = set(ground_truth.get("full_text_words", []))
 
+    element_order = ground_truth.get("element_order", [])
+
     detection = score_feature_detection(features, adapter_output)
     recall = score_structural_recall(features, adapter_output)
-    quality = score_structural_quality(features, adapter_output)
+    quality = score_structural_quality(features, adapter_output, element_order)
     fidelity = score_content_fidelity(ground_truth, adapter_output)
     jaccard = score_text_jaccard(gt_words, adapter_output)
     counts = score_element_counts(features, adapter_output)
@@ -123,6 +127,48 @@ def score_feature_detection(features: dict, output: dict) -> dict[str, Any]:
             for el in output.get("text_elements", [])
         )
         checks["styles"] = found
+        if found:
+            detected += 1
+
+    # Aspirational: equations (§22.1)
+    gt_equations = features.get("equations")
+    if isinstance(gt_equations, dict) and gt_equations.get("present"):
+        total += 1
+        # Check if equation text appears anywhere in output
+        all_text = _collect_all_text(output).lower()
+        eq_texts = gt_equations.get("texts", [])
+        found = any(eq.lower() in all_text for eq in eq_texts) if eq_texts else False
+        checks["equations"] = found
+        if found:
+            detected += 1
+
+    # Aspirational: bookmarks (§17.13.6)
+    gt_bookmarks = features.get("bookmarks")
+    if isinstance(gt_bookmarks, dict) and gt_bookmarks.get("present"):
+        total += 1
+        found = len(output.get("bookmarks", [])) > 0
+        checks["bookmarks"] = found
+        if found:
+            detected += 1
+
+    # Aspirational: field codes (§17.16)
+    gt_fields = features.get("fields")
+    if isinstance(gt_fields, dict) and gt_fields.get("present"):
+        total += 1
+        # Fields are detected if their display text appears in output
+        all_text = _collect_all_text(output).lower()
+        display_texts = gt_fields.get("display_texts", [])
+        found = any(dt.lower() in all_text for dt in display_texts) if display_texts else False
+        checks["fields"] = found
+        if found:
+            detected += 1
+
+    # Aspirational: section breaks (§17.6)
+    gt_breaks = features.get("section_breaks")
+    if isinstance(gt_breaks, dict) and gt_breaks.get("present"):
+        total += 1
+        found = len(output.get("section_breaks", [])) > 0
+        checks["section_breaks"] = found
         if found:
             detected += 1
 
@@ -219,11 +265,14 @@ def score_structural_recall(features: dict, output: dict) -> dict[str, Any]:
     }
 
 
-def score_structural_quality(features: dict, output: dict) -> dict[str, Any]:
+def score_structural_quality(features: dict, output: dict,
+                             element_order: list | None = None) -> dict[str, Any]:
     """Qualitative accuracy of extracted structures beyond count/presence.
 
     Scores heading-level distribution, track-change author attribution,
-    comment author/text matching, list type accuracy, and table row accuracy.
+    comment author/text matching, list type accuracy, table row accuracy,
+    merge span accuracy, list numbering, heading text match, section breaks,
+    and comment range accuracy.
     """
     scores: dict[str, Any] = {}
     total = 0
@@ -350,7 +399,7 @@ def score_structural_quality(features: dict, output: dict) -> dict[str, Any]:
             scores["list_structure"] = {"score": 0.0, "total_items": 0}
             total += 1
 
-    # ── Table row accuracy ─────────────────────────────────────────
+    # ── Table row accuracy ──────���───────────────────���──────────────
     gt_t = features.get("tables")
     if isinstance(gt_t, dict) and gt_t.get("present") and gt_t.get("total_rows", 0) > 0:
         expected_rows = gt_t["total_rows"]
@@ -363,6 +412,119 @@ def score_structural_quality(features: dict, output: dict) -> dict[str, Any]:
         }
         total += 1
         weighted_sum += row_score
+
+    # ── Table merge span accuracy (§18.3.1.55) ────────────────────
+    if isinstance(gt_t, dict) and gt_t.get("has_merged_cells") and gt_t.get("merge_count", 0) > 0:
+        expected_merges = gt_t["merge_count"]
+        # Count detected merged cells across all tables
+        actual_merges = 0
+        for tbl in output.get("tables", []):
+            if tbl.get("has_merged_cells"):
+                actual_merges += tbl.get("merge_count", 1)  # At least 1 if flagged
+        merge_score = min(actual_merges, expected_merges) / max(expected_merges, 1)
+        merge_score = min(merge_score, 1.0)
+        scores["table_merges"] = {
+            "score": round(merge_score, 4),
+            "expected": expected_merges,
+            "actual": actual_merges,
+        }
+        total += 1
+        weighted_sum += merge_score
+
+    # ── List numbering accuracy (§17.9) ───────────────────────────
+    gt_l = features.get("lists")
+    if isinstance(gt_l, dict) and gt_l.get("present"):
+        actual_lists = output.get("lists", [])
+        if actual_lists and (gt_l.get("ordered_count") is not None or gt_l.get("has_nested") is not None):
+            sub_scores = []
+
+            # Ordered vs unordered count accuracy
+            expected_ordered = gt_l.get("ordered_count", 0)
+            expected_unordered = gt_l.get("unordered_count", 0)
+            if expected_ordered is not None and expected_unordered is not None:
+                actual_ordered = sum(1 for li in actual_lists if li.get("ordered", False))
+                actual_unordered = len(actual_lists) - actual_ordered
+                ord_acc = 1 - abs(actual_ordered - expected_ordered) / max(actual_ordered, expected_ordered, 1) if (expected_ordered + actual_ordered) > 0 else 1.0
+                unord_acc = 1 - abs(actual_unordered - expected_unordered) / max(actual_unordered, expected_unordered, 1) if (expected_unordered + actual_unordered) > 0 else 1.0
+                type_score = (ord_acc + unord_acc) / 2
+                sub_scores.append(type_score)
+
+            # Nested list depth detection
+            if gt_l.get("has_nested"):
+                max_depth = gt_l.get("max_depth", 2)
+                actual_max_depth = max((li.get("depth", 0) for li in actual_lists), default=0)
+                depth_score = min(actual_max_depth, max_depth) / max_depth if max_depth > 0 else 1.0
+                sub_scores.append(min(depth_score, 1.0))
+
+            if sub_scores:
+                numbering_score = sum(sub_scores) / len(sub_scores)
+                scores["list_numbering"] = {
+                    "score": round(numbering_score, 4),
+                    "expected_ordered": expected_ordered,
+                    "expected_unordered": expected_unordered,
+                    "has_nested": gt_l.get("has_nested", False),
+                }
+                total += 1
+                weighted_sum += numbering_score
+
+    # ── Heading text match ─────────────────────────────────────────
+    gt_headings_from_order = [
+        e for e in (element_order or [])
+        if e.get("type") == "heading" and e.get("text")
+    ]
+    actual_headings = output.get("headings", [])
+    if gt_headings_from_order and actual_headings:
+        matched = 0
+        actual_texts = [h.get("text", "").strip().lower() for h in actual_headings]
+        for gt_h_entry in gt_headings_from_order:
+            gt_text = gt_h_entry["text"].strip().lower()
+            if any(gt_text in at or at in gt_text for at in actual_texts):
+                matched += 1
+        heading_text_score = matched / len(gt_headings_from_order)
+        scores["heading_text_match"] = {
+            "score": round(heading_text_score, 4),
+            "expected": len(gt_headings_from_order),
+            "matched": matched,
+        }
+        total += 1
+        weighted_sum += heading_text_score
+
+    # ── Section break detection (§17.6, aspirational) ──────────────
+    gt_breaks = features.get("section_breaks")
+    if isinstance(gt_breaks, dict) and gt_breaks.get("present"):
+        expected_breaks = gt_breaks.get("count", 0)
+        actual_breaks = len(output.get("section_breaks", []))
+        if expected_breaks > 0:
+            break_score = min(actual_breaks, expected_breaks) / expected_breaks
+            scores["section_breaks"] = {
+                "score": round(break_score, 4),
+                "expected": expected_breaks,
+                "actual": actual_breaks,
+            }
+            total += 1
+            weighted_sum += break_score
+
+    # ── Comment range accuracy (§17.13.1, aspirational) ────────────
+    gt_c = features.get("comments")
+    if isinstance(gt_c, dict) and gt_c.get("ranges"):
+        gt_ranges = gt_c["ranges"]
+        all_text = _collect_all_text(output).lower()
+        range_matched = 0
+        for r in gt_ranges:
+            annotated = r.get("annotated_text", "").lower()
+            if annotated and annotated in all_text:
+                range_matched += 0.5  # Partial: text present
+            comment_text = r.get("comment_text", "").lower()
+            if comment_text and comment_text in all_text:
+                range_matched += 0.5  # Partial: comment present
+        range_score = range_matched / len(gt_ranges) if gt_ranges else 0.0
+        scores["comment_ranges"] = {
+            "score": round(min(range_score, 1.0), 4),
+            "expected": len(gt_ranges),
+            "matched": round(range_matched, 1),
+        }
+        total += 1
+        weighted_sum += min(range_score, 1.0)
 
     score = weighted_sum / total if total > 0 else 1.0
 
@@ -535,6 +697,92 @@ def score_content_fidelity(ground_truth: dict, adapter_output: dict) -> dict[str
             }
             total += 1
             weighted_sum += cell_recall
+
+    # ── Equation Text Extraction (§22.1, aspirational) ────────────
+    gt_equations = features.get("equations")
+    if isinstance(gt_equations, dict) and gt_equations.get("present"):
+        eq_texts = gt_equations.get("texts", [])
+        if eq_texts:
+            all_text = _collect_all_text(adapter_output).lower()
+            eq_matched = 0
+            for eq in eq_texts:
+                normalized = eq.lower().replace(" ", "")
+                # Try exact match first
+                if normalized in all_text.replace(" ", ""):
+                    eq_matched += 1
+                else:
+                    # Partial: check if significant portion of chars present
+                    eq_chars = set(c for c in normalized if c.isalnum())
+                    text_chars = set(c for c in all_text if c.isalnum())
+                    if eq_chars and len(eq_chars & text_chars) / len(eq_chars) > 0.7:
+                        eq_matched += 0.5
+            eq_score = eq_matched / len(eq_texts)
+            details["equation_text"] = {
+                "score": round(min(eq_score, 1.0), 4),
+                "expected": len(eq_texts),
+                "matched": round(eq_matched, 1),
+            }
+            total += 1
+            weighted_sum += min(eq_score, 1.0)
+
+    # ── Field Display Text (§17.16, aspirational) ─────────────────
+    gt_fields = features.get("fields")
+    if isinstance(gt_fields, dict) and gt_fields.get("present"):
+        display_texts = gt_fields.get("display_texts", [])
+        if display_texts:
+            all_text = _collect_all_text(adapter_output).lower()
+            field_matched = 0
+            for dt in display_texts:
+                if dt.lower() in all_text:
+                    field_matched += 1
+            field_score = field_matched / len(display_texts)
+            details["field_display_text"] = {
+                "score": round(field_score, 4),
+                "expected": len(display_texts),
+                "matched": field_matched,
+                "field_types": gt_fields.get("field_types", []),
+            }
+            total += 1
+            weighted_sum += field_score
+
+    # ── Footnote/Endnote Text (aspirational) ──────────────────────
+    gt_fn = features.get("footnotes_endnotes")
+    if isinstance(gt_fn, dict) and gt_fn.get("present") and gt_fn.get("texts"):
+        fn_texts = gt_fn["texts"]
+        actual_footnotes = adapter_output.get("footnotes", [])
+        all_text = _collect_all_text(adapter_output).lower()
+        fn_matched = 0
+        for ft in fn_texts:
+            ft_lower = ft.lower()
+            # Check footnotes output first
+            if any(ft_lower in fn.get("text", "").lower() for fn in actual_footnotes):
+                fn_matched += 1
+            elif ft_lower in all_text:
+                fn_matched += 0.5  # Partial: text present but not in footnotes
+        fn_score = fn_matched / len(fn_texts)
+        details["footnote_text"] = {
+            "score": round(min(fn_score, 1.0), 4),
+            "expected": len(fn_texts),
+            "matched": round(fn_matched, 1),
+        }
+        total += 1
+        weighted_sum += min(fn_score, 1.0)
+
+    # ── Bookmark Detection (§17.13.6, aspirational) ───────────────
+    gt_bookmarks = features.get("bookmarks")
+    if isinstance(gt_bookmarks, dict) and gt_bookmarks.get("present"):
+        expected_names = set(gt_bookmarks.get("names", []))
+        actual_bookmarks = adapter_output.get("bookmarks", [])
+        actual_names = set(b.get("name", "") for b in actual_bookmarks)
+        if expected_names:
+            bm_recall = len(expected_names & actual_names) / len(expected_names)
+            details["bookmarks"] = {
+                "score": round(bm_recall, 4),
+                "expected": sorted(expected_names),
+                "actual": sorted(actual_names),
+            }
+            total += 1
+            weighted_sum += bm_recall
 
     score = weighted_sum / total if total > 0 else 1.0
 
