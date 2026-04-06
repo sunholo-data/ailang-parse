@@ -65,17 +65,19 @@ Every run produces:
 
 ## What AILANG Parse Extracts
 
-| Feature | DOCX | PPTX | XLSX | Competitors |
-|---------|------|------|------|-------------|
-| Tables with merged cells | Yes | Yes | Yes | Buggy or missing |
-| Track changes (redlining) | Yes | — | — | No |
-| Comments (interleaved) | Yes | — | — | No |
-| Headers/footers | Yes | — | — | Limited |
-| Text boxes / VML shapes | Yes | Yes | — | Dropped silently |
-| Speaker notes | — | Yes | — | Dropped |
-| Multi-sheet extraction | — | — | Yes | Yes |
+| Feature | DOCX | PPTX | XLSX | Best Competitor |
+|---------|------|------|------|-----------------|
+| Tables with merged cells | Yes | Yes | Yes | Raw OOXML only |
+| Track changes (redlining) | Yes | — | — | Pandoc (3/3) |
+| Comments (interleaved) | Yes | — | — | Raw OOXML (2/2) |
+| Headers/footers | Yes | — | — | Kreuzberg (2/3) |
+| Text boxes / VML shapes | Yes | Yes | — | Raw OOXML (1/2) |
+| Equations (§22.1) | Yes | — | — | None |
+| Field codes (§17.16) | Yes | — | — | Kreuzberg, OOXML |
+| Speaker notes | — | Yes | — | None |
+| Multi-sheet extraction | — | — | Yes | Kreuzberg |
 
-Competitors (MarkItDown, Unstructured, Docling, LlamaParse) either convert Office files to Markdown/PDF (losing structure) or use heuristics. AILANG Parse reads the XML directly.
+**OfficeDocBench** (69 files, 10 formats, 7 metrics): AILANG Parse **93.9%** composite with 100% coverage vs nearest competitor 68.0% coverage-adjusted. 8 parsers compared including Raw OOXML, Pandoc, Kreuzberg, MarkItDown, Unstructured, Docling. Scores include aspirational ECMA-376 spec targets that intentionally lower our score.
 
 ## Supported Formats
 
