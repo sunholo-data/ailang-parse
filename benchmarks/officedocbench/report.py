@@ -11,26 +11,24 @@ def _aggregate_scores(adapter_result: dict) -> dict[str, Any]:
     if not ok_results:
         return {"composite": 0, "count": 0, "feature_detection": 0,
                 "structural_recall": 0, "structural_quality": 0,
-                "text_jaccard": 0, "element_count": 0, "metadata": 0}
+                "content_fidelity": 0, "text_jaccard": 0,
+                "element_count": 0, "metadata": 0}
 
     n = len(ok_results)
-    composite = sum(r["scores"]["composite"] for r in ok_results) / n
-    feat_det = sum(r["scores"]["feature_detection"]["score"] for r in ok_results) / n
-    struct_rec = sum(r["scores"]["structural_recall"]["score"] for r in ok_results) / n
-    struct_qual = sum(r["scores"].get("structural_quality", {}).get("score", 1.0) for r in ok_results) / n
-    text_jac = sum(r["scores"]["text_jaccard"]["score"] for r in ok_results) / n
-    elem_cnt = sum(r["scores"]["element_count"]["score"] for r in ok_results) / n
-    meta = sum(r["scores"]["metadata"]["score"] for r in ok_results) / n
+
+    def _avg(key: str) -> float:
+        return sum(r["scores"].get(key, {}).get("score", 1.0) for r in ok_results) / n
 
     return {
-        "composite": round(composite, 4),
+        "composite": round(sum(r["scores"]["composite"] for r in ok_results) / n, 4),
         "count": n,
-        "feature_detection": round(feat_det, 4),
-        "structural_recall": round(struct_rec, 4),
-        "structural_quality": round(struct_qual, 4),
-        "text_jaccard": round(text_jac, 4),
-        "element_count": round(elem_cnt, 4),
-        "metadata": round(meta, 4),
+        "feature_detection": round(_avg("feature_detection"), 4),
+        "structural_recall": round(_avg("structural_recall"), 4),
+        "structural_quality": round(_avg("structural_quality"), 4),
+        "content_fidelity": round(_avg("content_fidelity"), 4),
+        "text_jaccard": round(_avg("text_jaccard"), 4),
+        "element_count": round(_avg("element_count"), 4),
+        "metadata": round(_avg("metadata"), 4),
     }
 
 
@@ -56,8 +54,8 @@ def _aggregate_by_format(adapter_result: dict) -> dict[str, dict]:
 def print_summary(all_results: list[dict]) -> None:
     """Print a comparative summary table."""
     print("\n# OfficeDocBench Results\n")
-    print("| Tool | Files | Composite | Feat. Det. | Struct. Recall | Struct. Quality | Text Jaccard | Elem. Count | Metadata |")
-    print("|------|-------|-----------|------------|----------------|-----------------|--------------|-------------|----------|")
+    print("| Tool | Files | Composite | Feat. Det. | Struct. Recall | Struct. Quality | Content Fidelity | Text Jaccard | Elem. Count | Metadata |")
+    print("|------|-------|-----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|")
 
     for ar in all_results:
         agg = _aggregate_scores(ar)
@@ -77,6 +75,7 @@ def print_summary(all_results: list[dict]) -> None:
             f"| {agg['feature_detection']:.1%} "
             f"| {agg['structural_recall']:.1%} "
             f"| {agg['structural_quality']:.1%} "
+            f"| {agg['content_fidelity']:.1%} "
             f"| {agg['text_jaccard']:.1%} "
             f"| {agg['element_count']:.1%} "
             f"| {agg['metadata']:.1%} |"
@@ -171,6 +170,7 @@ def print_latex(all_results: list[dict]) -> None:
         ("Feature Detection", "feature_detection"),
         ("Structural Recall", "structural_recall"),
         ("Structural Quality", "structural_quality"),
+        ("Content Fidelity", "content_fidelity"),
         ("Text Jaccard", "text_jaccard"),
         ("Element Count", "element_count"),
         ("Metadata", "metadata"),
