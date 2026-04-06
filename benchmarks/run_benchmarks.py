@@ -50,20 +50,30 @@ def run_officedocbench(json_output: bool = False):
 def run_competitors(competitor: str | None = None, json_output: bool = False):
     """Run competitor comparison."""
     competitors_dir = REPO_DIR / "benchmarks" / "competitors"
-    adapters = {
+    # Script-based adapters (legacy)
+    script_adapters = {
         "unstructured": competitors_dir / "run_unstructured.py",
         "docling": competitors_dir / "run_docling.py",
         "llamaparse": competitors_dir / "run_llamaparse.py",
     }
+    # OfficeDocBench-integrated adapters (run via eval_officedocbench.py --adapter)
+    odbench_adapters = {"pandoc", "ooxml"}
 
-    if competitor and competitor in adapters:
-        targets = {competitor: adapters[competitor]}
+    all_names = list(script_adapters.keys()) + sorted(odbench_adapters)
+
+    if competitor and competitor in script_adapters:
+        targets = {competitor: script_adapters[competitor]}
+        odbench_targets: set[str] = set()
+    elif competitor and competitor in odbench_adapters:
+        targets = {}
+        odbench_targets = {competitor}
     elif competitor:
         print(f"Unknown competitor: {competitor}")
-        print(f"Available: {', '.join(adapters.keys())}")
+        print(f"Available: {', '.join(all_names)}")
         return
     else:
-        targets = adapters
+        targets = script_adapters
+        odbench_targets = odbench_adapters
 
     for name, script in targets.items():
         if not script.exists():
@@ -73,6 +83,19 @@ def run_competitors(competitor: str | None = None, json_output: bool = False):
         print(f"Running {name} comparison...")
         print(f"{'='*60}\n")
         cmd = ["uv", "run", str(script)]
+        if json_output:
+            cmd.append("--json")
+        subprocess.run(cmd, cwd=str(REPO_DIR))
+
+    for name in sorted(odbench_targets):
+        print(f"\n{'='*60}")
+        print(f"Running {name} comparison (via OfficeDocBench)...")
+        print(f"{'='*60}\n")
+        cmd = [
+            "uv", "run",
+            str(REPO_DIR / "benchmarks" / "officedocbench" / "eval_officedocbench.py"),
+            "--adapter", name,
+        ]
         if json_output:
             cmd.append("--json")
         subprocess.run(cmd, cwd=str(REPO_DIR))
