@@ -96,6 +96,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
         // Primary navigation — page links
         '<nav class="header-nav dp-site-nav">' +
           navLink('index.html', 'Home', 'index') +
+          navLink('workbench.html', 'Workbench', 'workbench') +
           navLink('docs.html', 'Docs', 'docs') +
           navLink('api.html', 'API', 'api') +
           navLink('selfhost.html', 'Run Locally', 'selfhost') +
@@ -147,6 +148,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
         '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">' +
           '<a href="pricing.html" class="dp-btn dp-btn--primary" style="font-size:12px;padding:6px 16px;text-decoration:none">See Pricing</a>' +
           '<a href="api.html#getting-started" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:6px 16px;text-decoration:none">Get API Key</a>' +
+          '<a href="workbench.html" class="dp-btn dp-btn--ghost" style="font-size:12px;padding:6px 16px;text-decoration:none">Try Workbench</a>' +
         '</div>';
       footerMount.parentNode.insertBefore(ctaBand, footerMount);
     }
@@ -161,6 +163,8 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
           'Powered by <a href="https://ailang.sunholo.com/"><img src="img/ailang-logo.svg" alt="" width="14" height="14" style="vertical-align:-2px;margin-right:3px">AILANG</a>' +
           '<span class="footer-sep"></span>' +
           '<a href="https://www.sunholo.com/">sunholo.com</a>' +
+          '<span class="footer-sep"></span>' +
+          '<a href="workbench.html">Workbench</a>' +
           '<span class="footer-sep"></span>' +
           '<a href="https://sunholo.com/ailang-demos/">Demos</a>' +
         '</div>' +
