@@ -32,6 +32,12 @@ jobs:
       - name: Type-check all modules
         run: ./bin/docparse --check
 
+      - name: Check WASM bindings (source ↔ wasm-demo.js ↔ vendor script)
+        run: python3 docs/scripts/check-wasm-bindings.py
+
+      - name: Frontend unit tests (docparse-blocks.js)
+        run: node --test 'docs/js/__tests__/*.test.mjs'
+
       - name: Run inline tests (60+ test cases)
         run: |
           # Run tests and check that all non-property tests pass
@@ -81,6 +87,31 @@ jobs:
       - name: Run Go SDK tests
         run: cd sdks/go && go test -v ./...
 
+      # R SDK
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: sdks/r
+          extra-packages: |
+            any::rcmdcheck
+            any::testthat
+            any::withr
+            any::httptest2
+          needs: check
+
+      - name: R CMD check (--as-cran)
+        uses: r-lib/actions/check-r-package@v2
+        with:
+          working-directory: sdks/r
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"warning"'
+
   sdk-integration:
     name: SDK Integration Tests (live API)
     runs-on: ubuntu-latest
@@ -104,6 +135,21 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install R package dependencies (integration)
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: sdks/r
+          extra-packages: |
+            any::testthat
+            any::withr
+          needs: check
+
       - name: Python integration tests
         if: env.DOCPARSE_API_KEY != ''
         env:
@@ -121,6 +167,15 @@ jobs:
         env:
           DOCPARSE_API_KEY: ${{ secrets.DOCPARSE_API_KEY }}
         run: cd sdks/go && go test -v -run Integration ./...
+
+      - name: R integration tests
+        if: env.DOCPARSE_API_KEY != ''
+        env:
+          DOCPARSE_API_KEY: ${{ secrets.DOCPARSE_API_KEY }}
+          NOT_CRAN: "true"
+        run: |
+          R CMD INSTALL sdks/r
+          cd sdks/r && Rscript -e 'testthat::test_dir("tests/testthat", filter = "integration", reporter = "summary")'
 
   benchmark:
     name: Structural Benchmark (53 files)

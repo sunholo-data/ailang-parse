@@ -110,7 +110,7 @@ from ailang_parse import DocParse
 ```
 
 If the page needs a NEW code example, create the file in `docs/examples/` and reference it. Existing examples:
-- `examples/sdk/quickstart.{py,js,go}` — SDK usage
+- `examples/sdk/quickstart.{py,js,go,R}` — SDK usage (Python, JavaScript, Go, R)
 - `examples/cli/install.sh` — CLI installation
 - `examples/cli/parse.sh` — Basic parsing
 - `examples/cli/convert.sh` — Format conversion
@@ -166,7 +166,7 @@ Use these from the design system rather than inline styles:
 - `.dp-faq`, `.dp-faq-answer` — FAQ section
 - `.reveal`, `.reveal-delay-1` — scroll-reveal animation
 - `.hero`, `.subtitle` — page hero section
-- `language-bash`, `language-python`, `language-json`, etc. — Prism syntax classes
+- `language-bash`, `language-python`, `language-json`, `language-r`, etc. — Prism syntax classes
 
 ## After Creating the Page
 

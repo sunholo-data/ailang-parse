@@ -34,6 +34,28 @@ jobs:
       - name: Go SDK tests
         run: cd sdks/go && go test -v ./...
 
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: sdks/r
+          extra-packages: |
+            any::rcmdcheck
+            any::testthat
+            any::withr
+            any::httptest2
+          needs: check
+      - name: R CMD check (--as-cran)
+        uses: r-lib/actions/check-r-package@v2
+        with:
+          working-directory: sdks/r
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"warning"'
+
   publish-python:
     name: Publish Python SDK to PyPI
     needs: test-sdks
@@ -137,3 +159,72 @@ jobs:
           git remote add origin git@github.com:sunholo-data/ailang-parse-go.git
           git push --force origin main
           git push --force origin "v${{ steps.version.outputs.version }}"
+
+  publish-r:
+    name: Publish R SDK (GitHub Release)
+    needs: test-sdks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # to create releases and upload assets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: sdks/r
+          needs: check
+
+      - name: Verify tag matches DESCRIPTION version
+        run: |
+          cd sdks/r
+          FILE_VERSION=$(grep '^Version:' DESCRIPTION | sed 's/Version: //')
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match sdks/r/DESCRIPTION version ($FILE_VERSION)"
+            exit 1
+          fi
+          echo "Version $TAG_VERSION confirmed"
+
+      - name: Build R source tarball
+        run: |
+          R CMD build sdks/r
+          ls -la ailangparse_*.tar.gz
+
+      - name: Create GitHub Release and upload tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${{ steps.version.outputs.version }}"
+          TARBALL="ailangparse_${VERSION}.tar.gz"
+          cat > /tmp/release-notes.md <<EOF
+          AILANG Parse SDK release ${VERSION}. R source tarball attached.
+
+          Install via the attached tarball:
+          \`\`\`r
+          install.packages(
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${TARBALL}",
+            repos = NULL, type = "source"
+          )
+          \`\`\`
+
+          Or directly from the repo subdir:
+          \`\`\`r
+          remotes::install_github("${GITHUB_REPOSITORY}", subdir = "sdks/r", ref = "${TAG}")
+          \`\`\`
+          EOF
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "SDKs $TAG" --notes-file /tmp/release-notes.md
+          fi
+          gh release upload "$TAG" "$TARBALL" --clobber
