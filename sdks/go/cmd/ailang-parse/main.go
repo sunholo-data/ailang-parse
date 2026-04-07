@@ -26,15 +26,51 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	docparse "github.com/sunholo-data/ailang-parse-go"
 )
 
 const defaultEndpoint = "https://docparse.ailang.sunholo.com/mcp/"
 
 var (
-	sessionID string
-	endpoint  string
-	client    = &http.Client{}
+	sessionID   string
+	endpoint    string
+	client      = &http.Client{}
+	savedAPIKey string
 )
+
+// injectAPIKey injects the saved apiKey into a tools/call argument map
+// when the agent supplied an empty value. Returns the (possibly modified)
+// raw bytes to forward.
+func injectAPIKey(raw []byte, msg map[string]interface{}) []byte {
+	if savedAPIKey == "" {
+		return raw
+	}
+	if msg["method"] != "tools/call" {
+		return raw
+	}
+	params, ok := msg["params"].(map[string]interface{})
+	if !ok {
+		return raw
+	}
+	args, ok := params["arguments"].(map[string]interface{})
+	if !ok {
+		return raw
+	}
+	existing, hasField := args["apiKey"]
+	if !hasField {
+		return raw
+	}
+	if s, isStr := existing.(string); isStr && s != "" {
+		return raw
+	}
+	args["apiKey"] = savedAPIKey
+	updated, err := json.Marshal(msg)
+	if err != nil {
+		return raw
+	}
+	return updated
+}
 
 func logf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[ailang-parse-mcp] "+format+"\n", args...)
@@ -50,6 +86,8 @@ func writeJSON(obj map[string]interface{}) {
 }
 
 func forward(raw []byte, msg map[string]interface{}) error {
+	raw = injectAPIKey(raw, msg)
+
 	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return err
@@ -59,8 +97,8 @@ func forward(raw []byte, msg map[string]interface{}) error {
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
-	if apiKey := os.Getenv("DOCPARSE_API_KEY"); apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+	if savedAPIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+savedAPIKey)
 	}
 
 	resp, err := client.Do(req)
@@ -121,6 +159,17 @@ func runMCP() int {
 		endpoint = defaultEndpoint
 	}
 	logf("Connecting to %s", endpoint)
+
+	savedAPIKey = docparse.ResolveAPIKey()
+	if savedAPIKey != "" {
+		suffix := savedAPIKey
+		if len(suffix) > 4 {
+			suffix = suffix[len(suffix)-4:]
+		}
+		logf("Using saved API key (…%s)", suffix)
+	} else {
+		logf("No API key found — agent will need to call mcpAuth on first parse")
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	// MCP tool results can exceed the default 64KB scanner buffer

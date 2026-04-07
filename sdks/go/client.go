@@ -72,6 +72,32 @@ func loadSavedKey(baseURL string) *savedCredentials {
 	return &cred
 }
 
+// ResolveAPIKey returns any saved API key from the DOCPARSE_API_KEY env var
+// or the credentials file, without filtering by base URL.
+//
+// Used by the MCP CLI bridge, which forwards to whatever endpoint the user
+// configured via AILANG_PARSE_MCP_URL and just needs *a* key to inject.
+// Library callers that need strict base-URL matching should use the
+// internal loadSavedKey via the Client constructor instead.
+func ResolveAPIKey() string {
+	if k := os.Getenv("DOCPARSE_API_KEY"); k != "" {
+		return k
+	}
+	credPath := filepath.Join(configDir(), credentialsFile)
+	data, err := os.ReadFile(credPath)
+	if err != nil {
+		return ""
+	}
+	var cred savedCredentials
+	if err := json.Unmarshal(data, &cred); err != nil {
+		return ""
+	}
+	if len(cred.APIKey) >= 3 && cred.APIKey[:3] == "dp_" {
+		return cred.APIKey
+	}
+	return ""
+}
+
 // saveKey persists credentials to disk with restrictive permissions.
 func saveKey(apiKey, baseURL, keyID, tier, label string) error {
 	dir := configDir()

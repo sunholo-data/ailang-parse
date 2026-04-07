@@ -173,7 +173,9 @@ ailang serve-api --mcp --routes-only \
       <h2 id="configuration">Configuration</h2>
 
       <h3>Claude Desktop (hosted &mdash; recommended)</h3>
-      <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows). <strong>Requires Node.js &ge; 18.</strong></p>
+      <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows). Pick whichever runtime you have installed &mdash; all three SDKs ship the same stdio bridge.</p>
+
+      <p><strong>Node.js &ge; 18:</strong></p>
       <pre><code class="language-json">{
   "mcpServers": {
     "ailang-parse": {
@@ -182,7 +184,29 @@ ailang serve-api --mcp --routes-only \
     }
   }
 }</code></pre>
-      <p style="font-size:13px;color:var(--text-secondary)">This runs our npm package as a local stdio MCP server that bridges to the hosted API. No API key needed upfront &mdash; the agent handles device auth automatically.</p>
+
+      <p><strong>Python &ge; 3.8 (via <a href="https://docs.astral.sh/uv/" target="_blank" rel="noopener">uv</a>):</strong></p>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "uvx",
+      "args": ["ailang-parse", "mcp"]
+    }
+  }
+}</code></pre>
+
+      <p><strong>Go (install once, run from PATH):</strong></p>
+      <pre><code class="language-bash">go install github.com/sunholo-data/ailang-parse-go/cmd/ailang-parse@latest</code></pre>
+      <pre><code class="language-json">{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "ailang-parse",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+
+      <p style="font-size:13px;color:var(--text-secondary)">All three run the same stdio MCP bridge to the hosted API. No API key needed upfront &mdash; the agent handles device auth automatically.</p>
 
       <h3>Claude Desktop (local)</h3>
       <p>For local-only parsing without the hosted API, add to <code>claude_desktop_config.json</code>:</p>

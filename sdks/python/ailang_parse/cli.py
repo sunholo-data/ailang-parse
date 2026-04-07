@@ -23,10 +23,26 @@ import sys
 import urllib.error
 import urllib.request
 
+from ._credentials import resolve_api_key
+
 DEFAULT_ENDPOINT = "https://docparse.ailang.sunholo.com/mcp/"
 
 # Module-level session state — captured from server's first response
 _session_id: str | None = None
+_saved_api_key: str | None = None
+
+
+def _inject_api_key(msg: dict) -> None:
+    """Inject saved apiKey into tools/call params if the agent left it empty."""
+    if not _saved_api_key:
+        return
+    if msg.get("method") != "tools/call":
+        return
+    args = msg.get("params", {}).get("arguments")
+    if not isinstance(args, dict):
+        return
+    if "apiKey" in args and not args["apiKey"]:
+        args["apiKey"] = _saved_api_key
 
 
 def _log(msg: str) -> None:
@@ -44,6 +60,8 @@ def _forward(msg: dict, endpoint: str) -> None:
     """Forward a single JSON-RPC message to the MCP HTTP endpoint."""
     global _session_id
 
+    _inject_api_key(msg)
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
@@ -51,9 +69,8 @@ def _forward(msg: dict, endpoint: str) -> None:
     if _session_id:
         headers["Mcp-Session-Id"] = _session_id
 
-    api_key = os.environ.get("DOCPARSE_API_KEY")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if _saved_api_key:
+        headers["Authorization"] = f"Bearer {_saved_api_key}"
 
     body = json.dumps(msg).encode("utf-8")
     req = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
@@ -104,8 +121,14 @@ def _handle_response(resp) -> None:
 
 def _run_mcp() -> int:
     """Run the MCP stdio bridge until stdin closes."""
+    global _saved_api_key
     endpoint = os.environ.get("AILANG_PARSE_MCP_URL", DEFAULT_ENDPOINT)
     _log(f"Connecting to {endpoint}")
+    _saved_api_key = resolve_api_key()
+    if _saved_api_key:
+        _log(f"Using saved API key (…{_saved_api_key[-4:]})")
+    else:
+        _log("No API key found — agent will need to call mcpAuth on first parse")
 
     # Read newline-delimited JSON-RPC, process serially
     for line in sys.stdin:

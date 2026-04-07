@@ -18,11 +18,19 @@
  */
 
 import { createInterface } from "node:readline";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { resolveApiKey } from "./credentials.js";
 
 const cmd = process.argv[2];
 
 if (cmd !== "mcp") {
-  const pkg = "0.2.1";
+  let pkg = "unknown";
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")).version;
+  } catch {}
   process.stderr.write(`@ailang/parse v${pkg} — AILANG Parse CLI\n\n`);
   process.stderr.write("Commands:\n");
   process.stderr.write("  mcp    Start MCP stdio server (for Claude Desktop, Cursor, etc.)\n\n");
@@ -38,6 +46,8 @@ const ENDPOINT =
   process.env.AILANG_PARSE_MCP_URL ||
   "https://docparse.ailang.sunholo.com/mcp/";
 
+const SAVED_API_KEY = resolveApiKey();
+
 let sessionId = null;
 
 // Log to stderr (stdout is reserved for MCP protocol)
@@ -46,6 +56,25 @@ function log(msg) {
 }
 
 log(`Connecting to ${ENDPOINT}`);
+if (SAVED_API_KEY) {
+  log(`Using saved API key (…${SAVED_API_KEY.slice(-4)})`);
+} else {
+  log(`No API key found — agent will need to call mcpAuth on first parse`);
+}
+
+// Inject the saved apiKey into tools/call params if the tool's schema declares
+// apiKey but the agent supplied an empty value. Mutates msg in place.
+// We only inject when the field already exists (so we never add params the
+// tool's schema doesn't accept).
+function injectApiKey(msg) {
+  if (!SAVED_API_KEY) return;
+  if (msg?.method !== "tools/call") return;
+  const args = msg?.params?.arguments;
+  if (!args || typeof args !== "object") return;
+  if ("apiKey" in args && !args.apiKey) {
+    args.apiKey = SAVED_API_KEY;
+  }
+}
 
 // Serialize requests — MCP protocol is sequential
 const queue = [];
@@ -105,6 +134,8 @@ rl.on("close", () => {
 });
 
 async function forward(msg) {
+  injectApiKey(msg);
+
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
@@ -114,10 +145,9 @@ async function forward(msg) {
     headers["Mcp-Session-Id"] = sessionId;
   }
 
-  // Pass through API key if set
-  const apiKey = process.env.DOCPARSE_API_KEY;
-  if (apiKey) {
-    headers["Authorization"] = `Bearer ${apiKey}`;
+  // Also send as Authorization header — server may use either path
+  if (SAVED_API_KEY) {
+    headers["Authorization"] = `Bearer ${SAVED_API_KEY}`;
   }
 
   const resp = await fetch(ENDPOINT, {
