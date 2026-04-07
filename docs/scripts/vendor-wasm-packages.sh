@@ -111,10 +111,19 @@ for m in "${MODULES[@]}"; do
 done
 echo "→ Copied ${#MODULES[@]} parser modules from source"
 
-# ── 3. Vendor sunholo/a2ui from registry cache ───────────────────────────
+# ── 3. Vendor sunholo/a2ui from registry cache (if available) ────────────
+# If the registry cache is missing (CI without `ailang lock`), keep the
+# already-vendored copy in $DEST/sunholo/a2ui/components.ail.
 mkdir -p "$DEST/sunholo/a2ui"
-cp "$CACHE/sunholo/a2ui/0.1.0/components.ail" "$DEST/sunholo/a2ui/components.ail"
-echo "→ Vendored sunholo/a2ui package"
+if [ -f "$CACHE/sunholo/a2ui/0.1.0/components.ail" ]; then
+  cp "$CACHE/sunholo/a2ui/0.1.0/components.ail" "$DEST/sunholo/a2ui/components.ail"
+  echo "→ Refreshed sunholo/a2ui package from registry cache"
+elif [ -f "$DEST/sunholo/a2ui/components.ail" ]; then
+  echo "→ Keeping in-tree sunholo/a2ui (registry cache not present)"
+else
+  echo "✗ sunholo/a2ui not found in cache or vendor dir — run 'ailang lock' first"
+  exit 1
+fi
 
 echo ""
 echo "✓ Vendor complete — local browser bundle now matches deploy"
