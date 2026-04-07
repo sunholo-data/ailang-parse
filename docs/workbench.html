@@ -687,6 +687,70 @@ body.wb { background: var(--bg); }
 }
 
 /* Tabs */
+/* Copy-to-clipboard wrapper used by JSON / Markdown tab panels.
+   Wraps the <pre> in a relatively-positioned container with a small
+   button parked top-right. The button reads its target element's
+   textContent so the copy logic doesn't care which panel it's in. */
+.wb-copy-wrap {
+  position: relative;
+}
+.wb-copy-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  backdrop-filter: blur(6px);
+}
+.wb-copy-btn svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.wb-copy-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
+}
+.wb-copy-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+.wb-copy-btn.copied {
+  border-color: #059669;
+  color: #059669;
+  background: rgba(5, 150, 105, 0.06);
+}
+/* JSON panel uses a dark background, so the button needs higher contrast */
+#wb-panel-json-wrap .wb-copy-btn {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+}
+#wb-panel-json-wrap .wb-copy-btn:hover {
+  border-color: #60a5fa;
+  color: #60a5fa;
+  background: rgba(30, 41, 59, 0.95);
+}
+#wb-panel-json-wrap .wb-copy-btn.copied {
+  border-color: #34d399;
+  color: #34d399;
+  background: rgba(5, 150, 105, 0.18);
+}
+
 .wb-tabs {
   display: flex;
   gap: 2px;
@@ -1550,8 +1614,20 @@ body.wb { background: var(--bg); }
         <!-- Tab panels -->
         <div id="wb-panel-preview" style="display:none;"></div>
         <div id="wb-panel-blocks"></div>
-        <pre id="wb-panel-json" style="display:none; background: var(--bg-code); color: #e2e8f0; padding: 18px 20px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 11px; line-height: 1.55; overflow: auto; white-space: pre-wrap; word-break: break-word;"></pre>
-        <pre id="wb-panel-markdown" style="display:none; background: var(--bg-card); border: 1px solid var(--border); padding: 20px 24px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow: auto; white-space: pre-wrap;"></pre>
+        <div class="wb-copy-wrap" id="wb-panel-json-wrap" style="display:none;">
+          <button class="wb-copy-btn" type="button" data-target="wb-panel-json" title="Copy JSON to clipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy</span>
+          </button>
+          <pre id="wb-panel-json" style="margin:0; background: var(--bg-code); color: #e2e8f0; padding: 18px 20px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 11px; line-height: 1.55; overflow: auto; white-space: pre-wrap; word-break: break-word;"></pre>
+        </div>
+        <div class="wb-copy-wrap" id="wb-panel-markdown-wrap" style="display:none;">
+          <button class="wb-copy-btn" type="button" data-target="wb-panel-markdown" title="Copy Markdown to clipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copy</span>
+          </button>
+          <pre id="wb-panel-markdown" style="margin:0; background: var(--bg-card); border: 1px solid var(--border); padding: 20px 24px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow: auto; white-space: pre-wrap;"></pre>
+        </div>
         <div id="wb-panel-a2ui" style="display:none;"></div>
       </div>
     </section>
@@ -1834,7 +1910,9 @@ body.wb { background: var(--bg); }
   var panelPreview    = $('wb-panel-preview');
   var panelBlocks     = $('wb-panel-blocks');
   var panelJson       = $('wb-panel-json');
+  var panelJsonWrap   = $('wb-panel-json-wrap');
   var panelMarkdown   = $('wb-panel-markdown');
+  var panelMarkdownWrap = $('wb-panel-markdown-wrap');
   var panelA2UI       = $('wb-panel-a2ui');
   var cliCmd          = $('wb-cli-cmd');
 
@@ -2086,11 +2164,11 @@ body.wb { background: var(--bg); }
   }
 
   function renderTab(f) {
-    panelPreview.style.display  = 'none';
-    panelBlocks.style.display   = 'none';
-    panelJson.style.display     = 'none';
-    panelMarkdown.style.display = 'none';
-    panelA2UI.style.display     = 'none';
+    panelPreview.style.display       = 'none';
+    panelBlocks.style.display        = 'none';
+    panelJsonWrap.style.display      = 'none';
+    panelMarkdownWrap.style.display  = 'none';
+    panelA2UI.style.display          = 'none';
     // Block filter pills only make sense on the Blocks tab.
     if (blockFilters) blockFilters.style.display = state.tab === 'blocks' ? '' : 'none';
 
@@ -2098,10 +2176,10 @@ body.wb { background: var(--bg); }
       panelBlocks.style.display = '';
       panelBlocks.innerHTML = renderBlocksHtml(f.blocks);
     } else if (state.tab === 'json') {
-      panelJson.style.display = '';
+      panelJsonWrap.style.display = '';
       panelJson.textContent = JSON.stringify(f.blocks, null, 2);
     } else if (state.tab === 'markdown') {
-      panelMarkdown.style.display = '';
+      panelMarkdownWrap.style.display = '';
       panelMarkdown.textContent = blocksToMarkdown(f.blocks);
     } else if (state.tab === 'preview') {
       panelPreview.style.display = '';
@@ -2482,6 +2560,47 @@ body.wb { background: var(--bg); }
       if (f) renderTab(f);
     });
   });
+
+  // ── Copy-to-clipboard buttons (JSON / Markdown) ──────────────
+  // Reads textContent from the target <pre> and uses navigator.clipboard
+  // when available, with a manual textarea fallback for old browsers.
+  // Flips the button into a "Copied" state for 1.4s on success.
+  document.querySelectorAll('.wb-copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var targetId = btn.getAttribute('data-target');
+      var target = document.getElementById(targetId);
+      if (!target) return;
+      var text = target.textContent || '';
+      var done = function () {
+        var label = btn.querySelector('span');
+        var prev = label ? label.textContent : 'Copy';
+        btn.classList.add('copied');
+        if (label) label.textContent = 'Copied';
+        setTimeout(function () {
+          btn.classList.remove('copied');
+          if (label) label.textContent = prev;
+        }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {
+          // Fall through to legacy path
+          fallbackCopy(text, done);
+        });
+      } else {
+        fallbackCopy(text, done);
+      }
+    });
+  });
+  function fallbackCopy(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (_) {}
+    ta.remove();
+  }
 
   // ── AI key panel ─────────────────────────────────────────────
   // The Gemini key lives in localStorage under 'gemini-api-key' (managed via
