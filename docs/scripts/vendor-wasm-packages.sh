@@ -34,7 +34,9 @@ done
 
 # ── Freshness check ──────────────────────────────────────────────────────
 if [ -f "$WASM_DIR/ailang.wasm" ]; then
-  WASM_AGE_SECONDS=$(( $(date +%s) - $(stat -f %m "$WASM_DIR/ailang.wasm" 2>/dev/null || stat -c %Y "$WASM_DIR/ailang.wasm") ))
+  # GNU stat (Linux) uses -c, BSD stat (macOS) uses -f. Try GNU first.
+  WASM_MTIME=$(stat -c %Y "$WASM_DIR/ailang.wasm" 2>/dev/null || stat -f %m "$WASM_DIR/ailang.wasm")
+  WASM_AGE_SECONDS=$(( $(date +%s) - WASM_MTIME ))
   WASM_AGE_DAYS=$(( WASM_AGE_SECONDS / 86400 ))
   if [ "$WASM_AGE_DAYS" -ge "$STALE_DAYS" ]; then
     echo "⚠️  Vendored ailang.wasm is ${WASM_AGE_DAYS} days old (>= ${STALE_DAYS}d threshold)"
@@ -80,7 +82,7 @@ if [ "$SKIP_WASM" -eq 0 ]; then
   mv "$TMPDIR_WASM/ailang.wasm" "$WASM_DIR/"
   [ -f "$TMPDIR_WASM/wasm_exec.js" ]   && mv "$TMPDIR_WASM/wasm_exec.js"   "$WASM_DIR/"
   [ -f "$TMPDIR_WASM/ailang-repl.js" ] && mv "$TMPDIR_WASM/ailang-repl.js" "$WASM_DIR/"
-  WASM_SIZE=$(stat -f %z "$WASM_DIR/ailang.wasm" 2>/dev/null || stat -c %s "$WASM_DIR/ailang.wasm")
+  WASM_SIZE=$(stat -c %s "$WASM_DIR/ailang.wasm" 2>/dev/null || stat -f %z "$WASM_DIR/ailang.wasm")
   echo "  ailang.wasm: $((WASM_SIZE / 1024 / 1024)) MB"
 fi
 
