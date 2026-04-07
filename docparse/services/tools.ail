@@ -29,7 +29,7 @@ pure func mcpParseToolDef() -> Json =
     kv("name", js("mcpParse")),
     kv("description", js("Parse any document into structured blocks, markdown, or HTML. Accepts a file path or sample_id. Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are deterministic and instant. PDF, images, audio, video require AI. In hosted mode, pass an apiKey from mcpAuth.")),
     kv("endpoint", js("POST /mcp/v1/parse")),
-    kv("mcp_tool", js("docparse.services.mcp_tools.mcpParse")),
+    kv("mcp_tool", js("docparse.services.mcp.tools.mcpParse")),
     kv("inputSchema", jo([
       kv("type", js("object")),
       kv("properties", jo([
@@ -61,7 +61,7 @@ pure func mcpConvertToolDef() -> Json =
     kv("name", js("mcpConvert")),
     kv("description", js("Convert a document from one format to another. Parses the input, then generates the output. Supports: DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto). In hosted mode, pass an apiKey.")),
     kv("endpoint", js("POST /mcp/v1/convert")),
-    kv("mcp_tool", js("docparse.services.mcp_tools.mcpConvert")),
+    kv("mcp_tool", js("docparse.services.mcp.tools.mcpConvert")),
     kv("inputSchema", jo([
       kv("type", js("object")),
       kv("properties", jo([
@@ -92,7 +92,7 @@ pure func mcpFormatsToolDef() -> Json =
     kv("name", js("mcpFormats")),
     kv("description", js("List all supported formats, features, samples, pricing tiers, and service capabilities. This is the main discovery tool — call it first to understand what AILANG Parse can do.")),
     kv("endpoint", js("GET /mcp/v1/formats")),
-    kv("mcp_tool", js("docparse.services.mcp_tools.mcpFormats")),
+    kv("mcp_tool", js("docparse.services.mcp.tools.mcpFormats")),
     kv("inputSchema", jo([
       kv("type", js("object")),
       kv("properties", jo([])),
@@ -105,7 +105,7 @@ pure func mcpEstimateToolDef() -> Json =
     kv("name", js("mcpEstimate")),
     kv("description", js("Estimate cost and latency before parsing. Returns whether AI is required, estimated time, and whether it counts against AI quota. Use this to advise humans before consuming quota.")),
     kv("endpoint", js("POST /mcp/v1/estimate")),
-    kv("mcp_tool", js("docparse.services.mcp_estimate.mcpEstimate")),
+    kv("mcp_tool", js("docparse.services.mcp.estimate.mcpEstimate")),
     kv("inputSchema", jo([
       kv("type", js("object")),
       kv("properties", jo([
@@ -128,7 +128,7 @@ pure func mcpAuthToolDef() -> Json =
     kv("name", js("mcpAuth")),
     kv("description", js("Start device authorization to get an API key (RFC 8628). Returns a verification URL and user code. Tell the human to open the URL and sign in. Then call mcpAuthPoll with the device_code. Hosted mode only.")),
     kv("endpoint", js("POST /mcp/v1/auth")),
-    kv("mcp_tool", js("docparse.services.mcp_auth.mcpAuth")),
+    kv("mcp_tool", js("docparse.services.mcp.auth.mcpAuth")),
     kv("hosted_only", jb(true)),
     kv("inputSchema", jo([
       kv("type", js("object")),
@@ -148,7 +148,7 @@ pure func mcpAuthPollToolDef() -> Json =
     kv("name", js("mcpAuthPoll")),
     kv("description", js("Poll for device authorization completion. Returns pending (keep polling every 5s), approved (with api_key and tier info), or expired (start over). Hosted mode only.")),
     kv("endpoint", js("POST /mcp/v1/auth/poll")),
-    kv("mcp_tool", js("docparse.services.mcp_auth.mcpAuthPoll")),
+    kv("mcp_tool", js("docparse.services.mcp.auth.mcpAuthPoll")),
     kv("hosted_only", jb(true)),
     kv("inputSchema", jo([
       kv("type", js("object")),
@@ -167,7 +167,7 @@ pure func mcpAccountToolDef() -> Json =
     kv("name", js("mcpAccount")),
     kv("description", js("View account: tier, quota, usage, keys, pricing, and parse history. Pass action='pricing' without an apiKey to see tiers. Other actions (status, usage, history, keys) require an apiKey. Hosted mode only.")),
     kv("endpoint", js("POST /mcp/v1/account")),
-    kv("mcp_tool", js("docparse.services.mcp_account.mcpAccount")),
+    kv("mcp_tool", js("docparse.services.mcp.account.mcpAccount")),
     kv("hosted_only", jb(true)),
     kv("inputSchema", jo([
       kv("type", js("object")),
