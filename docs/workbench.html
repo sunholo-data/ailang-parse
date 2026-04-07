@@ -109,24 +109,90 @@ body.wb { background: var(--bg); }
 
 /* WASM loading banner (top of stage when engine is initializing) */
 .wb-engine-loading {
+  display: block;
+  padding: 14px 18px 16px;
+  margin: 16px 32px 0;
+  background: linear-gradient(180deg,
+    rgba(37, 99, 235, 0.06) 0%,
+    rgba(37, 99, 235, 0.02) 100%);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-sm);
+  color: var(--blue);
+  box-shadow: 0 1px 0 rgba(37, 99, 235, 0.04);
+}
+.wb-engine-loading-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 16px;
-  margin: 16px 32px 0;
-  background: rgba(37, 99, 235, 0.05);
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.wb-engine-loading-head .wb-spinner {
+  flex-shrink: 0;
+}
+.wb-engine-loading-pct {
+  margin-left: auto;
   font-family: var(--font-mono);
   font-size: 11px;
+  font-weight: 700;
   color: var(--blue);
+  font-variant-numeric: tabular-nums;
+}
+.wb-engine-loading-sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  min-height: 14px;
+}
+.wb-engine-loading-bar {
+  position: relative;
+  height: 6px;
+  background: rgba(37, 99, 235, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.wb-engine-loading-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, var(--blue) 0%, #60a5fa 100%);
+  border-radius: 3px;
+  transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+}
+.wb-engine-loading-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%);
+  animation: wb-shimmer 1.4s linear infinite;
+}
+@keyframes wb-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-engine-loading-fill::after { animation: none; }
 }
 .wb-engine-loading.error {
   background: rgba(255, 107, 71, 0.06);
   border-color: rgba(255, 107, 71, 0.25);
+  border-left-color: var(--coral-deep);
   color: var(--coral-deep);
 }
-.wb-engine-loading.ready { display: none; }
+.wb-engine-loading.error .wb-engine-loading-fill { background: var(--coral-deep); }
+.wb-engine-loading.error .wb-engine-loading-fill::after { display: none; }
+.wb-engine-loading.ready {
+  display: none;
+}
 .wb-engine-loading.file-warning {
   display: block;
   padding: 14px 18px;
@@ -1429,8 +1495,17 @@ body.wb { background: var(--bg); }
     <section class="wb-stage">
       <!-- Engine init banner — shown until WASM is ready -->
       <div class="wb-engine-loading" id="wb-engine-loading">
-        <div class="wb-spinner"></div>
-        <span id="wb-engine-loading-text">Loading WASM parse engine (≈35 MB, one-time)…</span>
+        <div class="wb-engine-loading-head">
+          <div class="wb-spinner"></div>
+          <span id="wb-engine-loading-text">Warming up the AILANG parse engine…</span>
+          <span class="wb-engine-loading-pct" id="wb-engine-loading-pct">0%</span>
+        </div>
+        <p class="wb-engine-loading-sub" id="wb-engine-loading-sub">
+          Downloading WASM runtime — your files will start parsing the moment it's ready.
+        </p>
+        <div class="wb-engine-loading-bar">
+          <div class="wb-engine-loading-fill" id="wb-engine-loading-fill"></div>
+        </div>
       </div>
 
       <!-- Empty state — no document selected -->
@@ -1744,6 +1819,9 @@ body.wb { background: var(--bg); }
   var loadDemoBtn     = $('wb-load-demo');
   var engineLoading   = $('wb-engine-loading');
   var engineLoadingTxt= $('wb-engine-loading-text');
+  var engineLoadingPct= $('wb-engine-loading-pct');
+  var engineLoadingSub= $('wb-engine-loading-sub');
+  var engineLoadingFill = $('wb-engine-loading-fill');
   var emptyStage      = $('wb-empty-stage');
   var wbEmptyStageDefault = emptyStage.innerHTML;
   var stageHeader     = $('wb-stage-header');
@@ -1808,18 +1886,61 @@ body.wb { background: var(--bg); }
   }
 
   // ── WASM engine status ───────────────────────────────────────
+  // Drive the loading banner from real progress events emitted by
+  // wasm-demo.js. Phases: script → wasm → stdlib → modules → ready.
+  // Files dropped before "ready" are queued automatically — addFile()
+  // awaits ensureEngine(), and ensureEngine() awaits the in-flight
+  // initPromise inside DocParseEngine, so the parse just lands as soon
+  // as the engine is up.
+  var PHASE_HEADLINE = {
+    script:  'Fetching the AILANG runtime…',
+    wasm:    'Downloading the WASM binary',
+    stdlib:  'Loading standard library…',
+    modules: 'Loading parser modules…',
+    ready:   'Engine ready',
+    error:   'Engine failed to load'
+  };
+  function setEngineProgress(ev) {
+    if (!ev) return;
+    if (ev.phase === 'error') {
+      engineLoading.classList.add('error');
+      engineLoading.classList.remove('ready');
+      engineLoadingTxt.textContent = 'Engine failed to load';
+      engineLoadingSub.textContent = ev.label || 'Unknown error';
+      engineLoadingPct.textContent = '!';
+      engineLoadingFill.style.width = '100%';
+      return;
+    }
+    if (ev.phase === 'ready') {
+      engineLoadingFill.style.width = '100%';
+      engineLoadingPct.textContent = '100%';
+      engineLoadingTxt.textContent = 'Engine ready';
+      engineLoadingSub.textContent = 'You can drop documents and they\'ll parse instantly.';
+      // Hide after the bar finishes its final transition
+      setTimeout(function () { engineLoading.classList.add('ready'); }, 450);
+      return;
+    }
+    engineLoadingTxt.textContent = PHASE_HEADLINE[ev.phase] || 'Loading…';
+    engineLoadingSub.textContent = ev.label || '';
+    engineLoadingFill.style.width = ev.percent + '%';
+    engineLoadingPct.textContent = Math.round(ev.percent) + '%';
+  }
   function pollEngine() {
     if (!window.DocParseEngine) return;
     if (window.DocParseEngine.isReady()) {
-      engineLoading.classList.add('ready');
+      setEngineProgress({ phase: 'ready', percent: 100 });
       return;
     }
-    if (window.DocParseEngine.getError()) {
-      engineLoading.classList.add('error');
-      engineLoadingTxt.textContent = 'Engine failed to load: ' + window.DocParseEngine.getError();
-      return;
+    if (typeof window.DocParseEngine.onProgress === 'function') {
+      window.DocParseEngine.onProgress(setEngineProgress);
+    } else {
+      // Fallback for older builds without onProgress
+      if (window.DocParseEngine.getError()) {
+        setEngineProgress({ phase: 'error', label: window.DocParseEngine.getError() });
+        return;
+      }
+      setTimeout(pollEngine, 250);
     }
-    setTimeout(pollEngine, 250);
   }
   // Kick off engine init explicitly (so it works on mobile too)
   function ensureEngine() {
@@ -1846,10 +1967,12 @@ body.wb { background: var(--bg); }
     fileList.innerHTML = ordered.map(function (f) {
       var statusClass = 'wb-file-status--' + (
         f.status === 'done'    ? 'done'    :
+        f.status === 'queued'  ? 'parsing' :
         f.status === 'parsing' ? 'parsing' :
         f.status === 'needs'   ? 'needs'   : 'error'
       );
       var sub = f.status === 'parsing' ? 'parsing…'
+              : f.status === 'queued'  ? 'queued — engine warming up'
               : f.status === 'error'   ? (f.error || 'parse failed')
               : f.status === 'needs'   ? fmtSize(f.sizeKB) + ' · needs API'
               : fmtSize(f.sizeKB) + ' · ' + (f.blocks ? flattenBlocks(f.blocks).length : 0) + ' blocks · ' + f.ms + 'ms';
@@ -2224,7 +2347,10 @@ body.wb { background: var(--bg); }
       a2uiNodes: null,
       previewRendered: false,
       a2uiRendered: false,
-      status: 'parsing',
+      // 'queued' if engine is still booting (the file will start parsing
+      // automatically the moment ensureEngine() resolves), otherwise jump
+      // straight to 'parsing'.
+      status: (window.DocParseEngine && window.DocParseEngine.isReady()) ? 'parsing' : 'queued',
       error: null
     };
     state.files.push(entry);
@@ -2234,6 +2360,11 @@ body.wb { background: var(--bg); }
 
     try {
       await ensureEngine();
+      // Engine is up — flip from queued → parsing so the row updates
+      if (entry.status === 'queued') {
+        entry.status = 'parsing';
+        renderLibrary();
+      }
       console.groupCollapsed('[workbench] parse ' + entry.name + ' (' + entry.ext + ', ' + entry.sizeKB + ' KB)');
       var result = await window.DocParseEngine.parseFile(file);
       console.log('parsed in ' + result.ms + 'ms,', result.blocks.length, 'blocks');

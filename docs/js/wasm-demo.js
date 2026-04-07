@@ -56,6 +56,19 @@
   var wasmReady = false;
   var wasmLoading = false;
   var wasmError = null;
+  // In-flight init promise so concurrent callers (e.g. workbench dropping
+  // files before WASM is ready) all await the same load instead of seeing
+  // wasmLoading=true and falling through to "not ready".
+  var initPromise = null;
+  // Progress listeners — receive {phase, label, percent} events as the
+  // engine boots. Used by the workbench to drive a real progress bar.
+  var progressListeners = [];
+  function emitProgress(phase, label, percent) {
+    var ev = { phase: phase, label: label, percent: Math.max(0, Math.min(100, percent)) };
+    for (var i = 0; i < progressListeners.length; i++) {
+      try { progressListeners[i](ev); } catch (_) {}
+    }
+  }
   var lastFileBuffer = null;
   var lastFileExt = null;
   var lastFileContent = null; // for text files
@@ -161,91 +174,112 @@
   }
 
   // ── WASM initialization ──
-  async function initWasm() {
-    if (wasmReady || wasmLoading) return;
-    wasmLoading = true;
-    setDotState('loading');
-    setStatus('Loading WASM runtime...', false, true);
+  // Idempotent + concurrent-safe: every caller awaits the same `initPromise`
+  // so a file dropped on the workbench before WASM is ready will queue
+  // cleanly behind the boot sequence instead of throwing.
+  function initWasm() {
+    if (wasmReady) return Promise.resolve();
+    if (initPromise) return initPromise;
+    initPromise = (async function () {
+      wasmLoading = true;
+      setDotState('loading');
+      setStatus('Loading WASM runtime...', false, true);
+      emitProgress('script', 'Fetching AILANG runtime…', 2);
 
-    try {
-      if (!('WebAssembly' in window)) {
-        throw new Error('WebAssembly not supported in this browser');
-      }
-
-      await loadScript('wasm/wasm_exec.js');
-      await loadScript('wasm/ailang-repl.js');
-
-      if (typeof AilangREPL === 'undefined') {
-        throw new Error('AilangREPL not found after loading scripts');
-      }
-
-      setStatus('Initializing AILANG...', false, true);
-      var repl = new AilangREPL();
-      setStatus('Loading WASM binary...', false, true);
-      await repl.init(WASM_BINARY_URL);
-
-      // Import stdlib
-      var stdlibs = ['std/json', 'std/option', 'std/result', 'std/string', 'std/math', 'std/ai'];
-      for (var i = 0; i < stdlibs.length; i++) {
-        repl.importModule(stdlibs[i]);
-      }
-      for (var j = 0; j < EXTRA_STDLIBS.length; j++) {
-        repl.importModule(EXTRA_STDLIBS[j]);
-      }
-
-      // Load AILANG Parse modules
-      for (var k = 0; k < MODULES_TO_LOAD.length; k++) {
-        var mod = MODULES_TO_LOAD[k];
-        setStatus('Loading ' + mod.name.split('/').pop() + '... (' + (k + 1) + '/' + MODULES_TO_LOAD.length + ')');
-
-        var resp = await fetch(MODULE_BASE + mod.path + '?v=' + Date.now());
-        if (!resp.ok) throw new Error('Failed to fetch ' + mod.path);
-        var code = await resp.text();
-
-        var result = repl.loadModule(mod.name, code);
-        if (!result.success) throw new Error('Module ' + mod.name + ' failed: ' + result.error);
-      }
-
-      // Set up AI handler if user has API key
-      var apiKey = localStorage.getItem('gemini-api-key');
-      if (apiKey && typeof repl.setAIHandler === 'function') {
-        repl.setAIHandler(createGeminiHandler(apiKey));
-        if (typeof repl.grantCapability === 'function') repl.grantCapability('AI');
-      }
-
-      engine = {
-        repl: repl,
-        call: function (func) {
-          var args = Array.prototype.slice.call(arguments, 1);
-          var r = repl.call(DOCPARSE_MODULE, func, ...args);
-          if (!r.success) return { success: false, error: r.error };
-          return { success: true, result: parseWasmResult(r.result) };
-        },
-        callAsync: async function (func) {
-          var args = Array.prototype.slice.call(arguments, 1);
-          var r;
-          if (typeof repl.callAsync === 'function') {
-            r = await repl.callAsync(DOCPARSE_MODULE, func, ...args);
-          } else {
-            r = repl.call(DOCPARSE_MODULE, func, ...args);
-          }
-          if (!r.success) return { success: false, error: r.error };
-          return { success: true, result: parseWasmResult(r.result) };
+      try {
+        if (!('WebAssembly' in window)) {
+          throw new Error('WebAssembly not supported in this browser');
         }
-      };
 
-      wasmReady = true;
-      wasmLoading = false;
-      setDotState('ready');
-      setStatus('Ready \u2014 drop a file to parse');
-      // Enable UI
-      setUIEnabled(true);
-    } catch (err) {
-      wasmError = err.message;
-      wasmLoading = false;
-      setStatus('WASM load failed: ' + err.message, true);
-      console.error('WASM init error:', err);
-    }
+        await loadScript('wasm/wasm_exec.js');
+        emitProgress('script', 'Runtime scripts loaded', 8);
+        await loadScript('wasm/ailang-repl.js');
+        emitProgress('script', 'Runtime scripts loaded', 12);
+
+        if (typeof AilangREPL === 'undefined') {
+          throw new Error('AilangREPL not found after loading scripts');
+        }
+
+        setStatus('Initializing AILANG...', false, true);
+        emitProgress('wasm', 'Initializing AILANG…', 15);
+        var repl = new AilangREPL();
+        setStatus('Loading WASM binary...', false, true);
+        emitProgress('wasm', 'Downloading WASM binary (~35 MB, one-time)…', 18);
+        await repl.init(WASM_BINARY_URL);
+        emitProgress('wasm', 'WASM binary ready', 55);
+
+        // Import stdlib
+        var stdlibs = ['std/json', 'std/option', 'std/result', 'std/string', 'std/math', 'std/ai'];
+        var allStdlibs = stdlibs.concat(EXTRA_STDLIBS);
+        for (var i = 0; i < allStdlibs.length; i++) {
+          repl.importModule(allStdlibs[i]);
+          emitProgress('stdlib', 'Loading ' + allStdlibs[i] + '…',
+            55 + Math.round(((i + 1) / allStdlibs.length) * 15));
+        }
+
+        // Load AILANG Parse modules
+        for (var k = 0; k < MODULES_TO_LOAD.length; k++) {
+          var mod = MODULES_TO_LOAD[k];
+          var label = 'Loading ' + mod.name.split('/').pop() + ' (' + (k + 1) + '/' + MODULES_TO_LOAD.length + ')';
+          setStatus(label);
+          emitProgress('modules', label, 70 + Math.round(((k + 1) / MODULES_TO_LOAD.length) * 28));
+
+          var resp = await fetch(MODULE_BASE + mod.path + '?v=' + Date.now());
+          if (!resp.ok) throw new Error('Failed to fetch ' + mod.path);
+          var code = await resp.text();
+
+          var result = repl.loadModule(mod.name, code);
+          if (!result.success) throw new Error('Module ' + mod.name + ' failed: ' + result.error);
+        }
+
+        // Set up AI handler if user has API key
+        var apiKey = localStorage.getItem('gemini-api-key');
+        if (apiKey && typeof repl.setAIHandler === 'function') {
+          repl.setAIHandler(createGeminiHandler(apiKey));
+          if (typeof repl.grantCapability === 'function') repl.grantCapability('AI');
+        }
+
+        engine = {
+          repl: repl,
+          call: function (func) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            var r = repl.call(DOCPARSE_MODULE, func, ...args);
+            if (!r.success) return { success: false, error: r.error };
+            return { success: true, result: parseWasmResult(r.result) };
+          },
+          callAsync: async function (func) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            var r;
+            if (typeof repl.callAsync === 'function') {
+              r = await repl.callAsync(DOCPARSE_MODULE, func, ...args);
+            } else {
+              r = repl.call(DOCPARSE_MODULE, func, ...args);
+            }
+            if (!r.success) return { success: false, error: r.error };
+            return { success: true, result: parseWasmResult(r.result) };
+          }
+        };
+
+        wasmReady = true;
+        wasmLoading = false;
+        setDotState('ready');
+        setStatus('Ready \u2014 drop a file to parse');
+        emitProgress('ready', 'Ready', 100);
+        // Enable UI
+        setUIEnabled(true);
+      } catch (err) {
+        wasmError = err.message;
+        wasmLoading = false;
+        setStatus('WASM load failed: ' + err.message, true);
+        emitProgress('error', err.message, 100);
+        console.error('WASM init error:', err);
+        // Reset so callers can retry after the user fixes whatever broke
+        // (e.g. flaky network on the WASM download).
+        initPromise = null;
+        throw err;
+      }
+    })();
+    return initPromise;
   }
 
   // ── Gemini AI handler ──
@@ -1750,6 +1784,25 @@
     isLoading: function () { return wasmLoading; },
     getError:  function () { return wasmError; },
     init:      function () { return initWasm(); },
+
+    /**
+     * Subscribe to engine boot progress events. The callback receives
+     * `{phase, label, percent}` objects as the engine downloads the WASM
+     * binary, imports stdlibs, and loads parser modules. Returns an
+     * unsubscribe function. If the engine is already ready, the callback
+     * is invoked once synchronously with `{phase: 'ready', percent: 100}`.
+     */
+    onProgress: function (cb) {
+      if (typeof cb !== 'function') return function () {};
+      progressListeners.push(cb);
+      if (wasmReady) {
+        try { cb({ phase: 'ready', label: 'Ready', percent: 100 }); } catch (_) {}
+      }
+      return function () {
+        var idx = progressListeners.indexOf(cb);
+        if (idx >= 0) progressListeners.splice(idx, 1);
+      };
+    },
 
     /**
      * Get/set the Gemini API key in localStorage. The key unlocks PDF, image,
