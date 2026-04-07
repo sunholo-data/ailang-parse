@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Migrate from Unstructured — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 96.6% structural fidelity vs 63.4%, sub-11ms latency. Keep Unstructured for PDFs.">
+<meta name="description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 93.9% structural fidelity vs 60.9%, sub-11ms latency. Keep Unstructured for PDFs.">
 <meta property="og:title" content="Migrate from Unstructured — AILANG Parse">
-<meta property="og:description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 96.6% structural fidelity vs 63.4%, sub-11ms latency. Keep Unstructured for PDFs.">
+<meta property="og:description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 93.9% structural fidelity vs 60.9%, sub-11ms latency. Keep Unstructured for PDFs.">
 <meta property="og:type" content="article">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/design-system.css">
 <link rel="stylesheet" href="css/docparse.css">
 <link rel="stylesheet" href="css/prism.css">
@@ -61,7 +61,7 @@
       <h2 id="why-migrate">Why Migrate</h2>
       <p>Unstructured converts Office documents to PDF before parsing, destroying structural data &mdash; track changes, merged cells, comments, headers, footers, text boxes &mdash; that exists in the source XML. AILANG Parse reads the XML directly. Deterministic, structural, fast.</p>
 
-      <p>On the <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> structural benchmark, AILANG Parse scores <strong>96.6%</strong> compared to Unstructured's <strong>63.4%</strong> across DOCX, PPTX, and XLSX test files.</p>
+      <p>On the <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> structural benchmark, AILANG Parse scores <strong><span data-bench="ailang_parse.composite">93.9%</span></strong> with 100% format coverage, compared to Unstructured's <strong><span data-bench="unstructured.composite">60.9%</span></strong> composite (<span data-bench="unstructured.adjusted">32.6%</span> coverage-adjusted &mdash; Unstructured only handles 54% of the benchmark files).</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -158,7 +158,8 @@ def parse_document(filepath: str) -> dict:
           <tr><td>Parse Speed</td><td>2&ndash;10 seconds</td><td>11 milliseconds</td></tr>
           <tr><td>Dependencies</td><td>Python + heavy libraries</td><td>Zero &mdash; single binary, no runtime deps</td></tr>
           <tr><td>Determinism</td><td>Non-deterministic (ML inference)</td><td>Deterministic &mdash; same input always gives same output</td></tr>
-          <tr><td>OfficeDocBench Score</td><td>63.4%</td><td>96.6%</td></tr>
+          <tr><td>OfficeDocBench (composite)</td><td data-bench="unstructured.composite">60.9%</td><td data-bench="ailang_parse.composite">93.9%</td></tr>
+          <tr><td>Coverage-adjusted</td><td data-bench="unstructured.adjusted">32.6%</td><td data-bench="ailang_parse.adjusted">93.9%</td></tr>
         </tbody>
       </table>
 
@@ -209,6 +210,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
 </div>
 
 <script src="js/site-data.js"></script>
+<script src="js/bench-data.js"></script>
 <script src="js/components.js"></script>
 <script src="js/prism.min.js"></script>
 <script src="js/prism-ailang.js"></script>

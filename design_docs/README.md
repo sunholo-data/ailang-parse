@@ -109,9 +109,11 @@ Designs that were superseded or abandoned (never delete — move here).
 - Additional auth providers: Microsoft, Phone SMS, Apple, SAML/OIDC
 - WASM image rendering (currently placeholder-only)
 - Manifest-driven API page (3 missing endpoints: formats, pricing, capabilities)
+- Valuable friction onboarding: structural insights banner, guided sample tour, intent selector, CLI/SDK/MCP education
 - [PDF Pipeline](planned/v0_9_0/pdf_pipeline.md) | [Ollama](planned/v0_9_0/ollama_model_aware_prompting.md)
 - [Email Follow-ups](planned/v0_9_0/email-parsing-followups.md) | [Auth Providers](planned/v0_9_0/v0_9_0_auth_providers.md)
 - [WASM Images](planned/v0_9_0/v0_9_0_wasm_images.md) | [Manifest API](planned/v0_9_0/v0_9_0_manifest_driven_api_page.md)
+- [Valuable Friction Onboarding](planned/v0_9_0/valuable_friction_onboarding.md)
 
 ### v0.10.0 — Quarto & Trust
 - Quarto Markdown generation with two rendering engines

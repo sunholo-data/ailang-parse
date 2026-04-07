@@ -37,6 +37,7 @@ if _env_path.exists():
 
 from scoring import score_file
 from report import print_summary, print_per_format, print_feature_heatmap, print_latex
+from datetime import datetime, timezone
 
 # Paths
 SCRIPT_DIR = Path(__file__).parent
@@ -241,6 +242,11 @@ def main():
         with open(result_dir / "results.json", "w") as f:
             json.dump(result, f, indent=2)
 
+    # Write summary.json — single source of truth for headline numbers used by docs.
+    # Only refresh when running --all or a single adapter wouldn't give a complete picture.
+    if args.all and not args.format:
+        _write_summary(all_results)
+
     if args.json:
         print(json.dumps(all_results, indent=2))
     elif args.latex:
@@ -249,6 +255,88 @@ def main():
         print_summary(all_results)
         print_per_format(all_results)
         print_feature_heatmap(all_results)
+
+
+# Adapter display name → short id used by the docs/website JS
+_ADAPTER_ID = {
+    "DocParse": "ailang_parse",
+    "Unstructured": "unstructured",
+    "Docling": "docling",
+    "LlamaParse": "llamaparse",
+    "MarkItDown": "markitdown",
+    "Kreuzberg": "kreuzberg",
+    "Pandoc": "pandoc",
+    "Raw OOXML": "ooxml",
+}
+
+
+def _write_summary(all_results: list[dict]) -> None:
+    """Write a compact summary.json with the headline numbers the docs site needs."""
+    total_files = max((len(ar["results"]) for ar in all_results), default=0)
+    adapters_summary = []
+    for ar in all_results:
+        ok = [r for r in ar["results"] if r["status"] == "OK"]
+        n_ok = len(ok)
+        n_total = len(ar["results"])
+        coverage = n_ok / n_total if n_total else 0
+        composite = sum(r["scores"]["composite"] for r in ok) / n_ok if ok else 0
+
+        def _avg(key: str) -> float:
+            return sum(r["scores"].get(key, {}).get("score", 0) for r in ok) / n_ok if ok else 0
+
+        # Per-format composite
+        by_fmt: dict[str, list[float]] = {}
+        for r in ok:
+            by_fmt.setdefault(r["format"], []).append(r["scores"]["composite"])
+        per_format = {
+            fmt: {
+                "composite": round(sum(scores) / len(scores), 4),
+                "files": len(scores),
+            }
+            for fmt, scores in sorted(by_fmt.items())
+        }
+
+        adapters_summary.append({
+            "id": _ADAPTER_ID.get(ar["adapter"], ar["adapter"].lower().replace(" ", "_")),
+            "name": ar["adapter"],
+            "version": ar.get("version", ""),
+            "files_ok": n_ok,
+            "files_total": n_total,
+            "coverage": round(coverage, 4),
+            "composite": round(composite, 4),
+            "adjusted": round(composite * coverage, 4),
+            "feature_detection": round(_avg("feature_detection"), 4),
+            "structural_recall": round(_avg("structural_recall"), 4),
+            "structural_quality": round(_avg("structural_quality"), 4),
+            "content_fidelity": round(_avg("content_fidelity"), 4),
+            "text_jaccard": round(_avg("text_jaccard"), 4),
+            "element_count": round(_avg("element_count"), 4),
+            "metadata": round(_avg("metadata"), 4),
+            "per_format": per_format,
+        })
+
+    # Sort by adjusted (coverage-aware) score descending — the leaderboard order
+    adapters_summary.sort(key=lambda a: a["adjusted"], reverse=True)
+
+    summary = {
+        "schema_version": 1,
+        "run_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "total_files": total_files,
+        "adapters": adapters_summary,
+    }
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    summary_path = RESULTS_DIR / "summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"  Wrote {summary_path.relative_to(REPO_DIR)}", file=sys.stderr)
+
+    # Mirror into docs/ so the static site can fetch it without a build step.
+    docs_summary = REPO_DIR / "docs" / "data" / "officedocbench-summary.json"
+    docs_summary.parent.mkdir(parents=True, exist_ok=True)
+    with open(docs_summary, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"  Wrote {docs_summary.relative_to(REPO_DIR)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

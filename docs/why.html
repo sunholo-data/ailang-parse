@@ -11,7 +11,7 @@
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/design-system.css">
 <link rel="stylesheet" href="css/docparse.css">
 <link rel="stylesheet" href="css/prism.css">
@@ -254,47 +254,63 @@
 
       <p>How parsers compare:</p>
 
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Coverage-adjusted composite (penalises tools that skip formats):</p>
+
       <div style="margin: 24px 0 28px">
         <div class="dp-score-row">
           <span class="dp-score-label">AILANG Parse</span>
           <div class="dp-score-bar-bg">
-            <div class="dp-score-bar dp-score-bar--ailang" style="width: 96.6%"></div>
+            <div class="dp-score-bar dp-score-bar--ailang" data-bench="ailang_parse.adjusted" data-bench-style="width" style="width: 93.9%"></div>
           </div>
-          <span class="dp-score-val" style="color:var(--dp-blue)">96.6%</span>
+          <span class="dp-score-val" style="color:var(--dp-blue)" data-bench="ailang_parse.adjusted">93.9%</span>
         </div>
         <div class="dp-score-row">
-          <span class="dp-score-label">MarkItDown</span>
+          <span class="dp-score-label">Kreuzberg</span>
           <div class="dp-score-bar-bg">
-            <div class="dp-score-bar dp-score-bar--other" style="width: 73.3%"></div>
+            <div class="dp-score-bar dp-score-bar--other" data-bench="kreuzberg.adjusted" data-bench-style="width" style="width: 68.0%"></div>
           </div>
-          <span class="dp-score-val">73.3%</span>
+          <span class="dp-score-val" data-bench="kreuzberg.adjusted">68.0%</span>
         </div>
         <div class="dp-score-row">
-          <span class="dp-score-label">Unstructured</span>
+          <span class="dp-score-label">Raw OOXML</span>
           <div class="dp-score-bar-bg">
-            <div class="dp-score-bar dp-score-bar--other" style="width: 63.4%"></div>
+            <div class="dp-score-bar dp-score-bar--other" data-bench="ooxml.adjusted" data-bench-style="width" style="width: 52.6%"></div>
           </div>
-          <span class="dp-score-val">63.4%</span>
+          <span class="dp-score-val" data-bench="ooxml.adjusted">52.6%</span>
+        </div>
+        <div class="dp-score-row">
+          <span class="dp-score-label">Pandoc</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--other" data-bench="pandoc.adjusted" data-bench-style="width" style="width: 48.2%"></div>
+          </div>
+          <span class="dp-score-val" data-bench="pandoc.adjusted">48.2%</span>
         </div>
         <div class="dp-score-row">
           <span class="dp-score-label">Docling</span>
           <div class="dp-score-bar-bg">
-            <div class="dp-score-bar dp-score-bar--other" style="width: 63.4%"></div>
+            <div class="dp-score-bar dp-score-bar--other" data-bench="docling.adjusted" data-bench-style="width" style="width: 38.5%"></div>
           </div>
-          <span class="dp-score-val">63.4%</span>
+          <span class="dp-score-val" data-bench="docling.adjusted">38.5%</span>
         </div>
         <div class="dp-score-row">
-          <span class="dp-score-label">LlamaParse</span>
+          <span class="dp-score-label">Unstructured</span>
           <div class="dp-score-bar-bg">
-            <div class="dp-score-bar dp-score-bar--other" style="width: 53.6%"></div>
+            <div class="dp-score-bar dp-score-bar--other" data-bench="unstructured.adjusted" data-bench-style="width" style="width: 32.6%"></div>
           </div>
-          <span class="dp-score-val">53.6%</span>
+          <span class="dp-score-val" data-bench="unstructured.adjusted">32.6%</span>
+        </div>
+        <div class="dp-score-row">
+          <span class="dp-score-label">MarkItDown</span>
+          <div class="dp-score-bar-bg">
+            <div class="dp-score-bar dp-score-bar--other" data-bench="markitdown.adjusted" data-bench-style="width" style="width: 27.3%"></div>
+          </div>
+          <span class="dp-score-val" data-bench="markitdown.adjusted">27.3%</span>
         </div>
       </div>
 
-      <p>The 33-point gap comes almost entirely from track changes, merged cells, and comments &mdash; structural features that don't survive PDF conversion.</p>
+      <p>The gap comes almost entirely from track changes, merged cells, comments, and the long tail of formats most tools skip &mdash; structural features that don't survive PDF conversion.</p>
 
-      <p>These scores are also our development targets &mdash; the AI agent optimizes against OfficeDocBench. When you see 96.6%, you're seeing eval-driven development, not cherry-picked benchmarks. <a href="benchmarks.html#eval-driven" style="color:var(--dp-blue)">How eval-driven development works &rarr;</a></p>
+      <p>These scores are also our development targets &mdash; the AI agent optimizes against OfficeDocBench. When you see <span data-bench="ailang_parse.composite">93.9%</span>, you're seeing eval-driven development, not cherry-picked benchmarks. <a href="benchmarks.html#eval-driven" style="color:var(--dp-blue)">How eval-driven development works &rarr;</a></p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -382,6 +398,7 @@
 </div>
 
 <script src="js/site-data.js"></script>
+<script src="js/bench-data.js"></script>
 <script src="js/components.js"></script>
 <script src="js/prism.min.js"></script>
 <script src="js/prism-ailang.js"></script>

@@ -1,12 +1,33 @@
 # ailang-parse-go
 
-Go client for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — standard library only.
+Go client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — standard library only.
 
 ## Install
 
 ```bash
 go get github.com/sunholo-data/ailang-parse-go
 ```
+
+## MCP Server (Claude Desktop, Cursor, VS Code)
+
+Install the CLI binary and run as a stdio MCP server that bridges to the hosted AILANG Parse API:
+
+```bash
+go install github.com/sunholo-data/ailang-parse-go/cmd/ailang-parse@latest
+```
+
+```json
+{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "ailang-parse",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Add to `claude_desktop_config.json` (Claude Desktop), `.cursor/mcp.json` (Cursor), or `.vscode/settings.json` (VS Code). Provides 7 tools: parse, convert, formats, estimate, auth, auth-poll, and account.
 
 ## Quick Start
 

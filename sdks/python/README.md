@@ -1,12 +1,29 @@
 # AILANG Parse Python SDK
 
-Python client for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — zero dependencies for Office, pluggable AI for PDFs.
+Python client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — zero dependencies for Office, pluggable AI for PDFs.
 
 ## Install
 
 ```bash
 pip install ailang-parse
 ```
+
+## MCP Server (Claude Desktop, Cursor, VS Code)
+
+Run as a stdio MCP server that bridges to the hosted AILANG Parse API. Stdlib only — works in any Python >= 3.8 environment.
+
+```json
+{
+  "mcpServers": {
+    "ailang-parse": {
+      "command": "uvx",
+      "args": ["ailang-parse", "mcp"]
+    }
+  }
+}
+```
+
+Add to `claude_desktop_config.json` (Claude Desktop), `.cursor/mcp.json` (Cursor), or `.vscode/settings.json` (VS Code). Provides 7 tools: parse, convert, formats, estimate, auth, auth-poll, and account.
 
 ## Quick Start
 
