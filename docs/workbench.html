@@ -2418,7 +2418,13 @@ body.wb { background: var(--bg); }
     'assets/ailang_architecture.md',
     'assets/ailang_formats.csv'
   ];
+  // One-shot: once the demo set is loaded (or in flight), don't allow it
+  // to be loaded again. The button latches into a "Loaded" state and stays
+  // disabled until the user clears the library.
+  var demoLoaded = false;
   async function loadDemoSet() {
+    if (demoLoaded) return;
+    demoLoaded = true;
     loadDemoBtn.disabled = true;
     loadDemoBtn.textContent = 'Loading…';
     try {
@@ -2434,9 +2440,13 @@ body.wb { background: var(--bg); }
           console.warn('Demo file failed:', path, e);
         }
       }
-    } finally {
+      loadDemoBtn.textContent = 'Demo set loaded';
+    } catch (err) {
+      // Allow retry on hard failure
+      demoLoaded = false;
       loadDemoBtn.disabled = false;
       loadDemoBtn.textContent = 'Load demo set';
+      throw err;
     }
   }
 
