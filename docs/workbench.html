@@ -559,6 +559,175 @@ body.wb { background: var(--bg); }
 .wb-toast.error { background: var(--coral-deep); }
 .wb-toast.success { background: var(--success); }
 
+/* ── SDK snippet modal ── */
+.wb-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 24px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.wb-modal-backdrop.open { display: flex; opacity: 1; }
+.wb-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
+  width: 100%;
+  max-width: 640px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(8px) scale(0.985);
+  transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+  position: relative;
+}
+.wb-modal::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--blue), #60a5fa);
+}
+.wb-modal-backdrop.open .wb-modal { transform: translateY(0) scale(1); }
+.wb-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.wb-modal-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.wb-modal-sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.wb-modal-close {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.wb-modal-close:hover { color: var(--blue); border-color: var(--blue); }
+.wb-modal-close svg { width: 14px; height: 14px; }
+.wb-modal-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 22px 0;
+  border-bottom: 1px solid var(--border);
+}
+.wb-modal-tab {
+  background: none;
+  border: none;
+  padding: 9px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  text-transform: uppercase;
+}
+.wb-modal-tab:hover { color: var(--text-secondary); }
+.wb-modal-tab.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+.wb-modal-body {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+  background: #0f172a;
+}
+.wb-modal-pre {
+  margin: 0;
+  padding: 22px 24px 26px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: #e2e8f0;
+  white-space: pre;
+  min-height: 180px;
+}
+.wb-modal-copy {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 2;
+}
+.wb-modal-copy svg { width: 12px; height: 12px; }
+.wb-modal-copy:hover {
+  border-color: #60a5fa;
+  color: #60a5fa;
+}
+.wb-modal-copy.copied {
+  border-color: #34d399;
+  color: #34d399;
+  background: rgba(5, 150, 105, 0.18);
+}
+.wb-modal-footer {
+  padding: 12px 22px 16px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wb-modal-footer a { color: var(--blue); text-decoration: none; }
+.wb-modal-footer a:hover { text-decoration: underline; }
+@media (max-width: 600px) {
+  .wb-modal { max-height: 92vh; }
+  .wb-modal-tabs { padding-left: 14px; padding-right: 14px; overflow-x: auto; }
+  .wb-modal-pre { font-size: 11.5px; padding: 16px 16px 20px; }
+}
+
 /* ── Library (left rail) ── */
 .wb-library {
   flex: 1;
@@ -1690,7 +1859,7 @@ body.wb { background: var(--bg); }
         <!-- Dropzone -->
         <div class="wb-dropzone" id="wb-dropzone" tabindex="0">
           <input type="file" id="wb-file-input" multiple hidden
-                 accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.epub,.html,.htm,.md,.csv,.tsv,.eml,.mbox,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp,.wav,.mp3,.aiff,.aac,.ogg,.flac,.mp4,.mov,.avi,.webm,.wmv,.mpeg,.mpg">
+                 accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.epub,.html,.htm,.md,.txt,.csv,.tsv,.eml,.mbox,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp,.wav,.mp3,.aiff,.aac,.ogg,.flac,.mp4,.mov,.avi,.webm,.wmv,.mpeg,.mpg">
           <div class="wb-dropzone-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -1700,9 +1869,8 @@ body.wb { background: var(--bg); }
           </div>
           <div class="wb-dropzone-title">Drop documents</div>
           <div class="wb-dropzone-hint">
-            <strong>Free, in-browser:</strong><br>DOCX · PPTX · XLSX<br>HTML · MD · CSV · TSV · EML · MBOX<br>
-            <strong style="display:inline-block;margin-top:6px">With your AI key:</strong><br>PDF · images · audio · video<br>
-            <strong style="display:inline-block;margin-top:6px">Via hosted API:</strong><br>ODT · ODP · ODS · EPUB
+            <strong>Free, in-browser:</strong><br>DOCX · PPTX · XLSX<br>ODT · ODP · ODS · EPUB<br>HTML · MD · TXT · CSV · TSV · EML · MBOX<br>
+            <strong style="display:inline-block;margin-top:6px">With your AI key:</strong><br>PDF · images · audio · video
           </div>
           <div class="wb-dropzone-or">— or —</div>
           <button class="wb-dropzone-demo" id="wb-load-demo">Load demo set</button>
@@ -2970,9 +3138,14 @@ body.wb { background: var(--bg); }
         navigator.clipboard.writeText('./bin/docparse ' + f.name);
         toast('Copied: ./bin/docparse ' + f.name, 'success');
       } else if (label.indexOf('SDK') !== -1) {
-        var snippet = 'from ailang_parse import DocParse\nresult = DocParse().parse("' + f.name + '")\nprint(result.blocks)';
-        navigator.clipboard.writeText(snippet);
-        toast('Copied Python SDK snippet', 'success');
+        if (window.WorkbenchSdkModal) {
+          window.WorkbenchSdkModal.open(f.name);
+        } else {
+          // Fallback if modal script failed to load
+          var snippet = 'from ailang_parse import DocParse\nresult = DocParse(api_key="dp_your_key_here").parse_file("' + f.name + '")\nprint(result.blocks)';
+          navigator.clipboard.writeText(snippet);
+          toast('Copied Python SDK snippet', 'success');
+        }
       } else if (label.indexOf('Markdown') !== -1) {
         var md = blocksToMarkdown(f.blocks);
         var blob = new Blob([md], { type: 'text/markdown' });
@@ -3024,6 +3197,162 @@ body.wb { background: var(--bg); }
       setTimeout(function () { window.DocParseEngine.init(); }, 100);
     }
   }
+})();
+</script>
+
+<!-- ── SDK snippet picker modal ─────────────────────────────── -->
+<div class="wb-modal-backdrop" id="wb-sdk-modal" role="dialog" aria-modal="true" aria-labelledby="wb-sdk-modal-title" hidden>
+  <div class="wb-modal">
+    <div class="wb-modal-header">
+      <div>
+        <div class="wb-modal-title" id="wb-sdk-modal-title">Copy SDK snippet</div>
+        <div class="wb-modal-sub" id="wb-sdk-modal-sub">parse · <span id="wb-sdk-modal-filename">document</span></div>
+      </div>
+      <button class="wb-modal-close" id="wb-sdk-modal-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="wb-modal-tabs" role="tablist">
+      <button class="wb-modal-tab active" data-lang="python" role="tab">Python</button>
+      <button class="wb-modal-tab" data-lang="js" role="tab">JavaScript</button>
+      <button class="wb-modal-tab" data-lang="go" role="tab">Go</button>
+      <button class="wb-modal-tab" data-lang="r" role="tab">R</button>
+      <button class="wb-modal-tab" data-lang="curl" role="tab">cURL</button>
+    </div>
+    <div class="wb-modal-body">
+      <button class="wb-modal-copy" id="wb-sdk-modal-copy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        <span>Copy</span>
+      </button>
+      <pre class="wb-modal-pre" id="wb-sdk-modal-pre"></pre>
+    </div>
+    <div class="wb-modal-footer">
+      <span>Replace <code>dp_your_key_here</code> with a real key from <a href="api.html" target="_blank" rel="noopener">api.html</a>.</span>
+      <a href="docs.html#sdks" target="_blank" rel="noopener">SDK docs &rarr;</a>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── SDK snippet picker controller ───────────────────────────────
+(function () {
+  var modal    = document.getElementById('wb-sdk-modal');
+  if (!modal) return;
+  var preEl    = document.getElementById('wb-sdk-modal-pre');
+  var copyBtn  = document.getElementById('wb-sdk-modal-copy');
+  var closeBtn = document.getElementById('wb-sdk-modal-close');
+  var fnEl     = document.getElementById('wb-sdk-modal-filename');
+  var tabs     = modal.querySelectorAll('.wb-modal-tab');
+  var currentLang = 'python';
+  var currentFile = 'report.docx';
+
+  function snippetFor(lang, filename) {
+    var f = filename || 'report.docx';
+    switch (lang) {
+      case 'python':
+        return 'from ailang_parse import DocParse\n\n' +
+               'client = DocParse(api_key="dp_your_key_here")\n' +
+               'result = client.parse_file("' + f + '")\n\n' +
+               'for block in result.blocks:\n' +
+               '    print(block.type, block)';
+      case 'js':
+        return "import { DocParse } from '@ailang/parse'\n\n" +
+               "const client = new DocParse({ apiKey: 'dp_your_key_here' })\n" +
+               "const result = await client.parse('" + f + "')\n\n" +
+               "for (const block of result.blocks) {\n" +
+               "  console.log(block.type, block)\n" +
+               "}";
+      case 'go':
+        return 'package main\n\n' +
+               'import (\n' +
+               '    "context"\n' +
+               '    "fmt"\n\n' +
+               '    docparse "github.com/sunholo-data/ailang-parse-go"\n' +
+               ')\n\n' +
+               'func main() {\n' +
+               '    client := docparse.New("dp_your_key_here")\n' +
+               '    result, err := client.Parse(context.Background(), "' + f + '")\n' +
+               '    if err != nil { panic(err) }\n' +
+               '    for _, b := range result.Blocks {\n' +
+               '        fmt.Println(b.Type, b)\n' +
+               '    }\n' +
+               '}';
+      case 'r':
+        return 'library(ailangparse)\n\n' +
+               'client <- DocParse$new(api_key = "dp_your_key_here")\n' +
+               'res <- client$parse_file("' + f + '")\n\n' +
+               'for (b in res$blocks) {\n' +
+               '  cat(b$type, ":", substr(b$text, 1, 80), "\\n")\n' +
+               '}';
+      case 'curl':
+        return 'curl -X POST https://api.sunholo.com/ailang-parse/v1/parse \\\n' +
+               '  -H "Authorization: Bearer dp_your_key_here" \\\n' +
+               '  -F "file=@' + f + '"';
+    }
+    return '';
+  }
+
+  function render() {
+    fnEl.textContent = currentFile;
+    preEl.textContent = snippetFor(currentLang, currentFile);
+    copyBtn.classList.remove('copied');
+    copyBtn.querySelector('span').textContent = 'Copy';
+  }
+
+  function open(filename) {
+    currentFile = filename || 'report.docx';
+    render();
+    modal.hidden = false;
+    requestAnimationFrame(function () { modal.classList.add('open'); });
+    document.addEventListener('keydown', onKey);
+  }
+  function close() {
+    modal.classList.remove('open');
+    document.removeEventListener('keydown', onKey);
+    setTimeout(function () { modal.hidden = true; }, 200);
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      tabs.forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      currentLang = t.dataset.lang;
+      render();
+    });
+  });
+
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  closeBtn.addEventListener('click', close);
+
+  copyBtn.addEventListener('click', function () {
+    var text = preEl.textContent;
+    var ok = function () {
+      copyBtn.classList.add('copied');
+      copyBtn.querySelector('span').textContent = 'Copied';
+      setTimeout(function () {
+        copyBtn.classList.remove('copied');
+        copyBtn.querySelector('span').textContent = 'Copy';
+      }, 1800);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok, function () {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); ok(); } catch (_) {}
+        ta.remove();
+      });
+    }
+  });
+
+  // Public hook so the action button can open it without poking internals.
+  window.WorkbenchSdkModal = { open: open, close: close };
 })();
 </script>
 </body>

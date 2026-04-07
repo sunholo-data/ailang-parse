@@ -42,6 +42,12 @@
     { name: 'docparse/services/csv_parser',       path: 'docparse/services/csv_parser.ail' },
     { name: 'docparse/services/markdown_parser',   path: 'docparse/services/markdown_parser.ail' },
     { name: 'docparse/services/eml_parser',       path: 'docparse/services/eml_parser.ail' },
+    // ODF + EPUB structural parsers (run pure XML→Blocks via AILANG WASM;
+    // JS only does ZIP extraction with JSZip).
+    { name: 'docparse/services/odt_parser',       path: 'docparse/services/odt_parser.ail' },
+    { name: 'docparse/services/odp_parser',       path: 'docparse/services/odp_parser.ail' },
+    { name: 'docparse/services/ods_parser',       path: 'docparse/services/ods_parser.ail' },
+    { name: 'docparse/services/epub_parser',      path: 'docparse/services/epub_parser.ail' },
     { name: 'docparse/services/output_formatter', path: 'docparse/services/output_formatter.ail' },
     // A2UI: vendored package + formatter (dependencies before dependents)
     { name: 'pkg/sunholo/a2ui/components',        path: 'pkg/sunholo/a2ui/components.ail' },
@@ -502,16 +508,14 @@
         allBlocks = await parsePptxZip(zip);
       } else if (ext === 'xlsx') {
         allBlocks = await parseXlsxZip(zip);
-      } else if (ext === 'odt' || ext === 'odp' || ext === 'ods') {
-        pipelineLog('info', 'ODF formats use the API for full parsing');
-        showFallback(ext, 'ODF formats use the API for full parsing.');
-        setDotState('ready');
-        return;
+      } else if (ext === 'odt') {
+        allBlocks = await parseOdtZip(zip);
+      } else if (ext === 'odp') {
+        allBlocks = await parseOdpZip(zip);
+      } else if (ext === 'ods') {
+        allBlocks = await parseOdsZip(zip);
       } else if (ext === 'epub') {
-        pipelineLog('info', 'EPUB uses the API for full parsing');
-        showFallback(ext, 'EPUB uses the API for full parsing.');
-        setDotState('ready');
-        return;
+        allBlocks = await parseEpubZip(zip);
       }
 
       pipelineLog('done', allBlocks.length + ' blocks extracted', 'done');
@@ -693,6 +697,193 @@
         if (r.success) allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
       }
     }
+    return allBlocks;
+  }
+
+  // ── ODF parsing (ODT / ODP / ODS) ──
+  // JS extracts content.xml / meta.xml / styles.xml from the ODF zip via
+  // JSZip; the parsing itself runs entirely in AILANG WASM. Same pattern
+  // as parseDocxZip — we never reimplement parser logic here.
+  async function parseOdtZip(zip) {
+    var allBlocks = [];
+
+    var contentEntry = zip.file('content.xml');
+    if (contentEntry) {
+      var xml = await contentEntry.async('string');
+      if (xml.length <= MAX_XML_SIZE) {
+        pipelineLog('xml', 'Parsing ODT content...');
+        var r = engine.call('parseOdtContent', xml);
+        if (r && r.success) {
+          allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
+          pipelineLog('xml', allBlocks.length + ' body blocks');
+        } else if (r) {
+          pipelineLog('error', 'parseOdtContent failed: ' + r.error, 'error');
+        }
+      }
+    }
+
+    var stylesEntry = zip.file('styles.xml');
+    if (stylesEntry) {
+      var sxml = await stylesEntry.async('string');
+      if (sxml.length <= MAX_XML_SIZE) {
+        var sr = engine.call('parseOdtStylesXml', sxml);
+        if (sr && sr.success) {
+          allBlocks = allBlocks.concat(safeJsonParse(sr.result, []));
+        }
+      }
+    }
+
+    var metaEntry = zip.file('meta.xml');
+    if (metaEntry) {
+      var mxml = await metaEntry.async('string');
+      var mr = engine.call('parseOdtMetadataXml', mxml);
+      if (mr && mr.success) {
+        var meta = safeJsonParse(mr.result, {});
+        if (meta.title) updateInfoBar('title', meta.title);
+      }
+    }
+
+    return allBlocks;
+  }
+
+  async function parseOdpZip(zip) {
+    var allBlocks = [];
+
+    var contentEntry = zip.file('content.xml');
+    if (contentEntry) {
+      var xml = await contentEntry.async('string');
+      if (xml.length <= MAX_XML_SIZE) {
+        pipelineLog('xml', 'Parsing ODP slides...');
+        var r = engine.call('parseOdpContent', xml);
+        if (r && r.success) {
+          allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
+          pipelineLog('xml', allBlocks.length + ' slide block(s)');
+        } else if (r) {
+          pipelineLog('error', 'parseOdpContent failed: ' + r.error, 'error');
+        }
+      }
+    }
+
+    var metaEntry = zip.file('meta.xml');
+    if (metaEntry) {
+      var mxml = await metaEntry.async('string');
+      var mr = engine.call('parseOdpMetadataXml', mxml);
+      if (mr && mr.success) {
+        var meta = safeJsonParse(mr.result, {});
+        if (meta.title) updateInfoBar('title', meta.title);
+      }
+    }
+
+    return allBlocks;
+  }
+
+  async function parseOdsZip(zip) {
+    var allBlocks = [];
+
+    var contentEntry = zip.file('content.xml');
+    if (contentEntry) {
+      var xml = await contentEntry.async('string');
+      if (xml.length <= MAX_XML_SIZE) {
+        pipelineLog('xml', 'Parsing ODS sheets...');
+        var r = engine.call('parseOdsContent', xml);
+        if (r && r.success) {
+          allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
+          pipelineLog('xml', allBlocks.length + ' sheet block(s)');
+        } else if (r) {
+          pipelineLog('error', 'parseOdsContent failed: ' + r.error, 'error');
+        }
+      }
+    }
+
+    var metaEntry = zip.file('meta.xml');
+    if (metaEntry) {
+      var mxml = await metaEntry.async('string');
+      var mr = engine.call('parseOdsMetadataXml', mxml);
+      if (mr && mr.success) {
+        var meta = safeJsonParse(mr.result, {});
+        if (meta.title) updateInfoBar('title', meta.title);
+      }
+    }
+
+    return allBlocks;
+  }
+
+  // ── EPUB parsing ──
+  // JS walks the OPF in two stages — both stages call AILANG bridge
+  // functions. Per-chapter HTML parsing goes through parseHtmlContent
+  // (already exposed). No parser logic lives in this function.
+  async function parseEpubZip(zip) {
+    var allBlocks = [];
+
+    // Step 1: container.xml -> OPF rootfile path (via AILANG)
+    var containerEntry = zip.file('META-INF/container.xml');
+    var opfPath = '';
+    if (containerEntry) {
+      var containerXml = await containerEntry.async('string');
+      var cr = engine.call('parseEpubContainer', containerXml);
+      if (cr && cr.success) opfPath = cr.result || '';
+    }
+
+    // Fallback: scan zip entries for any *.opf
+    if (!opfPath) {
+      var opfNames = Object.keys(zip.files).filter(function (n) { return n.match(/\.opf$/i); });
+      if (opfNames.length > 0) opfPath = opfNames[0];
+    }
+
+    if (!opfPath) {
+      pipelineLog('error', 'EPUB: no OPF file found', 'error');
+      return allBlocks;
+    }
+
+    // Step 2: read OPF, extract spine + metadata (via AILANG)
+    var opfEntry = zip.file(opfPath);
+    if (!opfEntry) {
+      pipelineLog('error', 'EPUB: OPF entry missing: ' + opfPath, 'error');
+      return allBlocks;
+    }
+    var opfXml = await opfEntry.async('string');
+
+    // opfDir = directory portion of opfPath, e.g. "OEBPS/" or ""
+    var lastSlash = opfPath.lastIndexOf('/');
+    var opfDir = lastSlash >= 0 ? opfPath.substring(0, lastSlash + 1) : '';
+
+    // Metadata
+    var mr = engine.call('parseEpubMetadataXml', opfXml);
+    if (mr && mr.success) {
+      var meta = safeJsonParse(mr.result, {});
+      if (meta.title) updateInfoBar('title', meta.title);
+    }
+
+    // Spine (ordered list of chapter file paths)
+    var sr = engine.call('parseEpubSpine', opfXml, opfDir);
+    var spine = [];
+    if (sr && sr.success) spine = safeJsonParse(sr.result, []);
+
+    pipelineLog('xml', 'EPUB: found ' + spine.length + ' chapter(s)');
+
+    // Step 3: parse each chapter via parseHtmlContent (AILANG)
+    var maxChapters = Math.min(spine.length, 50);
+    for (var i = 0; i < maxChapters; i++) {
+      var entryPath = spine[i];
+      var chapterEntry = zip.file(entryPath);
+      if (!chapterEntry) continue;
+      var chapterHtml = await chapterEntry.async('string');
+      if (chapterHtml.length > MAX_XML_SIZE) continue;
+      var hr = engine.call('parseHtmlContent', chapterHtml);
+      if (hr && hr.success) {
+        var blocks = safeJsonParse(hr.result, []);
+        if (blocks.length > 0) {
+          // Wrap in a SectionBlock so the inspector can show chapter boundaries.
+          var basename = entryPath.substring(entryPath.lastIndexOf('/') + 1);
+          allBlocks.push({
+            type: 'section',
+            kind: 'chapter:' + basename,
+            blocks: blocks
+          });
+        }
+      }
+    }
+
     return allBlocks;
   }
 
@@ -1846,16 +2037,16 @@
       var ext = file.name.split('.').pop().toLowerCase();
       var sizeKB = parseFloat((file.size / 1024).toFixed(1));
 
-      var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox'];
-      var zipFormats  = ['docx', 'pptx', 'xlsx'];
+      var textFormats = ['html', 'htm', 'md', 'txt', 'csv', 'tsv', 'eml', 'mbox'];
+      var zipFormats  = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'epub'];
       // Formats that need an AI vision/multimodal model. WASM still drives
       // the parse — it just delegates the visual extraction step to whichever
       // model the user's API key points at (Gemini today).
       var aiFormats   = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp',
                          'wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac',
                          'mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg'];
-      // Formats that genuinely need the hosted API tier (no WASM path yet).
-      var apiOnly     = ['odt', 'odp', 'ods', 'epub'];
+      // Nothing is API-only any more — every structural format has a WASM path.
+      var apiOnly     = [];
 
       if (aiFormats.indexOf(ext) !== -1) {
         // Try AI parsing in-browser if the user has a Gemini key in
@@ -1897,6 +2088,7 @@
         else if (ext === 'csv')                     r = engine.call('parseCsvContent', content, ',');
         else if (ext === 'tsv')                     r = engine.call('parseCsvContent', content, '\t');
         else if (ext === 'md')                      r = engine.call('parseMarkdownContent', content);
+        else if (ext === 'txt')                     r = engine.call('parseMarkdownContent', content);
         if (!r || !r.success) {
           // Surface the full WASM result so callers can inspect it in DevTools.
           var rawErr = r ? r.error : 'no result from engine.call';
@@ -1908,7 +2100,7 @@
                  : ext === 'html' || ext === 'htm' ? 'parseHtmlContent'
                  : ext === 'csv' ? 'parseCsvContent'
                  : ext === 'tsv' ? 'parseCsvContent'
-                 : ext === 'md' ? 'parseMarkdownContent' : 'unknown',
+                 : ext === 'md' || ext === 'txt' ? 'parseMarkdownContent' : 'unknown',
             wasmResult: r,
             error: rawErr
           });
@@ -1922,6 +2114,10 @@
         if      (ext === 'docx') blocks = await parseDocxZip(zip);
         else if (ext === 'pptx') blocks = await parsePptxZip(zip);
         else if (ext === 'xlsx') blocks = await parseXlsxZip(zip);
+        else if (ext === 'odt')  blocks = await parseOdtZip(zip);
+        else if (ext === 'odp')  blocks = await parseOdpZip(zip);
+        else if (ext === 'ods')  blocks = await parseOdsZip(zip);
+        else if (ext === 'epub') blocks = await parseEpubZip(zip);
       }
 
       var ms = Math.round(performance.now() - t0);

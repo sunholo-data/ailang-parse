@@ -31,6 +31,10 @@ import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
 import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
+import docparse/services/odt_parser (odtExtractBody, odtParseMetadata, odtExtractHeadersFooters)
+import docparse/services/odp_parser (odpExtractSlides, odpParseMetadata)
+import docparse/services/ods_parser (odsExtractSheets, odsParseMetadata)
+import docparse/services/epub_parser (epubFindOpfPath, epubExtractSpine, epubParseOpfMetadata)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
 import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert, documentToA2UI, a2ui_jsonToBlockList)
 
@@ -201,6 +205,97 @@ export pure func parseMboxMeta(content: string) -> string {
 -- Parse MBOX with thread reconstruction -> JSON array of thread blocks
 export pure func parseMboxThreadedContent(content: string) -> string {
   encode(ja(blocksToJson(parseMboxThreaded(content))))
+}
+
+-- ── ODF parsers (ODT / ODP / ODS) ─────────────────────────────
+-- JS extracts content.xml / meta.xml / styles.xml from the ODF zip
+-- using JSZip, then calls these pure WASM bridges. Same pattern as
+-- parseDocxBody — the parser logic lives entirely in AILANG.
+
+-- Parse ODT content.xml -> JSON array of blocks
+export pure func parseOdtContent(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parse(xml) {
+    Ok(root) => encode(ja(blocksToJson(odtExtractBody(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODT XML parse error: " ++ e))])]))
+  }
+}
+
+-- Parse ODT meta.xml -> JSON metadata object
+export pure func parseOdtMetadataXml(xml: string) -> string {
+  if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else match parse(xml) {
+    Ok(root) => encode(metadataToJson(odtParseMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}
+
+-- Parse ODT styles.xml -> JSON array of header/footer SectionBlocks
+export pure func parseOdtStylesXml(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parse(xml) {
+    Ok(root) => encode(ja(blocksToJson(odtExtractHeadersFooters(root)))),
+    Err(_) => encode(ja([]))
+  }
+}
+
+-- Parse ODP content.xml -> JSON array of slide SectionBlocks
+export pure func parseOdpContent(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parse(xml) {
+    Ok(root) => encode(ja(blocksToJson(odpExtractSlides(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODP XML parse error: " ++ e))])]))
+  }
+}
+
+-- Parse ODP meta.xml -> JSON metadata object
+export pure func parseOdpMetadataXml(xml: string) -> string {
+  if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else match parse(xml) {
+    Ok(root) => encode(metadataToJson(odpParseMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}
+
+-- Parse ODS content.xml -> JSON array of sheet SectionBlocks
+export pure func parseOdsContent(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parse(xml) {
+    Ok(root) => encode(ja(blocksToJson(odsExtractSheets(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODS XML parse error: " ++ e))])]))
+  }
+}
+
+-- Parse ODS meta.xml -> JSON metadata object
+export pure func parseOdsMetadataXml(xml: string) -> string {
+  if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else match parse(xml) {
+    Ok(root) => encode(metadataToJson(odsParseMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}
+
+-- ── EPUB bridges ─────────────────────────────────────────────
+-- EPUB content parsing per chapter goes through parseHtmlContent
+-- (already exposed). These two helpers let JS walk the OPF in
+-- AILANG: container.xml → OPF path, then OPF → ordered spine list.
+
+-- Parse EPUB META-INF/container.xml -> OPF rootfile path
+export pure func parseEpubContainer(xml: string) -> string {
+  epubFindOpfPath(xml)
+}
+
+-- Parse EPUB OPF spine -> JSON array of content file paths (in reading order).
+-- opfDir is the directory portion of the OPF path (e.g., "OEBPS/").
+export pure func parseEpubSpine(opfXml: string, opfDir: string) -> string {
+  let hrefs = epubExtractSpine(opfXml, opfDir);
+  encode(ja(map(\h. js(h), hrefs)))
+}
+
+-- Parse EPUB OPF metadata -> JSON metadata object
+export pure func parseEpubMetadataXml(opfXml: string) -> string {
+  if length(opfXml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else encode(metadataToJson(epubParseOpfMetadata(opfXml)))
 }
 
 -- Convert block JSON (from parseDocxBody etc.) to A2UI component JSON.
