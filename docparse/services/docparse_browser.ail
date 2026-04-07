@@ -27,6 +27,10 @@ import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml,
     hasContent, extractMetadata)
 import docparse/services/pptx_parser (extractSlideBlocks)
 import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml)
+import docparse/services/html_parser (parseHtml)
+import docparse/services/csv_parser (parseCsv)
+import docparse/services/markdown_parser (parseMarkdown)
+import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
 import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert, documentToA2UI, a2ui_jsonToBlockList)
 
@@ -154,6 +158,49 @@ export func describeImageBase64(base64Data: string, mimeType: string) -> string 
     ]));
     callJsonSimple(request)
   }
+}
+
+-- ── Text format parsers (HTML, CSV, Markdown, Email) ──
+-- These replace the JS-side text parsing with proper AILANG parsers via WASM.
+
+-- Parse HTML content -> JSON array of blocks
+export pure func parseHtmlContent(content: string) -> string {
+  encode(ja(blocksToJson(parseHtml(content))))
+}
+
+-- Parse CSV content -> JSON array of blocks
+export pure func parseCsvContent(content: string, delimiter: string) -> string {
+  encode(ja(blocksToJson(parseCsv(content, delimiter))))
+}
+
+-- Parse Markdown content -> JSON array of blocks
+export pure func parseMarkdownContent(content: string) -> string {
+  encode(ja(blocksToJson(parseMarkdown(content))))
+}
+
+-- Parse EML email content -> JSON array of blocks
+export pure func parseEmlContent(content: string) -> string {
+  encode(ja(blocksToJson(parseEml(content))))
+}
+
+-- Parse EML metadata (Subject, From, Date) -> JSON metadata object
+export pure func parseEmlMeta(content: string) -> string {
+  encode(metadataToJson(parseEmlMetadata(content)))
+}
+
+-- Parse MBOX archive -> JSON array of blocks (all messages)
+export pure func parseMboxContent(content: string) -> string {
+  encode(ja(blocksToJson(parseMbox(content))))
+}
+
+-- Parse MBOX metadata (from first message) -> JSON metadata object
+export pure func parseMboxMeta(content: string) -> string {
+  encode(metadataToJson(parseMboxMetadata(content)))
+}
+
+-- Parse MBOX with thread reconstruction -> JSON array of thread blocks
+export pure func parseMboxThreadedContent(content: string) -> string {
+  encode(ja(blocksToJson(parseMboxThreaded(content))))
 }
 
 -- Convert block JSON (from parseDocxBody etc.) to A2UI component JSON.

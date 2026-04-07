@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
-      - 'docparse/services/docparse_browser.ail'
-      - 'docparse/types/document.ail'
+      - 'docparse/services/**.ail'
+      - 'docparse/types/**.ail'
       - '.github/workflows/pages.yml'
 
 permissions:
@@ -30,6 +30,9 @@ jobs:
         with:
           fetch-tags: true
           fetch-depth: 0
+
+      - name: Check WASM bindings (source ↔ wasm-demo.js ↔ vendor script)
+        run: python3 docs/scripts/check-wasm-bindings.py
 
       - name: Download AILANG WASM runtime
         run: |
@@ -58,19 +61,12 @@ jobs:
           rm -f ailang-wasm.tar.gz
           echo "::endgroup::"
 
-      - name: Copy latest AILANG modules
+      - name: Vendor AILANG modules + packages from source
         run: |
-          # Ensure docs/ailang/ has the latest parser modules from source
-          mkdir -p docs/ailang/docparse/types docs/ailang/docparse/services
-          cp docparse/types/document.ail docs/ailang/docparse/types/
-          cp docparse/services/format_router.ail docs/ailang/docparse/services/
-          cp docparse/services/zip_extract.ail docs/ailang/docparse/services/
-          cp docparse/services/docx_parser.ail docs/ailang/docparse/services/
-          cp docparse/services/pptx_parser.ail docs/ailang/docparse/services/
-          cp docparse/services/xlsx_parser.ail docs/ailang/docparse/services/
-          cp docparse/services/output_formatter.ail docs/ailang/docparse/services/
-          cp docparse/services/docparse_browser.ail docs/ailang/docparse/services/
-          echo "Copied 8 AILANG modules"
+          # Single source of truth for vendoring — mirrors MODULES_TO_LOAD
+          # in docs/js/wasm-demo.js. Skip the WASM download step since the
+          # previous step already fetched it from the GitHub release.
+          bash docs/scripts/vendor-wasm-packages.sh --skip-wasm
 
       - name: Stamp version from latest git tag
         run: |

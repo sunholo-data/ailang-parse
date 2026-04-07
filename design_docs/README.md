@@ -114,6 +114,8 @@ Designs that were superseded or abandoned (never delete — move here).
 - [Email Follow-ups](planned/v0_9_0/email-parsing-followups.md) | [Auth Providers](planned/v0_9_0/v0_9_0_auth_providers.md)
 - [WASM Images](planned/v0_9_0/v0_9_0_wasm_images.md) | [Manifest API](planned/v0_9_0/v0_9_0_manifest_driven_api_page.md)
 - [Valuable Friction Onboarding](planned/v0_9_0/valuable_friction_onboarding.md)
+- Workbench page: dedicated multi-file WASM playground with Firebase-auth API engine for PDFs/large files/conversion, persistent friction nudges
+- [Workbench](planned/v0_9_0/workbench.md)
 
 ### v0.10.0 — Quarto & Trust
 - Quarto Markdown generation with two rendering engines

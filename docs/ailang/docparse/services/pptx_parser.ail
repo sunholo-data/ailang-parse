@@ -3,8 +3,8 @@ module docparse/services/pptx_parser
 import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join)
-import std/list (map, flatMap, any, length as listLength)
+import std/string (contains, length, trim, stringToInt, join, intToStr)
+import std/list (map, flatMap, any, length as listLength, take)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata)
 import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
 
@@ -48,7 +48,18 @@ import docparse/services/zip_extract (readCoreProperties, findSlideEntries, read
 -- Parse all slides from a PPTX file
 export func parsePptx(filepath: string) -> [Block] ! {FS} {
   let slideEntries = findSlideEntries(filepath);
-  parseSlides(filepath, slideEntries)
+  let totalSlides = listLength(slideEntries);
+  let cappedEntries = take(500, slideEntries);
+  let slideBlocks = parseSlides(filepath, cappedEntries);
+  if totalSlides > 500
+  then {
+    let warning = TextBlock({
+      text: "Warning: truncated from " ++ intToStr(totalSlides) ++ " to 500 slides.",
+      style: "warning", level: 0
+    });
+    warning :: slideBlocks
+  }
+  else slideBlocks
 }
 
 -- Parse metadata from PPTX (same core.xml format as DOCX)

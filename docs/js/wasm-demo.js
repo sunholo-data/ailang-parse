@@ -814,60 +814,71 @@
   }
 
   // ── Preview rendering ──
+  // Public version takes an explicit container; the homepage wrapper passes
+  // its own panelPreview. The workbench passes its own preview pane. All
+  // helpers below were refactored to take `container` instead of using a
+  // closure-scoped DOM ref so we never duplicate this logic again.
   async function renderPreview() {
-    if (!panelPreview) return;
-    var ext = lastFileExt;
+    return renderPreviewIntoImpl(
+      { ext: lastFileExt, content: lastFileContent, buffer: lastFileBuffer },
+      panelPreview
+    );
+  }
+
+  async function renderPreviewIntoImpl(src, container) {
+    if (!container) return;
+    var ext = src.ext;
 
     if (!ext) {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">No file loaded</div>';
+      container.innerHTML = '<div class="office-preview-fallback">No file loaded</div>';
       return;
     }
 
     // Text preview
-    if (lastFileContent != null) {
+    if (src.content != null) {
       if (ext === 'html' || ext === 'htm') {
-        panelPreview.innerHTML = '<div class="office-preview-page">' + lastFileContent + '</div>';
+        container.innerHTML = '<div class="office-preview-page">' + src.content + '</div>';
       } else {
-        panelPreview.innerHTML = '<div class="office-preview-text"><pre>' + escHtml(lastFileContent) + '</pre></div>';
+        container.innerHTML = '<div class="office-preview-text"><pre>' + escHtml(src.content) + '</pre></div>';
       }
       return;
     }
 
-    if (!lastFileBuffer) {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">No preview available</div>';
+    if (!src.buffer) {
+      container.innerHTML = '<div class="office-preview-fallback">No preview available</div>';
       return;
     }
 
-    var buffer = lastFileBuffer;
+    var buffer = src.buffer;
 
     if (ext === 'docx') {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">Rendering preview...</div>';
+      container.innerHTML = '<div class="office-preview-fallback">Rendering preview...</div>';
       try {
-        await renderDocxPreview(buffer);
+        await renderDocxPreview(buffer, container);
       } catch (err) {
-        panelPreview.innerHTML = '<div class="office-preview-fallback">DOCX preview failed: ' + escHtml(err.message) + '</div>';
+        container.innerHTML = '<div class="office-preview-fallback">DOCX preview failed: ' + escHtml(err.message) + '</div>';
       }
     } else if (ext === 'pptx') {
-      await renderPptxPreview(buffer);
+      await renderPptxPreview(buffer, container);
     } else if (ext === 'xlsx') {
-      await renderXlsxPreview(buffer);
+      await renderXlsxPreview(buffer, container);
     } else if (ext === 'pdf') {
-      renderPdfPreview(buffer);
+      renderPdfPreview(buffer, container);
     } else if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff'].indexOf(ext) !== -1) {
-      renderImagePreview(buffer, ext);
+      renderImagePreview(buffer, ext, container);
     } else if (['wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac'].indexOf(ext) !== -1) {
-      renderAudioPreview(buffer, ext);
+      renderAudioPreview(buffer, ext, container);
     } else if (['mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg'].indexOf(ext) !== -1) {
-      renderVideoPreview(buffer, ext);
+      renderVideoPreview(buffer, ext, container);
     } else {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">No preview available for .' + ext + ' files</div>';
+      container.innerHTML = '<div class="office-preview-fallback">No preview available for .' + ext + ' files</div>';
     }
   }
 
   // ── DOCX preview via Mammoth.js ──
-  async function renderDocxPreview(buffer) {
+  async function renderDocxPreview(buffer, container) {
     if (typeof mammoth === 'undefined') {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">Preview library not loaded</div>';
+      container.innerHTML = '<div class="office-preview-fallback">Preview library not loaded</div>';
       return;
     }
     var result = await mammoth.convertToHtml({ arrayBuffer: buffer });
@@ -876,13 +887,13 @@
     if (warnings > 0) {
       html += '<div class="office-preview-note">' + warnings + ' conversion warning' + (warnings > 1 ? 's' : '') + ' (minor formatting differences)</div>';
     }
-    panelPreview.innerHTML = html;
+    container.innerHTML = html;
   }
 
   // ── XLSX preview with sheet tabs ──
-  async function renderXlsxPreview(buffer) {
+  async function renderXlsxPreview(buffer, container) {
     if (!engine) {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">Loading WASM for preview...</div>';
+      container.innerHTML = '<div class="office-preview-fallback">Loading WASM for preview...</div>';
       return;
     }
     try {
@@ -894,7 +905,7 @@
         .sort();
 
       if (sheetEntries.length === 0) {
-        panelPreview.innerHTML = '<div class="office-preview-fallback">No sheets found</div>';
+        container.innerHTML = '<div class="office-preview-fallback">No sheets found</div>';
         return;
       }
 
@@ -910,10 +921,10 @@
         }
       }
 
-      panelPreview.innerHTML = buildSheetTabsHtml(sheets);
-      wireSheetTabs();
+      container.innerHTML = buildSheetTabsHtml(sheets);
+      wireSheetTabs(container);
     } catch (err) {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">XLSX preview failed: ' + escHtml(err.message) + '</div>';
+      container.innerHTML = '<div class="office-preview-fallback">XLSX preview failed: ' + escHtml(err.message) + '</div>';
     }
   }
 
@@ -944,24 +955,24 @@
     return html;
   }
 
-  function wireSheetTabs() {
-    var tabs = panelPreview.querySelectorAll('.xlsx-sheet-tab');
+  function wireSheetTabs(container) {
+    var tabs = container.querySelectorAll('.xlsx-sheet-tab');
     tabs.forEach(function (tab) {
       tab.addEventListener('click', function () {
         var idx = this.getAttribute('data-sheet');
-        panelPreview.querySelectorAll('.xlsx-sheet-tab').forEach(function (t) { t.classList.remove('active'); });
-        panelPreview.querySelectorAll('.xlsx-sheet-content').forEach(function (c) { c.classList.remove('active'); });
+        container.querySelectorAll('.xlsx-sheet-tab').forEach(function (t) { t.classList.remove('active'); });
+        container.querySelectorAll('.xlsx-sheet-content').forEach(function (c) { c.classList.remove('active'); });
         this.classList.add('active');
-        var content = panelPreview.querySelector('.xlsx-sheet-content[data-sheet="' + idx + '"]');
+        var content = container.querySelector('.xlsx-sheet-content[data-sheet="' + idx + '"]');
         if (content) content.classList.add('active');
       });
     });
   }
 
   // ── PPTX preview with slide cards ──
-  async function renderPptxPreview(buffer) {
+  async function renderPptxPreview(buffer, container) {
     if (!engine) {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">Loading WASM for preview...</div>';
+      container.innerHTML = '<div class="office-preview-fallback">Loading WASM for preview...</div>';
       return;
     }
     try {
@@ -1006,33 +1017,33 @@
         html += '</div></div>';
       });
       html += '</div>';
-      panelPreview.innerHTML = html;
+      container.innerHTML = html;
     } catch (err) {
-      panelPreview.innerHTML = '<div class="office-preview-fallback">PPTX preview failed: ' + escHtml(err.message) + '</div>';
+      container.innerHTML = '<div class="office-preview-fallback">PPTX preview failed: ' + escHtml(err.message) + '</div>';
     }
   }
 
   // ── PDF preview ──
-  function renderPdfPreview(buffer) {
+  function renderPdfPreview(buffer, container) {
     var blob = new Blob([buffer], { type: 'application/pdf' });
     var url = URL.createObjectURL(blob);
-    panelPreview.innerHTML = '<div class="office-preview-pdf"><object data="' + url + '" type="application/pdf" width="100%" height="600"><div class="office-preview-fallback">PDF preview not available in this browser</div></object></div>';
+    container.innerHTML = '<div class="office-preview-pdf"><object data="' + url + '" type="application/pdf" width="100%" height="600"><div class="office-preview-fallback">PDF preview not available in this browser</div></object></div>';
   }
 
   // ── Image preview ──
-  function renderImagePreview(buffer, ext) {
+  function renderImagePreview(buffer, ext, container) {
     var mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', tiff: 'image/tiff' };
     var blob = new Blob([buffer], { type: mimeMap[ext] || 'image/png' });
     var url = URL.createObjectURL(blob);
-    panelPreview.innerHTML = '<div class="office-preview-image"><img src="' + url + '" alt="Image preview"></div>';
+    container.innerHTML = '<div class="office-preview-image"><img src="' + url + '" alt="Image preview"></div>';
   }
 
   // ── Audio preview ──
-  function renderAudioPreview(buffer, ext) {
+  function renderAudioPreview(buffer, ext, container) {
     var mimeMap = { wav: 'audio/wav', mp3: 'audio/mpeg', aiff: 'audio/aiff', aac: 'audio/aac', ogg: 'audio/ogg', flac: 'audio/flac' };
     var blob = new Blob([buffer], { type: mimeMap[ext] || 'audio/mpeg' });
     var url = URL.createObjectURL(blob);
-    panelPreview.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;gap:16px">' +
+    container.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;gap:16px">' +
       '<svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="var(--dp-blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>' +
       '<audio controls src="' + url + '" style="width:100%;max-width:400px">Your browser does not support audio playback.</audio>' +
@@ -1040,11 +1051,11 @@
   }
 
   // ── Video preview ──
-  function renderVideoPreview(buffer, ext) {
+  function renderVideoPreview(buffer, ext, container) {
     var mimeMap = { mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm', wmv: 'video/x-ms-wmv', mpeg: 'video/mpeg', mpg: 'video/mpeg' };
     var blob = new Blob([buffer], { type: mimeMap[ext] || 'video/mp4' });
     var url = URL.createObjectURL(blob);
-    panelPreview.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;padding:20px;gap:12px">' +
+    container.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;padding:20px;gap:12px">' +
       '<video controls src="' + url + '" style="width:100%;max-width:100%;max-height:400px;border-radius:8px;background:#000">Your browser does not support video playback.</video>' +
       '<div style="font-size:12px;color:var(--text-muted)">.' + ext.toUpperCase() + ' video file</div></div>';
   }
@@ -1216,27 +1227,14 @@
     }).join('');
   }
 
+  // Markdown conversion lives in the shared docparse-blocks.js so the
+  // workbench and homepage demo cannot drift. Same logic, one source.
   function blocksToMarkdown(blocks) {
-    if (!Array.isArray(blocks)) return '';
-    return blocks.map(function (b) {
-      if (!b) return '';
-      switch (b.type) {
-        case 'heading': return '#'.repeat(b.level || 1) + ' ' + (b.text || '');
-        case 'text': return b.text || '';
-        case 'table':
-          var hdr = (b.headers || []).map(function (h) { return typeof h === 'string' ? h : h.text || ''; });
-          var sep = hdr.map(function () { return '---'; });
-          var rows = (b.rows || []).map(function (r) {
-            return '| ' + (Array.isArray(r) ? r : []).map(function (c) { return typeof c === 'string' ? c : c.text || ''; }).join(' | ') + ' |';
-          });
-          return '| ' + hdr.join(' | ') + ' |\n| ' + sep.join(' | ') + ' |\n' + rows.join('\n');
-        case 'list': return (b.items || []).map(function (i, idx) { return (b.ordered ? (idx + 1) + '. ' : '- ') + i; }).join('\n');
-        case 'change': return '> **' + (b.changeType || '') + '** by ' + (b.author || '') + ': ' + (b.text || '');
-        case 'section': return '### ' + (b.kind || 'section') + '\n' + blocksToMarkdown(b.blocks || b.children || []);
-        case 'image': return '![' + (b.description || 'image') + ']()';
-        default: return b.text || '';
-      }
-    }).join('\n\n');
+    if (!window.DocParseBlocks) {
+      console.error('[wasm-demo] docparse-blocks.js must load before wasm-demo.js');
+      return '';
+    }
+    return window.DocParseBlocks.toMarkdown(blocks);
   }
 
   // ── A2UI visual renderer (streaming rich document) ──
@@ -1477,7 +1475,7 @@
     var replayBtn = document.createElement('button');
     replayBtn.className = 'a2ui-replay-btn';
     replayBtn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Replay';
-    replayBtn.onclick = function () { window.triggerA2UIStream(); };
+    replayBtn.onclick = function () { window.triggerA2UIStream(container); };
     controls.appendChild(replayBtn);
     streamHeader.appendChild(controls);
     docPanel.appendChild(streamHeader);
@@ -1533,18 +1531,22 @@
     };
   }
 
-  // Trigger the streaming animation
-  function triggerA2UIStream() {
-    if (!panelA2UI || !panelA2UI._a2uiMeta) return;
-    var meta = panelA2UI._a2uiMeta;
+  // Trigger the streaming animation. `container` defaults to the homepage's
+  // panelA2UI for the existing onclick handlers; the workbench passes its own
+  // pane. The `_a2uiMeta` and `_a2uiTimers` state lives on the container, so
+  // multiple A2UI panes can stream independently without interfering.
+  function triggerA2UIStream(container) {
+    var pane = container || panelA2UI;
+    if (!pane || !pane._a2uiMeta) return;
+    var meta = pane._a2uiMeta;
     var demo = meta.demo;
     if (!demo) return;
 
     // Clear previous timers
-    if (panelA2UI._a2uiTimers) {
-      panelA2UI._a2uiTimers.forEach(clearTimeout);
+    if (pane._a2uiTimers) {
+      pane._a2uiTimers.forEach(clearTimeout);
     }
-    panelA2UI._a2uiTimers = [];
+    pane._a2uiTimers = [];
 
     // Reset
     demo.classList.remove('a2ui-demo--streaming');
@@ -1564,18 +1566,18 @@
         if (counter) counter.textContent = (i + 1) + '/' + meta.totalNodes;
         // Auto-scroll to keep current element visible (scroll the parent panel)
         var el = meta.richEls[i];
-        if (el && panelA2UI) {
-          var panelRect = panelA2UI.getBoundingClientRect();
+        if (el) {
+          var panelRect = pane.getBoundingClientRect();
           var elRect = el.getBoundingClientRect();
           if (elRect.bottom > panelRect.bottom - 20) {
-            panelA2UI.scrollTop += elRect.bottom - panelRect.bottom + 40;
+            pane.scrollTop += elRect.bottom - panelRect.bottom + 40;
           }
         }
         if (i === meta.totalNodes - 1 && statusEl) {
           statusEl.classList.add('done');
         }
       }, delay + 50);
-      panelA2UI._a2uiTimers.push(t);
+      pane._a2uiTimers.push(t);
     });
   }
   window.triggerA2UIStream = triggerA2UIStream;
@@ -1688,4 +1690,261 @@
     };
     if (dropzone) dropzone.parentNode.insertBefore(mobileLoadBtn, dropzone);
   }
+
+  // ──────────────────────────────────────────────────────────────
+  // ── Pure AI parse helper for the public API ───────────────────
+  // Mirrors what parseAIFile() does internally for the homepage demo, but
+  // returns a clean { name, ext, sizeKB, ms, blocks } shape instead of
+  // poking the homepage DOM. The workbench calls this transparently when
+  // the user has a Gemini key in localStorage.
+  async function parseAIFileViaWasm(file, ext, sizeKB, apiKey) {
+    // Always (re-)register the AI handler so a freshly added key takes
+    // effect without a page reload.
+    if (engine && engine.repl && typeof engine.repl.setAIHandler === 'function') {
+      engine.repl.setAIHandler(createGeminiHandler(apiKey));
+      if (typeof engine.repl.grantCapability === 'function') engine.repl.grantCapability('AI');
+    }
+
+    var t0 = performance.now();
+    var buffer = await file.arrayBuffer();
+    var bytes = new Uint8Array(buffer);
+    var base64 = '';
+    var chunkSize = 8192;
+    for (var ci = 0; ci < bytes.length; ci += chunkSize) {
+      var chunk = bytes.subarray(ci, Math.min(ci + chunkSize, bytes.length));
+      base64 += String.fromCharCode.apply(null, chunk);
+    }
+    base64 = btoa(base64);
+
+    var mimeMap = {
+      pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      gif: 'image/gif', bmp: 'image/bmp', tiff: 'image/tiff', webp: 'image/webp',
+      wav: 'audio/wav', mp3: 'audio/mp3', aiff: 'audio/aiff', aac: 'audio/aac',
+      ogg: 'audio/ogg', flac: 'audio/flac',
+      mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm',
+      wmv: 'video/x-ms-wmv', mpeg: 'video/mpeg', mpg: 'video/mpeg'
+    };
+    var mime = mimeMap[ext] || 'application/octet-stream';
+
+    var r = await engine.callAsync('parseFileFromBase64', base64, mime, file.name);
+    if (!r || !r.success) {
+      var err = new Error('AI parse failed: ' + (r ? r.error : 'no result'));
+      err.code = 'AI_PARSE_FAILED';
+      console.error('[DocParseEngine] AI parse failed for .' + ext, { file: file.name, error: r && r.error });
+      throw err;
+    }
+    var blocks = safeJsonParse(r.result, []);
+    var ms = Math.round(performance.now() - t0);
+    return { name: file.name, ext: ext, sizeKB: sizeKB, ms: ms, blocks: blocks };
+  }
+
+  // Public API — for workbench.html and any future consumer.
+  // Pure parse: no homepage DOM dependency. Returns plain JS objects
+  // or throws Error. The homepage UI keeps using its closure-private
+  // helpers (handleDocParseFile / parseTextFile / parseZipFile) and
+  // is not affected by anything below.
+  // ──────────────────────────────────────────────────────────────
+  window.DocParseEngine = {
+    MAX_FILE_SIZE: MAX_FILE_SIZE,
+    isReady:   function () { return wasmReady; },
+    isLoading: function () { return wasmLoading; },
+    getError:  function () { return wasmError; },
+    init:      function () { return initWasm(); },
+
+    /**
+     * Get/set the Gemini API key in localStorage. The key unlocks PDF, image,
+     * audio, and video parsing in the browser via WASM → Gemini. Returns null
+     * if no key is set. Both the homepage demo and the workbench read/write
+     * the same `gemini-api-key` slot, so a key set on one page is immediately
+     * usable on the other.
+     */
+    getApiKey: function () {
+      var k = localStorage.getItem('gemini-api-key') || '';
+      return k.trim() ? k : null;
+    },
+    setApiKey: function (key) {
+      var trimmed = (key || '').trim();
+      if (trimmed) {
+        localStorage.setItem('gemini-api-key', trimmed);
+        // Re-register the AI handler if WASM is already up so the new key
+        // takes effect without a reload.
+        if (engine && engine.repl && typeof engine.repl.setAIHandler === 'function') {
+          engine.repl.setAIHandler(createGeminiHandler(trimmed));
+          if (typeof engine.repl.grantCapability === 'function') engine.repl.grantCapability('AI');
+        }
+      } else {
+        localStorage.removeItem('gemini-api-key');
+      }
+    },
+
+    /**
+     * Parse a File via the in-browser AILANG WASM engine.
+     * Returns: { name, ext, sizeKB, ms, blocks }
+     * Throws:  Error (with .code === 'NEEDS_API' for formats that require the hosted API)
+     */
+    parseFile: async function (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        var sizeMB = (file.size / 1024 / 1024).toFixed(1);
+        var tooBig = new Error('File too large for browser parsing (' + sizeMB + ' MB). Use the API for files up to 50 MB.');
+        tooBig.code = 'TOO_LARGE';
+        throw tooBig;
+      }
+
+      var ext = file.name.split('.').pop().toLowerCase();
+      var sizeKB = parseFloat((file.size / 1024).toFixed(1));
+
+      var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox'];
+      var zipFormats  = ['docx', 'pptx', 'xlsx'];
+      // Formats that need an AI vision/multimodal model. WASM still drives
+      // the parse — it just delegates the visual extraction step to whichever
+      // model the user's API key points at (Gemini today).
+      var aiFormats   = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp',
+                         'wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac',
+                         'mp4', 'mov', 'avi', 'webm', 'wmv', 'mpeg', 'mpg'];
+      // Formats that genuinely need the hosted API tier (no WASM path yet).
+      var apiOnly     = ['odt', 'odp', 'ods', 'epub'];
+
+      if (aiFormats.indexOf(ext) !== -1) {
+        // Try AI parsing in-browser if the user has a Gemini key in
+        // localStorage. Otherwise fall back to NEEDS_API so the workbench
+        // can show its "needs API" UI with a link to add a key.
+        var apiKey = localStorage.getItem('gemini-api-key');
+        if (!apiKey) {
+          var needsKey = new Error(ext.toUpperCase() + ' parsing needs an AI model — add a Google API key to enable it.');
+          needsKey.code = 'NEEDS_API_KEY';
+          throw needsKey;
+        }
+        if (!wasmReady) await initWasm();
+        if (!wasmReady) throw new Error(wasmError || 'WASM failed to initialize');
+        return await parseAIFileViaWasm(file, ext, sizeKB, apiKey);
+      }
+      if (apiOnly.indexOf(ext) !== -1) {
+        var needsApi = new Error(ext.toUpperCase() + ' parsing requires the hosted API engine.');
+        needsApi.code = 'NEEDS_API';
+        throw needsApi;
+      }
+      if (textFormats.indexOf(ext) === -1 && zipFormats.indexOf(ext) === -1) {
+        var unsup = new Error('Unsupported format: .' + ext);
+        unsup.code = 'UNSUPPORTED';
+        throw unsup;
+      }
+
+      if (!wasmReady) await initWasm();
+      if (!wasmReady) throw new Error(wasmError || 'WASM failed to initialize');
+
+      var t0 = performance.now();
+      var blocks = [];
+
+      if (textFormats.indexOf(ext) !== -1) {
+        var content = await file.text();
+        var r;
+        if (ext === 'eml')                          r = engine.call('parseEmlContent', content);
+        else if (ext === 'mbox')                    r = engine.call('parseMboxThreadedContent', content);
+        else if (ext === 'html' || ext === 'htm')   r = engine.call('parseHtmlContent', content);
+        else if (ext === 'csv')                     r = engine.call('parseCsvContent', content, ',');
+        else if (ext === 'tsv')                     r = engine.call('parseCsvContent', content, '\t');
+        else if (ext === 'md')                      r = engine.call('parseMarkdownContent', content);
+        if (!r || !r.success) {
+          // Surface the full WASM result so callers can inspect it in DevTools.
+          var rawErr = r ? r.error : 'no result from engine.call';
+          console.error('[DocParseEngine] WASM call failed for .' + ext, {
+            file: file.name,
+            sizeKB: sizeKB,
+            entry: ext === 'eml' ? 'parseEmlContent'
+                 : ext === 'mbox' ? 'parseMboxThreadedContent'
+                 : ext === 'html' || ext === 'htm' ? 'parseHtmlContent'
+                 : ext === 'csv' ? 'parseCsvContent'
+                 : ext === 'tsv' ? 'parseCsvContent'
+                 : ext === 'md' ? 'parseMarkdownContent' : 'unknown',
+            wasmResult: r,
+            error: rawErr
+          });
+          throw new Error('Parse failed: ' + rawErr);
+        }
+        blocks = safeJsonParse(r.result, []);
+      } else {
+        if (typeof JSZip === 'undefined') throw new Error('JSZip not loaded — include vendor/jszip.min.js before wasm-demo.js');
+        var buffer = await file.arrayBuffer();
+        var zip = await JSZip.loadAsync(buffer);
+        if      (ext === 'docx') blocks = await parseDocxZip(zip);
+        else if (ext === 'pptx') blocks = await parsePptxZip(zip);
+        else if (ext === 'xlsx') blocks = await parseXlsxZip(zip);
+      }
+
+      var ms = Math.round(performance.now() - t0);
+      return { name: file.name, ext: ext, sizeKB: sizeKB, ms: ms, blocks: blocks };
+    },
+
+    /**
+     * Convert parsed blocks to A2UI nodes via the AILANG WASM formatter.
+     * Returns an array of A2UI nodes (possibly empty). Never throws — logs
+     * to console on failure and returns []. Both the homepage and the
+     * workbench call this; logic must stay shared.
+     */
+    convertToA2UI: function (blocks) {
+      if (!engine) return [];
+      try {
+        var json = typeof blocks === 'string' ? blocks : JSON.stringify(blocks);
+        var r = engine.call('convertBlocksToA2UI', json);
+        if (r && r.success) {
+          var parsed = JSON.parse(r.result);
+          if (Array.isArray(parsed)) return parsed;
+        } else {
+          console.warn('[DocParseEngine] convertToA2UI failed:', r ? r.error : 'null');
+        }
+      } catch (e) {
+        console.warn('[DocParseEngine] convertToA2UI error:', e);
+      }
+      return [];
+    },
+
+    /**
+     * Render the streaming A2UI demo into an arbitrary container.
+     * The streaming animation is triggered separately via streamA2UI() so
+     * callers can defer it until the pane becomes visible.
+     */
+    renderA2UIInto: function (nodes, container) {
+      buildA2UIDemo(nodes || [], container);
+    },
+
+    /**
+     * Trigger (or replay) the A2UI streaming animation in a given container.
+     * Container must have been initialized via renderA2UIInto first.
+     */
+    streamA2UI: function (container) {
+      triggerA2UIStream(container);
+    },
+
+    /**
+     * Render a file preview (DOCX/PPTX/XLSX/PDF/image/audio/video/text) into
+     * an arbitrary container. The workbench calls this with its own preview
+     * pane; the homepage continues to use its own renderPreview() wrapper.
+     * Reads the File freshly so callers don't need to manage buffers.
+     */
+    renderPreviewInto: async function (file, container) {
+      if (!container) return;
+      if (!file) {
+        container.innerHTML = '<div class="office-preview-fallback">No file loaded</div>';
+        return;
+      }
+      var ext = file.name.split('.').pop().toLowerCase();
+      var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox', 'txt'];
+      var src = { ext: ext, content: null, buffer: null };
+      try {
+        if (textFormats.indexOf(ext) !== -1) {
+          src.content = await file.text();
+        } else {
+          src.buffer = await file.arrayBuffer();
+        }
+      } catch (e) {
+        container.innerHTML = '<div class="office-preview-fallback">Could not read file: ' + escHtml(e.message) + '</div>';
+        return;
+      }
+      // XLSX/PPTX previews need WASM for sheet/slide parsing.
+      if ((ext === 'xlsx' || ext === 'pptx') && !wasmReady) {
+        try { await initWasm(); } catch (_) { /* fall through; helper will show fallback */ }
+      }
+      return renderPreviewIntoImpl(src, container);
+    }
+  };
 })();

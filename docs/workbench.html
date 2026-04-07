@@ -1,0 +1,2510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workbench — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="A multi-document workbench for AILANG Parse — drop dozens of files, inspect structure, switch between in-browser WASM and the hosted API. No signup required.">
+<meta property="og:title" content="Workbench — AILANG Parse">
+<meta property="og:description" content="A multi-document workbench for AILANG Parse. WASM-first, API on demand, persistent structural insights, and a single click to the CLI when you're ready to scale.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/wasm-demo.css">
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   WORKBENCH — Phase 0 mockup
+   Layout-only CSS. Tokens: docs/css/design-system.css
+   ───────────────────────────────────────────────────────────── */
+
+/* Override page max-width — workbench wants the whole canvas */
+body.wb { background: var(--bg); }
+.wb-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 56px);
+}
+
+/* ── Intent selector strip ── */
+/* ── Main grid: 3-region console ── */
+.wb-grid {
+  display: grid;
+  grid-template-columns: 296px minmax(0, 1fr) 332px;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Shared rail styling ── */
+.wb-rail {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  min-height: 0;
+}
+.wb-rail--left { border-right: 1px solid var(--border); }
+.wb-rail--right { border-left: 1px solid var(--border); }
+
+.wb-rail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 5;
+}
+.wb-rail-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+}
+.wb-rail-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 2px 8px;
+  border-radius: 100px;
+  margin-left: auto;
+}
+.wb-rail-action {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--blue);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.wb-rail-action svg { width: 11px; height: 11px; }
+.wb-rail-action:hover { text-decoration: underline; }
+
+/* Inline status dot — used in body copy */
+.wb-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  vertical-align: 1px;
+  margin-right: 5px;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+/* WASM loading banner (top of stage when engine is initializing) */
+.wb-engine-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 16px 32px 0;
+  background: rgba(37, 99, 235, 0.05);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--blue);
+}
+.wb-engine-loading.error {
+  background: rgba(255, 107, 71, 0.06);
+  border-color: rgba(255, 107, 71, 0.25);
+  color: var(--coral-deep);
+}
+.wb-engine-loading.ready { display: none; }
+.wb-engine-loading.file-warning {
+  display: block;
+  padding: 14px 18px;
+  background: rgba(217, 119, 6, 0.06);
+  border-color: rgba(217, 119, 6, 0.28);
+  color: #92400e;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.wb-engine-loading.file-warning strong {
+  display: block;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: #78350f;
+  margin-bottom: 4px;
+}
+.wb-engine-loading.file-warning code {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: rgba(217, 119, 6, 0.12);
+  border: 1px solid rgba(217, 119, 6, 0.22);
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: #78350f;
+}
+.wb-engine-loading.file-warning .wb-file-warning-cmd {
+  margin-top: 8px;
+  padding: 9px 12px;
+  background: #1a1a1a;
+  color: #f4e9d8;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  border: none;
+}
+.wb-spinner {
+  width: 12px; height: 12px;
+  border: 2px solid rgba(37, 99, 235, 0.25);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: wbSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes wbSpin { to { transform: rotate(360deg); } }
+
+/* Empty state (no document selected) */
+.wb-empty-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 32px;
+  color: var(--text-muted);
+}
+.wb-empty-stage-icon {
+  width: 56px; height: 56px;
+  border-radius: var(--radius);
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+.wb-empty-stage-icon svg { width: 26px; height: 26px; }
+.wb-empty-stage-title {
+  font-family: var(--font-headline);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+  margin-bottom: 6px;
+}
+.wb-empty-stage-text {
+  font-family: var(--font-display);
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* Error / needs-API stage */
+.wb-stage-error {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.wb-stage-error-icon {
+  width: 56px; height: 56px;
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 18px;
+}
+.wb-stage-error-icon svg { width: 28px; height: 28px; }
+.wb-stage-error-icon.error {
+  background: rgba(255, 107, 71, 0.08);
+  color: var(--coral-deep);
+}
+.wb-stage-error-icon.needs {
+  background: rgba(217, 119, 6, 0.10);
+  color: #b45309;
+}
+.wb-stage-error-title {
+  font-family: var(--font-headline);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+  margin: 0 0 6px;
+}
+.wb-stage-error-file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 4px;
+}
+.wb-stage-error-file strong { color: var(--text-primary); font-weight: 600; }
+.wb-stage-error-sub {
+  font-family: var(--font-display);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 460px;
+  margin: 0 0 18px;
+}
+.wb-stage-error-detail {
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  background: #1a1a1a;
+  color: #f4e9d8;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  margin: 0 0 14px;
+}
+.wb-stage-error-copy {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wb-stage-error-copy:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* Library empty hint */
+.wb-library-empty {
+  padding: 14px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* Error toast */
+.wb-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--bg-dark);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.25s var(--ease-out-expo);
+  max-width: 480px;
+}
+.wb-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.wb-toast.error { background: var(--coral-deep); }
+.wb-toast.success { background: var(--success); }
+
+/* ── Library (left rail) ── */
+.wb-library {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wb-dropzone {
+  border: 1.5px dashed rgba(37, 99, 235, 0.35);
+  border-radius: var(--radius);
+  padding: 22px 18px;
+  text-align: center;
+  background: rgba(37, 99, 235, 0.025);
+  transition: all 0.25s var(--ease-out-expo);
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.wb-dropzone:hover {
+  border-color: var(--blue);
+  background: rgba(37, 99, 235, 0.06);
+  transform: translateY(-1px);
+}
+.wb-dropzone-icon {
+  width: 38px; height: 38px;
+  margin: 0 auto 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(37, 99, 235, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--blue);
+}
+.wb-dropzone-icon svg { width: 20px; height: 20px; }
+.wb-dropzone-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+.wb-dropzone-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.wb-dropzone-or {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  margin: 10px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.wb-dropzone-demo {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--blue);
+  background: none;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.wb-dropzone-demo:hover {
+  background: var(--blue);
+  color: #fff;
+  border-color: var(--blue);
+}
+
+/* File entry — designed as a precision ledger row */
+.wb-file {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+  background: transparent;
+}
+.wb-file:hover {
+  background: var(--bg);
+  border-color: var(--border);
+}
+.wb-file.active {
+  background: rgba(37, 99, 235, 0.05);
+  border-color: rgba(37, 99, 235, 0.25);
+  box-shadow: var(--shadow-xs);
+}
+.wb-file.active::before {
+  content: '';
+  position: absolute;
+  left: -1px; top: 8px; bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--blue);
+}
+
+.wb-file-icon {
+  width: 28px; height: 32px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.3px;
+  position: relative;
+  flex-shrink: 0;
+}
+.wb-file-icon::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  border-style: solid;
+  border-width: 0 6px 6px 0;
+  border-color: transparent rgba(255,255,255,0.35) transparent transparent;
+}
+.wb-file-icon--docx { background: #2b579a; }
+.wb-file-icon--pptx { background: #d24726; }
+.wb-file-icon--xlsx { background: #207244; }
+.wb-file-icon--pdf  { background: #e51c23; }
+.wb-file-icon--md   { background: #475569; }
+.wb-file-icon--html { background: #e34c26; }
+
+.wb-file-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wb-file-name {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.1px;
+}
+.wb-file-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-file-ts {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.65;
+  margin-top: 1px;
+  letter-spacing: 0.2px;
+}
+
+.wb-file-status {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+.wb-file-status--done {
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+.wb-file-status--parsing {
+  background: var(--blue);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  animation: wbBlink 1.1s ease-in-out infinite;
+}
+@keyframes wbBlink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.85); }
+}
+.wb-file-status--needs {
+  background: var(--warning);
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15);
+}
+.wb-file-status--error {
+  background: var(--coral);
+  box-shadow: 0 0 0 2px rgba(255, 107, 71, 0.15);
+}
+
+.wb-library-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.wb-library-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Center stage ── */
+.wb-stage {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  min-width: 0;
+  min-height: 0;
+}
+.wb-stage-header {
+  padding: 22px 32px 0;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+.wb-doc-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.wb-doc-icon {
+  width: 44px; height: 52px;
+  border-radius: 4px;
+  background: #2b579a;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+.wb-doc-icon::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  border-style: solid;
+  border-width: 0 10px 10px 0;
+  border-color: transparent rgba(255,255,255,0.35) transparent transparent;
+}
+.wb-doc-info { flex: 1; min-width: 0; }
+.wb-doc-title {
+  font-family: var(--font-headline);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.4px;
+  line-height: 1.25;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wb-doc-stats {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.wb-doc-stats span { display: flex; align-items: center; gap: 5px; }
+.wb-doc-stats strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.wb-doc-stats .sep {
+  width: 1px; height: 10px;
+  background: var(--border);
+  display: inline-block;
+}
+
+/* Tabs */
+.wb-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: -1px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.wb-tabs::-webkit-scrollbar { display: none; }
+.wb-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+.wb-tab:hover {
+  color: var(--text-primary);
+  background: rgba(37, 99, 235, 0.04);
+}
+.wb-tab.active {
+  color: var(--blue);
+  background: var(--bg);
+  border-color: var(--border);
+  position: relative;
+}
+.wb-tab.active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 6px 6px 0 0;
+}
+.wb-tab .wb-tab-count {
+  display: inline-block;
+  margin-left: 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 100px;
+  font-weight: 600;
+}
+.wb-tab.active .wb-tab-count {
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--blue);
+}
+
+/* Stage content scroll area */
+.wb-stage-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+}
+
+/* Block filter row */
+.wb-block-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.wb-filter {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wb-filter:hover {
+  border-color: var(--border-active);
+  color: var(--text-primary);
+}
+.wb-filter.active {
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: var(--bg);
+}
+.wb-filter-count {
+  display: inline-block;
+  margin-left: 4px;
+  opacity: 0.6;
+}
+
+/* Block cards */
+.wb-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(10px);
+  animation: fadeInUp 0.5s var(--ease-out-expo) forwards;
+}
+.wb-block:nth-child(1) { animation-delay: 0.04s; }
+.wb-block:nth-child(2) { animation-delay: 0.09s; }
+.wb-block:nth-child(3) { animation-delay: 0.14s; }
+.wb-block:nth-child(4) { animation-delay: 0.19s; }
+.wb-block:nth-child(5) { animation-delay: 0.24s; }
+.wb-block:nth-child(6) { animation-delay: 0.29s; }
+.wb-block:nth-child(7) { animation-delay: 0.34s; }
+
+.wb-block-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.wb-block-type {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+.wb-block-type--heading { background: rgba(37, 99, 235, 0.1); color: var(--blue); }
+.wb-block-type--table   { background: var(--teal-bg); color: var(--teal); }
+.wb-block-type--change  { background: var(--ai-orange-bg); color: var(--amber); }
+.wb-block-type--comment { background: var(--purple-bg); color: var(--purple); }
+.wb-block-type--para    { background: var(--bg-input); color: var(--text-muted); }
+.wb-block-type--image   { background: var(--contract-purple-bg); color: var(--contract-purple); }
+
+.wb-block-num {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+.wb-block-ctx {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.wb-only-badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  background: linear-gradient(135deg, rgba(0, 179, 122, 0.12), rgba(37, 99, 235, 0.12));
+  color: var(--primary);
+  border: 1px solid rgba(0, 179, 122, 0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.wb-only-badge::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 6px rgba(0, 179, 122, 0.6);
+}
+
+.wb-block-body {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+.wb-block-body--heading {
+  font-family: var(--font-headline);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.wb-block-body em {
+  font-style: normal;
+  background: rgba(217, 119, 6, 0.16);
+  color: var(--warning);
+  padding: 0 3px;
+  border-radius: 2px;
+  text-decoration: line-through;
+}
+.wb-block-body ins {
+  background: rgba(5, 150, 105, 0.16);
+  color: var(--success);
+  padding: 0 3px;
+  border-radius: 2px;
+  text-decoration: none;
+}
+
+/* Track-change attribution row */
+.wb-block-attr {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.wb-block-attr strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* Inline mini-table for table blocks */
+.wb-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.wb-mini-table th, .wb-mini-table td {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  background: var(--bg);
+}
+.wb-mini-table th {
+  background: var(--bg-input);
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+}
+.wb-mini-table td.merged {
+  background: rgba(13, 148, 136, 0.06);
+  position: relative;
+}
+.wb-mini-table td.merged::after {
+  content: 'colspan=2';
+  position: absolute;
+  bottom: 2px; right: 4px;
+  font-size: 8px;
+  color: var(--teal);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* ── Inspector (right rail) ── */
+.wb-inspector {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.wb-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 16px 14px;
+}
+.wb-panel-title {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wb-panel-title::before {
+  content: '';
+  width: 3px;
+  height: 11px;
+  background: var(--blue);
+  border-radius: 1px;
+}
+
+/* Insight rows */
+.wb-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.wb-insight:last-child { border-bottom: none; padding-bottom: 0; }
+.wb-insight-num {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  width: 38px;
+  text-align: right;
+  letter-spacing: -0.5px;
+}
+.wb-insight-num--accent { color: var(--primary); }
+.wb-insight-body {
+  flex: 1;
+  min-width: 0;
+}
+.wb-insight-label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.wb-insight-note {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.wb-insight-note .only {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Action buttons */
+.wb-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wb-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  width: 100%;
+}
+.wb-action:hover {
+  border-color: var(--blue);
+  background: rgba(37, 99, 235, 0.03);
+  transform: translateX(1px);
+}
+.wb-action-icon {
+  width: 22px; height: 22px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.wb-action-icon svg { width: 13px; height: 13px; }
+.wb-action:hover .wb-action-icon {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--blue);
+}
+.wb-action-label { flex: 1; }
+.wb-action-shortcut {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+/* Engine switcher — the hero of the inspector */
+.wb-engine {
+  background: linear-gradient(180deg, var(--bg-card), var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.wb-engine::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary) 50%, var(--warning) 50%);
+}
+.wb-engine-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.wb-engine-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  position: relative;
+  margin-bottom: 12px;
+}
+.wb-engine-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.22s var(--ease-out-expo);
+  letter-spacing: 0.4px;
+  position: relative;
+  z-index: 1;
+}
+.wb-engine-option .wb-led {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.4;
+  transition: all 0.22s var(--ease-out-expo);
+}
+.wb-engine-option.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+.wb-engine-option.active--wasm { color: var(--success); }
+.wb-engine-option.active--wasm .wb-led {
+  background: var(--success);
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(5, 150, 105, 0.55);
+  animation: wbPulse 2.4s var(--ease-out-expo) infinite;
+}
+.wb-engine-option.active--api { color: var(--warning); }
+.wb-engine-option.active--api .wb-led {
+  background: var(--warning);
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(217, 119, 6, 0.55);
+}
+.wb-engine-state {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.wb-engine-state strong {
+  display: block;
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.wb-engine-state .upgrade {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--warning);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  letter-spacing: 0.2px;
+}
+.wb-engine-state .upgrade:hover { text-decoration: underline; }
+
+/* AI key panel — unlocks PDF/image/audio/video parsing in-browser */
+.wb-aikey .wb-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wb-aikey-status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.wb-aikey-status.active {
+  background: rgba(5, 150, 105, 0.08);
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.25);
+}
+.wb-aikey-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+.wb-aikey-note code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-input);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text-secondary);
+}
+.wb-aikey-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.wb-aikey-row input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 0;
+}
+.wb-aikey-row input:focus {
+  border-color: var(--blue, #2563eb);
+  background: var(--bg-card);
+}
+.wb-aikey.has-key .wb-aikey-row input {
+  border-color: rgba(5, 150, 105, 0.35);
+  background: rgba(5, 150, 105, 0.04);
+}
+.wb-aikey-row button {
+  width: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.wb-aikey-row button:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.wb-aikey-row button svg { width: 14px; height: 14px; }
+.wb-aikey-link {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--blue, #2563eb);
+  text-decoration: none;
+  letter-spacing: 0.2px;
+}
+.wb-aikey-link:hover { text-decoration: underline; }
+
+/* Friction nudge — graduate to CLI / API */
+.wb-graduate {
+  background: linear-gradient(135deg, rgba(0, 179, 122, 0.04), rgba(37, 99, 235, 0.04));
+  border: 1px solid rgba(0, 179, 122, 0.18);
+  border-radius: var(--radius);
+  padding: 14px 14px 12px;
+  position: relative;
+}
+.wb-graduate-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--primary);
+  margin-bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.wb-graduate-label svg { width: 11px; height: 11px; }
+.wb-graduate-title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+.wb-graduate-cmd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--bg-code);
+  color: #e2e8f0;
+  padding: 8px 10px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wb-graduate-cmd code { color: #b8e600; }
+.wb-graduate-cmd-copy {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.55);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+.wb-graduate-cmd-copy svg { width: 13px; height: 13px; }
+.wb-graduate-cmd-copy:hover { color: #fff; }
+
+/* ── Mobile bottom toolbar (hidden by default) ── */
+.wb-mobile-bar { display: none; }
+
+/* ── Empty preview hint (when no doc selected) ── */
+.wb-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 80px 24px;
+  color: var(--text-muted);
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 1180px) {
+  .wb-grid { grid-template-columns: 264px minmax(0, 1fr) 308px; }
+  .wb-stage-header { padding: 18px 22px 0; }
+  .wb-stage-body { padding: 20px 22px 32px; }
+}
+
+@media (max-width: 900px) {
+  .wb-grid { grid-template-columns: 240px minmax(0, 1fr); }
+  .wb-rail--right { display: none; }
+}
+
+@media (max-width: 768px) {
+  .wb-grid { grid-template-columns: 1fr; }
+  .wb-rail--left, .wb-rail--right { display: none; }
+  .wb-rail--left.open, .wb-rail--right.open {
+    display: flex;
+    position: fixed;
+    bottom: 56px; left: 0; right: 0;
+    max-height: 70vh;
+    z-index: 50;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 40px rgba(0,0,0,0.18);
+    border-right: none; border-left: none;
+    border-top: 1px solid var(--border);
+    animation: wbSlideUp 0.3s var(--ease-out-expo);
+  }
+  @keyframes wbSlideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+
+  .wb-stage-header { padding: 16px 18px 0; }
+  .wb-doc-title { font-size: 18px; }
+  .wb-stage-body { padding: 18px 18px 100px; }
+
+  /* Mobile bottom toolbar */
+  .wb-mobile-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    padding: 8px;
+    gap: 8px;
+    z-index: 60;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+  }
+  .wb-mobile-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 8px 6px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .wb-mobile-btn .icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+  }
+  .wb-mobile-btn .icon svg { width: 17px; height: 17px; }
+  .wb-mobile-btn .badge {
+    position: absolute;
+    top: 2px; right: 18%;
+    min-width: 14px; height: 14px;
+    border-radius: 100px;
+    background: var(--blue);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+  }
+  .wb-mobile-btn.active {
+    color: var(--blue);
+    background: rgba(37, 99, 235, 0.06);
+    border-color: rgba(37, 99, 235, 0.2);
+  }
+}
+</style>
+</head>
+
+<body class="wb">
+
+<!-- Shared header injected by components.js -->
+<div id="header-mount"></div>
+
+<main class="wb-shell">
+
+  <!-- ── 3-region console ───────────────────────────────── -->
+  <div class="wb-grid">
+
+    <!-- ─── LEFT: Library ────────────────────────────── -->
+    <aside class="wb-rail wb-rail--left">
+      <div class="wb-rail-header">
+        <div class="wb-rail-title">Library</div>
+        <div class="wb-rail-count" id="wb-library-count">0 files</div>
+      </div>
+
+      <div class="wb-library">
+
+        <!-- Dropzone -->
+        <div class="wb-dropzone" id="wb-dropzone" tabindex="0">
+          <input type="file" id="wb-file-input" multiple hidden
+                 accept=".docx,.pptx,.xlsx,.html,.htm,.md,.csv,.tsv,.eml,.mbox,.odt,.odp,.ods,.epub,.pdf,.png,.jpg,.jpeg">
+          <div class="wb-dropzone-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <div class="wb-dropzone-title">Drop documents</div>
+          <div class="wb-dropzone-hint">DOCX · PPTX · XLSX · MD<br>HTML · CSV · EML</div>
+          <div class="wb-dropzone-or">— or —</div>
+          <button class="wb-dropzone-demo" id="wb-load-demo">Load demo set</button>
+        </div>
+
+        <div class="wb-library-divider">in this session</div>
+
+        <!-- File rows are injected by the controller -->
+        <div id="wb-file-list">
+          <div class="wb-library-empty">No documents yet.<br>Drop a file or load the demo set.</div>
+        </div>
+
+        <div class="wb-library-divider">privacy</div>
+        <div style="padding: 4px 12px; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); line-height: 1.6;">
+          <span class="wb-dot"></span>parsed entirely in your browser<br>
+          files never leave this device
+        </div>
+      </div>
+    </aside>
+
+    <!-- ─── CENTER: Active document ──────────────────── -->
+    <section class="wb-stage">
+      <!-- Engine init banner — shown until WASM is ready -->
+      <div class="wb-engine-loading" id="wb-engine-loading">
+        <div class="wb-spinner"></div>
+        <span id="wb-engine-loading-text">Loading WASM parse engine (≈35 MB, one-time)…</span>
+      </div>
+
+      <!-- Empty state — no document selected -->
+      <div class="wb-empty-stage" id="wb-empty-stage">
+        <div class="wb-empty-stage-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="9" y1="13" x2="15" y2="13"/>
+            <line x1="9" y1="17" x2="15" y2="17"/>
+          </svg>
+        </div>
+        <div class="wb-empty-stage-title">No document loaded</div>
+        <div class="wb-empty-stage-text">
+          Drop a file into the library, or load the demo set to see real
+          parser output. Everything runs locally in your browser.
+        </div>
+      </div>
+
+      <!-- Real document view — populated by the controller -->
+      <header class="wb-stage-header" id="wb-stage-header" style="display: none;">
+        <div class="wb-doc-meta">
+          <div class="wb-doc-icon" id="wb-doc-icon">DOC</div>
+          <div class="wb-doc-info">
+            <h1 class="wb-doc-title" id="wb-doc-title">—</h1>
+            <div class="wb-doc-stats" id="wb-doc-stats"></div>
+          </div>
+        </div>
+
+        <nav class="wb-tabs" role="tablist" id="wb-tabs">
+          <button class="wb-tab" data-tab="preview">Original</button>
+          <button class="wb-tab active" data-tab="blocks">Blocks <span class="wb-tab-count" id="wb-count-blocks">0</span></button>
+          <button class="wb-tab" data-tab="json">JSON</button>
+          <button class="wb-tab" data-tab="markdown">Markdown</button>
+          <button class="wb-tab" data-tab="a2ui">A2UI</button>
+        </nav>
+      </header>
+
+      <div class="wb-stage-body" id="wb-stage-body" style="display: none;">
+        <!-- Block filter pills (only visible on the Blocks tab) -->
+        <div class="wb-block-filters" id="wb-block-filters"></div>
+        <!-- Tab panels -->
+        <div id="wb-panel-preview" style="display:none;"></div>
+        <div id="wb-panel-blocks"></div>
+        <pre id="wb-panel-json" style="display:none; background: var(--bg-code); color: #e2e8f0; padding: 18px 20px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 11px; line-height: 1.55; overflow: auto; white-space: pre-wrap; word-break: break-word;"></pre>
+        <pre id="wb-panel-markdown" style="display:none; background: var(--bg-card); border: 1px solid var(--border); padding: 20px 24px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow: auto; white-space: pre-wrap;"></pre>
+        <div id="wb-panel-a2ui" style="display:none;"></div>
+      </div>
+    </section>
+
+    <!-- ─── RIGHT: Inspector ─────────────────────────── -->
+    <aside class="wb-rail wb-rail--right">
+      <div class="wb-rail-header">
+        <div class="wb-rail-title">Inspector</div>
+        <button class="wb-rail-action">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          refresh
+        </button>
+      </div>
+
+      <div class="wb-inspector">
+
+        <!-- Structural insights panel -->
+        <div class="wb-panel">
+          <div class="wb-panel-title">Structural readouts</div>
+
+          <div class="wb-insight">
+            <div class="wb-insight-num wb-insight-num--accent" id="wb-i-changes">0</div>
+            <div class="wb-insight-body">
+              <div class="wb-insight-label">Tracked changes</div>
+              <div class="wb-insight-note">with author + timestamp · <span class="only">0/5 competitors extract these</span></div>
+            </div>
+          </div>
+
+          <div class="wb-insight">
+            <div class="wb-insight-num wb-insight-num--accent" id="wb-i-merged">0</div>
+            <div class="wb-insight-body">
+              <div class="wb-insight-label">Merged cells</div>
+              <div class="wb-insight-note">colspan / rowspan preserved as typed metadata</div>
+            </div>
+          </div>
+
+          <div class="wb-insight">
+            <div class="wb-insight-num wb-insight-num--accent" id="wb-i-comments">0</div>
+            <div class="wb-insight-body">
+              <div class="wb-insight-label">Comments</div>
+              <div class="wb-insight-note">author, anchor, reply threads intact</div>
+            </div>
+          </div>
+
+          <div class="wb-insight">
+            <div class="wb-insight-num" id="wb-i-headfoot">0</div>
+            <div class="wb-insight-body">
+              <div class="wb-insight-label">Headers / footers</div>
+              <div class="wb-insight-note">extracted per-section · not flattened</div>
+            </div>
+          </div>
+
+          <div class="wb-insight">
+            <div class="wb-insight-num" id="wb-i-ms">—</div>
+            <div class="wb-insight-body">
+              <div class="wb-insight-label">Milliseconds</div>
+              <div class="wb-insight-note">deterministic XML · no AI involved</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions panel -->
+        <div class="wb-panel">
+          <div class="wb-panel-title">Actions</div>
+          <div class="wb-actions">
+            <button class="wb-action">
+              <div class="wb-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </div>
+              <span class="wb-action-label">Download Markdown</span>
+              <span class="wb-action-shortcut">⌘D</span>
+            </button>
+
+            <button class="wb-action">
+              <div class="wb-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </div>
+              <span class="wb-action-label">Copy CLI command</span>
+              <span class="wb-action-shortcut">⌘L</span>
+            </button>
+
+            <button class="wb-action">
+              <div class="wb-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="16 18 22 12 16 6"/>
+                  <polyline points="8 6 2 12 8 18"/>
+                </svg>
+              </div>
+              <span class="wb-action-label">Copy SDK snippet</span>
+              <span class="wb-action-shortcut">⌘S</span>
+            </button>
+
+            <button class="wb-action">
+              <div class="wb-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </div>
+              <span class="wb-action-label">Send to API</span>
+              <span class="wb-action-shortcut">⇧↵</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- AI key panel — unlocks PDF / image / audio / video parsing -->
+        <div class="wb-panel wb-aikey" id="wb-aikey-panel">
+          <div class="wb-panel-title">
+            <span>AI model key</span>
+            <span class="wb-aikey-status" id="wb-aikey-status">not set</span>
+          </div>
+          <p class="wb-aikey-note">
+            Unlocks PDF, image, audio &amp; video parsing in your browser.
+            Stored only in <code>localStorage</code> — never sent to our servers.
+          </p>
+          <div class="wb-aikey-row">
+            <input type="password" id="wb-aikey-input" placeholder="AIza…" autocomplete="off" spellcheck="false">
+            <button type="button" id="wb-aikey-toggle" aria-label="Show/hide key" title="Show / hide key">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+          <a class="wb-aikey-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">
+            Get a free Google AI Studio key →
+          </a>
+        </div>
+
+        <!-- Engine switcher — the hardware toggle -->
+        <div class="wb-engine">
+          <div class="wb-engine-label">Parse engine</div>
+          <div class="wb-engine-switch" role="radiogroup">
+            <div class="wb-engine-option active active--wasm" role="radio" aria-checked="true">
+              <span class="wb-led"></span>
+              WASM
+            </div>
+            <div class="wb-engine-option" role="radio" aria-checked="false">
+              <span class="wb-led"></span>
+              API
+            </div>
+          </div>
+          <div class="wb-engine-state">
+            <strong>In-browser · free · private</strong>
+            Office formats parse locally with zero upload. Switch to API for
+            PDFs, files over 20 MB, or format conversion.
+            <a class="upgrade" href="#">→ Sign in to unlock the API ›</a>
+          </div>
+        </div>
+
+        <!-- Friction nudge: graduate to CLI -->
+        <div class="wb-graduate">
+          <div class="wb-graduate-label">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            Working at scale?
+          </div>
+          <div class="wb-graduate-title">
+            Parse hundreds of files in one command — same engine, zero browser limits.
+          </div>
+          <div class="wb-graduate-cmd">
+            <code id="wb-cli-cmd">./bin/docparse &lt;file&gt;</code>
+            <button class="wb-graduate-cmd-copy" aria-label="Copy command">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ── Mobile bottom toolbar ────────────────────────── -->
+  <nav class="wb-mobile-bar" aria-label="Workbench panels">
+    <button class="wb-mobile-btn">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="8" y1="6" x2="21" y2="6"/>
+          <line x1="8" y1="12" x2="21" y2="12"/>
+          <line x1="8" y1="18" x2="21" y2="18"/>
+          <line x1="3" y1="6" x2="3.01" y2="6"/>
+          <line x1="3" y1="12" x2="3.01" y2="12"/>
+          <line x1="3" y1="18" x2="3.01" y2="18"/>
+        </svg>
+      </span>
+      Library
+      <span class="badge">5</span>
+    </button>
+    <button class="wb-mobile-btn active">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+      </span>
+      Document
+    </button>
+    <button class="wb-mobile-btn">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="21" x2="4" y2="14"/>
+          <line x1="4" y1="10" x2="4" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="12"/>
+          <line x1="12" y1="8" x2="12" y2="3"/>
+          <line x1="20" y1="21" x2="20" y2="16"/>
+          <line x1="20" y1="12" x2="20" y2="3"/>
+          <line x1="1" y1="14" x2="7" y2="14"/>
+          <line x1="9" y1="8" x2="15" y2="8"/>
+          <line x1="17" y1="16" x2="23" y2="16"/>
+        </svg>
+      </span>
+      Inspector
+    </button>
+  </nav>
+
+  <div id="footer-mount"></div>
+</main>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<!-- WASM parse engine — same module the homepage demo uses -->
+<script src="vendor/jszip.min.js"></script>
+<!-- Mammoth.js powers the DOCX "Original" preview tab via DocParseEngine.renderPreviewInto -->
+<script src="vendor/mammoth.browser.min.js"></script>
+<script src="js/docparse-blocks.js"></script>
+<script src="js/wasm-demo.js"></script>
+<script>
+/* ─────────────────────────────────────────────────────────────
+   Workbench controller — Phase 1
+   Drives a JS state object from real WASM parses, renders into
+   the static shell. Reuses window.DocParseEngine from wasm-demo.js.
+   ───────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+
+  // ── State ───────────────────────────────────────────────────
+  var state = {
+    files: [],         // [{ id, name, ext, sizeKB, ms, blocks, status, error }]
+    activeId: null,
+    tab: 'blocks',     // 'blocks' | 'json' | 'markdown'
+    filter: 'all'
+  };
+  var nextId = 1;
+
+  // ── Element refs ─────────────────────────────────────────────
+  var $ = function (id) { return document.getElementById(id); };
+  var dropzone        = $('wb-dropzone');
+  var fileInput       = $('wb-file-input');
+  var fileList        = $('wb-file-list');
+  var libraryCount    = $('wb-library-count');
+  var loadDemoBtn     = $('wb-load-demo');
+  var engineLoading   = $('wb-engine-loading');
+  var engineLoadingTxt= $('wb-engine-loading-text');
+  var emptyStage      = $('wb-empty-stage');
+  var wbEmptyStageDefault = emptyStage.innerHTML;
+  var stageHeader     = $('wb-stage-header');
+  var stageBody       = $('wb-stage-body');
+  var docTitle        = $('wb-doc-title');
+  var docIcon         = $('wb-doc-icon');
+  var docStats        = $('wb-doc-stats');
+  var countBlocks     = $('wb-count-blocks');
+  var blockFilters    = $('wb-block-filters');
+  var panelPreview    = $('wb-panel-preview');
+  var panelBlocks     = $('wb-panel-blocks');
+  var panelJson       = $('wb-panel-json');
+  var panelMarkdown   = $('wb-panel-markdown');
+  var panelA2UI       = $('wb-panel-a2ui');
+  var cliCmd          = $('wb-cli-cmd');
+
+  // ── Utilities ────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function fmtSize(kb) {
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    return (kb / 1024).toFixed(2) + ' MB';
+  }
+  // Compact relative timestamp for the library list. Returns '' for falsy
+  // input so legacy entries (no addedAt) just skip the timestamp row.
+  function fmtRelativeTime(ts) {
+    if (!ts) return '';
+    var diffSec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (diffSec < 5)     return 'just now';
+    if (diffSec < 60)    return diffSec + 's ago';
+    var diffMin = Math.round(diffSec / 60);
+    if (diffMin < 60)    return diffMin + 'm ago';
+    var diffHr = Math.round(diffMin / 60);
+    if (diffHr < 24)     return diffHr + 'h ago';
+    var diffDay = Math.round(diffHr / 24);
+    if (diffDay < 7)     return diffDay + 'd ago';
+    // Beyond a week, fall back to a short date.
+    return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  function iconColor(ext) {
+    return ({
+      docx: '#2b579a', pptx: '#d24726', xlsx: '#207244',
+      pdf:  '#e51c23', md:   '#475569', html: '#e34c26', htm: '#e34c26',
+      csv:  '#207244', tsv:  '#207244', eml:  '#475569'
+    })[ext] || '#475569';
+  }
+  function iconLabel(ext) { return (ext || '?').toUpperCase().slice(0, 4); }
+
+  function toast(msg, kind) {
+    var t = document.createElement('div');
+    t.className = 'wb-toast' + (kind ? ' ' + kind : '');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add('show'); });
+    setTimeout(function () {
+      t.classList.remove('show');
+      setTimeout(function () { t.remove(); }, 300);
+    }, 3500);
+  }
+
+  // ── WASM engine status ───────────────────────────────────────
+  function pollEngine() {
+    if (!window.DocParseEngine) return;
+    if (window.DocParseEngine.isReady()) {
+      engineLoading.classList.add('ready');
+      return;
+    }
+    if (window.DocParseEngine.getError()) {
+      engineLoading.classList.add('error');
+      engineLoadingTxt.textContent = 'Engine failed to load: ' + window.DocParseEngine.getError();
+      return;
+    }
+    setTimeout(pollEngine, 250);
+  }
+  // Kick off engine init explicitly (so it works on mobile too)
+  function ensureEngine() {
+    if (!window.DocParseEngine) return Promise.reject(new Error('DocParseEngine not loaded'));
+    if (window.DocParseEngine.isReady()) return Promise.resolve();
+    return window.DocParseEngine.init();
+  }
+
+  // ── Library rendering ────────────────────────────────────────
+  function renderLibrary() {
+    libraryCount.textContent = state.files.length + ' file' + (state.files.length === 1 ? '' : 's');
+
+    if (state.files.length === 0) {
+      fileList.innerHTML = '<div class="wb-library-empty">No documents yet.<br>Drop a file or load the demo set.</div>';
+      return;
+    }
+
+    // Newest file at the top — sort by addedAt descending. We don't mutate
+    // state.files (insertion order matters for setActive/iteration); we just
+    // render a reversed view.
+    var ordered = state.files.slice().sort(function (a, b) {
+      return (b.addedAt || 0) - (a.addedAt || 0);
+    });
+    fileList.innerHTML = ordered.map(function (f) {
+      var statusClass = 'wb-file-status--' + (
+        f.status === 'done'    ? 'done'    :
+        f.status === 'parsing' ? 'parsing' :
+        f.status === 'needs'   ? 'needs'   : 'error'
+      );
+      var sub = f.status === 'parsing' ? 'parsing…'
+              : f.status === 'error'   ? (f.error || 'parse failed')
+              : f.status === 'needs'   ? fmtSize(f.sizeKB) + ' · needs API'
+              : fmtSize(f.sizeKB) + ' · ' + (f.blocks ? flattenBlocks(f.blocks).length : 0) + ' blocks · ' + f.ms + 'ms';
+      var ts = fmtRelativeTime(f.addedAt);
+      return '' +
+        '<div class="wb-file ' + (f.id === state.activeId ? 'active' : '') + '" data-id="' + f.id + '">' +
+          '<div class="wb-file-icon" style="background:' + iconColor(f.ext) + '">' + escHtml(iconLabel(f.ext)) + '</div>' +
+          '<div class="wb-file-meta">' +
+            '<div class="wb-file-name">' + escHtml(f.name) + '</div>' +
+            '<div class="wb-file-sub">' + escHtml(sub) + '</div>' +
+            (ts ? '<div class="wb-file-ts" title="' + escHtml(new Date(f.addedAt).toLocaleString()) + '">' + escHtml(ts) + '</div>' : '') +
+          '</div>' +
+          '<div class="wb-file-status ' + statusClass + '"></div>' +
+        '</div>';
+    }).join('');
+
+    fileList.querySelectorAll('.wb-file').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var id = parseInt(el.getAttribute('data-id'), 10);
+        setActive(id);
+      });
+    });
+  }
+
+  // ── Stage / doc rendering ────────────────────────────────────
+  function setActive(id) {
+    state.activeId = id;
+    state.filter = 'all';
+    renderLibrary();
+    renderStage();
+  }
+
+  function activeFile() {
+    return state.files.find(function (f) { return f.id === state.activeId; });
+  }
+
+  function renderStage() {
+    var f = activeFile();
+    if (!f) {
+      emptyStage.style.display = '';
+      emptyStage.innerHTML = wbEmptyStageDefault;
+      stageHeader.style.display = 'none';
+      stageBody.style.display = 'none';
+      resetInsights();
+      return;
+    }
+    if (f.status === 'error' || f.status === 'needs') {
+      emptyStage.style.display = '';
+      var isNeeds = f.status === 'needs';
+      var heading = isNeeds ? 'Needs the API engine' : 'Parse failed';
+      var sub = isNeeds
+        ? 'This format runs on the hosted API. Sign in (Phase 3) to enable it.'
+        : 'The WASM parser returned an error for this file. Full details below and in the browser console.';
+      var safeErr = (f.error || 'unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      emptyStage.innerHTML =
+        '<div class="wb-stage-error">' +
+          '<div class="wb-stage-error-icon ' + (isNeeds ? 'needs' : 'error') + '">' +
+            (isNeeds
+              ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+              : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>') +
+          '</div>' +
+          '<h3 class="wb-stage-error-title">' + heading + '</h3>' +
+          '<p class="wb-stage-error-file"><strong>' + f.name + '</strong> · ' + f.ext.toUpperCase() + ' · ' + fmtSize(f.sizeKB) + '</p>' +
+          '<p class="wb-stage-error-sub">' + sub + '</p>' +
+          '<pre class="wb-stage-error-detail">' + safeErr + '</pre>' +
+          '<button class="wb-stage-error-copy" type="button">Copy error</button>' +
+        '</div>';
+      var copyBtn = emptyStage.querySelector('.wb-stage-error-copy');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function () {
+          navigator.clipboard.writeText(f.name + ' (' + f.ext + ', ' + f.sizeKB + ' KB)\n' + (f.error || ''));
+          toast('Error copied to clipboard', 'success');
+        });
+      }
+      stageHeader.style.display = 'none';
+      stageBody.style.display = 'none';
+      resetInsights();
+      return;
+    }
+    if (f.status !== 'done') {
+      emptyStage.style.display = '';
+      emptyStage.innerHTML = wbEmptyStageDefault;
+      stageHeader.style.display = 'none';
+      stageBody.style.display = 'none';
+      resetInsights();
+      return;
+    }
+
+    emptyStage.style.display = 'none';
+    stageHeader.style.display = '';
+    stageBody.style.display = '';
+
+    docTitle.textContent = f.name;
+    docIcon.textContent = iconLabel(f.ext);
+    docIcon.style.background = iconColor(f.ext);
+    var leafCount = flattenBlocks(f.blocks).length;
+    docStats.innerHTML = '' +
+      '<span><strong>' + fmtSize(f.sizeKB) + '</strong> file size</span>' +
+      '<span class="sep"></span>' +
+      '<span><strong>' + leafCount + '</strong> blocks</span>' +
+      '<span class="sep"></span>' +
+      '<span><strong>' + f.ms + '&nbsp;ms</strong> parse time</span>' +
+      '<span class="sep"></span>' +
+      '<span style="color: var(--success); display: inline-flex; align-items: center;"><span class="wb-dot"></span>parsed via WASM · no upload</span>';
+    countBlocks.textContent = leafCount;
+    cliCmd.textContent = './bin/docparse ' + f.name;
+
+    renderInsights(f);
+    renderBlockFilters(f);
+    renderTab(f);
+  }
+
+  function renderTab(f) {
+    panelPreview.style.display  = 'none';
+    panelBlocks.style.display   = 'none';
+    panelJson.style.display     = 'none';
+    panelMarkdown.style.display = 'none';
+    panelA2UI.style.display     = 'none';
+    // Block filter pills only make sense on the Blocks tab.
+    if (blockFilters) blockFilters.style.display = state.tab === 'blocks' ? '' : 'none';
+
+    if (state.tab === 'blocks') {
+      panelBlocks.style.display = '';
+      panelBlocks.innerHTML = renderBlocksHtml(f.blocks);
+    } else if (state.tab === 'json') {
+      panelJson.style.display = '';
+      panelJson.textContent = JSON.stringify(f.blocks, null, 2);
+    } else if (state.tab === 'markdown') {
+      panelMarkdown.style.display = '';
+      panelMarkdown.textContent = blocksToMarkdown(f.blocks);
+    } else if (state.tab === 'preview') {
+      panelPreview.style.display = '';
+      // Render once per active file; cache via previewRendered flag so flipping
+      // tabs doesn't re-parse XLSX/PPTX or re-blit Mammoth output.
+      if (!f.previewRendered) {
+        panelPreview.innerHTML = '<div class="office-preview-fallback">Rendering preview…</div>';
+        if (window.DocParseEngine && f.file) {
+          window.DocParseEngine.renderPreviewInto(f.file, panelPreview).then(function () {
+            f.previewRendered = true;
+          }).catch(function (err) {
+            console.error('[workbench] preview failed for ' + f.name, err);
+            panelPreview.innerHTML = '<div class="office-preview-fallback">Preview failed: ' + escHtml(err && err.message || String(err)) + '</div>';
+          });
+        } else {
+          panelPreview.innerHTML = '<div class="office-preview-fallback">Preview unavailable (engine not loaded)</div>';
+        }
+      }
+    } else if (state.tab === 'a2ui') {
+      panelA2UI.style.display = '';
+      if (!f.a2uiRendered) {
+        if (window.DocParseEngine) {
+          if (f.a2uiNodes == null) {
+            f.a2uiNodes = window.DocParseEngine.convertToA2UI(f.blocks);
+          }
+          window.DocParseEngine.renderA2UIInto(f.a2uiNodes, panelA2UI);
+          f.a2uiRendered = true;
+        } else {
+          panelA2UI.innerHTML = '<div class="office-preview-fallback">A2UI unavailable (engine not loaded)</div>';
+        }
+      }
+      // Replay the streaming animation every time the tab becomes visible.
+      if (window.DocParseEngine && f.a2uiRendered) {
+        window.DocParseEngine.streamA2UI(panelA2UI);
+      }
+    }
+  }
+
+  // ── Block rendering ──────────────────────────────────────────
+  // All block transforms come from the shared DocParseBlocks module so the
+  // homepage demo and workbench cannot drift. The workbench-specific bit
+  // here is the filter mapping (which UI category each canonical type
+  // belongs to) — that lives with the UI, not the transform layer.
+  var DPB = window.DocParseBlocks;
+  function blockTypeOf(b) {
+    var t = DPB.typeOf(b);
+    // Workbench groups list/text/unknown under "para" for filtering purposes
+    if (t === 'list' || t === 'text' || t === 'unknown') return 'para';
+    return t;
+  }
+  var flattenBlocks = DPB.flatten;
+  var isMergedTable = DPB.isMergedTable;
+  var cellText      = DPB.cellText;
+
+  function passesFilter(b) {
+    if (state.filter === 'all') return true;
+    var t = blockTypeOf(b);
+    if (state.filter === 'headings') return t === 'heading';
+    if (state.filter === 'tables')   return t === 'table';
+    if (state.filter === 'changes')  return t === 'change';
+    if (state.filter === 'comments') return t === 'comment';
+    if (state.filter === 'paragraphs') return t === 'para';
+    return true;
+  }
+
+  function renderBlocksHtml(blocks) {
+    var flat = flattenBlocks(blocks);
+    var visible = flat.filter(passesFilter);
+    if (visible.length === 0) {
+      return '<div style="padding: 40px 20px; text-align: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">No blocks match this filter.</div>';
+    }
+    return visible.map(function (b, i) {
+      var t = blockTypeOf(b);
+      var only = (t === 'change' || t === 'comment' || isMergedTable(b))
+        ? '<span class="wb-only-badge">Only AILANG Parse</span>' : '';
+      var ctx = b._sectionKind ? '<span class="wb-block-ctx">' + escHtml(b._sectionKind) + '</span>' : '';
+      var head = '' +
+        '<div class="wb-block-head">' +
+          '<span class="wb-block-type wb-block-type--' + t + '">' + blockHeadLabel(b, t) + '</span>' +
+          ctx +
+          '<span class="wb-block-num">block ' + String(flat.indexOf(b) + 1).padStart(2, '0') + '</span>' +
+          only +
+        '</div>';
+      return '<article class="wb-block">' + head + renderBlockBody(b, t) + '</article>';
+    }).join('');
+  }
+
+  function blockHeadLabel(b, t) {
+    if (t === 'heading') return 'Heading · H' + (b.level || 1);
+    if (t === 'table') {
+      var rows = (b.rows || []).length;
+      var cols = (b.headers || []).length || ((b.rows && b.rows[0]) ? b.rows[0].length : 0);
+      return 'Table · ' + rows + '×' + cols;
+    }
+    if (t === 'change')  return 'Tracked change';
+    if (t === 'comment') return 'Comment';
+    if (t === 'image')   return 'Image';
+    if (b.kind === 'header') return 'Header';
+    if (b.kind === 'footer') return 'Footer';
+    return (b.type || 'block').charAt(0).toUpperCase() + (b.type || 'block').slice(1);
+  }
+
+  function renderBlockBody(b, t) {
+    if (t === 'heading') {
+      return '<div class="wb-block-body wb-block-body--heading">' + escHtml(b.text || '') + '</div>';
+    }
+    if (t === 'table') {
+      var headers = (b.headers || []).map(cellText);
+      var head = headers.length
+        ? '<thead><tr>' + headers.map(function (h) { return '<th>' + escHtml(h) + '</th>'; }).join('') + '</tr></thead>'
+        : '';
+      var bodyRows = (b.rows || []).map(function (row) {
+        var cells = (Array.isArray(row) ? row : []).map(function (c) {
+          if (c && typeof c === 'object' && (c.colSpan > 1 || c.rowSpan > 1 || c.merged)) {
+            var attrs = '';
+            if (c.colSpan > 1) attrs += ' colspan="' + c.colSpan + '"';
+            if (c.rowSpan > 1) attrs += ' rowspan="' + c.rowSpan + '"';
+            return '<td class="merged"' + attrs + '>' + escHtml(cellText(c)) + '</td>';
+          }
+          return '<td>' + escHtml(cellText(c)) + '</td>';
+        }).join('');
+        return '<tr>' + cells + '</tr>';
+      }).join('');
+      return '<table class="wb-mini-table">' + head + '<tbody>' + bodyRows + '</tbody></table>';
+    }
+    if (t === 'change') {
+      var orig = b.original || b.deleted || '';
+      var rev  = b.revised  || b.inserted || b.text || '';
+      var attr = '';
+      if (b.author || b.date || b.changeType) {
+        attr = '<div class="wb-block-attr">' +
+          (b.author ? '<span><strong>author</strong> ' + escHtml(b.author) + '</span>' : '') +
+          (b.date   ? '<span><strong>date</strong> ' + escHtml(b.date) + '</span>' : '') +
+          (b.changeType ? '<span><strong>type</strong> ' + escHtml(b.changeType) + '</span>' : '') +
+        '</div>';
+      }
+      return '<div class="wb-block-body">' +
+        (orig ? '<em>' + escHtml(orig) + '</em>' : '') +
+        (rev  ? '<ins>' + escHtml(rev) + '</ins>' : '') +
+      '</div>' + attr;
+    }
+    if (t === 'comment') {
+      var attrC = '';
+      if (b.author || b.anchor) {
+        attrC = '<div class="wb-block-attr">' +
+          (b.author ? '<span><strong>author</strong> ' + escHtml(b.author) + '</span>' : '') +
+          (b.anchor ? '<span><strong>anchor</strong> ' + escHtml(b.anchor) + '</span>' : '') +
+        '</div>';
+      }
+      return '<div class="wb-block-body" style="font-style: italic; color: var(--text-secondary);">' +
+        '"' + escHtml(b.text || '') + '"' +
+      '</div>' + attrC;
+    }
+    if (t === 'image') {
+      return '<div class="wb-block-body" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">' +
+        '[image' + (b.alt ? ' · ' + escHtml(b.alt) : '') + (b.description ? ' · ' + escHtml(b.description) : '') + ']' +
+      '</div>';
+    }
+    // List
+    if (b.type === 'list' && Array.isArray(b.items)) {
+      var items = b.items.map(function (it) { return '<li>' + escHtml(it) + '</li>'; }).join('');
+      return '<div class="wb-block-body">' + (b.ordered ? '<ol>' : '<ul>') + items + (b.ordered ? '</ol>' : '</ul>') + '</div>';
+    }
+    // Section / header / footer / paragraph fallback
+    var text = b.text || '';
+    if (!text && Array.isArray(b.blocks)) {
+      text = b.blocks.map(function (sub) { return cellText(sub) || sub.text || ''; }).filter(Boolean).join(' · ');
+    }
+    return '<div class="wb-block-body">' + escHtml(text || '(empty)') + '</div>';
+  }
+
+  var blocksToMarkdown = DPB.toMarkdown;
+
+  // ── Insights ─────────────────────────────────────────────────
+  function resetInsights() {
+    $('wb-i-changes').textContent = '0';
+    $('wb-i-merged').textContent  = '0';
+    $('wb-i-comments').textContent= '0';
+    $('wb-i-headfoot').textContent= '0';
+    $('wb-i-ms').textContent      = '—';
+  }
+  function renderInsights(f) {
+    var i = DPB.computeInsights(f.blocks);
+    $('wb-i-changes').textContent  = i.changes;
+    $('wb-i-merged').textContent   = i.merged;
+    $('wb-i-comments').textContent = i.comments;
+    $('wb-i-headfoot').textContent = i.headfoot;
+    $('wb-i-ms').textContent       = f.ms;
+  }
+
+  // ── Block filter pills ───────────────────────────────────────
+  function renderBlockFilters(f) {
+    var flat = flattenBlocks(f.blocks);
+    var counts = { all: flat.length, headings: 0, paragraphs: 0, tables: 0, changes: 0, comments: 0 };
+    flat.forEach(function (b) {
+      var t = blockTypeOf(b);
+      if (t === 'heading') counts.headings++;
+      else if (t === 'table') counts.tables++;
+      else if (t === 'change') counts.changes++;
+      else if (t === 'comment' || b.kind === 'comment') counts.comments++;
+      else counts.paragraphs++;
+    });
+    var labels = [
+      ['all',        'All'],
+      ['headings',   'Headings'],
+      ['paragraphs', 'Paragraphs'],
+      ['tables',     'Tables'],
+      ['changes',    'Changes'],
+      ['comments',   'Comments']
+    ];
+    blockFilters.innerHTML = labels.filter(function (l) { return counts[l[0]] > 0; }).map(function (l) {
+      return '<button class="wb-filter ' + (state.filter === l[0] ? 'active' : '') + '" data-filter="' + l[0] + '">' +
+        l[1] + ' <span class="wb-filter-count">' + counts[l[0]] + '</span></button>';
+    }).join('');
+    blockFilters.querySelectorAll('.wb-filter').forEach(function (el) {
+      el.addEventListener('click', function () {
+        state.filter = el.getAttribute('data-filter');
+        renderBlockFilters(activeFile());
+        renderTab(activeFile());
+      });
+    });
+  }
+
+  // ── Adding files ─────────────────────────────────────────────
+  async function addFile(file) {
+    var ext = file.name.split('.').pop().toLowerCase();
+    var entry = {
+      id: nextId++,
+      name: file.name,
+      ext: ext,
+      sizeKB: parseFloat((file.size / 1024).toFixed(1)),
+      ms: 0,
+      // Wall-clock add time, used for sorting (newest first) and for the
+      // relative timestamp shown in the library row.
+      addedAt: Date.now(),
+      blocks: [],
+      // Keep the File handle so the Original/Preview tab and re-parses can
+      // re-read the bytes without re-prompting the user. The browser keeps
+      // these alive cheaply (no upload, no copy).
+      file: file,
+      // Lazily-built A2UI nodes from convertToA2UI; null until the user opens
+      // the A2UI tab. Cached so flipping tabs back-and-forth is instant.
+      a2uiNodes: null,
+      previewRendered: false,
+      a2uiRendered: false,
+      status: 'parsing',
+      error: null
+    };
+    state.files.push(entry);
+    if (state.activeId == null) state.activeId = entry.id;
+    renderLibrary();
+    renderStage();
+
+    try {
+      await ensureEngine();
+      console.groupCollapsed('[workbench] parse ' + entry.name + ' (' + entry.ext + ', ' + entry.sizeKB + ' KB)');
+      var result = await window.DocParseEngine.parseFile(file);
+      console.log('parsed in ' + result.ms + 'ms,', result.blocks.length, 'blocks');
+      console.groupEnd();
+      entry.blocks = result.blocks;
+      entry.ms = result.ms;
+      entry.status = 'done';
+      renderLibrary();
+      if (state.activeId === entry.id) renderStage();
+    } catch (err) {
+      // Always log the full error to the console so it's copyable, even if
+      // the WASM runtime swallowed its own stack on the way out.
+      console.groupEnd(); // close any open parse group
+      console.error('[workbench] parse failed: ' + entry.name, {
+        file: entry.name,
+        ext: entry.ext,
+        sizeKB: entry.sizeKB,
+        code: err && err.code,
+        message: err && err.message,
+        error: err
+      });
+      if (err && err.code === 'NEEDS_API_KEY') {
+        // Format needs an AI model — point user at the inspector key panel.
+        entry.status = 'needs';
+        entry.error = err.message;
+        toast(err.message + ' Add a key in the inspector →', 'error');
+        flashAiKeyPanel();
+      } else if (err && err.code === 'NEEDS_API') {
+        entry.status = 'needs';
+        entry.error = err.message;
+        toast(err.message + ' Sign in to enable the API engine.', 'error');
+      } else {
+        entry.status = 'error';
+        entry.error = (err && err.message) || String(err);
+        toast('Failed to parse ' + entry.name + ' — see console for details', 'error');
+      }
+      renderLibrary();
+      if (state.activeId === entry.id) renderStage();
+    }
+  }
+
+  function addFiles(fileList) {
+    Array.from(fileList).forEach(addFile);
+  }
+
+  // ── Demo set loader ──────────────────────────────────────────
+  var DEMO_SET = [
+    'assets/track_changes_move.docx',
+    'assets/challenge_merged_cells.xlsx',
+    'assets/comments.docx',
+    'assets/ailang_architecture.md',
+    'assets/ailang_formats.csv'
+  ];
+  async function loadDemoSet() {
+    loadDemoBtn.disabled = true;
+    loadDemoBtn.textContent = 'Loading…';
+    try {
+      for (var i = 0; i < DEMO_SET.length; i++) {
+        var path = DEMO_SET[i];
+        try {
+          var resp = await fetch(path);
+          if (!resp.ok) continue;
+          var blob = await resp.blob();
+          var name = path.split('/').pop();
+          await addFile(new File([blob], name));
+        } catch (e) {
+          console.warn('Demo file failed:', path, e);
+        }
+      }
+    } finally {
+      loadDemoBtn.disabled = false;
+      loadDemoBtn.textContent = 'Load demo set';
+    }
+  }
+
+  // ── Wiring ───────────────────────────────────────────────────
+  // Dropzone
+  ['dragenter', 'dragover'].forEach(function (e) {
+    dropzone.addEventListener(e, function (ev) { ev.preventDefault(); dropzone.classList.add('dragover'); });
+  });
+  ['dragleave', 'drop'].forEach(function (e) {
+    dropzone.addEventListener(e, function (ev) { ev.preventDefault(); dropzone.classList.remove('dragover'); });
+  });
+  dropzone.addEventListener('drop', function (ev) {
+    if (ev.dataTransfer.files.length > 0) addFiles(ev.dataTransfer.files);
+  });
+  dropzone.addEventListener('click', function (ev) {
+    // Don't trigger when clicking the demo button
+    if (ev.target.id === 'wb-load-demo' || ev.target.closest('#wb-load-demo')) return;
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', function () {
+    if (this.files.length > 0) addFiles(this.files);
+    this.value = '';
+  });
+  loadDemoBtn.addEventListener('click', function (ev) { ev.stopPropagation(); loadDemoSet(); });
+
+  // Tab switching
+  document.querySelectorAll('#wb-tabs .wb-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('#wb-tabs .wb-tab').forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      state.tab = tab.getAttribute('data-tab');
+      var f = activeFile();
+      if (f) renderTab(f);
+    });
+  });
+
+  // ── AI key panel ─────────────────────────────────────────────
+  // The Gemini key lives in localStorage under 'gemini-api-key' (managed via
+  // DocParseEngine.getApiKey/setApiKey) so it's shared with the homepage demo.
+  // Adding a key here re-registers the WASM AI handler immediately — no
+  // reload required, and any "needs API key" file in the library can be
+  // re-parsed by clicking it.
+  var aiKeyPanel  = $('wb-aikey-panel');
+  var aiKeyInput  = $('wb-aikey-input');
+  var aiKeyStatus = $('wb-aikey-status');
+  var aiKeyToggle = $('wb-aikey-toggle');
+
+  function refreshAiKeyUI() {
+    var hasKey = !!(window.DocParseEngine && window.DocParseEngine.getApiKey());
+    aiKeyPanel.classList.toggle('has-key', hasKey);
+    aiKeyStatus.classList.toggle('active', hasKey);
+    aiKeyStatus.textContent = hasKey ? 'active' : 'not set';
+  }
+  function flashAiKeyPanel() {
+    if (!aiKeyPanel) return;
+    aiKeyPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    aiKeyPanel.style.transition = 'box-shadow 0.4s ease';
+    aiKeyPanel.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.35)';
+    setTimeout(function () { aiKeyPanel.style.boxShadow = ''; }, 1400);
+  }
+
+  // Hydrate from localStorage on boot.
+  if (window.DocParseEngine) {
+    var saved = window.DocParseEngine.getApiKey();
+    if (saved) aiKeyInput.value = saved;
+  }
+  refreshAiKeyUI();
+
+  aiKeyInput.addEventListener('input', function () {
+    if (window.DocParseEngine) window.DocParseEngine.setApiKey(this.value);
+    refreshAiKeyUI();
+  });
+  aiKeyToggle.addEventListener('click', function () {
+    aiKeyInput.type = aiKeyInput.type === 'password' ? 'text' : 'password';
+  });
+  // Re-parsing a "needs key" entry: click its row after adding a key.
+  // Since setActive already exists, the user just clicks the file in the
+  // library. To make that obvious, expose a "Retry" affordance: when the
+  // user hits Enter inside the input, re-try every "needs"-status entry.
+  aiKeyInput.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && window.DocParseEngine && window.DocParseEngine.getApiKey()) {
+      var pending = state.files.filter(function (f) { return f.status === 'needs' && f.file; });
+      if (pending.length === 0) {
+        toast('Key saved — drop a PDF or image to try it', 'success');
+        return;
+      }
+      toast('Retrying ' + pending.length + ' file(s) with new key…', 'success');
+      pending.forEach(function (f) {
+        f.status = 'parsing';
+        f.error = null;
+        renderLibrary();
+        window.DocParseEngine.parseFile(f.file).then(function (result) {
+          f.blocks = result.blocks;
+          f.ms = result.ms;
+          f.status = 'done';
+          renderLibrary();
+          if (state.activeId === f.id) renderStage();
+        }).catch(function (err) {
+          f.status = err && err.code === 'NEEDS_API_KEY' ? 'needs' : 'error';
+          f.error = (err && err.message) || String(err);
+          renderLibrary();
+          if (state.activeId === f.id) renderStage();
+        });
+      });
+    }
+  });
+
+  // Engine switcher (visual only — Phase 3 wires the API)
+  document.querySelectorAll('.wb-engine-option').forEach(function (opt) {
+    opt.addEventListener('click', function () {
+      var label = opt.textContent.trim();
+      if (label.indexOf('API') !== -1) {
+        toast('API engine arrives in Phase 3 — sign in to opt in.');
+        return;
+      }
+      opt.parentElement.querySelectorAll('.wb-engine-option').forEach(function (o) {
+        o.classList.remove('active', 'active--wasm', 'active--api');
+        o.setAttribute('aria-checked', 'false');
+      });
+      opt.classList.add('active', 'active--wasm');
+      opt.setAttribute('aria-checked', 'true');
+    });
+  });
+
+  // Mobile drawer toggles
+  document.querySelectorAll('.wb-mobile-btn').forEach(function (btn, idx) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.wb-mobile-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      document.querySelector('.wb-rail--left').classList.toggle('open', idx === 0);
+      document.querySelector('.wb-rail--right').classList.toggle('open', idx === 2);
+    });
+  });
+
+  // Action buttons
+  document.querySelectorAll('.wb-action').forEach(function (a) {
+    a.addEventListener('click', function () {
+      var label = a.querySelector('.wb-action-label').textContent;
+      var f = activeFile();
+      if (!f || f.status !== 'done') { toast('Parse a document first.'); return; }
+      if (label.indexOf('CLI') !== -1) {
+        navigator.clipboard.writeText('./bin/docparse ' + f.name);
+        toast('Copied: ./bin/docparse ' + f.name, 'success');
+      } else if (label.indexOf('SDK') !== -1) {
+        var snippet = 'from ailang_parse import DocParse\nresult = DocParse().parse("' + f.name + '")\nprint(result.blocks)';
+        navigator.clipboard.writeText(snippet);
+        toast('Copied Python SDK snippet', 'success');
+      } else if (label.indexOf('Markdown') !== -1) {
+        var md = blocksToMarkdown(f.blocks);
+        var blob = new Blob([md], { type: 'text/markdown' });
+        var url = URL.createObjectURL(blob);
+        var aDl = document.createElement('a');
+        aDl.href = url; aDl.download = f.name.replace(/\.[^.]+$/, '') + '.md';
+        aDl.click();
+        URL.revokeObjectURL(url);
+      } else if (label.indexOf('API') !== -1) {
+        toast('API engine arrives in Phase 3 — sign in to opt in.');
+      }
+    });
+  });
+
+  // Graduate-CLI copy
+  document.querySelector('.wb-graduate-cmd-copy').addEventListener('click', function () {
+    var f = activeFile();
+    var cmd = f && f.status === 'done' ? './bin/docparse ' + f.name : './bin/docparse <file>';
+    navigator.clipboard.writeText(cmd);
+    toast('Copied: ' + cmd, 'success');
+  });
+
+  // ── Boot ─────────────────────────────────────────────────────
+  renderLibrary();
+
+  // Tick the library every 30s so relative timestamps ("just now" → "1m ago")
+  // stay roughly accurate without per-row state. Cheap because the file count
+  // is always small.
+  setInterval(function () {
+    if (state.files.length > 0) renderLibrary();
+  }, 30000);
+
+  // file:// detection — browsers block fetch() of the WASM binary on file://,
+  // so the engine can never load. Show a clear hint instead of a cryptic error.
+  if (location.protocol === 'file:') {
+    engineLoading.classList.add('file-warning');
+    engineLoading.innerHTML =
+      '<strong>This page must be served over HTTP</strong>' +
+      'Browsers block <code>fetch()</code> of the 35 MB WASM engine on <code>file://</code> URLs. ' +
+      'Run the dev server from the repo root and reload:' +
+      '<div class="wb-file-warning-cmd">bash docs/serve.sh</div>' +
+      '<div style="margin-top:6px;font-size:11.5px;opacity:0.85;">' +
+      'Then open <code>http://localhost:8765/workbench.html</code>.' +
+      '</div>';
+  } else {
+    pollEngine();
+    // Kick the WASM init even on mobile (the homepage IIFE only auto-inits at >= 768)
+    if (window.innerWidth < 768 && window.DocParseEngine) {
+      setTimeout(function () { window.DocParseEngine.init(); }, 100);
+    }
+  }
+})();
+</script>
+</body>
+</html>
