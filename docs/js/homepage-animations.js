@@ -220,16 +220,27 @@
               if (el) el.classList.add('vis');
             }, idx * 250);
           });
-          // Animate score counter after result appears
+          // Animate score counter after result appears.
+          // Pull live value from window.BENCH_DATA (loaded async by bench-data.js).
+          // Falls back to the inline data-bench text (e.g. "93.9%") if fetch hasn't completed.
           var scoreEl = document.getElementById('vs-eval-score');
           if (scoreEl) {
             setTimeout(function () {
+              var target = 93.9;
+              var bd = window.BENCH_DATA;
+              if (bd && bd.adapters) {
+                var ap = bd.adapters.find(function (a) { return a.id === 'ailang_parse'; });
+                if (ap && typeof ap.composite === 'number') target = ap.composite * 100;
+              } else {
+                var parsed = parseFloat((scoreEl.textContent || '').replace('%', ''));
+                if (!isNaN(parsed) && parsed > 0) target = parsed;
+              }
               var frame = 0;
               var interval = setInterval(function () {
                 frame++;
                 var prog = Math.min(1, frame / 60);
                 var eased = 1 - Math.pow(1 - prog, 3);
-                scoreEl.textContent = (96.6 * eased).toFixed(1) + '%';
+                scoreEl.textContent = (target * eased).toFixed(1) + '%';
                 if (frame >= 60) clearInterval(interval);
               }, 33);
             }, steps.length * 250);
