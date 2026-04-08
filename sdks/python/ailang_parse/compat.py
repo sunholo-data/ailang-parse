@@ -7,7 +7,8 @@ from typing import List, Optional
 
 import requests
 
-from .types import Element, DocParseError
+from .types import Element, DocParseError, AuthError, QuotaError
+from .client import DocParse as _DocParse
 
 DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com"
 
@@ -47,12 +48,16 @@ class _GeneralApi:
                 timeout=self._timeout,
             )
 
+        if resp.status_code == 401:
+            raise AuthError("Invalid or missing API key", 401)
+        if resp.status_code == 429:
+            raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code}", resp.status_code)
 
         outer = resp.json()
-        if "error" in outer and outer["error"]:
-            raise DocParseError(outer["error"])
+        if "error" in outer and outer["error"] and isinstance(outer["error"], str):
+            _DocParse._raise_envelope_error(outer["error"])
 
         result_str = outer.get("result", "[]")
         try:
@@ -64,7 +69,7 @@ class _GeneralApi:
         if isinstance(elements_raw, dict) and "error" in elements_raw:
             err = elements_raw["error"]
             msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-            raise DocParseError(msg)
+            _DocParse._raise_envelope_error(msg)
 
         if isinstance(elements_raw, list):
             return [Element.from_dict(e) for e in elements_raw]

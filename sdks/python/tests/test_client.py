@@ -233,3 +233,194 @@ class TestErrors:
         c = DocParse(api_key="dp_test", base_url=mock_server)
         with pytest.raises(DocParseError, match="parse failed"):
             c.parse("bad.docx")
+
+
+# ── KeyManager (uses _call internally) ──
+
+class TestKeyManager:
+    def test_list(self, mock_server):
+        _set_response(200, {
+            "result": json.dumps({"status": "ok", "keys": [{"key_id": "k1"}]})
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        out = c.keys.list(user_id="u1")
+        assert out["status"] == "ok"
+        assert out["keys"][0]["key_id"] == "k1"
+
+    def test_revoke(self, mock_server):
+        _set_response(200, {"result": json.dumps({"status": "revoked"})})
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        out = c.keys.revoke(key_id="k1", user_id="u1")
+        assert out["status"] == "revoked"
+
+    def test_rotate_returns_keyinfo(self, mock_server):
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "active",
+                "key": "dp_newkey",
+                "keyId": "k2",
+                "label": "rotated",
+                "tier": "free",
+                "created": "2026-04-08",
+                "quota": {"requestsPerDay": 50},
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        info = c.keys.rotate(key_id="k1")
+        assert info.key == "dp_newkey"
+        assert info.tier == "free"
+        assert info.quota.requests_per_day == 50
+
+    def test_usage_returns_usageinfo(self, mock_server):
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok",
+                "keyId": "k1",
+                "tier": "free",
+                "usage": {"requestsToday": 3, "requestsThisMonth": 10, "totalRequests": 100},
+                "quota": {"requestsPerDay": 50, "requestsPerMonth": 1000,
+                          "aiLimitPerRequest": 5, "fsLimitPerRequest": 10},
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        u = c.keys.usage(key_id="k1")
+        assert u.usage.requests_today == 3
+        assert u.quota.requests_per_day == 50
+
+    def test_keymanager_propagates_auth_error(self, mock_server):
+        # Server returns 200 envelope but with auth error string
+        _set_response(200, {"error": "Invalid or expired API key"})
+        c = DocParse(api_key="dp_bad", base_url=mock_server)
+        with pytest.raises(AuthError):
+            c.keys.list(user_id="u1")
+
+
+# ── Unstructured compat ──
+
+class TestUnstructuredCompat:
+    def test_partition_returns_elements(self, mock_server):
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(200, {
+            "result": json.dumps([
+                {"type": "NarrativeText", "element_id": "abc", "text": "Hello",
+                 "metadata": {"filename": "test.docx"}},
+                {"type": "Title", "element_id": "def", "text": "Heading", "metadata": {}},
+            ])
+        })
+        uc = UnstructuredClient(server_url=mock_server, api_key="dp_test")
+        elements = uc.general.partition(file="sample.docx")
+        assert len(elements) == 2
+        assert elements[0].type == "NarrativeText"
+        assert elements[0].text == "Hello"
+
+    def test_partition_401_raises_auth_error(self, mock_server):
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(401, {"error": "unauthorized"})
+        uc = UnstructuredClient(server_url=mock_server, api_key="dp_bad")
+        with pytest.raises(AuthError):
+            uc.general.partition(file="sample.docx")
+
+    def test_partition_429_raises_quota_error(self, mock_server):
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(429, {"error": "quota"})
+        uc = UnstructuredClient(server_url=mock_server, api_key="dp_test")
+        with pytest.raises(QuotaError):
+            uc.general.partition(file="sample.docx")
+
+    def test_partition_envelope_auth_error_routes_to_auth_error(self, mock_server):
+        # 200 with auth-error envelope — the production failure mode
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(200, {"error": "Invalid or expired API key"})
+        uc = UnstructuredClient(server_url=mock_server, api_key="dp_bad")
+        with pytest.raises(AuthError):
+            uc.general.partition(file="sample.docx")
+
+    def test_partition_inner_auth_error_routes_to_auth_error(self, mock_server):
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(200, {
+            "result": json.dumps({"error": {"message": "Invalid or expired API key"}})
+        })
+        uc = UnstructuredClient(server_url=mock_server, api_key="dp_bad")
+        with pytest.raises(AuthError):
+            uc.general.partition(file="sample.docx")
+
+    def test_partition_non_auth_envelope_error(self, mock_server):
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(200, {"error": "parse failed"})
+        uc = UnstructuredClient(server_url=mock_server, api_key="dp_test")
+        with pytest.raises(DocParseError) as exc_info:
+            uc.general.partition(file="sample.docx")
+        assert not isinstance(exc_info.value, AuthError)
+
+
+# ── Credentials file ──
+
+class TestCredentials:
+    def test_save_and_load_round_trip(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        _credentials.save_key(
+            api_key="dp_round_trip",
+            base_url="https://example.test",
+            key_id="k1", tier="pro", label="my-laptop",
+        )
+        loaded = _credentials.load_saved_key("https://example.test")
+        assert loaded is not None
+        assert loaded["api_key"] == "dp_round_trip"
+        assert loaded["tier"] == "pro"
+        assert loaded["label"] == "my-laptop"
+
+    def test_load_returns_none_when_missing(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        assert _credentials.load_saved_key("https://example.test") is None
+
+    def test_load_filters_by_base_url(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        _credentials.save_key(api_key="dp_a", base_url="https://a.test")
+        # Asking for a different base URL should miss
+        assert _credentials.load_saved_key("https://b.test") is None
+        assert _credentials.load_saved_key("https://a.test") is not None
+
+    def test_load_rejects_malformed_json(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        path = _credentials.credentials_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+        assert _credentials.load_saved_key() is None
+
+    def test_load_rejects_non_dp_prefix(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        path = _credentials.credentials_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"api_key": "garbage_no_prefix"}))
+        assert _credentials.load_saved_key() is None
+
+    def test_resolve_api_key_prefers_env(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        monkeypatch.setenv("DOCPARSE_API_KEY", "dp_env_wins")
+        _credentials.save_key(api_key="dp_disk", base_url="https://x.test")
+        assert _credentials.resolve_api_key() == "dp_env_wins"
+
+    def test_resolve_api_key_falls_back_to_disk(self, tmp_path, monkeypatch):
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        monkeypatch.delenv("DOCPARSE_API_KEY", raising=False)
+        _credentials.save_key(api_key="dp_disk", base_url="https://x.test")
+        assert _credentials.resolve_api_key() == "dp_disk"
+
+    def test_client_loads_saved_key(self, tmp_path, monkeypatch):
+        # End-to-end: client constructor picks up the on-disk key
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        monkeypatch.delenv("DOCPARSE_API_KEY", raising=False)
+        _credentials.save_key(
+            api_key="dp_from_disk",
+            base_url="https://disk.test",
+        )
+        c = DocParse(base_url="https://disk.test")
+        assert c.api_key == "dp_from_disk"

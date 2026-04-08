@@ -241,4 +241,135 @@ describe("UnstructuredClient compat", () => {
     const uc = new UnstructuredClient({ serverUrl: baseUrl });
     await assert.rejects(() => uc.general.partition({ file: "bad.docx" }), DocParseError);
   });
+
+  it("partition routes envelope auth error to AuthError", async () => {
+    setMock(200, { error: "Invalid or expired API key" });
+    const uc = new UnstructuredClient({ serverUrl: baseUrl, apiKey: "dp_bad" });
+    await assert.rejects(() => uc.general.partition({ file: "sample.docx" }), AuthError);
+  });
+
+  it("partition routes inner-result auth error to AuthError", async () => {
+    setMock(200, {
+      result: JSON.stringify({ error: { message: "Invalid or expired API key" } }),
+    });
+    const uc = new UnstructuredClient({ serverUrl: baseUrl, apiKey: "dp_bad" });
+    await assert.rejects(() => uc.general.partition({ file: "sample.docx" }), AuthError);
+  });
+
+  it("partition routes 401 status to AuthError", async () => {
+    setMock(401, { error: "unauthorized" });
+    const uc = new UnstructuredClient({ serverUrl: baseUrl, apiKey: "dp_bad" });
+    await assert.rejects(() => uc.general.partition({ file: "sample.docx" }), AuthError);
+  });
+
+  it("partition routes 429 status to QuotaError", async () => {
+    setMock(429, { error: "quota" });
+    const uc = new UnstructuredClient({ serverUrl: baseUrl, apiKey: "dp_test" });
+    await assert.rejects(() => uc.general.partition({ file: "sample.docx" }), QuotaError);
+  });
+});
+
+// ── KeyManager ──
+
+describe("KeyManager", () => {
+  it("list returns key list", async () => {
+    setMock(200, {
+      result: JSON.stringify({ status: "ok", keys: [{ key_id: "k1" }] }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const out: any = await c.keys.list("u1");
+    assert.equal(out.status, "ok");
+    assert.equal(out.keys[0].key_id, "k1");
+  });
+
+  it("revoke returns success", async () => {
+    setMock(200, { result: JSON.stringify({ status: "revoked" }) });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const out: any = await c.keys.revoke("k1", "u1");
+    assert.equal(out.status, "revoked");
+  });
+
+  it("rotate returns new key info", async () => {
+    setMock(200, {
+      result: JSON.stringify({
+        status: "active", key: "dp_newkey", keyId: "k2",
+        label: "rotated", tier: "free", created: "2026-04-08",
+        quota: { requestsPerDay: 50 },
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const info: any = await c.keys.rotate("k1");
+    assert.equal(info.key, "dp_newkey");
+  });
+
+  it("usage returns usage info", async () => {
+    setMock(200, {
+      result: JSON.stringify({
+        status: "ok", keyId: "k1", tier: "free",
+        usage: { requestsToday: 3, requestsThisMonth: 10, totalRequests: 100 },
+        quota: { requestsPerDay: 50 },
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const u: any = await c.keys.usage("k1");
+    assert.equal(u.usage.requestsToday, 3);
+  });
+
+  it("propagates auth error from envelope", async () => {
+    setMock(200, { error: "Invalid or expired API key" });
+    const c = new DocParse({ apiKey: "dp_bad", baseUrl });
+    await assert.rejects(() => c.keys.list("u1"), AuthError);
+  });
+});
+
+// ── parseFile multipart upload ──
+
+describe("parseFile", () => {
+  it("uploads local file via multipart", async () => {
+    setMock(200, {
+      result: JSON.stringify({
+        status: "ok",
+        filename: "upload.docx",
+        format: "docx",
+        blocks: [{ type: "text", text: "hello" }],
+        metadata: {},
+        summary: { totalBlocks: 1 },
+      }),
+    });
+    // Write a real temp file so the readFileSync path works
+    const { mkdtempSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    const dir = mkdtempSync(join(tmpdir(), "ailang-parse-test-"));
+    const local = join(dir, "upload.docx");
+    writeFileSync(local, Buffer.from("PK\x03\x04 fake docx"));
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parseFile(local);
+    assert.equal(r.status, "ok");
+    assert.equal(r.blocks[0].text, "hello");
+  });
+
+  it("parseFile routes 401 to AuthError", async () => {
+    setMock(401, { error: "unauthorized" });
+    const { mkdtempSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    const dir = mkdtempSync(join(tmpdir(), "ailang-parse-test-"));
+    const local = join(dir, "upload.docx");
+    writeFileSync(local, Buffer.from("PK\x03\x04 fake"));
+    const c = new DocParse({ apiKey: "dp_bad", baseUrl });
+    await assert.rejects(() => c.parseFile(local), AuthError);
+  });
+
+  it("parseFile routes envelope auth error to AuthError", async () => {
+    setMock(200, { error: "Invalid or expired API key" });
+    const { mkdtempSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    const dir = mkdtempSync(join(tmpdir(), "ailang-parse-test-"));
+    const local = join(dir, "upload.docx");
+    writeFileSync(local, Buffer.from("PK\x03\x04 fake"));
+    const c = new DocParse({ apiKey: "dp_bad", baseUrl });
+    await assert.rejects(() => c.parseFile(local), AuthError);
+  });
 });

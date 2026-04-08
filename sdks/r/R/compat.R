@@ -93,7 +93,7 @@ UnstructuredClient <- R6::R6Class(
         }
       )
       if (!is.null(outer$error) && length(outer$error) > 0L) {
-        stop(.docparse_error(as.character(outer$error)))
+        .raise_envelope_error(as.character(outer$error))
       }
       result_str <- if (is.null(outer$result)) "[]" else outer$result
       elements_raw <- tryCatch(
@@ -104,7 +104,7 @@ UnstructuredClient <- R6::R6Class(
         err <- elements_raw$error
         msg <- if (is.list(err) && !is.null(err$message)) err$message
                else as.character(err)
-        stop(.docparse_error(msg))
+        .raise_envelope_error(msg)
       }
       if (!is.list(elements_raw)) return(list())
       lapply(elements_raw, .element_from_list)

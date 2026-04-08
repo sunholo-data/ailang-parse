@@ -1,7 +1,25 @@
 /** Unstructured API compatibility — drop-in replacement for unstructured-client. */
 
 import type { Element } from "./types.js";
-import { DocParseError } from "./types.js";
+import { DocParseError, AuthError, QuotaError } from "./types.js";
+
+/** Detect auth-related error messages from server-side envelope errors. */
+function isAuthErrorMessage(msg: string): boolean {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  return (
+    m.includes("invalid or expired api key") ||
+    m.includes("invalid api key") ||
+    m.includes("missing api key") ||
+    m.includes("unauthorized") ||
+    m.includes("api key required")
+  );
+}
+
+function raiseEnvelopeError(msg: string): never {
+  if (isAuthErrorMessage(msg)) throw new AuthError(msg);
+  throw new DocParseError(msg);
+}
 
 const DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com";
 
@@ -56,10 +74,14 @@ class GeneralApi {
       });
     }
 
+    if (resp.status === 401) throw new AuthError();
+    if (resp.status === 429) throw new QuotaError("Quota exceeded");
     if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
 
     const outer = await resp.json();
-    if (outer.error) throw new DocParseError(outer.error);
+    if (outer.error && typeof outer.error === "string") {
+      raiseEnvelopeError(outer.error);
+    }
 
     const resultStr = outer.result || "[]";
     try {
@@ -68,7 +90,7 @@ class GeneralApi {
       if (parsed?.error) {
         const err = parsed.error;
         const msg = typeof err === "object" ? err.message || JSON.stringify(err) : String(err);
-        throw new DocParseError(msg);
+        raiseEnvelopeError(msg);
       }
       return Array.isArray(parsed) ? parsed : [];
     } catch (e) {

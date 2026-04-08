@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -342,6 +345,301 @@ func TestParseResultJSON(t *testing.T) {
 	}
 	if r.Metadata.Title != "T" {
 		t.Fatalf("expected T, got %s", r.Metadata.Title)
+	}
+}
+
+// ── KeyManager ──
+
+func TestKeyManager_List(t *testing.T) {
+	ts := mockServer(200, envelope(map[string]any{
+		"status": "ok",
+		"keys":   []map[string]string{{"key_id": "k1"}},
+	}))
+	defer ts.Close()
+
+	c := New("dp_test", WithBaseURL(ts.URL))
+	out, err := c.Keys.List(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var parsed map[string]any
+	json.Unmarshal(out, &parsed)
+	if parsed["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", parsed["status"])
+	}
+}
+
+func TestKeyManager_Revoke(t *testing.T) {
+	ts := mockServer(200, envelope(map[string]string{"status": "revoked"}))
+	defer ts.Close()
+
+	c := New("dp_test", WithBaseURL(ts.URL))
+	if err := c.Keys.Revoke(context.Background(), "k1", "u1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestKeyManager_Rotate(t *testing.T) {
+	ts := mockServer(200, envelope(map[string]any{
+		"status":  "active",
+		"key":     "dp_newkey",
+		"keyId":   "k2",
+		"label":   "rotated",
+		"tier":    "free",
+		"created": "2026-04-08",
+		"quota":   map[string]int{"requestsPerDay": 50},
+	}))
+	defer ts.Close()
+
+	c := New("dp_test", WithBaseURL(ts.URL))
+	info, err := c.Keys.Rotate(context.Background(), "k1", "u1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Key != "dp_newkey" {
+		t.Fatalf("expected dp_newkey, got %s", info.Key)
+	}
+	if info.Quota.RequestsPerDay != 50 {
+		t.Fatalf("expected 50, got %d", info.Quota.RequestsPerDay)
+	}
+}
+
+func TestKeyManager_Usage(t *testing.T) {
+	ts := mockServer(200, envelope(map[string]any{
+		"status": "ok",
+		"keyId":  "k1",
+		"tier":   "free",
+		"usage":  map[string]int{"requestsToday": 3, "requestsThisMonth": 10, "totalRequests": 100},
+		"quota":  map[string]int{"requestsPerDay": 50},
+	}))
+	defer ts.Close()
+
+	c := New("dp_test", WithBaseURL(ts.URL))
+	u, err := c.Keys.Usage(context.Background(), "k1", "u1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if u.Usage.RequestsToday != 3 {
+		t.Fatalf("expected 3, got %d", u.Usage.RequestsToday)
+	}
+}
+
+func TestKeyManager_PropagatesAuthErrorFromEnvelope(t *testing.T) {
+	ts := mockServer(200, map[string]any{"error": "Invalid or expired API key"})
+	defer ts.Close()
+
+	c := New("dp_bad", WithBaseURL(ts.URL))
+	_, err := c.Keys.List(context.Background(), "u1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+}
+
+// ── ParseFile multipart upload ──
+
+func TestParseFile_UploadsLocalFile(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify it's a multipart upload
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			t.Errorf("expected multipart Content-Type, got %s", r.Header.Get("Content-Type"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		json.NewEncoder(w).Encode(envelope(map[string]any{
+			"status":   "ok",
+			"filename": "upload.docx",
+			"format":   "docx",
+			"blocks":   []map[string]any{{"type": "text", "text": "hello"}},
+			"metadata": map[string]any{},
+			"summary":  map[string]any{"totalBlocks": 1},
+		}))
+	}))
+	defer ts.Close()
+
+	dir := t.TempDir()
+	local := filepath.Join(dir, "upload.docx")
+	if err := os.WriteFile(local, []byte("PK\x03\x04 fake"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := New("dp_test", WithBaseURL(ts.URL))
+	r, err := c.ParseFile(context.Background(), local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Status != "ok" {
+		t.Fatalf("expected ok, got %s", r.Status)
+	}
+	if r.Blocks[0].Text != "hello" {
+		t.Fatalf("expected hello, got %s", r.Blocks[0].Text)
+	}
+}
+
+func TestParseFile_AuthErrorOn401(t *testing.T) {
+	ts := mockServer(401, map[string]any{"error": "unauthorized"})
+	defer ts.Close()
+
+	dir := t.TempDir()
+	local := filepath.Join(dir, "upload.docx")
+	os.WriteFile(local, []byte("fake"), 0644)
+
+	c := New("dp_bad", WithBaseURL(ts.URL))
+	_, err := c.ParseFile(context.Background(), local)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+}
+
+func TestParseFile_AuthErrorOnEnvelope200(t *testing.T) {
+	ts := mockServer(200, map[string]any{"error": "Invalid or expired API key"})
+	defer ts.Close()
+
+	dir := t.TempDir()
+	local := filepath.Join(dir, "upload.docx")
+	os.WriteFile(local, []byte("fake"), 0644)
+
+	c := New("dp_bad", WithBaseURL(ts.URL))
+	_, err := c.ParseFile(context.Background(), local)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+}
+
+// ── Compat (Unstructured) ──
+
+func TestCompat_Partition_AuthErrorOnEnvelope(t *testing.T) {
+	ts := mockServer(200, map[string]any{"error": "Invalid or expired API key"})
+	defer ts.Close()
+
+	uc := NewUnstructuredClient(ts.URL, "dp_bad")
+	_, err := uc.Partition(context.Background(), "sample.docx")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+}
+
+func TestCompat_Partition_401(t *testing.T) {
+	ts := mockServer(401, map[string]any{"error": "unauthorized"})
+	defer ts.Close()
+
+	uc := NewUnstructuredClient(ts.URL, "dp_bad")
+	_, err := uc.Partition(context.Background(), "sample.docx")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+}
+
+// ── Credentials file ──
+
+func TestCredentials_SaveAndLoadRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	if err := saveKey("dp_round_trip", "https://example.test", "k1", "pro", "laptop"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded := loadSavedKey("https://example.test")
+	if loaded == nil {
+		t.Fatal("expected to load saved key")
+	}
+	if loaded.APIKey != "dp_round_trip" || loaded.Tier != "pro" || loaded.Label != "laptop" {
+		t.Fatalf("round-trip mismatch: %+v", loaded)
+	}
+}
+
+func TestCredentials_LoadReturnsNilWhenMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	if loadSavedKey("https://example.test") != nil {
+		t.Fatal("expected nil for missing credentials")
+	}
+}
+
+func TestCredentials_LoadFiltersByBaseURL(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	saveKey("dp_a", "https://a.test", "", "free", "")
+	if loadSavedKey("https://b.test") != nil {
+		t.Fatal("expected nil for mismatched base URL")
+	}
+	if loadSavedKey("https://a.test") == nil {
+		t.Fatal("expected hit for matching base URL")
+	}
+}
+
+func TestCredentials_LoadRejectsNonDPPrefix(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	credPath := filepath.Join(tmp, "ailang-parse", "credentials.json")
+	os.MkdirAll(filepath.Dir(credPath), 0700)
+	os.WriteFile(credPath, []byte(`{"api_key":"garbage_no_prefix","base_url":"https://x.test"}`), 0600)
+
+	if loadSavedKey("https://x.test") != nil {
+		t.Fatal("expected nil for non-dp_ prefix")
+	}
+}
+
+func TestCredentials_LoadRejectsMalformedJSON(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	credPath := filepath.Join(tmp, "ailang-parse", "credentials.json")
+	os.MkdirAll(filepath.Dir(credPath), 0700)
+	os.WriteFile(credPath, []byte("{not json"), 0600)
+
+	if loadSavedKey("https://x.test") != nil {
+		t.Fatal("expected nil for malformed JSON")
+	}
+}
+
+func TestCredentials_ResolveAPIKeyPrefersEnv(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("DOCPARSE_API_KEY", "dp_env_wins")
+
+	saveKey("dp_disk", "https://x.test", "", "free", "")
+	if got := ResolveAPIKey(); got != "dp_env_wins" {
+		t.Fatalf("expected dp_env_wins, got %s", got)
+	}
+}
+
+func TestCredentials_ResolveAPIKeyFallsBackToDisk(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	os.Unsetenv("DOCPARSE_API_KEY")
+
+	saveKey("dp_disk", "https://x.test", "", "free", "")
+	if got := ResolveAPIKey(); got != "dp_disk" {
+		t.Fatalf("expected dp_disk, got %s", got)
+	}
+}
+
+func TestCredentials_ClientPicksUpSavedKey(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	os.Unsetenv("DOCPARSE_API_KEY")
+
+	saveKey("dp_from_disk", "https://disk.test", "", "free", "")
+	c := New("", WithBaseURL("https://disk.test"))
+	if c.APIKey != "dp_from_disk" {
+		t.Fatalf("expected dp_from_disk, got %s", c.APIKey)
 	}
 }
 
