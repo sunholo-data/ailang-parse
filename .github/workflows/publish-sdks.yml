@@ -160,6 +160,56 @@ jobs:
           git push --force origin main
           git push --force origin "v${{ steps.version.outputs.version }}"
 
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    needs: [publish-python, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # GitHub OIDC for mcp-publisher auth
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify server.json version matches tag
+        run: |
+          FILE_VERSION=$(jq -r .version server.json)
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match server.json version ($FILE_VERSION)"
+            exit 1
+          fi
+          # All package entries in server.json must also match the tag version
+          MISMATCH=$(jq -r --arg v "$TAG_VERSION" '.packages[] | select(.version != $v) | .identifier' server.json)
+          if [ -n "$MISMATCH" ]; then
+            echo "::error::These server.json packages do not match tag version $TAG_VERSION: $MISMATCH"
+            exit 1
+          fi
+          echo "server.json version $TAG_VERSION confirmed"
+
+      - name: Wait for PyPI long description to be queryable
+        run: |
+          # PyPI takes a few seconds after upload before the long description
+          # (where the mcp-name marker lives) is reachable. Sleep is cheaper
+          # than the retry-loop alternative.
+          sleep 30
+
+      - name: Install mcp-publisher
+        run: |
+          MCP_PUBLISHER_VERSION="1.5.0"
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_${MCP_PUBLISHER_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin mcp-publisher
+          mcp-publisher --version
+
+      - name: Authenticate with GitHub OIDC
+        run: mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: mcp-publisher publish
+
   publish-r:
     name: Publish R SDK (GitHub Release)
     needs: test-sdks
