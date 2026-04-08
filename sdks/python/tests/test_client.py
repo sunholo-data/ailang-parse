@@ -168,6 +168,27 @@ class TestParse:
         assert r.metadata.title == "Sample"
         assert r.summary.total_blocks == 2
 
+    def test_parse_file_uploads_local_file(self, mock_server, tmp_path):
+        """Regression test: parse_file must build a multipart upload from a real
+        local path. Previously this method referenced ``Path`` without importing
+        it, so any caller hit a NameError at runtime."""
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok",
+                "filename": "upload.docx",
+                "format": "docx",
+                "blocks": [{"type": "text", "text": "hello"}],
+                "metadata": {},
+                "summary": {"totalBlocks": 1},
+            })
+        })
+        local = tmp_path / "upload.docx"
+        local.write_bytes(b"PK\x03\x04 fake docx bytes")
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse_file(str(local))
+        assert r.status == "ok"
+        assert r.blocks[0].text == "hello"
+
 
 # ── Error handling ──
 
