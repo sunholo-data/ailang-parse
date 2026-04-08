@@ -76,6 +76,29 @@ class TestUnwrap:
         outer = {"result": "plain text"}
         assert DocParse._unwrap(outer) == {"raw": "plain text"}
 
+    def test_unwrap_outer_auth_error_raises_auth_error(self):
+        # Server returns envelope-level error string for a bad key
+        with pytest.raises(AuthError):
+            DocParse._unwrap({"error": "Invalid or expired API key"})
+
+    def test_unwrap_inner_auth_error_raises_auth_error(self):
+        inner = {"error": {"message": "Invalid or expired API key"}}
+        outer = {"result": json.dumps(inner)}
+        with pytest.raises(AuthError):
+            DocParse._unwrap(outer)
+
+    def test_unwrap_inner_unauthorized_raises_auth_error(self):
+        inner = {"error": "Unauthorized"}
+        outer = {"result": json.dumps(inner)}
+        with pytest.raises(AuthError):
+            DocParse._unwrap(outer)
+
+    def test_unwrap_non_auth_error_still_docparse_error(self):
+        with pytest.raises(DocParseError) as exc_info:
+            DocParse._unwrap({"error": "malformed document"})
+        # Must NOT be an AuthError
+        assert not isinstance(exc_info.value, AuthError)
+
 
 # ── Client construction ──
 

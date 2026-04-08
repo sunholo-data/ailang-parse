@@ -92,8 +92,14 @@ func (uc *UnstructuredClient) Partition(ctx context.Context, filePath string, st
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
+	if resp.StatusCode == 401 {
+		return nil, newAuthError("")
+	}
+	if resp.StatusCode == 429 {
+		return nil, newQuotaError("")
+	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(rawData))
+		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(rawData)), resp.StatusCode)
 	}
 	data, err := uc.client.unwrap(rawData)
 	if err != nil {

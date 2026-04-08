@@ -209,12 +209,33 @@ class DocParse:
         raise DocParseError("Device authorization timed out")
 
     @staticmethod
-    def _unwrap(outer: Dict[str, Any]) -> Dict[str, Any]:
+    def _is_auth_error_message(msg: str) -> bool:
+        """Detect auth-related error messages from server-side envelope errors."""
+        if not msg:
+            return False
+        m = msg.lower()
+        return (
+            "invalid or expired api key" in m
+            or "invalid api key" in m
+            or "missing api key" in m
+            or "unauthorized" in m
+            or "api key required" in m
+        )
+
+    @classmethod
+    def _raise_envelope_error(cls, msg: str) -> None:
+        """Raise AuthError for auth-like messages, otherwise DocParseError."""
+        if cls._is_auth_error_message(msg):
+            raise AuthError(msg, 401)
+        raise DocParseError(msg)
+
+    @classmethod
+    def _unwrap(cls, outer: Dict[str, Any]) -> Dict[str, Any]:
         """Unwrap serve-api response envelope."""
         if "error" in outer and outer["error"]:
             err = outer["error"]
             if isinstance(err, str):
-                raise DocParseError(err)
+                cls._raise_envelope_error(err)
             # Dict errors (e.g. device auth poll) — return as-is for caller handling
             return outer
         result_str = outer.get("result", "")
@@ -228,7 +249,7 @@ class DocParse:
         if isinstance(inner, dict) and "error" in inner and inner["error"]:
             err = inner["error"]
             msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-            raise DocParseError(msg)
+            cls._raise_envelope_error(msg)
         return inner
 
     # ── HTTP layer ──

@@ -3,6 +3,7 @@ package docparse
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -81,6 +82,49 @@ func TestUnwrap_Error(t *testing.T) {
 	_, err := c.unwrap([]byte(data))
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	// Non-auth envelope error must NOT match ErrAuth
+	if errors.Is(err, ErrAuth) {
+		t.Fatalf("non-auth message should not be auth error: %v", err)
+	}
+}
+
+func TestUnwrap_AuthErrorEnvelope(t *testing.T) {
+	c := New("dp_x")
+	_, err := c.unwrap([]byte(`{"error":"Invalid or expired API key"}`))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+	var ae *AuthError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AuthError, got %T", err)
+	}
+}
+
+func TestUnwrap_InnerAuthErrorEnvelope(t *testing.T) {
+	c := New("dp_x")
+	inner := `{"error":{"message":"Invalid or expired API key"}}`
+	envBytes, _ := json.Marshal(map[string]string{"result": inner})
+	_, err := c.unwrap(envBytes)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+}
+
+func TestUnwrap_UnauthorizedEnvelope(t *testing.T) {
+	c := New("dp_x")
+	_, err := c.unwrap([]byte(`{"error":"Unauthorized"}`))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
 	}
 }
 
@@ -178,6 +222,13 @@ func TestError_401(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on 401")
 	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+	var ae *AuthError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AuthError, got %T", err)
+	}
 }
 
 func TestError_429(t *testing.T) {
@@ -188,6 +239,29 @@ func TestError_429(t *testing.T) {
 	_, err := c.Health(context.Background())
 	if err == nil {
 		t.Fatal("expected error on 429")
+	}
+	if !errors.Is(err, ErrQuota) {
+		t.Fatalf("expected ErrQuota, got %v", err)
+	}
+	var qe *QuotaError
+	if !errors.As(err, &qe) {
+		t.Fatalf("expected *QuotaError, got %T", err)
+	}
+}
+
+func TestError_AuthEnvelopeOn200(t *testing.T) {
+	// Server returns 200 but with an auth-error string in the envelope —
+	// this is the actual production failure mode.
+	ts := mockServer(200, map[string]any{"error": "Invalid or expired API key"})
+	defer ts.Close()
+
+	c := New("dp_bad", WithBaseURL(ts.URL))
+	_, err := c.Parse(context.Background(), "sample.docx")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
 	}
 }
 

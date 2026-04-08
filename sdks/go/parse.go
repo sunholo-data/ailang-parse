@@ -56,13 +56,13 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 	}
 
 	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("auth error: invalid or missing API key")
+		return nil, newAuthError("")
 	}
 	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("quota exceeded")
+		return nil, newQuotaError("")
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
+		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data)), resp.StatusCode)
 	}
 
 	inner, err := c.unwrap(data)
@@ -130,13 +130,13 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 	}
 
 	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("auth error: invalid or missing API key")
+		return nil, newAuthError("")
 	}
 	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("quota exceeded")
+		return nil, newQuotaError("")
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
+		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data)), resp.StatusCode)
 	}
 
 	inner, err := c.unwrap(data)

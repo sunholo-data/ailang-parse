@@ -188,6 +188,35 @@ describe("error handling", () => {
     const c = new DocParse({ apiKey: "dp_test", baseUrl });
     await assert.rejects(() => c.health(), DocParseError);
   });
+
+  it("routes envelope 'Invalid or expired API key' to AuthError", async () => {
+    setMock(200, { error: "Invalid or expired API key" });
+    const c = new DocParse({ apiKey: "dp_bad", baseUrl });
+    await assert.rejects(() => c.parse("sample.docx"), AuthError);
+  });
+
+  it("routes inner-result auth error to AuthError", async () => {
+    setMock(200, {
+      result: JSON.stringify({ error: { message: "Invalid or expired API key" } }),
+    });
+    const c = new DocParse({ apiKey: "dp_bad", baseUrl });
+    await assert.rejects(() => c.parse("sample.docx"), AuthError);
+  });
+
+  it("routes 'Unauthorized' envelope error to AuthError", async () => {
+    setMock(200, { error: "Unauthorized" });
+    const c = new DocParse({ apiKey: "dp_bad", baseUrl });
+    await assert.rejects(() => c.parse("sample.docx"), AuthError);
+  });
+
+  it("non-auth envelope error stays as plain DocParseError (not AuthError)", async () => {
+    setMock(200, { error: "malformed document" });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(
+      () => c.parse("bad.docx"),
+      (e: unknown) => e instanceof DocParseError && !(e instanceof AuthError),
+    );
+  });
 });
 
 // ── Unstructured compat ──

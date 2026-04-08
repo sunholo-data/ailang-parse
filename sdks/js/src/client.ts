@@ -216,9 +216,34 @@ export class DocParse {
     throw new DocParseError("Device authorization timed out");
   }
 
+  /** Detect auth-related error messages from server-side envelope errors. */
+  private static _isAuthErrorMessage(msg: string): boolean {
+    if (!msg) return false;
+    const m = msg.toLowerCase();
+    return (
+      m.includes("invalid or expired api key") ||
+      m.includes("invalid api key") ||
+      m.includes("missing api key") ||
+      m.includes("unauthorized") ||
+      m.includes("api key required")
+    );
+  }
+
+  /** Throw AuthError for auth-like messages, otherwise DocParseError. */
+  private static _raiseEnvelopeError(msg: string): never {
+    if (DocParse._isAuthErrorMessage(msg)) throw new AuthError(msg);
+    throw new DocParseError(msg);
+  }
+
   /** Unwrap serve-api response envelope. */
   private _unwrap(outer: any): any {
-    if (outer.error) throw new DocParseError(outer.error);
+    if (outer.error) {
+      if (typeof outer.error === "string") {
+        DocParse._raiseEnvelopeError(outer.error);
+      }
+      // Dict errors (e.g. device-auth poll) — return for caller handling
+      return outer;
+    }
     const resultStr = outer.result || "";
     if (!resultStr) return outer;
     try {
@@ -227,7 +252,7 @@ export class DocParse {
       if (inner?.error) {
         const err = inner.error;
         const msg = typeof err === "object" ? err.message || JSON.stringify(err) : String(err);
-        throw new DocParseError(msg);
+        DocParse._raiseEnvelopeError(msg);
       }
       return inner;
     } catch (e) {

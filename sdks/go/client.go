@@ -287,13 +287,18 @@ func (c *Client) DeviceAuth(ctx context.Context, label string) (*DeviceAuthResul
 }
 
 // unwrap extracts the inner result from a serve-api response envelope.
+//
+// Auth-like envelope error strings ("Invalid or expired API key",
+// "Unauthorized", etc.) are returned as *AuthError so callers can detect
+// them via errors.As / errors.Is(err, ErrAuth) — even when the server
+// reports them inside a 200-OK envelope rather than as a 401.
 func (c *Client) unwrap(data []byte) ([]byte, error) {
 	var outer serveAPIResponse
 	if err := json.Unmarshal(data, &outer); err != nil {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
 	if outer.Error != "" {
-		return nil, fmt.Errorf("API error: %s", outer.Error)
+		return nil, envelopeError(outer.Error)
 	}
 	inner := []byte(outer.Result)
 	// If no result field, return the raw response (e.g. health, formats)
@@ -309,9 +314,9 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 			Message string `json:"message"`
 		}
 		if json.Unmarshal(innerObj.Error, &errObj) == nil && errObj.Message != "" {
-			return nil, fmt.Errorf("API error: %s", errObj.Message)
+			return nil, envelopeError(errObj.Message)
 		}
-		return nil, fmt.Errorf("API error: %s", string(innerObj.Error))
+		return nil, envelopeError(string(innerObj.Error))
 	}
 	return inner, nil
 }
@@ -353,13 +358,13 @@ func (c *Client) call(ctx context.Context, method, path string, args []string) (
 	}
 
 	if resp.StatusCode == 401 {
-		return nil, fmt.Errorf("auth error: invalid or missing API key")
+		return nil, newAuthError("")
 	}
 	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("quota exceeded")
+		return nil, newQuotaError("")
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(data))
+		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data)), resp.StatusCode)
 	}
 
 	return c.unwrap(data)

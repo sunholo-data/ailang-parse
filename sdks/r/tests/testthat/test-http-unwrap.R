@@ -25,6 +25,36 @@ test_that("unwrap raises docparse_error on inner result error", {
   )
 })
 
+test_that("unwrap routes 'Invalid or expired API key' envelope to auth_error", {
+  expect_error(
+    ailangparse:::.unwrap('{"error": "Invalid or expired API key"}'),
+    class = "ailang_auth_error"
+  )
+})
+
+test_that("unwrap routes inner-result auth error to auth_error", {
+  expect_error(
+    ailangparse:::.unwrap(.envelope(list(error = list(message = "Invalid or expired API key")))),
+    class = "ailang_auth_error"
+  )
+})
+
+test_that("unwrap routes 'Unauthorized' envelope to auth_error", {
+  expect_error(
+    ailangparse:::.unwrap('{"error": "Unauthorized"}'),
+    class = "ailang_auth_error"
+  )
+})
+
+test_that("unwrap leaves non-auth envelope errors as plain docparse_error", {
+  err <- tryCatch(
+    ailangparse:::.unwrap('{"error": "malformed document"}'),
+    error = function(e) e
+  )
+  expect_s3_class(err, "ailang_docparse_error")
+  expect_false(inherits(err, "ailang_auth_error"))
+})
+
 test_that("stop_for_status maps 401/429 to typed errors", {
   expect_error(ailangparse:::.stop_for_status(401L, ""),
                class = "ailang_auth_error")

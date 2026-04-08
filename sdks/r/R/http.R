@@ -38,6 +38,23 @@ NULL
 #' @param body_text Raw JSON text returned by the API.
 #' @return A parsed list (the inner result).
 #' @keywords internal
+.is_auth_error_message <- function(msg) {
+  if (is.null(msg) || !nzchar(msg)) return(FALSE)
+  m <- tolower(msg)
+  grepl("invalid or expired api key", m, fixed = TRUE) ||
+    grepl("invalid api key", m, fixed = TRUE) ||
+    grepl("missing api key", m, fixed = TRUE) ||
+    grepl("unauthorized", m, fixed = TRUE) ||
+    grepl("api key required", m, fixed = TRUE)
+}
+
+.raise_envelope_error <- function(msg) {
+  if (.is_auth_error_message(msg)) {
+    stop(.auth_error(msg))
+  }
+  stop(.docparse_error(msg))
+}
+
 .unwrap <- function(body_text) {
   if (!nzchar(body_text)) return(list())
   outer <- tryCatch(
@@ -48,7 +65,7 @@ NULL
   )
   if (!is.null(outer$error) && length(outer$error) > 0L) {
     err <- outer$error
-    if (is.character(err)) stop(.docparse_error(err))
+    if (is.character(err)) .raise_envelope_error(err)
     # Dict errors (e.g. device-auth poll) — return the whole envelope so
     # the caller can inspect status fields.
     return(outer)
@@ -62,7 +79,7 @@ NULL
   if (is.list(inner) && !is.null(inner$error) && length(inner$error) > 0L) {
     err <- inner$error
     msg <- if (is.list(err) && !is.null(err$message)) err$message else as.character(err)
-    stop(.docparse_error(msg))
+    .raise_envelope_error(msg)
   }
   inner
 }
