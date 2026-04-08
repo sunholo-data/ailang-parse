@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EPUB Parsing API — Parse EPUB Ebooks to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse EPUB ebooks to structured JSON. Spine-ordered chapters, OPF metadata, embedded images. No Calibre subprocess, no PDF conversion. Runs in the browser via WebAssembly.">
+<meta property="og:title" content="EPUB Parsing API — AILANG Parse">
+<meta property="og:description" content="Native EPUB parsing — spine-ordered chapters, OPF metadata, embedded images. No Calibre subprocess.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/epub-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0 28px; }
+.dp-compare-grid > div { border-radius: var(--radius-sm); border: 1px solid var(--border); overflow: hidden; }
+.dp-compare-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.dp-compare-label--raw { background: #2d1b1b; color: #f08080; }
+.dp-compare-label--structured { background: #1b2d1b; color: #80f080; }
+.dp-compare-grid pre { margin: 0; padding: 14px; font-size: 11.5px; line-height: 1.55; overflow-x: auto; background: var(--bg-card); max-height: 340px; }
+.dp-feature-grid, .dp-usecase-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.dp-feature-card, .dp-usecase-card { padding: 20px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); }
+.dp-feature-card h4, .dp-usecase-card h4 { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
+.dp-feature-card p, .dp-usecase-card p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+@media (max-width: 900px) { .dp-compare-grid, .dp-feature-grid, .dp-usecase-grid { grid-template-columns: 1fr; } }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse an EPUB file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Drop the .epub file into the AILANG Parse Workbench, send it to the API, or use the Python/JS/Go/R SDK. The parser walks META-INF/container.xml to find the OPF, reads the spine, and parses each XHTML chapter directly — no Calibre or PDF conversion."}},
+    {"@type": "Question", "name": "Are chapters parsed in reading order?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The OPF spine defines the canonical reading order. AILANG Parse follows the spine and emits each chapter as a SectionBlock in that order, so downstream code never has to guess at file ordering."}},
+    {"@type": "Question", "name": "Does EPUB parsing need Calibre or any external tool?", "acceptedAnswer": {"@type": "Answer", "text": "No. The parser is pure AILANG — it reads container.xml, walks the OPF, parses each XHTML chapter via the same HTML parser used for standalone HTML files. No subprocesses, no PDF conversion."}},
+    {"@type": "Question", "name": "What metadata is extracted from EPUB?", "acceptedAnswer": {"@type": "Answer", "text": "Dublin Core metadata from the OPF: dc:title, dc:creator (author), dc:language, dc:identifier (ISBN), dc:date, dc:publisher. Useful for indexing libraries by author or ISBN."}},
+    {"@type": "Question", "name": "Does EPUB parsing run in the browser?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. EPUB parsing runs in WebAssembly via the same AILANG parser used by the CLI. Files never leave the browser tab — try it in the Workbench."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">EPUB Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Native EPUB ebook parsing &mdash; spine-ordered chapters, OPF metadata, embedded images, all extracted directly from the <code>.epub</code> archive. No Calibre subprocess, no PDF conversion, no flattening into one wall of text.</p>
+    <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own EPUB in the Workbench &rarr;</a></div>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#spine-order">Spine &amp; Reading Order</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Books as Structured Data</h2>
+      <p>An <code>.epub</code> file is a zip archive that hides a small filesystem inside it: <code>META-INF/container.xml</code> points to a <code>.opf</code> manifest, the OPF lists every resource and a <code>spine</code> defining the canonical reading order, and the actual content lives as XHTML files &mdash; one per chapter, sometimes more. Embedded images, fonts, and CSS sit alongside.</p>
+
+      <p>Most ebook tooling treats EPUB as a black box: convert to PDF, render to text, lose chapter boundaries, lose metadata, lose image references. AILANG Parse walks the EPUB structure directly &mdash; container &rarr; OPF &rarr; spine &rarr; XHTML &mdash; and emits each chapter as a <code>SectionBlock</code> in spine order.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>The same Block ADT used by the <a href="html-parsing.html">HTML parser</a> &mdash; chapter XHTML routes through the same code path, so EPUB and standalone HTML pages flow through one downstream pipeline.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw EPUB Structure vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw OPF + chapter XHTML</div>
+<pre><code>&lt;!-- content.opf --&gt;
+&lt;package version="3.0"&gt;
+ &lt;metadata&gt;
+  &lt;dc:title&gt;A Tale of Two Cities&lt;/dc:title&gt;
+  &lt;dc:creator&gt;Charles Dickens&lt;/dc:creator&gt;
+  &lt;dc:language&gt;en&lt;/dc:language&gt;
+ &lt;/metadata&gt;
+ &lt;manifest&gt;
+  &lt;item id="ch1" href="ch1.xhtml"
+        media-type="application/xhtml+xml"/&gt;
+  &lt;item id="ch2" href="ch2.xhtml"
+        media-type="application/xhtml+xml"/&gt;
+ &lt;/manifest&gt;
+ &lt;spine&gt;
+  &lt;itemref idref="ch1"/&gt;
+  &lt;itemref idref="ch2"/&gt;
+ &lt;/spine&gt;
+&lt;/package&gt;
+
+&lt;!-- ch1.xhtml --&gt;
+&lt;h1&gt;Book the First&lt;/h1&gt;
+&lt;p&gt;It was the best of times,
+   it was the worst of times...&lt;/p&gt;</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output</div>
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "A Tale of Two Cities",
+    "author": "Charles Dickens",
+    "language": "en"
+  },
+  "blocks": [
+    {
+      "type": "section",
+      "kind": "chapter:ch1.xhtml",
+      "blocks": [
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "Book the First"
+        },
+        {
+          "type": "text",
+          "text": "It was the best of times, it was the worst of times..."
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "kind": "chapter:ch2.xhtml",
+      "blocks": [ ... ]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Spine-Ordered Chapters</h4>
+          <p>The OPF <code>spine</code> defines canonical reading order. Each spine item becomes a <code>SectionBlock</code> with <code>kind: "chapter:&lt;href&gt;"</code>, in the exact order an ebook reader would render them.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>OPF Metadata</h4>
+          <p>Dublin Core fields from the OPF: <code>dc:title</code>, <code>dc:creator</code>, <code>dc:language</code>, <code>dc:identifier</code> (often the ISBN), <code>dc:date</code>, <code>dc:publisher</code>. Indexable, searchable, exportable.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Headings, Paragraphs, Lists</h4>
+          <p>Each chapter XHTML is parsed by the same HTML parser used for standalone HTML files. Headings (<code>h1&ndash;h6</code>), paragraphs, ordered/unordered lists, blockquotes, and inline emphasis come through as typed blocks.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables &amp; Code Blocks</h4>
+          <p>Reference works, technical books, and cookbooks routinely embed tables and <code>&lt;pre&gt;&lt;code&gt;</code> blocks. Both round-trip cleanly through the Block ADT &mdash; no flattening.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Embedded Images</h4>
+          <p>Image references (<code>&lt;img src="..."&gt;</code>) come through as <code>ImageBlock</code> with their relative path inside the EPUB. Useful for cover extraction or figure captioning pipelines.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>No Calibre, No PDF Pipeline</h4>
+          <p>The parser is pure AILANG. No <code>calibre</code> binary, no <code>ebook-convert</code> subprocess, no PDF intermediate. Same code runs in the CLI and in WebAssembly in the browser.</p>
+        </div>
+      </div>
+
+      <h2 id="spine-order">Spine &amp; Reading Order</h2>
+      <p>EPUB chapter files do not have to be ordered by filename &mdash; the OPF <code>spine</code> is the only authoritative source of reading order. AILANG Parse follows the spine, so chapters always come out in the order the author intended, even if the underlying files are named <code>x4j2-zb.xhtml</code>.</p>
+
+      <p>Each chapter is its own <code>SectionBlock</code>, which means downstream code can chunk by chapter, embed by chapter, or render a table of contents from headings without flattening the book first.</p>
+
+<pre><code class="language-python">from ailang_parse import DocParse
+
+result = DocParse(api_key="...").parse_file("book.epub")
+
+print(result.metadata.title, "by", result.metadata.author)
+
+for chapter in result.blocks:
+    if chapter.type != "section":
+        continue
+    print("---", chapter.kind, "---")
+    for block in chapter.blocks:
+        if block.type == "heading":
+            print("H" + str(block.level), block.text)
+</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Project Gutenberg &amp; Public Domain</h4>
+          <p>Bulk-process tens of thousands of EPUBs from Project Gutenberg, Standard Ebooks, or the Internet Archive. One parser, one Block ADT, no per-source heuristics.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Ebook RAG &amp; Semantic Search</h4>
+          <p>Each chapter becomes a coherent retrievable chunk with explicit boundaries &mdash; embed by chapter or by heading section, not by an arbitrary 512-token window that splits a sentence in two.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Accessibility Tooling</h4>
+          <p>Generate audio versions, large-print exports, or simplified-language renderings. Structural blocks survive the conversion, so chapter boundaries and headings remain intact in the output.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Format Migration</h4>
+          <p>Convert EPUB to Markdown, HTML, or DOCX while preserving chapter structure, headings, lists, and image references. See <a href="html-parsing.html">HTML parsing</a> for the inverse direction.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Browser-Based Library Tools</h4>
+          <p>Drop an EPUB into the <a href="workbench.html">Workbench</a> &mdash; the parser runs in WebAssembly, the file never leaves the browser. Useful for personal library curation without uploading purchased books.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Citation &amp; Quote Extraction</h4>
+          <p>Walk the chapter tree to extract every quotation, every blockquote, or every section heading for citation databases, study guides, or literary analysis pipelines.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>Workbench (in-browser)</h3>
+      <p>Drop an EPUB file into the <a href="workbench.html">Workbench</a> &mdash; parsing runs in WebAssembly with the same AILANG parser used by the CLI. No upload, no signup.</p>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse an EPUB file
+./bin/docparse book.epub
+
+# Convert EPUB to Markdown
+./bin/docparse book.epub --convert book.md
+
+# Convert EPUB to HTML
+./bin/docparse book.epub --convert book.html</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"book.epub","outputFormat":"json","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="workbench.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse an EPUB file to JSON?</summary>
+          <div class="dp-faq-answer"><p>Drop it into the <a href="workbench.html">Workbench</a>, send it to the <a href="api.html">API</a>, or use the Python/JS/Go/R SDK. The parser walks <code>META-INF/container.xml</code>, reads the OPF spine, and parses each XHTML chapter directly &mdash; no Calibre, no PDF conversion.</p></div>
+        </details>
+        <details>
+          <summary>Are chapters parsed in reading order?</summary>
+          <div class="dp-faq-answer"><p>Yes. The OPF <code>spine</code> defines canonical reading order. AILANG Parse follows the spine and emits each chapter as a <code>SectionBlock</code> in that order, even when the underlying filenames are arbitrary.</p></div>
+        </details>
+        <details>
+          <summary>Does EPUB parsing need Calibre or any external tool?</summary>
+          <div class="dp-faq-answer"><p>No. The parser is pure AILANG. Container, OPF, and chapter XHTML are all read directly from the <code>.epub</code> zip archive.</p></div>
+        </details>
+        <details>
+          <summary>What metadata is extracted from EPUB?</summary>
+          <div class="dp-faq-answer"><p>Dublin Core fields from the OPF: <code>dc:title</code>, <code>dc:creator</code>, <code>dc:language</code>, <code>dc:identifier</code> (ISBN), <code>dc:date</code>, <code>dc:publisher</code>.</p></div>
+        </details>
+        <details>
+          <summary>Does EPUB parsing run in the browser?</summary>
+          <div class="dp-faq-answer"><p>Yes. The same AILANG parser used by the CLI compiles to WebAssembly. Files never leave the browser tab.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

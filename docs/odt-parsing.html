@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ODT Parsing API — Parse OpenDocument Text to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse ODT (OpenDocument Text / LibreOffice Writer) files to structured JSON. Native ODF parsing with no LibreOffice subprocess and no DOCX conversion step. Headings, tables, lists, images, metadata.">
+<meta property="og:title" content="ODT Parsing API — AILANG Parse">
+<meta property="og:description" content="Native OpenDocument Text parsing — no LibreOffice subprocess, no DOCX conversion. Reads content.xml directly.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/odt-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0 28px; }
+.dp-compare-grid > div { border-radius: var(--radius-sm); border: 1px solid var(--border); overflow: hidden; }
+.dp-compare-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.dp-compare-label--raw { background: #2d1b1b; color: #f08080; }
+.dp-compare-label--structured { background: #1b2d1b; color: #80f080; }
+.dp-compare-grid pre { margin: 0; padding: 14px; font-size: 11.5px; line-height: 1.55; overflow-x: auto; background: var(--bg-card); max-height: 340px; }
+.dp-feature-grid, .dp-usecase-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.dp-feature-card, .dp-usecase-card { padding: 20px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); }
+.dp-feature-card h4, .dp-usecase-card h4 { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
+.dp-feature-card p, .dp-usecase-card p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+@media (max-width: 900px) { .dp-compare-grid, .dp-feature-grid, .dp-usecase-grid { grid-template-columns: 1fr; } }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse an ODT file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Drop the .odt file into the AILANG Parse Workbench, send it to the API, or use the Python/JS/Go/R SDK. The parser reads OpenDocument XML directly from the .odt zip — no LibreOffice subprocess, no DOCX conversion."}},
+    {"@type": "Question", "name": "Does AILANG Parse need LibreOffice installed?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads ODF content.xml directly. There is no soffice subprocess, no headless rendering, and no DOCX conversion. Native ODF parsing all the way down."}},
+    {"@type": "Question", "name": "What ODT elements are extracted?", "acceptedAnswer": {"@type": "Answer", "text": "Headings (text:h with outline level), paragraphs (text:p), tables with merged cells (table:table-cell with table:number-columns-spanned), lists (text:list), images (draw:image), text boxes (draw:text-box), sections, and metadata from meta.xml (dc:title, dc:creator, dc:date)."}},
+    {"@type": "Question", "name": "Are headers and footers extracted?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ODT stores headers and footers inside style:master-page elements in styles.xml. AILANG Parse reads styles.xml separately and emits each header/footer as a SectionBlock."}},
+    {"@type": "Question", "name": "Does ODT parsing run in the browser?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ODT parsing runs entirely in-browser via WebAssembly. The same AILANG parser used by the CLI compiles to WASM and runs locally — your file never leaves your device. Try it in the Workbench."}},
+    {"@type": "Question", "name": "How is ODT different from DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Both are zip archives with XML inside, but they use different schemas. DOCX uses Office Open XML (w: namespace). ODT uses OpenDocument Format (text:, table:, office: namespaces). AILANG Parse implements both natively — same Block ADT output, different XML mappers."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">ODT Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Native OpenDocument Text parsing for LibreOffice Writer files. Headings, tables, lists, headers/footers, images, and metadata &mdash; extracted directly from <code>content.xml</code>. No LibreOffice subprocess, no DOCX conversion step.</p>
+    <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own ODT in the Workbench &rarr;</a></div>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#headers-footers">Headers &amp; Footers</a>
+        <a href="#tables">Tables &amp; Merged Cells</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Native ODT, Not "DOCX-ish"</h2>
+      <p>An <code>.odt</code> file is a zip archive containing XML &mdash; specifically, the OpenDocument Format. Paragraphs live in <code>content.xml</code> as <code>text:p</code> elements. Tables use the <code>table:</code> namespace. Headers and footers sit inside <code>style:master-page</code> in <code>styles.xml</code>. None of this maps cleanly to Word's <code>w:</code> schema.</p>
+
+      <p>Most parsers handle ODT by shelling out to LibreOffice to convert to DOCX or PDF first &mdash; losing whatever ODF-specific structure won't survive the trip. AILANG Parse reads ODF XML directly, with the same Block ADT output you get from DOCX. No subprocess, no rendering, no conversion.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Native ODF parsing is a strategic gap in the ecosystem. Most "universal" document parsers either skip ODT entirely or pipe it through <code>soffice --headless --convert-to</code>, adding 2&ndash;5 seconds per file and losing structure. AILANG Parse runs in milliseconds with no external dependency.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw ODF XML vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw content.xml</div>
+<pre><code>&lt;office:body&gt;
+ &lt;office:text&gt;
+  &lt;text:h text:outline-level="1"&gt;
+    Q1 Plan
+  &lt;/text:h&gt;
+  &lt;text:p text:style-name="Normal"&gt;
+    Revenue target: 2.4M EUR
+  &lt;/text:p&gt;
+  &lt;table:table table:name="Targets"&gt;
+   &lt;table:table-row&gt;
+    &lt;table:table-cell
+      table:number-columns-spanned="2"&gt;
+     &lt;text:p&gt;Region&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+    &lt;table:table-cell&gt;
+     &lt;text:p&gt;Q1&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+   &lt;/table:table-row&gt;
+  &lt;/table:table&gt;
+  &lt;text:list&gt;
+    &lt;text:list-item&gt;
+      &lt;text:p&gt;EMEA&lt;/text:p&gt;
+    &lt;/text:list-item&gt;
+  &lt;/text:list&gt;
+ &lt;/office:text&gt;
+&lt;/office:body&gt;</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output</div>
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "Q1 Plan",
+    "author": "Alice Chen",
+    "created": "2026-03-15T09:00:00Z"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "Q1 Plan"
+    },
+    {
+      "type": "text",
+      "text": "Revenue target: 2.4M EUR",
+      "style": "normal"
+    },
+    {
+      "type": "table",
+      "headers": [
+        {"text": "Region", "colSpan": 2},
+        {"text": "Q1"}
+      ],
+      "rows": [...]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": ["EMEA"]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Headings &amp; Outline</h4>
+          <p>Every <code>text:h</code> element becomes a typed heading block with its outline level (1&ndash;6) preserved from <code>text:outline-level</code>. The document outline is reconstructable without rendering.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Paragraphs &amp; Styles</h4>
+          <p><code>text:p</code> elements become text blocks with their style name preserved. Inline runs and embedded frames (images anchored to text) come through inline at their anchor position.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables &amp; Merged Cells</h4>
+          <p>Full <code>table:table</code> structure with <code>table:number-columns-spanned</code> resolved into explicit <code>colSpan</code> metadata. Header row identification matches the DOCX parser's contract.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Lists</h4>
+          <p><code>text:list</code> elements become typed list blocks with their items extracted and empty entries filtered. Nested list items come through as individual entries.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Headers, Footers &amp; Text Boxes</h4>
+          <p>Headers and footers from <code>style:master-page</code> in <code>styles.xml</code> extracted as section blocks. Text boxes (<code>draw:text-box</code>) come through as their own SectionBlocks, anchored at the right place in the flow.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Images &amp; Metadata</h4>
+          <p>Embedded images (<code>draw:image</code>) extracted with their <code>xlink:href</code> path and inferred MIME type. Metadata from <code>meta.xml</code> &mdash; <code>dc:title</code>, <code>dc:creator</code>, <code>dc:date</code>, page count from <code>meta:document-statistic</code>.</p>
+        </div>
+      </div>
+
+      <h2 id="headers-footers">Headers &amp; Footers</h2>
+      <p>Unlike DOCX, ODT puts headers and footers inside the <em>style</em> definitions, not the body. They live in <code>style:master-page</code> elements inside <code>styles.xml</code>. AILANG Parse reads <code>styles.xml</code> as a second pass, walks every master-page, and emits any header/footer content as a <code>SectionBlock</code> with <code>kind: "header"</code> or <code>"footer"</code>.</p>
+
+<pre><code class="language-json">{
+  "type": "section",
+  "kind": "header",
+  "blocks": [
+    {"type": "text", "text": "Confidential — Internal Only", "style": "normal"}
+  ]
+}</code></pre>
+
+      <h2 id="tables">Tables &amp; Merged Cells</h2>
+      <p>ODF tables encode horizontal merges with <code>table:number-columns-spanned</code> on the cell that owns the merge. AILANG Parse resolves these into the same <code>colSpan</code>/<code>rowSpan</code> shape used by the DOCX parser, so downstream code can treat ODT and DOCX tables identically.</p>
+
+<pre><code class="language-json">{
+  "type": "table",
+  "headers": [
+    {"text": "Region", "colSpan": 2, "rowSpan": 1, "merged": false},
+    {"text": "Total", "colSpan": 1, "rowSpan": 1, "merged": false}
+  ],
+  "rows": [
+    [{"text": "EMEA"}, {"text": "UK"}, {"text": "&euro;125K"}],
+    [{"text": "EMEA"}, {"text": "DE"}, {"text": "&euro;98K"}]
+  ]
+}</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>European Public Sector</h4>
+          <p>EU government bodies and many national administrations standardise on ODF for procurement, contracts, and policy documents. Native ODT parsing means you can ingest this archive without setting up a LibreOffice fleet.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Mixed-Office Environments</h4>
+          <p>Organisations with a Linux/LibreOffice contingent end up with mixed DOCX/ODT archives. One parser, one Block ADT, one downstream pipeline &mdash; instead of branching on file extension and hoping the conversion didn't lose structure.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Academic Manuscripts</h4>
+          <p>Researchers using LaTeX or Zotero often produce ODT exports. Extract heading hierarchy, citation tables, and figure references without round-tripping through Word format.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Document Migration</h4>
+          <p>Convert legacy ODT archives to Markdown for docs-as-code, HTML for web publishing, or DOCX for collaborators who insist on Word. Structure preservation means headings, tables, and images survive intact.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Compliance &amp; Records</h4>
+          <p>ODF is the standard for long-term document preservation in many jurisdictions because the format is open. Native parsing means you can index, search, and audit ODF archives without converting them to a proprietary format first.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Browser-Based Tools</h4>
+          <p>Because ODT parsing runs in WebAssembly, you can build review tools that never upload files. Drop an ODT into the <a href="workbench.html">Workbench</a> &mdash; the parser runs in your tab, files never leave your device.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>Workbench (in-browser)</h3>
+      <p>Drop an ODT file into the <a href="workbench.html">Workbench</a> &mdash; ODT parsing runs in WebAssembly with the same AILANG parser used by the CLI. No upload, no signup.</p>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse an ODT file
+./bin/docparse report.odt
+
+# Convert ODT to Markdown
+./bin/docparse report.odt --convert output.md
+
+# Convert ODT to DOCX
+./bin/docparse report.odt --convert output.docx</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample.odt","outputFormat":"json","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <h3>Python SDK</h3>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="YOUR_API_KEY")
+result = client.parse_file("report.odt")
+
+print(result.metadata.title)
+for block in result.blocks:
+    if block.type == "heading":
+        print("H" + str(block.level), block.text)
+    elif block.type == "table":
+        print("Table:", len(block.rows), "rows")
+</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="workbench.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse an ODT file to JSON?</summary>
+          <div class="dp-faq-answer"><p>Drop the <code>.odt</code> file into the <a href="workbench.html">Workbench</a>, send it to the <a href="api.html">API</a>, or use the Python/JS/Go/R SDK. The parser reads OpenDocument XML directly &mdash; no LibreOffice subprocess, no DOCX conversion.</p></div>
+        </details>
+        <details>
+          <summary>Does AILANG Parse need LibreOffice installed?</summary>
+          <div class="dp-faq-answer"><p>No. ODF <code>content.xml</code>, <code>styles.xml</code>, and <code>meta.xml</code> are read directly from the zip archive. There is no <code>soffice</code> subprocess and no headless rendering.</p></div>
+        </details>
+        <details>
+          <summary>What ODT elements are extracted?</summary>
+          <div class="dp-faq-answer"><p>Headings (<code>text:h</code> with outline level), paragraphs (<code>text:p</code>), tables with merged cells (<code>table:number-columns-spanned</code>), lists (<code>text:list</code>), images (<code>draw:image</code>), text boxes (<code>draw:text-box</code>), sections, headers and footers from <code>style:master-page</code>, and metadata from <code>meta.xml</code>.</p></div>
+        </details>
+        <details>
+          <summary>Are headers and footers extracted?</summary>
+          <div class="dp-faq-answer"><p>Yes. ODT stores headers and footers in <code>style:master-page</code> elements inside <code>styles.xml</code>. AILANG Parse reads <code>styles.xml</code> separately and emits each header/footer as a <code>SectionBlock</code>.</p></div>
+        </details>
+        <details>
+          <summary>Does ODT parsing run in the browser?</summary>
+          <div class="dp-faq-answer"><p>Yes. The same AILANG parser used by the CLI compiles to WebAssembly. Drop an <code>.odt</code> into the <a href="workbench.html">Workbench</a> and parsing happens locally in your browser tab &mdash; the file never leaves your device.</p></div>
+        </details>
+        <details>
+          <summary>How is ODT different from DOCX parsing?</summary>
+          <div class="dp-faq-answer"><p>Both are zip archives with XML inside, but they use different schemas. DOCX uses Office Open XML (<code>w:</code> namespace). ODT uses OpenDocument Format (<code>text:</code>, <code>table:</code>, <code>office:</code> namespaces). AILANG Parse implements both natively, with the same Block ADT output. See <a href="docx-parsing.html">DOCX parsing</a> for the Word equivalent.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

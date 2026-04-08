@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ODS Parsing API — Parse OpenDocument Spreadsheets to Structured JSON — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse ODS (OpenDocument Spreadsheet / LibreOffice Calc) files to structured JSON. Per-sheet tables with merged cells, no LibreOffice subprocess and no XLSX conversion step.">
+<meta property="og:title" content="ODS Parsing API — AILANG Parse">
+<meta property="og:description" content="Native OpenDocument Spreadsheet parsing — per-sheet tables, merged cells, no LibreOffice subprocess.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/ods-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0 28px; }
+.dp-compare-grid > div { border-radius: var(--radius-sm); border: 1px solid var(--border); overflow: hidden; }
+.dp-compare-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.dp-compare-label--raw { background: #2d1b1b; color: #f08080; }
+.dp-compare-label--structured { background: #1b2d1b; color: #80f080; }
+.dp-compare-grid pre { margin: 0; padding: 14px; font-size: 11.5px; line-height: 1.55; overflow-x: auto; background: var(--bg-card); max-height: 340px; }
+.dp-feature-grid, .dp-usecase-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.dp-feature-card, .dp-usecase-card { padding: 20px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); }
+.dp-feature-card h4, .dp-usecase-card h4 { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; }
+.dp-feature-card p, .dp-usecase-card p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+@media (max-width: 900px) { .dp-compare-grid, .dp-feature-grid, .dp-usecase-grid { grid-template-columns: 1fr; } }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I parse an ODS file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Drop the .ods file into the AILANG Parse Workbench, send it to the API, or use the Python/JS/Go/R SDK. The parser reads OpenDocument Spreadsheet XML directly from the .ods zip — no LibreOffice subprocess and no XLSX conversion."}},
+    {"@type": "Question", "name": "Are sheets extracted individually?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every table:table becomes a SectionBlock with kind 'sheet:<sheet name>' wrapping a TableBlock with rows, headers, and merged cells. Empty trailing rows are filtered."}},
+    {"@type": "Question", "name": "Are merged cells preserved?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ODF stores horizontal merges in table:number-columns-spanned on the cell that owns the merge. AILANG Parse resolves these into explicit colSpan metadata, matching the XLSX parser's contract."}},
+    {"@type": "Question", "name": "Does ODS parsing need LibreOffice installed?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads ODF content.xml directly from the .ods zip archive. There is no soffice subprocess and no XLSX conversion step."}},
+    {"@type": "Question", "name": "Does ODS parsing run in the browser?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ODS parsing runs in WebAssembly via the same AILANG parser used by the CLI. Files never leave the browser tab — try it in the Workbench."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">ODS Parsing</span> API</h1>
+    <p class="subtitle reveal reveal-delay-1">Native OpenDocument Spreadsheet parsing for LibreOffice Calc files. Per-sheet tables with merged cells preserved &mdash; extracted directly from <code>content.xml</code>. No LibreOffice subprocess, no XLSX conversion step.</p>
+    <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own ODS in the Workbench &rarr;</a></div>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#raw-vs-structured">Raw vs Structured</a>
+        <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#sheets-and-merges">Sheets &amp; Merges</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Spreadsheets Without the Subprocess</h2>
+      <p>An <code>.ods</code> file is a zip archive with one <code>content.xml</code> describing every sheet as a <code>table:table</code> element. Cells, rows, headers, and merge metadata all live in the ODF <code>table:</code> namespace. None of it maps to Excel's <code>x:</code> schema.</p>
+
+      <p>Most parsers handle ODS by piping it through LibreOffice to convert to XLSX or CSV first &mdash; losing per-sheet structure, losing merge metadata, and adding seconds of latency. AILANG Parse reads ODF directly: each sheet becomes a <code>SectionBlock</code> wrapping a <code>TableBlock</code> with the same shape used by the XLSX parser.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Same Block ADT as the <a href="xlsx-parsing.html">XLSX parser</a> &mdash; one downstream pipeline handles both formats without branching on file extension.</div>
+      </div>
+
+      <h2 id="raw-vs-structured">Raw ODF XML vs Structured Output</h2>
+
+      <div class="dp-compare-grid">
+        <div>
+          <div class="dp-compare-label dp-compare-label--raw">Raw content.xml</div>
+<pre><code>&lt;office:body&gt;
+ &lt;office:spreadsheet&gt;
+  &lt;table:table table:name="Q1"&gt;
+   &lt;table:table-row&gt;
+    &lt;table:table-cell
+      table:number-columns-spanned="2"&gt;
+     &lt;text:p&gt;Region&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+    &lt;table:table-cell&gt;
+     &lt;text:p&gt;Total&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+   &lt;/table:table-row&gt;
+   &lt;table:table-row&gt;
+    &lt;table:table-cell&gt;
+     &lt;text:p&gt;EMEA&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+    &lt;table:table-cell&gt;
+     &lt;text:p&gt;UK&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+    &lt;table:table-cell&gt;
+     &lt;text:p&gt;125000&lt;/text:p&gt;
+    &lt;/table:table-cell&gt;
+   &lt;/table:table-row&gt;
+  &lt;/table:table&gt;
+ &lt;/office:spreadsheet&gt;
+&lt;/office:body&gt;</code></pre>
+        </div>
+        <div>
+          <div class="dp-compare-label dp-compare-label--structured">Structured output</div>
+<pre><code class="language-json">{
+  "metadata": {
+    "title": "Q1 Targets",
+    "author": "Finance Team"
+  },
+  "blocks": [
+    {
+      "type": "section",
+      "kind": "sheet:Q1",
+      "blocks": [
+        {
+          "type": "table",
+          "headers": [
+            {"text": "Region", "colSpan": 2},
+            {"text": "Total"}
+          ],
+          "rows": [
+            [
+              {"text": "EMEA"},
+              {"text": "UK"},
+              {"text": "125000"}
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="what-gets-extracted">What Gets Extracted</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Per-Sheet SectionBlocks</h4>
+          <p>Every <code>table:table</code> becomes a <code>SectionBlock</code> with <code>kind: "sheet:&lt;name&gt;"</code>. Sheet names come from <code>table:name</code> attributes.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables with Headers</h4>
+          <p>Each sheet's first non-empty row is identified as the header. Subsequent rows become data rows. Empty trailing rows are filtered (ODS files often pad sheets with thousands of empty rows).</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Merged Cells</h4>
+          <p><code>table:number-columns-spanned</code> on the owning cell is resolved into explicit <code>colSpan</code> metadata. Same shape as the XLSX parser, so downstream code is identical.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Cell Text</h4>
+          <p>Cell content is extracted as text (the displayed value). Numbers, dates, and formulas come through as their rendered representation &mdash; same as the XLSX parser.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Multi-Sheet Workbooks</h4>
+          <p>Workbooks with dozens of sheets come through as an ordered list of <code>SectionBlock</code>s, one per sheet. Iterate them in workbook order without losing sheet boundaries.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Metadata</h4>
+          <p>Document metadata from <code>meta.xml</code> &mdash; <code>dc:title</code>, <code>dc:creator</code>, <code>dc:date</code>. Useful for indexing spreadsheets by author or date in bulk pipelines.</p>
+        </div>
+      </div>
+
+      <h2 id="sheets-and-merges">Sheets &amp; Merges</h2>
+      <p>Because each sheet becomes its own <code>SectionBlock</code>, downstream code can iterate sheets cleanly without flattening the workbook. Want a single sheet by name? Filter on <code>kind</code>. Want every table in the file? Walk all sections.</p>
+
+<pre><code class="language-python">from ailang_parse import DocParse
+
+result = DocParse(api_key="...").parse_file("targets.ods")
+
+for sheet in result.blocks:
+    if sheet.type != "section":
+        continue
+    sheet_name = sheet.kind.replace("sheet:", "")
+    table = sheet.blocks[0]    # one TableBlock per sheet
+    print(sheet_name, "-", len(table.rows), "rows")
+    for row in table.rows:
+        print("  ", [cell.text for cell in row])
+</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Open Data Pipelines</h4>
+          <p>Many government open-data portals publish ODS alongside CSV. ODS preserves multi-sheet structure that CSV flattens. Native parsing means you can ingest the structured version directly.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Mixed-Office Pipelines</h4>
+          <p>Organisations with a Linux/LibreOffice contingent end up with mixed XLSX/ODS archives. One parser, one Block ADT. See <a href="xlsx-parsing.html">XLSX parsing</a> for the Excel counterpart.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Financial Data Migration</h4>
+          <p>Migrate legacy ODS workbooks to a database, data warehouse, or modern spreadsheet format. Sheet structure, column headers, and merged-cell hints survive intact.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Tabular RAG</h4>
+          <p>Each sheet becomes its own retrievable chunk. Embed the sheet as a unit so the model gets a coherent table instead of a windowed slice of cells from the wrong rows.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Compliance Archives</h4>
+          <p>ODS is the standard for long-term preservation of spreadsheet data in many EU jurisdictions. Index, search, and audit ODS archives without converting them to a proprietary format.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Browser-Based Review</h4>
+          <p>Drop an ODS into the <a href="workbench.html">Workbench</a> &mdash; the parser runs in WebAssembly, files never leave your browser. Useful when financial data is confidential.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <h3>Workbench (in-browser)</h3>
+      <p>Drop an ODS file into the <a href="workbench.html">Workbench</a> &mdash; parsing runs in WebAssembly with the same AILANG parser used by the CLI. No upload, no signup.</p>
+
+      <h3>CLI</h3>
+      <pre><code class="language-bash"># Parse an ODS file
+./bin/docparse data.ods
+
+# Convert ODS to CSV
+./bin/docparse data.ods --convert data.csv
+
+# Convert ODS to XLSX
+./bin/docparse data.ods --convert data.xlsx</code></pre>
+
+      <h3>API</h3>
+      <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"data.ods","outputFormat":"json","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="workbench.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I parse an ODS file to JSON?</summary>
+          <div class="dp-faq-answer"><p>Drop it into the <a href="workbench.html">Workbench</a>, send it to the <a href="api.html">API</a>, or use the Python/JS/Go/R SDK. The parser reads OpenDocument Spreadsheet XML directly &mdash; no LibreOffice subprocess.</p></div>
+        </details>
+        <details>
+          <summary>Are sheets extracted individually?</summary>
+          <div class="dp-faq-answer"><p>Yes. Every <code>table:table</code> becomes a <code>SectionBlock</code> with <code>kind: "sheet:&lt;name&gt;"</code> wrapping a <code>TableBlock</code> with rows, headers, and merge metadata.</p></div>
+        </details>
+        <details>
+          <summary>Are merged cells preserved?</summary>
+          <div class="dp-faq-answer"><p>Yes. ODF encodes horizontal merges via <code>table:number-columns-spanned</code>. AILANG Parse resolves these into explicit <code>colSpan</code> metadata, matching the <a href="xlsx-parsing.html">XLSX parser</a>'s contract.</p></div>
+        </details>
+        <details>
+          <summary>Does ODS parsing need LibreOffice installed?</summary>
+          <div class="dp-faq-answer"><p>No. <code>content.xml</code> is read directly from the <code>.ods</code> zip. No <code>soffice</code> subprocess, no XLSX conversion.</p></div>
+        </details>
+        <details>
+          <summary>Does ODS parsing run in the browser?</summary>
+          <div class="dp-faq-answer"><p>Yes. The same AILANG parser used by the CLI compiles to WebAssembly. Files never leave the browser tab.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
