@@ -189,8 +189,7 @@
   "mainEntity": [
     {"@type": "Question", "name": "What exactly is lost when converting DOCX to PDF before parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Converting DOCX to PDF destroys five categories of data: (1) track changes and revision history, (2) merge attributes on table cells, (3) comments and annotations with author metadata, (4) semantic heading levels (PDF has no heading concept), and (5) document metadata like custom properties. AILANG Parse preserves all five by reading Office XML directly."}},
     {"@type": "Question", "name": "Why do wrapper-based parsers have quality problems with DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Most wrapper-based parsers use libraries designed for display rendering, not structural extraction. They miss track changes, flatten merged cells, and drop comments. On OfficeDocBench, the best alternative scores 78.6% composite (27.3% coverage-adjusted) versus AILANG Parse's 93.9% with 100% format coverage."}},
-    {"@type": "Question", "name": "Is PDF parsing always worse than direct DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "When the original source is a DOCX, direct XML parsing is strictly better — faster, more accurate, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends for PDFs."}},
-    {"@type": "Question", "name": "How much faster is direct DOCX parsing compared to PDF conversion pipelines?", "acceptedAnswer": {"@type": "Answer", "text": "Under 11ms with zero dependencies versus 2-10 seconds for PDF conversion pipelines. 200-1000x faster, and the PDF path still loses structural metadata."}}
+    {"@type": "Question", "name": "Is PDF parsing always worse than direct DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "When the original source is a DOCX, direct XML parsing is strictly better — more accurate, no per-page billing, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends for PDFs."}}
   ]
 }
 </script>
@@ -406,7 +405,7 @@ elements = partition(filename="report.docx")</code></pre>
 from unstructured.partition.pdf import partition_pdf
 
 if filename.endswith(('.docx', '.pptx', '.xlsx')):
-    # Direct XML parse, 11ms, full structure
+    # Direct XML parse, no per-page billing, full structure
     blocks = AilangParse().parse(filename)
 else:
     # ML pipeline where it's actually needed
@@ -445,11 +444,7 @@ else:
         </details>
         <details>
           <summary>Is PDF parsing always worse than direct DOCX parsing?</summary>
-          <div class="dp-faq-answer"><p>When the original source is a DOCX, direct XML parsing is strictly better &mdash; faster, more accurate, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends (Gemini, Claude, Ollama) for PDFs.</p></div>
-        </details>
-        <details>
-          <summary>How much faster is direct DOCX parsing compared to PDF conversion pipelines?</summary>
-          <div class="dp-faq-answer"><p>Under 11ms with zero dependencies versus 2&ndash;10 seconds for PDF conversion pipelines. 200&ndash;1000x faster, and the PDF path still loses structural metadata.</p></div>
+          <div class="dp-faq-answer"><p>When the original source is a DOCX, direct XML parsing is strictly better &mdash; more accurate, no per-page billing, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends (Gemini, Claude, Ollama) for PDFs.</p></div>
         </details>
       </div>
 

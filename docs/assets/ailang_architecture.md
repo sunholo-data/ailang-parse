@@ -172,19 +172,11 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
 
 ---
 
-## Performance
+## How it runs
 
-Benchmarks on Apple M2 (deterministic parsers):
+Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are parsed deterministically by reading the underlying XML — no AI calls, no network requests, no per-page billing. The same input always produces the same output blocks. PDFs and image-only documents are routed to the configured AI backend (Gemini, Claude or local Ollama), bounded by an explicit capability budget.
 
-| Scenario                | Time    | Throughput        |
-|-------------------------|---------|-------------------|
-| Single DOCX (5KB)       | ~11ms   | 450 KB/s          |
-| 5× DOCX sequential      | ~55ms   | 11ms each         |
-| 5× DOCX concurrent      | ~26ms   | Near-linear scale |
-| 10× mixed concurrent    | ~32ms   | 3.2ms each        |
-| Alice in Wonderland EPUB | ~45ms  | 4.2 MB/s          |
-
-Cloud Run handles `concurrency=80` safely with warm response times of 0–10ms.
+Performance characteristics are tied to the AILANG runtime and improve as the AILANG compiler evolves; published per-document timings will follow once the runtime work currently in flight is shipped.
 
 ---
 

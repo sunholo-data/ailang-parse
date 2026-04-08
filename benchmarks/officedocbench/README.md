@@ -8,7 +8,7 @@ OfficeDocBench fills this gap.
 
 ## Dataset
 
-**69 test files** across **10 formats**, sourced from real-world test suites (54 core + 15 challenge):
+**69 test files** across **11 formats**, sourced from real-world test suites (54 core + 15 challenge):
 
 | Format | Files | Sources |
 |--------|-------|---------|

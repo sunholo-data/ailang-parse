@@ -83,4 +83,5 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         }
 
     def supported_formats(self) -> set[str]:
-        return {"docx", "pptx", "xlsx"}
+        # LlamaParse Cloud accepts a broad set; list the formats present in OfficeDocBench
+        return {"docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "epub", "csv", "tsv"}

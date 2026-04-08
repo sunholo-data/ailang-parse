@@ -77,7 +77,7 @@ Every run produces:
 | Speaker notes | — | Yes | — | None |
 | Multi-sheet extraction | — | — | Yes | Kreuzberg |
 
-**OfficeDocBench** (69 files, 10 formats, 7 metrics): AILANG Parse **93.9%** composite with 100% coverage vs nearest competitor 68.0% coverage-adjusted. 8 parsers compared including Raw OOXML, Pandoc, Kreuzberg, MarkItDown, Unstructured, Docling. Scores include aspirational ECMA-376 spec targets that intentionally lower our score.
+**OfficeDocBench** (69 files, 11 formats, 7 metrics): AILANG Parse **93.9%** composite with 100% coverage vs nearest competitor 68.0% coverage-adjusted. 8 parsers compared including Raw OOXML, Pandoc, Kreuzberg, MarkItDown, Unstructured, Docling. Scores include aspirational ECMA-376 spec targets that intentionally lower our score.
 
 ## Supported Formats
 
