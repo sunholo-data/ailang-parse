@@ -1,5 +1,7 @@
 # AILANG Parse Python SDK
 
+<!-- mcp-name: io.github.sunholo-data/parse -->
+
 Python client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — zero dependencies for Office, pluggable AI for PDFs.
 
 ## Install
