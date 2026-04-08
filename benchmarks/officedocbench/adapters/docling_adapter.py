@@ -38,6 +38,9 @@ class DoclingAdapter(OfficeDocBenchAdapter):
         tables = []
         images = []
         lists_out = []
+        headers_footers = []
+        footnotes = []
+        metadata: dict[str, Any] = {}
 
         try:
             doc_dict = result.document.export_to_dict()
@@ -56,14 +59,20 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                     headings.append({"text": text, "level": item.get("level", 1)})
                 elif label == "list_item":
                     lists_out.append({"items": [text], "ordered": False})
-                elif label in ("caption", "page_header", "page_footer"):
-                    text_elements.append({"text": text, "style": label})
+                elif label in ("page_header", "page-header"):
+                    headers_footers.append({"type": "header", "text": text})
+                elif label in ("page_footer", "page-footer"):
+                    headers_footers.append({"type": "footer", "text": text})
+                elif label == "footnote":
+                    footnotes.append({"text": text})
                 else:
                     text_elements.append({"text": text, "style": label})
 
             for tbl in tables_list:
-                # Extract table text from Docling's table structure
+                # Extract table text and detect merged cells from Docling's
+                # table_cells (each cell carries row_span/col_span).
                 cell_text = ""
+                has_merged = False
                 data = tbl.get("data", {})
                 if isinstance(data, dict):
                     grid = data.get("table_cells", data.get("grid", []))
@@ -72,6 +81,8 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                         for cell in grid:
                             if isinstance(cell, dict):
                                 cell_texts.append(cell.get("text", ""))
+                                if cell.get("row_span", 1) > 1 or cell.get("col_span", 1) > 1:
+                                    has_merged = True
                     cell_text = " ".join(cell_texts)
                 elif isinstance(data, str):
                     cell_text = data
@@ -82,9 +93,20 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                 num_rows = data.get("num_rows", 0) if isinstance(data, dict) else 0
                 tables.append({
                     "row_count": num_rows,
-                    "has_merged_cells": False,
+                    "has_merged_cells": has_merged,
                     "cell_text": cell_text,
                 })
+
+            # Surface whatever document-level metadata Docling exposes.
+            doc_name = doc_dict.get("name") or ""
+            if doc_name:
+                metadata["title"] = doc_name
+            origin = doc_dict.get("origin") or {}
+            if isinstance(origin, dict):
+                if origin.get("filename"):
+                    metadata.setdefault("title", origin["filename"])
+                if origin.get("mimetype"):
+                    metadata["mimetype"] = origin["mimetype"]
 
             for pic in pictures_list:
                 images.append({"description": pic.get("text", pic.get("orig", ""))})
@@ -133,13 +155,13 @@ class DoclingAdapter(OfficeDocBenchAdapter):
             "tables": tables,
             "track_changes": [],
             "comments": [],
-            "headers_footers": [],
-            "footnotes": [],
+            "headers_footers": headers_footers,
+            "footnotes": footnotes,
             "speaker_notes": [],
             "text_boxes": [],
             "images": images,
             "lists": lists_out,
-            "metadata": {},
+            "metadata": metadata,
         }
 
     def supported_formats(self) -> set[str]:

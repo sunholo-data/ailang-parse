@@ -270,9 +270,10 @@ class PandocAdapter(OfficeDocBenchAdapter):
         """
         row_count = 0
         cell_texts = []
+        has_merged = False
 
         def extract_rows(rows: list) -> None:
-            nonlocal row_count
+            nonlocal row_count, has_merged
             for row in rows:
                 if not isinstance(row, list) or len(row) < 2:
                     continue
@@ -280,6 +281,11 @@ class PandocAdapter(OfficeDocBenchAdapter):
                 cells = row[1] if isinstance(row[1], list) else []
                 for cell in cells:
                     if isinstance(cell, list) and len(cell) >= 5:
+                        # cell = [attr, alignment, rowspan, colspan, [blocks]]
+                        rowspan = cell[2] if isinstance(cell[2], int) else 1
+                        colspan = cell[3] if isinstance(cell[3], int) else 1
+                        if rowspan > 1 or colspan > 1:
+                            has_merged = True
                         cell_blocks = cell[4]
                         text = self._blocks_to_text(cell_blocks, [], [], [])
                         if text.strip():
@@ -308,7 +314,7 @@ class PandocAdapter(OfficeDocBenchAdapter):
 
         return {
             "row_count": row_count,
-            "has_merged_cells": False,  # Pandoc does not expose merge info
+            "has_merged_cells": has_merged,
             "cell_text": " ".join(cell_texts),
         }
 

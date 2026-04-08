@@ -49,13 +49,22 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
 
     def parse(self, filepath: Path) -> dict[str, Any]:
         try:
-            from kreuzberg import extract_file_sync, ExtractionConfig
+            from kreuzberg import extract_file_sync, ExtractionConfig, ImageExtractionConfig
         except ImportError:
             raise RuntimeError(
                 "kreuzberg not installed: pip install kreuzberg>=4.0.0"
             )
 
-        config = ExtractionConfig(include_document_structure=True)
+        # include_document_structure → walk the node tree (headings, lists,
+        # headers/footers); explicit ImageExtractionConfig guarantees images
+        # are pulled rather than relying on the default. NOTE: do not set
+        # output_format="markdown" — kreuzberg 4.7.x panics on EPUB content
+        # containing curly quotes (UTF-8 byte index bug in comrak_bridge.rs)
+        # and the panic is a pyo3 BaseException that crashes the whole eval.
+        config = ExtractionConfig(
+            include_document_structure=True,
+            images=ImageExtractionConfig(extract_images=True),
+        )
         result = extract_file_sync(str(filepath), config=config)
 
         text_elements: list[dict[str, Any]] = []

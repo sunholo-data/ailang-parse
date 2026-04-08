@@ -171,7 +171,13 @@ def evaluate_adapter(
                     continue
                 output = adapter.parse(test_path)
             elapsed_ms = round((time.time() - start) * 1000, 1)
-        except Exception as e:
+        except BaseException as e:
+            # BaseException (not Exception) so a pyo3_runtime.PanicException
+            # from a Rust-backed adapter (e.g. kreuzberg's comrak panic on
+            # certain EPUBs) records as a per-file ERROR instead of crashing
+            # the entire benchmark run. KeyboardInterrupt still re-raises.
+            if isinstance(e, KeyboardInterrupt):
+                raise
             results.append({
                 "file": source_file,
                 "format": fmt,

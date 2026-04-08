@@ -45,6 +45,23 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
             text = str(el)
             meta = el.metadata if hasattr(el, "metadata") else None
 
+            # Pull document-level metadata from the first element that has it.
+            # ElementMetadata.to_dict() exposes filename, last_modified, page_number,
+            # languages, and (for partition_docx) author/title where the DOCX core
+            # properties were populated.
+            if meta is not None and not metadata_dict:
+                try:
+                    md = meta.to_dict()
+                except Exception:
+                    md = {}
+                for src, dst in (
+                    ("filename", "title"),
+                    ("last_modified", "modified"),
+                    ("file_directory", None),
+                ):
+                    if dst and md.get(src):
+                        metadata_dict.setdefault(dst, md[src])
+
             if el_type == "Title":
                 headings.append({"text": text, "level": 1})
             elif el_type == "Table":
