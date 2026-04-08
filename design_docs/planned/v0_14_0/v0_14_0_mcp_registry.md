@@ -96,12 +96,12 @@ The full identifier becomes `io.github.sunholo-data/parse`. Clients display the 
 
 The description is the listing's elevator pitch and the most important field for discoverability. Constraints:
 
-- Must lead with what it does (`Parse N document formats`) so it's intelligible without context
-- Must include the formats list because users search by format name (`docx`, `pptx`)
+- Must lead with what it does so it's intelligible without context
+- Must include format names because users search by format (`docx`, `pptx`)
 - Must mention Unstructured.io because that's the keyword most users searching for an alternative type
-- Must not exceed ~250 chars — the registry truncates long descriptions in browse views
+- **Must not exceed 100 characters** — this is a hard schema constraint enforced by `mcp-publisher validate`, not a soft truncation rule. Submissions over 100 chars are rejected with a 422. (An earlier version of this doc said "~250 chars"; that was wrong. The schema field caps at 100.)
 
-The draft above is 215 characters and hits all of those.
+The shipped 0.4.1 description is 95 characters: `Deterministic Office parser for DOCX/PPTX/XLSX/ODT/EPUB/HTML/PDF. Unstructured.io alternative.`
 
 ## Required SDK changes
 

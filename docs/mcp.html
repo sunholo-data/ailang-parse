@@ -51,7 +51,8 @@
         <a href="#available-tools">Available Tools</a>
         <a href="#available-tools" style="padding-left:24px;font-size:12px">Core (4)</a>
         <a href="#available-tools" style="padding-left:24px;font-size:12px">Hosted (3)</a>
-        <a href="#configuration">Configuration</a>
+        <a href="#mcp-registry">MCP Registry</a>
+        <a href="#configuration">Manual Configuration</a>
         <a href="#tool-discovery">Tool Discovery</a>
         <a href="#claude-code">With Claude Code</a>
         <a href="#other-agents">With Other Agents</a>
@@ -170,7 +171,32 @@ ailang serve-api --mcp --routes-only \
         <li>Agent includes <code>apiKey</code> in all subsequent parse/convert calls</li>
       </ol>
 
-      <h2 id="configuration">Configuration</h2>
+      <h2 id="mcp-registry">Install from the MCP Registry</h2>
+      <p>AILANG Parse is listed in the <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener">official MCP Registry</a> as <code>io.github.sunholo-data/parse</code>. Registry-aware clients can discover and install it without you copying any JSON snippets.</p>
+
+      <p>
+        <a href="https://registry.modelcontextprotocol.io/v0/servers?search=sunholo" target="_blank" rel="noopener">
+          <img src="https://img.shields.io/badge/MCP%20Registry-io.github.sunholo--data%2Fparse-1f6feb?logo=anthropic&logoColor=white" alt="MCP Registry: io.github.sunholo-data/parse">
+        </a>
+      </p>
+
+      <h3>How to install via the registry</h3>
+      <ul style="font-size:14px;color:var(--text-secondary);line-height:1.8">
+        <li><strong>Claude Code</strong>: <code>claude mcp add io.github.sunholo-data/parse</code> &mdash; resolves the entry, picks the best available transport (PyPI / npm / hosted HTTP), and writes the config for you.</li>
+        <li><strong>Cursor / VS Code with MCP extension</strong>: open the MCP server browser and search for <em>parse</em> or <em>sunholo</em>. Click install &mdash; the client populates <code>.cursor/mcp.json</code> or <code>.vscode/settings.json</code> automatically.</li>
+        <li><strong>Any registry-aware client</strong>: point it at <code>io.github.sunholo-data/parse</code>. The listing exposes both <em>packages</em> (npm + PyPI stdio bridges) and a <em>remote</em> (hosted Streamable HTTP at <code>docparse.ailang.sunholo.com/mcp/</code>); the client picks whichever it supports.</li>
+      </ul>
+
+      <p>Inspect the live entry directly:</p>
+      <pre><code class="language-bash">curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=parse" \
+  | jq '[.servers[] | select(.server.name == "io.github.sunholo-data/parse")]'</code></pre>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>If your client doesn't browse the registry yet, use the manual configuration snippets below &mdash; they're equivalent. The registry path just saves you a copy/paste.</div>
+      </div>
+
+      <h2 id="configuration">Manual Configuration</h2>
 
       <h3>Claude Desktop (hosted &mdash; recommended)</h3>
       <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows). Pick whichever runtime you have installed &mdash; all three SDKs ship the same stdio bridge.</p>

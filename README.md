@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/ailang-parse?logo=python&logoColor=white&label=PyPI)](https://pypi.org/project/ailang-parse/)
 [![npm](https://img.shields.io/npm/v/@ailang/parse?logo=npm&label=npm)](https://www.npmjs.com/package/@ailang/parse)
 [![Go](https://img.shields.io/github/v/tag/sunholo-data/ailang-parse-go?logo=go&logoColor=white&label=Go)](https://github.com/sunholo-data/ailang-parse-go)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.sunholo--data%2Fparse-1f6feb?logo=anthropic&logoColor=white)](https://registry.modelcontextprotocol.io/v0/servers?search=sunholo)
 [![CI](https://img.shields.io/github/actions/workflow/status/sunholo-data/ailang-parse/ci.yml?logo=github&label=CI)](https://github.com/sunholo-data/ailang-parse/actions/workflows/ci.yml)
 
 Universal document parsing in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown.
