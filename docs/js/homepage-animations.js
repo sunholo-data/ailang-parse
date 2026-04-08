@@ -152,43 +152,6 @@
     }, { threshold: 0.4 }).observe(mergeViz);
   }
 
-  // ── SPEED RACE ──
-  var raceContainer = document.getElementById('vs-race-container');
-  var raceRun = false;
-  if (raceContainer) {
-    new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting && !raceRun) {
-          raceRun = true;
-          var ailang = document.getElementById('vs-race-ailang');
-          var unst = document.getElementById('vs-race-unst');
-          var docling = document.getElementById('vs-race-docling');
-          var llama = document.getElementById('vs-race-llama');
-          var tA = document.getElementById('vs-time-a');
-          var tU = document.getElementById('vs-time-u');
-          var tD = document.getElementById('vs-time-d');
-          var tL = document.getElementById('vs-time-l');
-
-          // AILANG: instant
-          if (ailang) { ailang.style.transition = 'width 0.15s ease-out'; ailang.style.width = '100%'; }
-          setTimeout(function () { if (tA) { tA.textContent = '<1s'; tA.style.color = 'var(--emerald)'; } }, 150);
-
-          // Unstructured: ~3s
-          if (unst) { unst.style.transition = 'width 3s linear'; setTimeout(function () { unst.style.width = '100%'; }, 50); }
-          setTimeout(function () { if (tU) tU.textContent = '~3s'; }, 3050);
-
-          // Docling: ~4s
-          if (docling) { docling.style.transition = 'width 4s linear'; setTimeout(function () { docling.style.width = '100%'; }, 50); }
-          setTimeout(function () { if (tD) tD.textContent = '~4s'; }, 4050);
-
-          // LlamaParse: slow (show partial)
-          if (llama) { llama.style.transition = 'width 5s linear'; setTimeout(function () { llama.style.width = '12%'; }, 50); }
-          setTimeout(function () { if (tL) tL.textContent = '~54s'; }, 5000);
-        }
-      });
-    }, { threshold: 0.5 }).observe(raceContainer);
-  }
-
   // ── BENCHMARK BARS ──
   var benchBars = document.getElementById('vs-bench-bars');
   var benchDone = false;
