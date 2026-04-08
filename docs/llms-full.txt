@@ -1,0 +1,237 @@
+# AILANG Parse — Agent Reference
+
+> Single-fetch reference for AI agents. Everything you need to call the AILANG Parse hosted service via MCP or REST, including the device authorization flow.
+
+If you are an AI agent, this is the page to read. The human-facing docs at [mcp.html](mcp.html) cover the same material with more prose.
+
+---
+
+## What this is
+
+AILANG Parse is a universal document parser. It converts 17 input formats into one consistent block schema (Heading, Text, Table, Image, List, Section, Change, Comment, Code). Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, EML, MBOX) are parsed deterministically in milliseconds with no AI calls. PDFs, images, audio, and video go through whatever AI model the operator has configured.
+
+Three ways to use it:
+
+1. **Hosted MCP server** — `https://docparse.ailang.sunholo.com/mcp/` (Streamable JSON-RPC). Quota-bounded, requires an API key. Best for agents.
+2. **Hosted REST API** — `https://docparse.ailang.sunholo.com/api/v1/*`. Use this if your agent does not speak MCP.
+3. **Local MCP stdio server** — install via `npm i -g @ailang/parse` or `pip install ailang-parse`, then run a stdio MCP server with no auth and no quota. Best for developer machines.
+
+This document focuses on the hosted variants. For local install, see [mcp.html](mcp.html).
+
+---
+
+## Quickest path (hosted MCP)
+
+If your MCP client supports remote MCP servers, just connect to:
+
+```
+https://docparse.ailang.sunholo.com/mcp/
+```
+
+On connect, call `tools/list` (the standard MCP discovery) to see all 7 tools, then call `mcpFormats` (no auth) to get the full service contract — supported formats, sample IDs, pricing tiers, and capabilities.
+
+When you call a quota-bounded tool (`mcpParse`, `mcpConvert`, `mcpAccount`) without an API key, the response will be:
+
+```json
+{
+  "error": "AUTH_REQUIRED",
+  "message": "An API key is required for hosted parsing. Use mcpAuth to get one via device authorization.",
+  "suggested_fix": "Call mcpAuth to start device authorization and get an API key."
+}
+```
+
+That is your cue to run the device auth flow below.
+
+---
+
+## Device authorization flow (RFC 8628)
+
+The flow has three steps. The agent never sees the human's password — the human approves a short code in their browser, and the agent receives an API key.
+
+### Via MCP tools
+
+**Step 1 — start the flow.** Call `mcpAuth(label: "my-agent")`. The `label` is a human-readable name for the key (it will appear in the user's key list).
+
+The response (returned by the backend `POST /api/v1/auth/device`) contains:
+
+```json
+{
+  "device_code": "…",
+  "user_code": "ABCD-1234",
+  "verification_url": "https://docparse.ailang.sunholo.com/device",
+  "expires_in": 600,
+  "interval": 5
+}
+```
+
+**Step 2 — tell the human.** Print something like:
+
+> Open `https://docparse.ailang.sunholo.com/device` in your browser, sign in, and enter the code `ABCD-1234`. I'll wait.
+
+**Step 3 — poll.** Every 5 seconds, call `mcpAuthPoll(deviceCode: "<device_code from step 1>")`. The response will be one of:
+
+- `{"status": "pending"}` — keep polling.
+- `{"status": "approved", "api_key": "dp_…", "tier": "free"}` — store the API key. Use it for all subsequent `mcpParse`, `mcpConvert`, `mcpAccount` calls.
+- `{"status": "expired"}` — the device code expired (10 minutes). Start over with `mcpAuth`.
+
+### Via raw HTTP (for non-MCP agents)
+
+Same two endpoints, called directly:
+
+```bash
+# Step 1: start device flow
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/auth/device \
+  -H "Content-Type: application/json" \
+  -d '{"label":"my-agent","scope":"parse"}'
+
+# Step 2: human opens verification_url and enters user_code
+
+# Step 3: poll every 5s until approved
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/auth/device/poll \
+  -H "Content-Type: application/json" \
+  -d '{"deviceCode":"<device_code from step 1>"}'
+```
+
+### After approval
+
+Store the `api_key` (it starts with `dp_`). Pass it to every quota-bounded tool. For REST calls, use it as a Bearer token: `Authorization: Bearer dp_…`. For MCP tool calls, pass it as the `apiKey` parameter.
+
+A working end-to-end shell example lives in [examples/agent_workflow.sh](https://github.com/sunholo-data/ailang-parse/blob/main/examples/agent_workflow.sh).
+
+---
+
+## Tool catalog (7 MCP tools)
+
+Source of truth: `docparse/services/mcp/{tools,auth,account,estimate}.ail` in the repo. Param names below match the AILANG signatures exactly.
+
+| Tool | Auth? | Purpose | Key params |
+|---|---|---|---|
+| `mcpFormats` | no | Discover formats, samples, pricing tiers, capabilities. **Call this first.** | (none) |
+| `mcpEstimate` | no | Predict cost, latency, and AI requirement before parsing. | `filepath`, `outputFormat` |
+| `mcpAuth` | no | Start RFC 8628 device authorization. | `label` |
+| `mcpAuthPoll` | no | Poll for device auth approval. | `deviceCode` |
+| `mcpParse` | yes (hosted) | Parse a document into blocks/markdown/HTML. | `filepath`, `outputFormat`, `apiKey`, `requestId` |
+| `mcpConvert` | yes (hosted) | Convert one document format into another. | `input`, `outputFormat`, `outputPath`, `apiKey` |
+| `mcpAccount` | yes (hosted, except `action="pricing"`) | View tier, quota, usage, history, keys. | `apiKey`, `action` |
+
+### Tool details
+
+**`mcpParse(filepath, outputFormat, apiKey, requestId)`**
+- `filepath`: a real file path *or* a `sample_…` ID from `mcpFormats` (no extension → treated as sample ID).
+- `outputFormat`: `"blocks"` (default, structured JSON), `"markdown"`, or `"html"`.
+- `apiKey`: required in hosted mode; ignored in local mode.
+- `requestId`: optional. Pass an ID from a previous parse to replay it without consuming quota.
+- Returns the parsed document as a JSON string.
+
+**`mcpConvert(input, outputFormat, outputPath, apiKey)`**
+- `input`: file path or sample ID.
+- `outputFormat`: one of `docx`, `pptx`, `xlsx`, `odt`, `odp`, `ods`, `html`, `md`, `qmd`.
+- `outputPath`: optional; defaults to the input path with the new extension.
+- Returns `{"output": "<path>", "format": "<fmt>"}` on success.
+
+**`mcpFormats()`**
+- No params. Returns input formats (with feature flags: tables, track changes, comments, images), output formats, output modes, ~26 sample files for testing, and the full `service` block (api_url, auth_method, pricing tiers, tools_available).
+- Always safe to call. No quota cost.
+
+**`mcpEstimate(filepath, outputFormat)`**
+- Returns whether AI is required, expected latency, and quota impact. Use it to warn humans before consuming quota on large or AI-required files.
+
+**`mcpAuth(label)`** and **`mcpAuthPoll(deviceCode)`** — see the auth flow section above.
+
+**`mcpAccount(apiKey, action)`**
+- `action`: `"status"` (default — entitlements + quota), `"pricing"` (no auth needed), `"usage"`, `"history"`, `"keys"`.
+- `"pricing"` is the only action callable without an `apiKey`; use it to advise a human on which tier to pick before they sign up.
+
+---
+
+## REST fallback (for non-MCP agents)
+
+Base URL: `https://docparse.ailang.sunholo.com`
+
+### Discover
+
+```bash
+# All 7 tools as machine-readable JSON Schema definitions
+curl -s https://docparse.ailang.sunholo.com/api/v1/tools
+
+# Service capabilities (formats, pricing, samples)
+curl -s https://docparse.ailang.sunholo.com/api/v1/capabilities
+
+# Pricing tiers (no auth)
+curl -s https://docparse.ailang.sunholo.com/api/v1/pricing
+```
+
+### Parse a document
+
+```bash
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Authorization: Bearer dp_…" \
+  -H "Content-Type: application/json" \
+  -d '{"sample_id":"sample_docx_tables","outputFormat":"markdown"}'
+```
+
+Replace `sample_id` with `filepath` if you are uploading a real path that the server can reach. Sample IDs come from `mcpFormats` / `/api/v1/capabilities`.
+
+### Estimate before parsing
+
+```bash
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"my-report.pdf","outputFormat":"blocks"}'
+```
+
+### Check account
+
+```bash
+curl -s -X POST https://docparse.ailang.sunholo.com/me/entitlements \
+  -H "Authorization: Bearer dp_…" \
+  -H "Content-Type: application/json" \
+  -d '{"apiKey":"dp_…"}'
+```
+
+---
+
+## Environment variables
+
+These are read by the AILANG `docparse` runtime and the SDKs. They control which deployment mode the tools target.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DOCPARSE_MODE` | `local` | `local` (no auth, parse from FS) or `hosted` (call the API, requires key). |
+| `DOCPARSE_API_URL` | `https://docparse.ailang.sunholo.com` | Override for self-hosted deployments. |
+| `DOCPARSE_API_KEY` | (unset) | API key for hosted mode. Alternative to passing `apiKey` per call. |
+
+If you connect over remote MCP at `https://docparse.ailang.sunholo.com/mcp/`, the server is already in hosted mode — you do not set these variables yourself, you just pass `apiKey` to each tool.
+
+---
+
+## Common error codes
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `AUTH_REQUIRED` | Quota-bounded tool called without `apiKey` in hosted mode. | Run the device auth flow. |
+| `LOCAL_MODE` | Auth/account tool called in local mode. | Local mode has no quota. Just call `mcpParse` directly. |
+| `FILE_NOT_FOUND` | `filepath` does not exist (or sample ID unknown). | Check the path, or call `mcpFormats` for valid sample IDs. |
+| `UNSUPPORTED_FORMAT` | `outputFormat` not in the supported list. | See `mcpFormats` → `output_formats`. |
+| `INVALID_ACTION` | `mcpAccount` called with an unknown action. | Use `status`, `pricing`, `usage`, `history`, or `keys`. |
+
+---
+
+## Pricing tiers (summary)
+
+| Tier | Price | Requests/month | AI parses/month | Daily limit | Max file |
+|---|---|---|---|---|---|
+| Free | EUR 0 | 1,000 | 50 | 500 | 10 MB |
+| Pro | EUR 29/mo | 100,000 | 500 | 5,000 | 25 MB |
+| Business | EUR 99/mo | 500,000 | 2,000 | 20,000 | 50 MB |
+
+Pricing is per *document*, not per page — a 200-page PDF and a one-line memo each count as one request. Live pricing comes from `mcpAccount(action: "pricing")` or `GET /api/v1/pricing`.
+
+---
+
+## Where to go next
+
+- [mcp.html](mcp.html) — full human-readable MCP documentation, including Claude Desktop / Claude Code setup snippets.
+- [api.html](api.html) — REST API reference.
+- [examples/agent_workflow.sh](https://github.com/sunholo-data/ailang-parse/blob/main/examples/agent_workflow.sh) — complete bash agent lifecycle (discover → auth → estimate → parse → quota check).
+- [GitHub repo](https://github.com/sunholo-data/ailang-parse) — source, AILANG modules, SDKs (Python, JS, Go).

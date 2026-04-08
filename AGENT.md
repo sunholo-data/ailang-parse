@@ -8,6 +8,8 @@ Every format returns the same block structure: headings, tables, lists, images, 
 
 **Parse anything. Get consistent structure. Move on.**
 
+**For AI agents using the hosted service:** fetch <https://www.sunholo.com/ailang-parse/llms-full.txt> for a single-request reference covering the hosted MCP endpoint, RFC 8628 device authorization flow, and all 7 MCP tools.
+
 ## Quick Start (CLI)
 
 ```bash
