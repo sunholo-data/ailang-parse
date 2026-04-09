@@ -27,7 +27,8 @@ NULL
     error = function(e) ""
   )
   .stop_for_status(status, body_text)
-  body_text
+  headers <- tryCatch(httr2::resp_headers(resp), error = function(e) list())
+  list(body = body_text, headers = headers)
 }
 
 #' Unwrap a serve-API response envelope.
@@ -48,11 +49,13 @@ NULL
     grepl("api key required", m, fixed = TRUE)
 }
 
-.raise_envelope_error <- function(msg, suggested_fix = "") {
+.raise_envelope_error <- function(msg, suggested_fix = "",
+                                  details = NULL, request_id = "") {
   if (.is_auth_error_message(msg)) {
     stop(.auth_error(msg))
   }
-  stop(.docparse_error(msg, suggested_fix = suggested_fix))
+  stop(.docparse_error(msg, suggested_fix = suggested_fix,
+                       details = details, request_id = request_id))
 }
 
 .unwrap <- function(body_text) {
@@ -66,13 +69,21 @@ NULL
   if (!is.null(outer$error) && length(outer$error) > 0L) {
     err <- outer$error
     if (is.character(err)) {
-      # Structured error: {error: "CODE", message: "...", suggested_fix: "..."}
+      # Legacy error: {error: "CODE", message: "...", suggested_fix: "..."}
       msg <- if (!is.null(outer$message) && nzchar(outer$message)) outer$message else err
       fix <- if (!is.null(outer$suggested_fix)) .s(outer$suggested_fix) else ""
       .raise_envelope_error(msg, suggested_fix = fix)
     }
-    # Dict errors (e.g. device-auth poll) — return the whole envelope so
-    # the caller can inspect status fields.
+    if (is.list(err)) {
+      # Structured dict error: {error: {code, message, details, ...}, request_id}
+      msg <- if (!is.null(err$message)) .s(err$message) else as.character(err)
+      fix <- if (!is.null(err$suggested_fix)) .s(err$suggested_fix) else ""
+      details <- err$details
+      request_id <- if (!is.null(outer$request_id)) .s(outer$request_id) else ""
+      .raise_envelope_error(msg, suggested_fix = fix,
+                            details = details, request_id = request_id)
+    }
+    # Unknown error shape — return for caller handling
     return(outer)
   }
   result_str <- outer$result
@@ -83,8 +94,15 @@ NULL
   )
   if (is.list(inner) && !is.null(inner$error) && length(inner$error) > 0L) {
     err <- inner$error
-    msg <- if (is.list(err) && !is.null(err$message)) err$message else as.character(err)
-    .raise_envelope_error(msg)
+    if (is.list(err)) {
+      msg <- if (!is.null(err$message)) .s(err$message) else as.character(err)
+      fix <- if (!is.null(err$suggested_fix)) .s(err$suggested_fix) else ""
+      details <- err$details
+      request_id <- if (!is.null(inner$request_id)) .s(inner$request_id) else ""
+      .raise_envelope_error(msg, suggested_fix = fix,
+                            details = details, request_id = request_id)
+    }
+    .raise_envelope_error(as.character(err))
   }
   inner
 }
@@ -100,5 +118,5 @@ NULL
     body <- if (is.null(args)) list() else list(args = args)
     req <- httr2::req_body_json(req, body, auto_unbox = FALSE)
   }
-  .unwrap(.perform(req))
+  .unwrap(.perform(req)$body)
 }

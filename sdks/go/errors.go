@@ -24,6 +24,8 @@ type DocParseError struct {
 	Message      string
 	StatusCode   int
 	SuggestedFix string
+	Details      map[string]interface{}
+	RequestID    string
 }
 
 func (e *DocParseError) Error() string {
@@ -113,5 +115,21 @@ func envelopeErrorWithFix(msg, suggestedFix string) error {
 	}
 	e := newDocParseError(msg, 0)
 	e.SuggestedFix = suggestedFix
+	return e
+}
+
+// envelopeErrorFull builds an error with all structured fields.
+func envelopeErrorFull(msg, suggestedFix, requestID string, details map[string]interface{}) error {
+	if isAuthErrorMessage(msg) {
+		e := newAuthError(msg)
+		e.SuggestedFix = suggestedFix
+		e.Details = details
+		e.RequestID = requestID
+		return e
+	}
+	e := newDocParseError(msg, 0)
+	e.SuggestedFix = suggestedFix
+	e.Details = details
+	e.RequestID = requestID
 	return e
 }

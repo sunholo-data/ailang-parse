@@ -94,6 +94,17 @@ type Section struct {
 	Markdown string `json:"markdown"`
 }
 
+// ResponseMeta contains metadata extracted from API response HTTP headers.
+type ResponseMeta struct {
+	RequestID           string `json:"requestId"`
+	Tier                string `json:"tier"`
+	QuotaRemainingDay   int    `json:"quotaRemainingDay"`
+	QuotaRemainingMonth int    `json:"quotaRemainingMonth"`
+	QuotaRemainingAI    int    `json:"quotaRemainingAi"`
+	Format              string `json:"format"`
+	Replayable          bool   `json:"replayable"`
+}
+
 // ParseResult is the response from /api/v1/parse.
 type ParseResult struct {
 	Status   string      `json:"status"`
@@ -109,6 +120,8 @@ type ParseResult struct {
 	Markdown string `json:"markdown,omitempty"`
 	// Sections are heading-sliced document sections for outputFormat="markdown+metadata".
 	Sections []Section `json:"sections,omitempty"`
+	// ResponseMeta contains request ID, tier, and quota remaining from HTTP headers.
+	ResponseMeta *ResponseMeta `json:"-"`
 }
 
 // HealthResult is the response from /api/v1/health.

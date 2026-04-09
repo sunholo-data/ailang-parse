@@ -20,10 +20,13 @@ let server: http.Server;
 let baseUrl: string;
 let mockStatus = 200;
 let mockBody: any = {};
+let mockHeaders: Record<string, string> = {};
+let lastRequestBody: any = null;
 
-function setMock(status: number, body: any) {
+function setMock(status: number, body: any, headers: Record<string, string> = {}) {
   mockStatus = status;
   mockBody = body;
+  mockHeaders = headers;
 }
 
 before(async () => {
@@ -32,11 +35,17 @@ before(async () => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
+      // Capture request body for assertion
+      const raw = Buffer.concat(chunks).toString();
+      try { lastRequestBody = JSON.parse(raw); } catch { lastRequestBody = raw; }
+
       const responseBody = JSON.stringify(mockBody);
-      res.writeHead(mockStatus, {
+      const hdrs: Record<string, string> = {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(responseBody).toString(),
-      });
+        ...mockHeaders,
+      };
+      res.writeHead(mockStatus, hdrs);
       res.end(responseBody);
     });
   });
@@ -514,5 +523,191 @@ describe("parseFile", () => {
     writeFileSync(local, Buffer.from("PK\x03\x04 fake"));
     const c = new DocParse({ apiKey: "dp_bad", baseUrl });
     await assert.rejects(() => c.parseFile(local), AuthError);
+  });
+});
+
+// ── responseMeta (header extraction) ──
+
+describe("responseMeta", () => {
+  it("parse captures response headers as responseMeta", async () => {
+    setMock(
+      200,
+      { result: "# Hello\n" },
+      {
+        "X-Request-Id": "req_abc123",
+        "X-DocParse-Tier": "pro",
+        "X-DocParse-Quota-Remaining-Day": "1990",
+        "X-DocParse-Quota-Remaining-Month": "9500",
+        "X-DocParse-Quota-Remaining-Ai": "450",
+        "X-AilangParse-Format": "markdown",
+        "X-AilangParse-Replayable": "true",
+      },
+    );
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parse("doc.md", "markdown");
+    assert.ok(r.responseMeta, "responseMeta should be populated");
+    assert.equal(r.responseMeta!.requestId, "req_abc123");
+    assert.equal(r.responseMeta!.tier, "pro");
+    assert.equal(r.responseMeta!.quotaRemainingDay, 1990);
+    assert.equal(r.responseMeta!.quotaRemainingMonth, 9500);
+    assert.equal(r.responseMeta!.quotaRemainingAi, 450);
+    assert.equal(r.responseMeta!.format, "markdown");
+    assert.equal(r.responseMeta!.replayable, true);
+  });
+
+  it("parse defaults responseMeta fields when headers missing", async () => {
+    setMock(200, { result: "# Hello\n" });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parse("doc.md", "markdown");
+    assert.ok(r.responseMeta, "responseMeta should still be present");
+    assert.equal(r.responseMeta!.requestId, "");
+    assert.equal(r.responseMeta!.tier, "");
+    assert.equal(r.responseMeta!.quotaRemainingDay, -1);
+    assert.equal(r.responseMeta!.replayable, false);
+  });
+
+  it("parseFile captures response headers as responseMeta", async () => {
+    setMock(
+      200,
+      {
+        result: JSON.stringify({
+          status: "ok", filename: "f.docx", format: "docx",
+          blocks: [{ type: "text", text: "hi" }], metadata: {}, summary: { totalBlocks: 1 },
+        }),
+      },
+      {
+        "X-Request-Id": "req_file456",
+        "X-DocParse-Tier": "business",
+        "X-AilangParse-Replayable": "false",
+      },
+    );
+    const { mkdtempSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    const dir = mkdtempSync(join(tmpdir(), "ailang-meta-test-"));
+    const local = join(dir, "f.docx");
+    writeFileSync(local, Buffer.from("PK\x03\x04 fake"));
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parseFile(local);
+    assert.ok(r.responseMeta);
+    assert.equal(r.responseMeta!.requestId, "req_file456");
+    assert.equal(r.responseMeta!.tier, "business");
+    assert.equal(r.responseMeta!.replayable, false);
+  });
+});
+
+// ── parseUrl / sourceUrl ──
+
+describe("parseUrl", () => {
+  it("sends sourceUrl in request body", async () => {
+    setMock(200, {
+      result: JSON.stringify({
+        status: "ok", filename: "remote.html", format: "html",
+        blocks: [{ type: "text", text: "fetched" }], metadata: {}, summary: { totalBlocks: 1 },
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parse("", "blocks", { sourceUrl: "https://example.com/page.html" });
+    assert.ok(lastRequestBody, "request body should be captured");
+    assert.equal(lastRequestBody.sourceUrl, "https://example.com/page.html");
+    assert.equal(lastRequestBody.filepath, "");
+  });
+
+  it("parseUrl delegates to parse with sourceUrl", async () => {
+    setMock(200, {
+      result: JSON.stringify({
+        status: "ok", filename: "remote.pdf", format: "pdf",
+        blocks: [], metadata: {}, summary: { totalBlocks: 0 },
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parseUrl("https://example.com/doc.pdf");
+    assert.equal(r.status, "ok");
+    assert.ok(lastRequestBody);
+    assert.equal(lastRequestBody.sourceUrl, "https://example.com/doc.pdf");
+    assert.equal(lastRequestBody.filepath, "");
+    assert.equal(lastRequestBody.outputFormat, "blocks");
+  });
+
+  it("parseUrl passes custom outputFormat", async () => {
+    setMock(200, { result: "<h1>Title</h1>" });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parseUrl("https://example.com/doc.pdf", "html");
+    assert.ok(lastRequestBody);
+    assert.equal(lastRequestBody.outputFormat, "html");
+    assert.equal(lastRequestBody.sourceUrl, "https://example.com/doc.pdf");
+  });
+});
+
+// ── Structured dict error with details and requestId ──
+
+describe("structured dict error", () => {
+  it("carries details and requestId from dict error envelope", async () => {
+    setMock(200, {
+      error: {
+        message: "File too large for tier",
+        details: { maxBytes: 10485760, actualBytes: 52428800, tier: "free" },
+      },
+      request_id: "req_err789",
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(
+      () => c.parse("huge.pdf"),
+      (e: any) => {
+        assert.ok(e instanceof DocParseError);
+        assert.equal(e.message, "File too large for tier");
+        assert.equal(e.requestId, "req_err789");
+        assert.equal(e.details.maxBytes, 10485760);
+        assert.equal(e.details.actualBytes, 52428800);
+        assert.equal(e.details.tier, "free");
+        return true;
+      },
+    );
+  });
+
+  it("dict error with suggested_fix populates suggestedFix", async () => {
+    setMock(200, {
+      error: {
+        message: "Unsupported format",
+        suggested_fix: "Use /api/v1/formats to check supported types.",
+        details: { format: "xyz" },
+      },
+      request_id: "req_sf001",
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(
+      () => c.parse("file.xyz"),
+      (e: any) => {
+        assert.ok(e instanceof DocParseError);
+        assert.equal(e.suggestedFix, "Use /api/v1/formats to check supported types.");
+        assert.equal(e.details.format, "xyz");
+        assert.equal(e.requestId, "req_sf001");
+        return true;
+      },
+    );
+  });
+
+  it("inner-result dict error carries details and requestId", async () => {
+    setMock(200, {
+      result: JSON.stringify({
+        error: {
+          message: "AI quota exceeded",
+          details: { aiUsed: 500, aiLimit: 500 },
+        },
+        request_id: "req_inner456",
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(
+      () => c.parse("report.pdf"),
+      (e: any) => {
+        assert.ok(e instanceof DocParseError);
+        assert.equal(e.message, "AI quota exceeded");
+        assert.equal(e.requestId, "req_inner456");
+        assert.equal(e.details.aiUsed, 500);
+        assert.equal(e.details.aiLimit, 500);
+        return true;
+      },
+    );
   });
 });

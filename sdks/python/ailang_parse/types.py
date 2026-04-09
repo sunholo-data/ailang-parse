@@ -8,10 +8,13 @@ from typing import Any, Dict, List, Optional, Union
 
 class DocParseError(Exception):
     """Base error for all AILANG Parse API errors."""
-    def __init__(self, message: str, status_code: int = 0, suggested_fix: str = ""):
+    def __init__(self, message: str, status_code: int = 0, suggested_fix: str = "",
+                 details: Optional[Dict[str, Any]] = None, request_id: str = ""):
         super().__init__(message)
         self.status_code = status_code
         self.suggested_fix = suggested_fix
+        self.details = details
+        self.request_id = request_id
 
 
 class AuthError(DocParseError):
@@ -169,6 +172,46 @@ class Section:
         )
 
 
+# ── Response metadata (HTTP headers) ──
+
+@dataclass
+class ResponseMeta:
+    """Metadata extracted from the API response HTTP headers.
+
+    Populated on :class:`ParseResult` after every parse call.  Contains
+    the request ID, the caller's tier, and remaining quota counters.
+    """
+    request_id: str = ""
+    tier: str = ""
+    quota_remaining_day: int = -1
+    quota_remaining_month: int = -1
+    quota_remaining_ai: int = -1
+    format: str = ""
+    replayable: bool = False
+
+    @classmethod
+    def from_headers(cls, headers: Dict[str, str]) -> "ResponseMeta":
+        # Case-insensitive lookup — HTTP libraries normalize casing differently
+        lc = {k.lower(): v for k, v in headers.items()}
+        def _get(key: str) -> str:
+            return lc.get(key.lower(), "")
+        def _int(key: str) -> int:
+            v = _get(key)
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                return -1
+        return cls(
+            request_id=_get("X-Request-Id"),
+            tier=_get("X-DocParse-Tier"),
+            quota_remaining_day=_int("X-DocParse-Quota-Remaining-Day"),
+            quota_remaining_month=_int("X-DocParse-Quota-Remaining-Month"),
+            quota_remaining_ai=_int("X-DocParse-Quota-Remaining-Ai"),
+            format=_get("X-AilangParse-Format"),
+            replayable=_get("X-AilangParse-Replayable").lower() == "true",
+        )
+
+
 # ── Parse result ──
 
 @dataclass
@@ -187,6 +230,8 @@ class ParseResult:
     markdown: str = ""
     #: Heading-sliced sections for ``output_format="markdown+metadata"``.
     sections: List[Section] = field(default_factory=list)
+    #: HTTP response metadata (request ID, tier, quota remaining).
+    response_meta: Optional[ResponseMeta] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ParseResult":

@@ -6,7 +6,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import pytest
 from ailang_parse.client import DocParse
-from ailang_parse.types import DocParseError, AuthError, QuotaError
+from ailang_parse.types import DocParseError, AuthError, QuotaError, ResponseMeta
 
 
 # ── Mock server ──
@@ -17,15 +17,18 @@ class MockHandler(BaseHTTPRequestHandler):
     # Class-level response config — tests set these before making requests.
     response_status = 200
     response_body = {}
+    response_headers = {}  # extra headers to include in every response
+    last_request_body = None  # captured POST body (bytes)
 
     def do_GET(self):
         self._respond()
 
     def do_POST(self):
-        # Read body (ignore it — we just echo canned responses)
         length = int(self.headers.get("Content-Length", 0))
         if length:
-            self.rfile.read(length)
+            MockHandler.last_request_body = self.rfile.read(length)
+        else:
+            MockHandler.last_request_body = None
         self._respond()
 
     def _respond(self):
@@ -33,6 +36,8 @@ class MockHandler(BaseHTTPRequestHandler):
         self.send_response(self.response_status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        for k, v in self.response_headers.items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -51,9 +56,11 @@ def mock_server():
     server.shutdown()
 
 
-def _set_response(status=200, body=None):
+def _set_response(status=200, body=None, headers=None):
     MockHandler.response_status = status
     MockHandler.response_body = body or {}
+    MockHandler.response_headers = headers or {}
+    MockHandler.last_request_body = None
 
 
 # ── Unwrap tests ──
@@ -559,3 +566,109 @@ class TestCredentials:
         )
         c = DocParse(base_url="https://disk.test")
         assert c.api_key == "dp_from_disk"
+
+
+# ── sourceUrl in parse() ──
+
+class TestParseSourceUrl:
+    def test_parse_sends_source_url_in_body(self, mock_server):
+        """parse() with source_url= should include sourceUrl in the POST body."""
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok",
+                "filename": "remote.docx",
+                "format": "docx",
+                "blocks": [{"type": "text", "text": "from URL"}],
+                "metadata": {},
+                "summary": {"totalBlocks": 1},
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse("remote.docx", source_url="https://storage.example.com/doc.docx?sig=abc")
+        assert r.status == "ok"
+        # Verify the request body contained sourceUrl
+        body = json.loads(MockHandler.last_request_body)
+        assert body["sourceUrl"] == "https://storage.example.com/doc.docx?sig=abc"
+
+    def test_parse_omits_source_url_when_empty(self, mock_server):
+        """When source_url is not provided, sourceUrl should not appear in the body."""
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok", "filename": "local.docx", "format": "docx",
+                "blocks": [], "metadata": {}, "summary": {"totalBlocks": 0},
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        c.parse("local.docx")
+        body = json.loads(MockHandler.last_request_body)
+        assert "sourceUrl" not in body
+
+    def test_parse_url_delegates_to_parse(self, mock_server):
+        """parse_url() should delegate to parse() with source_url set."""
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok", "filename": "", "format": "pdf",
+                "blocks": [{"type": "text", "text": "hello"}],
+                "metadata": {}, "summary": {"totalBlocks": 1},
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse_url("https://bucket.example.com/report.pdf?token=xyz")
+        assert r.status == "ok"
+        body = json.loads(MockHandler.last_request_body)
+        assert body["sourceUrl"] == "https://bucket.example.com/report.pdf?token=xyz"
+        assert body["filepath"] == ""
+
+
+# ── Response meta captured in parse result ──
+
+class TestResponseMetaCapture:
+    def test_parse_populates_response_meta(self, mock_server):
+        """After a successful parse(), result.response_meta should be populated
+        from the HTTP response headers."""
+        _set_response(
+            200,
+            {
+                "result": json.dumps({
+                    "status": "ok", "filename": "test.docx", "format": "docx",
+                    "blocks": [{"type": "text", "text": "hi"}],
+                    "metadata": {}, "summary": {"totalBlocks": 1},
+                })
+            },
+            headers={
+                "X-Request-Id": "req_meta_test",
+                "X-DocParse-Tier": "pro",
+                "X-DocParse-Quota-Remaining-Day": "42",
+                "X-DocParse-Quota-Remaining-Month": "900",
+                "X-DocParse-Quota-Remaining-Ai": "100",
+                "X-AilangParse-Format": "docx",
+                "X-AilangParse-Replayable": "true",
+            },
+        )
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse("test.docx")
+        assert r.response_meta is not None
+        assert r.response_meta.request_id == "req_meta_test"
+        assert r.response_meta.tier == "pro"
+        assert r.response_meta.quota_remaining_day == 42
+        assert r.response_meta.quota_remaining_month == 900
+        assert r.response_meta.quota_remaining_ai == 100
+        assert r.response_meta.format == "docx"
+        assert r.response_meta.replayable is True
+
+    def test_parse_response_meta_defaults_when_no_headers(self, mock_server):
+        """When the server sends no custom headers, response_meta should still
+        exist with default values."""
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok", "filename": "plain.docx", "format": "docx",
+                "blocks": [], "metadata": {}, "summary": {"totalBlocks": 0},
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse("plain.docx")
+        assert r.response_meta is not None
+        assert r.response_meta.request_id == ""
+        assert r.response_meta.tier == ""
+        assert r.response_meta.quota_remaining_day == -1
+        assert r.response_meta.replayable is False

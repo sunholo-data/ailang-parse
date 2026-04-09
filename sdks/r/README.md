@@ -51,12 +51,47 @@ head(df)
 res <- client$parse_file("data/report.docx")
 ```
 
+### Parse from a signed URL
+
+Parse documents from GCS, S3, or Azure Blob signed URLs without downloading locally:
+
+```r
+res <- client$parse_url(
+  "https://storage.googleapis.com/bucket/doc.docx?X-Goog-Signature=...",
+  output_format = "markdown+metadata"
+)
+```
+
 ### Output formats
 
 ```r
-res <- client$parse("report.docx", output_format = "blocks")    # default
+res <- client$parse("report.docx", output_format = "blocks")              # default
 res <- client$parse("report.docx", output_format = "markdown")
 res <- client$parse("report.docx", output_format = "html")
+res <- client$parse("report.docx", output_format = "markdown+metadata")   # markdown with sections
+
+# markdown+metadata includes rendered markdown and heading-sliced sections
+cat(res$markdown)
+for (s in res$sections) {
+  cat("  ", s$heading, ": ", substr(s$markdown, 1, 60), "...\n", sep = "")
+}
+```
+
+### Response metadata
+
+Every parse result carries quota and request metadata as an attribute:
+
+```r
+res <- client$parse("report.docx")
+meta <- attr(res, "response_meta")
+
+meta$request_id            # "req_abc123"
+meta$tier                  # "free", "pro", or "business"
+meta$quota_remaining_day   # Requests left today
+meta$quota_remaining_month # Requests left this month
+meta$quota_remaining_ai    # AI requests remaining
+meta$format                # Detected input format ("docx", etc.)
+meta$replayable            # Whether this request can be replayed
 ```
 
 ## Authentication
@@ -133,7 +168,12 @@ tryCatch(
   client$parse("missing.docx"),
   ailang_auth_error  = function(e) message("auth: ", conditionMessage(e)),
   ailang_quota_error = function(e) message("quota: ", e$tier, " ", e$used, "/", e$limit),
-  ailang_docparse_error = function(e) message("api error: ", conditionMessage(e))
+  ailang_docparse_error = function(e) {
+    message("api error: ", conditionMessage(e))
+    message("  suggested fix: ", e$suggested_fix)
+    message("  details: ", e$details)       # Structured error details
+    message("  request_id: ", e$request_id) # For support/debugging
+  }
 )
 ```
 

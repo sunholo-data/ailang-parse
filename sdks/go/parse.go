@@ -10,23 +10,33 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // ParseOptions configures a parse request.
 type ParseOptions struct {
 	OutputFormat string // "blocks" (default), "markdown", "html"
+	SourceURL    string // URL to fetch and parse (instead of a local file path)
 }
 
 // Parse parses a document file and returns structured blocks.
 func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOptions) (*ParseResult, error) {
 	format := "blocks"
-	if len(opts) > 0 && opts[0].OutputFormat != "" {
-		format = opts[0].OutputFormat
+	var sourceURL string
+	if len(opts) > 0 {
+		if opts[0].OutputFormat != "" {
+			format = opts[0].OutputFormat
+		}
+		sourceURL = opts[0].SourceURL
 	}
 
 	body := map[string]string{
 		"filepath":     filePath,
 		"outputFormat": format,
+	}
+	if sourceURL != "" {
+		body["sourceUrl"] = sourceURL
 	}
 	if c.APIKey != "" {
 		body["apiKey"] = c.APIKey
@@ -50,6 +60,7 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 		return nil, fmt.Errorf("http request: %w", err)
 	}
 	defer resp.Body.Close()
+	respHeader := resp.Header
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -69,7 +80,21 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 	if err != nil {
 		return nil, err
 	}
-	return buildParseResult(inner, format)
+	result, err := buildParseResult(inner, format)
+	if err != nil {
+		return nil, err
+	}
+	result.ResponseMeta = extractResponseMeta(respHeader)
+	return result, nil
+}
+
+// ParseURL is a convenience method that parses a document at a remote URL.
+func (c *Client) ParseURL(ctx context.Context, url string, outputFormat string) (*ParseResult, error) {
+	opts := ParseOptions{
+		OutputFormat: outputFormat,
+		SourceURL:    url,
+	}
+	return c.Parse(ctx, "", opts)
 }
 
 // buildParseResult builds a ParseResult from the inner unwrapped bytes.
@@ -142,6 +167,7 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 		return nil, fmt.Errorf("http request: %w", err)
 	}
 	defer resp.Body.Close()
+	respHeader := resp.Header
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -162,7 +188,12 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 	if err != nil {
 		return nil, err
 	}
-	return buildParseResult(inner, format)
+	result, err := buildParseResult(inner, format)
+	if err != nil {
+		return nil, err
+	}
+	result.ResponseMeta = extractResponseMeta(respHeader)
+	return result, nil
 }
 
 // Health checks the API health.
@@ -177,6 +208,31 @@ func (c *Client) Health(ctx context.Context) (*HealthResult, error) {
 		return nil, fmt.Errorf("unmarshal health: %w", err)
 	}
 	return &result, nil
+}
+
+// extractResponseMeta reads quota and request metadata from HTTP response headers.
+func extractResponseMeta(h http.Header) *ResponseMeta {
+	return &ResponseMeta{
+		RequestID:           h.Get("X-Request-Id"),
+		Tier:                h.Get("X-DocParse-Tier"),
+		QuotaRemainingDay:   headerInt(h, "X-DocParse-Quota-Remaining-Day"),
+		QuotaRemainingMonth: headerInt(h, "X-DocParse-Quota-Remaining-Month"),
+		QuotaRemainingAI:    headerInt(h, "X-DocParse-Quota-Remaining-Ai"),
+		Format:              h.Get("X-AilangParse-Format"),
+		Replayable:          strings.EqualFold(h.Get("X-AilangParse-Replayable"), "true"),
+	}
+}
+
+func headerInt(h http.Header, key string) int {
+	v := h.Get(key)
+	if v == "" {
+		return -1
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // Formats lists supported parse and generate formats.

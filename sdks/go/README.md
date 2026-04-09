@@ -83,10 +83,45 @@ result, err := client.Parse(ctx, "report.docx", docparse.ParseOptions{
 	OutputFormat: "markdown",
 })
 
+// Markdown with section metadata
+result, err := client.Parse(ctx, "report.docx", docparse.ParseOptions{
+	OutputFormat: "markdown+metadata",
+})
+fmt.Println(result.Markdown)
+for _, s := range result.Sections {
+	fmt.Printf("  %s: %s...\n", s.Heading, s.Markdown[:60])
+}
+
+// Upload a local file (multipart)
+result, err := client.ParseFile(ctx, "local/report.docx")
+
+// Parse from a signed URL (GCS, S3, Azure Blob — no local file needed)
+result, err := client.ParseURL(ctx,
+	"https://storage.googleapis.com/bucket/doc.docx?X-Goog-Signature=...",
+	"markdown+metadata",
+)
+
 // Access structured data
 fmt.Println(result.Status)           // "success"
 fmt.Println(result.Metadata.Title)   // Document title
 fmt.Println(result.Summary.Tables)   // Number of tables
+```
+
+## Response Metadata
+
+Every parse result includes quota and request metadata from response headers:
+
+```go
+result, err := client.Parse(ctx, "report.docx")
+meta := result.ResponseMeta
+
+fmt.Println(meta.RequestID)           // "req_abc123"
+fmt.Println(meta.Tier)                // "free", "pro", or "business"
+fmt.Println(meta.QuotaRemainingDay)   // Requests left today
+fmt.Println(meta.QuotaRemainingMonth) // Requests left this month
+fmt.Println(meta.QuotaRemainingAI)    // AI requests remaining
+fmt.Println(meta.Format)              // Detected input format ("docx", etc.)
+fmt.Println(meta.Replayable)          // Whether this request can be replayed
 ```
 
 ## Health & Formats
@@ -146,6 +181,31 @@ client := docparse.New("dp_your_key",
 	docparse.WithBaseURL("https://your-deployment.run.app"),
 	docparse.WithHTTPClient(&http.Client{Timeout: 120 * time.Second}),
 )
+```
+
+## Error Handling
+
+```go
+import "errors"
+
+result, err := client.Parse(ctx, "file.docx")
+if err != nil {
+	var authErr *docparse.AuthError
+	var quotaErr *docparse.QuotaError
+	var parseErr *docparse.DocParseError
+
+	switch {
+	case errors.As(err, &authErr):
+		fmt.Println("Bad API key")
+	case errors.As(err, &quotaErr):
+		fmt.Println("Quota exceeded")
+	case errors.As(err, &parseErr):
+		fmt.Printf("API error: %s\n", parseErr.Message)
+		fmt.Printf("  suggested fix: %s\n", parseErr.SuggestedFix)
+		fmt.Printf("  details: %v\n", parseErr.Details)    // Structured error details
+		fmt.Printf("  request ID: %s\n", parseErr.RequestID) // For support/debugging
+	}
+}
 ```
 
 ## Block Types

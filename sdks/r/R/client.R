@@ -68,30 +68,40 @@ DocParse <- R6::R6Class(
 
     #' @description Parse a document by sample ID or server-side filepath.
     #'   To upload a local file, use \code{$parse_file()}.
+    #'   To parse from a signed URL, use \code{$parse_url()}.
     #' @param filepath Sample ID or server-side filepath.
     #' @param output_format One of \code{"blocks"}, \code{"markdown"},
     #'   \code{"html"}.
-    #' @return A \code{ailang_parse_result} S3 list.
-    parse = function(filepath, output_format = "blocks") {
-      url <- paste0(self$base_url, "/api/v1/parse")
+    #' @param source_url Optional HTTPS signed URL (GCS, S3, Azure Blob)
+    #'   to fetch the document from server-side.
+    #' @return A \code{ailang_parse_result} S3 list with a
+    #'   \code{"response_meta"} attribute containing quota/tier headers.
+    parse = function(filepath, output_format = "blocks", source_url = NULL) {
       body <- list(
         filepath     = jsonlite::unbox(filepath),
         outputFormat = jsonlite::unbox(output_format)
       )
+      if (!is.null(source_url)) {
+        body$sourceUrl <- jsonlite::unbox(source_url)
+      }
       if (nzchar(self$api_key)) {
         body$apiKey <- jsonlite::unbox(self$api_key)
       }
       req <- .build_request(self$base_url, "/api/v1/parse",
                             self$api_key, self$timeout)
       req <- httr2::req_body_json(req, body, auto_unbox = FALSE)
-      .build_parse_result(.unwrap(.perform(req)), output_format)
+      resp <- .perform(req)
+      result <- .build_parse_result(.unwrap(resp$body), output_format)
+      attr(result, "response_meta") <- .response_meta_from_headers(resp$headers)
+      result
     },
 
     #' @description Upload a local file (multipart) and parse it.
     #' @param filepath Path to a local file.
     #' @param output_format One of \code{"blocks"}, \code{"markdown"},
     #'   \code{"html"}.
-    #' @return A \code{ailang_parse_result} S3 list.
+    #' @return A \code{ailang_parse_result} S3 list with a
+    #'   \code{"response_meta"} attribute containing quota/tier headers.
     parse_file = function(filepath, output_format = "blocks") {
       stopifnot(file.exists(filepath))
       req <- .build_request(self$base_url, "/api/v1/parse",
@@ -102,7 +112,22 @@ DocParse <- R6::R6Class(
         outputFormat = output_format,
         apiKey       = self$api_key
       )
-      .build_parse_result(.unwrap(.perform(req)), output_format)
+      resp <- .perform(req)
+      result <- .build_parse_result(.unwrap(resp$body), output_format)
+      attr(result, "response_meta") <- .response_meta_from_headers(resp$headers)
+      result
+    },
+
+    #' @description Parse a document from a signed URL (GCS, S3, Azure
+    #'   Blob, etc.) without uploading a local file.
+    #' @param url HTTPS signed URL pointing to the document.
+    #' @param output_format One of \code{"blocks"}, \code{"markdown"},
+    #'   \code{"html"}.
+    #' @return A \code{ailang_parse_result} S3 list with a
+    #'   \code{"response_meta"} attribute containing quota/tier headers.
+    #' @export
+    parse_url = function(url, output_format = "blocks") {
+      self$parse(filepath = "", output_format = output_format, source_url = url)
     },
 
     #' @description Check API health.
@@ -201,7 +226,7 @@ DocParse <- R6::R6Class(
         list(label = jsonlite::unbox(label),
              scope = jsonlite::unbox(scope))
       )
-      data <- .unwrap(.perform(req))
+      data <- .unwrap(.perform(req)$body)
 
       device_code <- .s(data$device_code)
       user_code   <- .s(data$user_code)
@@ -230,7 +255,7 @@ DocParse <- R6::R6Class(
           poll_req,
           list(deviceCode = jsonlite::unbox(device_code))
         )
-        poll <- .unwrap(.perform(poll_req))
+        poll <- .unwrap(.perform(poll_req)$body)
 
         if (identical(.s(poll$status), "approved") && nzchar(.s(poll$api_key))) {
           self$api_key <- poll$api_key

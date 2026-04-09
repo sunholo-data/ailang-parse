@@ -60,12 +60,45 @@ for (const block of result.blocks) {
 const blocks = await client.parse('report.docx');                    // Block ADT (default)
 const markdown = await client.parse('report.docx', 'markdown');      // Markdown
 const html = await client.parse('report.docx', 'html');              // HTML
+const mdMeta = await client.parse('report.docx', 'markdown+metadata'); // Markdown with sections
+
+// Upload a local file (multipart)
+const result = await client.parseFile('local/report.docx');
+
+// Parse from a signed URL (GCS, S3, Azure Blob — no local file needed)
+const result = await client.parseUrl(
+  'https://storage.googleapis.com/bucket/doc.docx?X-Goog-Signature=...',
+  'markdown+metadata',
+);
 
 // Access structured data
 console.log(result.status);           // "success"
 console.log(result.blocks);           // Block[]
 console.log(result.metadata.title);   // Document title
 console.log(result.summary.tables);   // Number of tables
+
+// markdown+metadata format includes sections
+console.log(result.markdown);
+for (const s of result.sections) {
+  console.log(`  ${s.heading}: ${s.markdown.slice(0, 60)}...`);
+}
+```
+
+## Response Metadata
+
+Every parse result includes quota and request metadata from response headers:
+
+```typescript
+const result = await client.parse('report.docx');
+const meta = result.responseMeta;
+
+console.log(meta.requestId);           // "req_abc123"
+console.log(meta.tier);                // "free", "pro", or "business"
+console.log(meta.quotaRemainingDay);   // Requests left today
+console.log(meta.quotaRemainingMonth); // Requests left this month
+console.log(meta.quotaRemainingAi);    // AI requests remaining
+console.log(meta.format);             // Detected input format ("docx", etc.)
+console.log(meta.replayable);         // Whether this request can be replayed
 ```
 
 ## Block Types
@@ -139,7 +172,12 @@ try {
 } catch (e) {
   if (e instanceof AuthError) console.log('Bad API key');
   else if (e instanceof QuotaError) console.log('Quota exceeded');
-  else if (e instanceof DocParseError) console.log(`API error: ${e.statusCode}`);
+  else if (e instanceof DocParseError) {
+    console.log(`API error: ${e.statusCode}`);
+    console.log(`  suggested fix: ${e.suggestedFix}`);
+    console.log(`  details: ${JSON.stringify(e.details)}`);  // Structured error details
+    console.log(`  request ID: ${e.requestId}`);             // For support/debugging
+  }
 }
 ```
 

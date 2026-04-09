@@ -84,7 +84,7 @@ UnstructuredClient <- R6::R6Class(
         )
       }
 
-      body_text <- .perform(req)
+      body_text <- .perform(req)$body
       outer <- tryCatch(
         jsonlite::fromJSON(body_text, simplifyVector = FALSE),
         error = function(e) {

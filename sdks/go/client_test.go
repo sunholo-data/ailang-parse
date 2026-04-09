@@ -924,3 +924,314 @@ func TestKeyInfoJSON(t *testing.T) {
 		t.Fatalf("expected 50, got %d", k.Quota.RequestsPerDay)
 	}
 }
+
+// ── extractResponseMeta ──
+
+func TestExtractResponseMeta(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Request-Id", "req_abc123")
+	h.Set("X-DocParse-Tier", "pro")
+	h.Set("X-DocParse-Quota-Remaining-Day", "195")
+	h.Set("X-DocParse-Quota-Remaining-Month", "9800")
+	h.Set("X-DocParse-Quota-Remaining-Ai", "450")
+	h.Set("X-AilangParse-Format", "docx")
+	h.Set("X-AilangParse-Replayable", "true")
+
+	meta := extractResponseMeta(h)
+	if meta.RequestID != "req_abc123" {
+		t.Fatalf("expected req_abc123, got %s", meta.RequestID)
+	}
+	if meta.Tier != "pro" {
+		t.Fatalf("expected pro, got %s", meta.Tier)
+	}
+	if meta.QuotaRemainingDay != 195 {
+		t.Fatalf("expected 195, got %d", meta.QuotaRemainingDay)
+	}
+	if meta.QuotaRemainingMonth != 9800 {
+		t.Fatalf("expected 9800, got %d", meta.QuotaRemainingMonth)
+	}
+	if meta.QuotaRemainingAI != 450 {
+		t.Fatalf("expected 450, got %d", meta.QuotaRemainingAI)
+	}
+	if meta.Format != "docx" {
+		t.Fatalf("expected docx, got %s", meta.Format)
+	}
+	if !meta.Replayable {
+		t.Fatal("expected replayable=true")
+	}
+}
+
+func TestExtractResponseMeta_Empty(t *testing.T) {
+	meta := extractResponseMeta(http.Header{})
+	if meta.RequestID != "" {
+		t.Fatalf("expected empty RequestID, got %s", meta.RequestID)
+	}
+	if meta.Tier != "" {
+		t.Fatalf("expected empty Tier, got %s", meta.Tier)
+	}
+	if meta.QuotaRemainingDay != -1 {
+		t.Fatalf("expected -1 for QuotaRemainingDay, got %d", meta.QuotaRemainingDay)
+	}
+	if meta.QuotaRemainingMonth != -1 {
+		t.Fatalf("expected -1 for QuotaRemainingMonth, got %d", meta.QuotaRemainingMonth)
+	}
+	if meta.QuotaRemainingAI != -1 {
+		t.Fatalf("expected -1 for QuotaRemainingAI, got %d", meta.QuotaRemainingAI)
+	}
+	if meta.Format != "" {
+		t.Fatalf("expected empty Format, got %s", meta.Format)
+	}
+	if meta.Replayable {
+		t.Fatal("expected replayable=false for empty headers")
+	}
+}
+
+// ── SourceURL in Parse ──
+
+func TestParse_SourceURL(t *testing.T) {
+	var receivedBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(envelope(map[string]any{
+			"status":   "ok",
+			"filename": "remote.pdf",
+			"format":   "pdf",
+			"blocks":   []map[string]any{{"type": "text", "text": "from url"}},
+			"metadata": map[string]any{},
+			"summary":  map[string]any{"totalBlocks": 1},
+		}))
+	}))
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	_, err := c.Parse(context.Background(), "", ParseOptions{SourceURL: "https://example.com/doc.pdf"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody["sourceUrl"] != "https://example.com/doc.pdf" {
+		t.Fatalf("expected sourceUrl in body, got %v", receivedBody)
+	}
+}
+
+// ── ParseURL convenience method ──
+
+func TestParseURL(t *testing.T) {
+	var receivedBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(envelope(map[string]any{
+			"status":   "ok",
+			"filename": "remote.docx",
+			"format":   "docx",
+			"blocks":   []map[string]any{{"type": "text", "text": "url parse"}},
+			"metadata": map[string]any{},
+			"summary":  map[string]any{"totalBlocks": 1},
+		}))
+	}))
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.ParseURL(context.Background(), "https://example.com/report.docx", "markdown")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody["sourceUrl"] != "https://example.com/report.docx" {
+		t.Fatalf("expected sourceUrl in body, got %v", receivedBody)
+	}
+	if receivedBody["outputFormat"] != "markdown" {
+		t.Fatalf("expected outputFormat=markdown, got %s", receivedBody["outputFormat"])
+	}
+	if receivedBody["filepath"] != "" {
+		t.Fatalf("expected empty filepath for URL parse, got %s", receivedBody["filepath"])
+	}
+	// ParseURL should return a valid result
+	if r.Status != "ok" {
+		t.Fatalf("expected ok, got %s", r.Status)
+	}
+}
+
+// ── Response meta on ParseResult ──
+
+func TestParse_ResponseMetaPopulated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-Id", "req_meta_test")
+		w.Header().Set("X-DocParse-Tier", "business")
+		w.Header().Set("X-DocParse-Quota-Remaining-Day", "9500")
+		w.Header().Set("X-DocParse-Quota-Remaining-Month", "49000")
+		w.Header().Set("X-DocParse-Quota-Remaining-Ai", "990")
+		w.Header().Set("X-AilangParse-Format", "docx")
+		w.Header().Set("X-AilangParse-Replayable", "true")
+		json.NewEncoder(w).Encode(envelope(map[string]any{
+			"status":   "ok",
+			"filename": "test.docx",
+			"format":   "docx",
+			"blocks":   []map[string]any{{"type": "text", "text": "hello"}},
+			"metadata": map[string]any{},
+			"summary":  map[string]any{"totalBlocks": 1},
+		}))
+	}))
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.Parse(context.Background(), "test.docx")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.ResponseMeta == nil {
+		t.Fatal("expected ResponseMeta to be populated")
+	}
+	if r.ResponseMeta.RequestID != "req_meta_test" {
+		t.Fatalf("expected req_meta_test, got %s", r.ResponseMeta.RequestID)
+	}
+	if r.ResponseMeta.Tier != "business" {
+		t.Fatalf("expected business, got %s", r.ResponseMeta.Tier)
+	}
+	if r.ResponseMeta.QuotaRemainingDay != 9500 {
+		t.Fatalf("expected 9500, got %d", r.ResponseMeta.QuotaRemainingDay)
+	}
+	if r.ResponseMeta.QuotaRemainingMonth != 49000 {
+		t.Fatalf("expected 49000, got %d", r.ResponseMeta.QuotaRemainingMonth)
+	}
+	if r.ResponseMeta.QuotaRemainingAI != 990 {
+		t.Fatalf("expected 990, got %d", r.ResponseMeta.QuotaRemainingAI)
+	}
+	if r.ResponseMeta.Format != "docx" {
+		t.Fatalf("expected docx, got %s", r.ResponseMeta.Format)
+	}
+	if !r.ResponseMeta.Replayable {
+		t.Fatal("expected replayable=true")
+	}
+}
+
+func TestParseFile_ResponseMetaPopulated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-Id", "req_file_meta")
+		w.Header().Set("X-DocParse-Tier", "pro")
+		w.Header().Set("X-DocParse-Quota-Remaining-Day", "1800")
+		json.NewEncoder(w).Encode(envelope(map[string]any{
+			"status":   "ok",
+			"filename": "up.docx",
+			"format":   "docx",
+			"blocks":   []map[string]any{{"type": "text", "text": "uploaded"}},
+			"metadata": map[string]any{},
+			"summary":  map[string]any{"totalBlocks": 1},
+		}))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	local := filepath.Join(dir, "up.docx")
+	os.WriteFile(local, []byte("PK\x03\x04 fake"), 0644)
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.ParseFile(context.Background(), local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.ResponseMeta == nil {
+		t.Fatal("expected ResponseMeta to be populated")
+	}
+	if r.ResponseMeta.RequestID != "req_file_meta" {
+		t.Fatalf("expected req_file_meta, got %s", r.ResponseMeta.RequestID)
+	}
+	if r.ResponseMeta.Tier != "pro" {
+		t.Fatalf("expected pro, got %s", r.ResponseMeta.Tier)
+	}
+	if r.ResponseMeta.QuotaRemainingDay != 1800 {
+		t.Fatalf("expected 1800, got %d", r.ResponseMeta.QuotaRemainingDay)
+	}
+}
+
+// ── Structured error with details ──
+
+func TestStructuredErrorCarriesDetails(t *testing.T) {
+	// The unwrap method first unmarshals into serveAPIResponse where Error is
+	// a string. When the server sends a dict-style error, the outer error field
+	// must be a string code; the dict envelope is parsed on a second pass.
+	// However, when the inner result contains a structured error object, unwrap
+	// handles it via the innerObj path. Test both the flat legacy format and the
+	// inner-result structured error format.
+
+	// Inner-result structured error: {result: "{\"error\":{\"message\":...},\"request_id\":...}"}
+	inner := `{"error":{"message":"bad request","details":{"field":"x"}},"request_id":"req_1"}`
+	srv := mockServer(200, map[string]any{"result": inner})
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	_, err := c.Parse(context.Background(), "bad.docx")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var dpe *DocParseError
+	if !errors.As(err, &dpe) {
+		t.Fatalf("expected DocParseError, got %T", err)
+	}
+	if dpe.Message != "bad request" {
+		t.Fatalf("expected 'bad request', got %q", dpe.Message)
+	}
+	if dpe.RequestID != "req_1" {
+		t.Fatalf("expected request_id=req_1, got %q", dpe.RequestID)
+	}
+	if dpe.Details == nil {
+		t.Fatal("expected details to be populated")
+	}
+	if dpe.Details["field"] != "x" {
+		t.Fatalf("expected details.field=x, got %v", dpe.Details["field"])
+	}
+}
+
+func TestStructuredErrorAuthWithDetails(t *testing.T) {
+	// Auth error inside the inner result envelope
+	inner := `{"error":{"message":"Invalid or expired API key","details":{"reason":"expired"}},"request_id":"req_auth_det"}`
+	srv := mockServer(200, map[string]any{"result": inner})
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	_, err := c.Health(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("expected ErrAuth, got %v", err)
+	}
+	var ae *AuthError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AuthError, got %T", err)
+	}
+	if ae.RequestID != "req_auth_det" {
+		t.Fatalf("expected request_id=req_auth_det, got %q", ae.RequestID)
+	}
+	if ae.Details["reason"] != "expired" {
+		t.Fatalf("expected details.reason=expired, got %v", ae.Details["reason"])
+	}
+}
+
+func TestStructuredErrorFlatFormatWithDetails(t *testing.T) {
+	// Legacy flat format: {error: "CODE", message: "...", suggested_fix: "..."}
+	srv := mockServer(200, map[string]any{
+		"error":         "VALIDATION_ERROR",
+		"message":       "Invalid file format",
+		"suggested_fix": "Use a supported format like docx or pdf.",
+	})
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	_, err := c.Parse(context.Background(), "bad.xyz")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var dpe *DocParseError
+	if !errors.As(err, &dpe) {
+		t.Fatalf("expected DocParseError, got %T", err)
+	}
+	if dpe.Message != "Invalid file format" {
+		t.Fatalf("expected 'Invalid file format', got %q", dpe.Message)
+	}
+	if dpe.SuggestedFix != "Use a supported format like docx or pdf." {
+		t.Fatalf("expected suggested_fix, got %q", dpe.SuggestedFix)
+	}
+}

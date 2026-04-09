@@ -3,7 +3,7 @@ import pytest
 from ailang_parse.types import (
     Block, Cell, DocMetadata, Summary, ParseResult,
     HealthResult, FormatsResult, KeyInfo, Quota, Usage, UsageInfo,
-    Element, ElementMetadata,
+    Element, ElementMetadata, ResponseMeta,
     DocParseError, AuthError, QuotaError,
 )
 
@@ -270,3 +270,51 @@ class TestErrors:
         e = QuotaError("over limit", tier="free", used=100, limit=50)
         assert e.status_code == 429
         assert e.tier == "free"
+
+    def test_docparse_error_details(self):
+        err = DocParseError("bad", details={"field": "name"}, request_id="req_123")
+        assert err.details == {"field": "name"}
+        assert err.request_id == "req_123"
+
+    def test_docparse_error_details_defaults(self):
+        err = DocParseError("oops")
+        assert err.details is None
+        assert err.request_id == ""
+
+
+# ── ResponseMeta ──
+
+class TestResponseMeta:
+    def test_response_meta_from_headers(self):
+        headers = {
+            "X-Request-Id": "req_abc123",
+            "X-DocParse-Tier": "pro",
+            "X-DocParse-Quota-Remaining-Day": "195",
+            "X-DocParse-Quota-Remaining-Month": "9800",
+            "X-DocParse-Quota-Remaining-Ai": "450",
+            "X-AilangParse-Format": "docx",
+            "X-AilangParse-Replayable": "true",
+        }
+        meta = ResponseMeta.from_headers(headers)
+        assert meta.request_id == "req_abc123"
+        assert meta.tier == "pro"
+        assert meta.quota_remaining_day == 195
+        assert meta.quota_remaining_month == 9800
+        assert meta.quota_remaining_ai == 450
+        assert meta.format == "docx"
+        assert meta.replayable is True
+
+    def test_response_meta_defaults(self):
+        meta = ResponseMeta.from_headers({})
+        assert meta.request_id == ""
+        assert meta.tier == ""
+        assert meta.quota_remaining_day == -1
+        assert meta.quota_remaining_month == -1
+        assert meta.quota_remaining_ai == -1
+        assert meta.format == ""
+        assert meta.replayable is False
+
+    def test_response_meta_non_numeric_quota(self):
+        headers = {"X-DocParse-Quota-Remaining-Day": "not-a-number"}
+        meta = ResponseMeta.from_headers(headers)
+        assert meta.quota_remaining_day == -1

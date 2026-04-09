@@ -311,18 +311,41 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
 	if outer.Error != "" {
-		// Try structured error: {error: "CODE", message: "...", suggested_fix: "..."}
+		// Try structured error: {error: {code, message, details, ...}, request_id: "..."}
+		// or legacy: {error: "CODE", message: "...", suggested_fix: "..."}
 		msg := outer.Error
-		var suggestedFix string
-		var structured struct {
-			Message      string `json:"message"`
-			SuggestedFix string `json:"suggested_fix"`
+		var suggestedFix, requestID string
+		var details map[string]interface{}
+
+		// Try new-style dict error envelope
+		var dictEnvelope struct {
+			Error struct {
+				Message      string                 `json:"message"`
+				SuggestedFix string                 `json:"suggested_fix"`
+				Details      map[string]interface{} `json:"details"`
+			} `json:"error"`
+			RequestID string `json:"request_id"`
 		}
-		if json.Unmarshal(data, &structured) == nil {
-			if structured.Message != "" {
-				msg = structured.Message
+		if json.Unmarshal(data, &dictEnvelope) == nil && dictEnvelope.Error.Message != "" {
+			msg = dictEnvelope.Error.Message
+			suggestedFix = dictEnvelope.Error.SuggestedFix
+			details = dictEnvelope.Error.Details
+			requestID = dictEnvelope.RequestID
+		} else {
+			// Fall back to legacy flat envelope
+			var structured struct {
+				Message      string `json:"message"`
+				SuggestedFix string `json:"suggested_fix"`
 			}
-			suggestedFix = structured.SuggestedFix
+			if json.Unmarshal(data, &structured) == nil {
+				if structured.Message != "" {
+					msg = structured.Message
+				}
+				suggestedFix = structured.SuggestedFix
+			}
+		}
+		if details != nil || requestID != "" {
+			return nil, envelopeErrorFull(msg, suggestedFix, requestID, details)
 		}
 		if suggestedFix != "" {
 			return nil, envelopeErrorWithFix(msg, suggestedFix)
@@ -336,14 +359,17 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 	}
 	// Check for error in inner result (API wraps errors in envelope too)
 	var innerObj struct {
-		Error json.RawMessage `json:"error,omitempty"`
+		Error     json.RawMessage `json:"error,omitempty"`
+		RequestID string          `json:"request_id,omitempty"`
 	}
 	if json.Unmarshal(inner, &innerObj) == nil && len(innerObj.Error) > 0 && string(innerObj.Error) != "null" {
 		var errObj struct {
-			Message string `json:"message"`
+			Message      string                 `json:"message"`
+			SuggestedFix string                 `json:"suggested_fix"`
+			Details      map[string]interface{} `json:"details"`
 		}
 		if json.Unmarshal(innerObj.Error, &errObj) == nil && errObj.Message != "" {
-			return nil, envelopeError(errObj.Message)
+			return nil, envelopeErrorFull(errObj.Message, errObj.SuggestedFix, innerObj.RequestID, errObj.Details)
 		}
 		return nil, envelopeError(string(innerObj.Error))
 	}

@@ -56,6 +56,16 @@ for block in result.blocks:
 result = client.parse("report.docx")                        # Block ADT (default)
 result = client.parse("report.docx", output_format="markdown")  # Markdown
 result = client.parse("report.docx", output_format="html")      # HTML
+result = client.parse("report.docx", output_format="markdown+metadata")  # Markdown with sections
+
+# Upload a local file (multipart)
+result = client.parse_file("local/report.docx")
+
+# Parse from a signed URL (GCS, S3, Azure Blob — no local file needed)
+result = client.parse_url(
+    "https://storage.googleapis.com/bucket/doc.docx?X-Goog-Signature=...",
+    output_format="markdown+metadata",
+)
 
 # Access structured data
 print(result.status)          # "success"
@@ -65,6 +75,28 @@ print(result.blocks)          # List[Block]
 print(result.metadata.title)  # Document title
 print(result.metadata.author) # Document author
 print(result.summary.tables)  # Number of tables found
+
+# markdown+metadata format includes sections
+print(result.markdown)        # Full rendered markdown
+for section in result.sections:
+    print(f"  {section.heading}: {section.markdown[:60]}...")
+```
+
+## Response Metadata
+
+Every parse result includes quota and request metadata from response headers:
+
+```python
+result = client.parse("report.docx")
+meta = result.response_meta
+
+print(meta.request_id)            # "req_abc123"
+print(meta.tier)                  # "free", "pro", or "business"
+print(meta.quota_remaining_day)   # Requests left today
+print(meta.quota_remaining_month) # Requests left this month
+print(meta.quota_remaining_ai)    # AI requests remaining
+print(meta.format)                # Detected input format ("docx", etc.)
+print(meta.replayable)            # Whether this request can be replayed
 ```
 
 ## Supported Formats
@@ -188,6 +220,9 @@ except QuotaError as e:
     print(f"Quota exceeded: {e}")    # 429
 except DocParseError as e:
     print(f"API error ({e.status_code}): {e}")
+    print(f"  suggested fix: {e.suggested_fix}")
+    print(f"  details: {e.details}")       # Structured error details dict
+    print(f"  request_id: {e.request_id}") # For support/debugging
 ```
 
 ## Configuration

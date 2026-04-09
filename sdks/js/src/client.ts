@@ -3,7 +3,7 @@
  * and persistent credential storage.
  */
 
-import type { ParseResult, HealthResult, FormatsResult, DocParseOptions } from "./types.js";
+import type { ParseResult, HealthResult, FormatsResult, DocParseOptions, ResponseMeta } from "./types.js";
 import { DocParseError, AuthError, QuotaError } from "./types.js";
 import { KeyManager } from "./keys.js";
 
@@ -56,12 +56,26 @@ export class DocParse {
     this.keys = new KeyManager(this);
   }
 
+  /** Extract response metadata from API response headers. */
+  private static _extractMeta(headers: Headers): ResponseMeta {
+    return {
+      requestId: headers.get("X-Request-Id") || "",
+      tier: headers.get("X-DocParse-Tier") || "",
+      quotaRemainingDay: parseInt(headers.get("X-DocParse-Quota-Remaining-Day") || "-1", 10),
+      quotaRemainingMonth: parseInt(headers.get("X-DocParse-Quota-Remaining-Month") || "-1", 10),
+      quotaRemainingAi: parseInt(headers.get("X-DocParse-Quota-Remaining-Ai") || "-1", 10),
+      format: headers.get("X-AilangParse-Format") || "",
+      replayable: (headers.get("X-AilangParse-Replayable") || "").toLowerCase() === "true",
+    };
+  }
+
   /** Parse a document by sample ID or server-side filepath. Returns structured blocks.
    *  For uploading local files, use {@link parseFile} instead. */
-  async parse(filepath: string, outputFormat = "blocks"): Promise<ParseResult> {
+  async parse(filepath: string, outputFormat = "blocks", opts?: { sourceUrl?: string }): Promise<ParseResult> {
     const url = this.baseUrl + "/api/v1/parse";
     const body: Record<string, string> = { filepath, outputFormat };
     if (this.apiKey) body.apiKey = this.apiKey;
+    if (opts?.sourceUrl) body.sourceUrl = opts.sourceUrl;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
@@ -77,10 +91,18 @@ export class DocParse {
       if (resp.status === 401) throw new AuthError();
       if (resp.status === 429) throw new QuotaError("Quota exceeded");
       if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
-      return DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
+      const meta = DocParse._extractMeta(resp.headers);
+      const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
+      result.responseMeta = meta;
+      return result;
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Parse a document from a URL. Convenience wrapper around {@link parse}. */
+  async parseUrl(url: string, outputFormat = "blocks"): Promise<ParseResult> {
+    return this.parse("", outputFormat, { sourceUrl: url });
   }
 
   /**
@@ -139,7 +161,10 @@ export class DocParse {
       if (resp.status === 429) throw new QuotaError("Quota exceeded");
       if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
 
-      return DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
+      const meta = DocParse._extractMeta(resp.headers);
+      const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
+      result.responseMeta = meta;
+      return result;
     } finally {
       clearTimeout(timer);
     }
@@ -328,9 +353,12 @@ export class DocParse {
   }
 
   /** Throw AuthError for auth-like messages, otherwise DocParseError. */
-  private static _raiseEnvelopeError(msg: string, suggestedFix = ""): never {
+  private static _raiseEnvelopeError(
+    msg: string, suggestedFix = "",
+    details: Record<string, unknown> = {}, requestId = "",
+  ): never {
     if (DocParse._isAuthErrorMessage(msg)) throw new AuthError(msg);
-    throw new DocParseError(msg, 0, suggestedFix);
+    throw new DocParseError(msg, 0, suggestedFix, details, requestId);
   }
 
   /** Unwrap serve-api response envelope. */
@@ -341,7 +369,15 @@ export class DocParse {
         const msg = outer.message || outer.error;
         DocParse._raiseEnvelopeError(msg, suggested);
       }
-      // Dict errors (e.g. device-auth poll) — return for caller handling
+      if (typeof outer.error === "object") {
+        const err = outer.error;
+        const msg = err.message || JSON.stringify(err);
+        const suggested = err.suggested_fix || "";
+        const details = err.details || {};
+        const requestId = outer.request_id || "";
+        DocParse._raiseEnvelopeError(msg, suggested, details, requestId);
+      }
+      // Unknown error shape — return for caller handling
       return outer;
     }
     const resultStr = outer.result || "";
@@ -351,8 +387,14 @@ export class DocParse {
       // Check for error in inner result (API wraps errors in envelope too)
       if (inner?.error) {
         const err = inner.error;
-        const msg = typeof err === "object" ? err.message || JSON.stringify(err) : String(err);
-        DocParse._raiseEnvelopeError(msg);
+        if (typeof err === "object") {
+          const msg = err.message || JSON.stringify(err);
+          const suggested = err.suggested_fix || "";
+          const details = err.details || {};
+          const requestId = inner.request_id || "";
+          DocParse._raiseEnvelopeError(msg, suggested, details, requestId);
+        }
+        DocParse._raiseEnvelopeError(String(err));
       }
       return inner;
     } catch (e) {

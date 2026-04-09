@@ -5,11 +5,21 @@
 export class DocParseError extends Error {
   statusCode: number;
   suggestedFix: string;
-  constructor(message: string, statusCode: number = 0, suggestedFix: string = "") {
+  details: Record<string, unknown>;
+  requestId: string;
+  constructor(
+    message: string,
+    statusCode: number = 0,
+    suggestedFix: string = "",
+    details: Record<string, unknown> = {},
+    requestId: string = "",
+  ) {
     super(message);
     this.name = "DocParseError";
     this.statusCode = statusCode;
     this.suggestedFix = suggestedFix;
+    this.details = details;
+    this.requestId = requestId;
   }
 }
 
@@ -95,6 +105,17 @@ export interface Section {
   markdown: string;
 }
 
+/** Metadata extracted from API response HTTP headers. */
+export interface ResponseMeta {
+  requestId: string;
+  tier: string;
+  quotaRemainingDay: number;
+  quotaRemainingMonth: number;
+  quotaRemainingAi: number;
+  format: string;
+  replayable: boolean;
+}
+
 export interface ParseResult {
   status: string;
   filename: string;
@@ -112,6 +133,8 @@ export interface ParseResult {
   markdown: string;
   /** Heading-sliced sections for `outputFormat: "markdown+metadata"`. */
   sections: Section[];
+  /** HTTP response metadata (request ID, tier, quota remaining). */
+  responseMeta?: ResponseMeta;
 }
 
 export interface HealthResult {

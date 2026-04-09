@@ -159,6 +159,31 @@ as.data.frame.ailang_block_table <- function(x, row.names = NULL,
   )
 }
 
+#' Extract ResponseMeta from HTTP headers.
+#' @keywords internal
+.response_meta_from_headers <- function(headers) {
+  # Case-insensitive lookup — Go HTTP canonical form differs from expected casing
+  lc_names <- tolower(names(headers))
+  .hget <- function(key) {
+    idx <- match(tolower(key), lc_names)
+    if (is.na(idx)) "" else .s(headers[[idx]])
+  }
+  .hi <- function(key, default_val = -1L) {
+    v <- .hget(key)
+    if (!nzchar(v)) return(default_val)
+    tryCatch(as.integer(v), warning = function(w) default_val)
+  }
+  list(
+    request_id            = .hget("X-Request-Id"),
+    tier                  = .hget("X-DocParse-Tier"),
+    quota_remaining_day   = .hi("X-DocParse-Quota-Remaining-Day"),
+    quota_remaining_month = .hi("X-DocParse-Quota-Remaining-Month"),
+    quota_remaining_ai    = .hi("X-DocParse-Quota-Remaining-Ai"),
+    format                = .hget("X-AilangParse-Format"),
+    replayable            = identical(tolower(.hget("X-AilangParse-Replayable")), "true")
+  )
+}
+
 #' Convert a raw API response into a ParseResult S3 object.
 #' @keywords internal
 .parse_result_from_list <- function(d) {

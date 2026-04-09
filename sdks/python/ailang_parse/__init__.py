@@ -23,7 +23,7 @@ Unstructured migration::
 from .client import DocParse
 from .compat import UnstructuredClient
 from .types import (
-    Block, Cell, Section, ParseResult, DocMetadata, Summary,
+    Block, Cell, Section, ParseResult, DocMetadata, Summary, ResponseMeta,
     HealthResult, FormatsResult,
     KeyInfo, Quota, Usage, UsageInfo,
     Element, ElementMetadata,
@@ -35,6 +35,7 @@ __all__ = [
     "DocParse",
     "UnstructuredClient",
     "Block", "Cell", "Section", "ParseResult", "DocMetadata", "Summary",
+    "ResponseMeta",
     "HealthResult", "FormatsResult",
     "KeyInfo", "Quota", "Usage", "UsageInfo",
     "Element", "ElementMetadata",

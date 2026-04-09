@@ -16,7 +16,7 @@ from ._credentials import (
 )
 from .types import (
     DocParseError, AuthError, QuotaError,
-    ParseResult, HealthResult, FormatsResult,
+    ParseResult, ResponseMeta, HealthResult, FormatsResult,
 )
 
 
@@ -71,15 +71,27 @@ class DocParse:
 
     # ── Core API methods ──
 
-    def parse(self, filepath: str, output_format: str = "blocks") -> ParseResult:
-        """Parse a document by sample ID or server-side filepath. Returns structured blocks.
+    def parse(self, filepath: str, output_format: str = "blocks",
+              source_url: str = "") -> ParseResult:
+        """Parse a document by sample ID, server-side filepath, or signed URL.
 
         For uploading local files, use :meth:`parse_file` instead.
+        For parsing a URL directly, use :meth:`parse_url` for convenience.
+
+        Args:
+            filepath: Sample ID (e.g. ``"sample_docx_formatting"``) or server path.
+            output_format: ``"blocks"`` (default), ``"markdown"``, ``"html"``,
+                ``"markdown+metadata"``, or ``"a2ui"``.
+            source_url: HTTPS signed URL (GCS, S3, etc.). When provided, the
+                server fetches the document from this URL instead of reading
+                a local file.
         """
         url = self.base_url + "/api/v1/parse"
         body: Dict[str, Any] = {"filepath": filepath, "outputFormat": output_format}
         if self.api_key:
             body["apiKey"] = self.api_key
+        if source_url:
+            body["sourceUrl"] = source_url
         resp = self._session.post(url, json=body, timeout=self.timeout)
         if resp.status_code == 401:
             raise AuthError("Invalid or missing API key", 401)
@@ -87,7 +99,27 @@ class DocParse:
             raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
-        return self._build_parse_result(self._unwrap(resp.json()), output_format)
+        meta = ResponseMeta.from_headers(dict(resp.headers))
+        result = self._build_parse_result(self._unwrap(resp.json()), output_format)
+        result.response_meta = meta
+        return result
+
+    def parse_url(self, url: str, output_format: str = "blocks") -> ParseResult:
+        """Parse a document from a signed URL (GCS, S3, Azure Blob, etc.).
+
+        The server fetches the document from the URL — no local file needed.
+        The URL must be HTTPS and the server enforces tier-based size limits
+        (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+
+        Usage::
+
+            result = client.parse_url(
+                "https://storage.googleapis.com/bucket/doc.docx?X-Goog-Signature=...",
+                output_format="markdown+metadata",
+            )
+            print(result.markdown)
+        """
+        return self.parse(filepath="", output_format=output_format, source_url=url)
 
     def parse_file(self, filepath: str, output_format: str = "blocks") -> ParseResult:
         """Upload a local file and parse it. Returns structured blocks.
@@ -114,7 +146,10 @@ class DocParse:
             raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
-        return self._build_parse_result(self._unwrap(resp.json()), output_format)
+        meta = ResponseMeta.from_headers(dict(resp.headers))
+        result = self._build_parse_result(self._unwrap(resp.json()), output_format)
+        result.response_meta = meta
+        return result
 
     @staticmethod
     def _build_parse_result(data: Any, output_format: str) -> ParseResult:
@@ -295,11 +330,15 @@ class DocParse:
         )
 
     @classmethod
-    def _raise_envelope_error(cls, msg: str, suggested_fix: str = "") -> None:
+    def _raise_envelope_error(cls, msg: str, suggested_fix: str = "",
+                              details: Optional[Dict[str, Any]] = None,
+                              request_id: str = "") -> None:
         """Raise AuthError for auth-like messages, otherwise DocParseError."""
         if cls._is_auth_error_message(msg):
-            raise AuthError(msg, 401, suggested_fix=suggested_fix)
-        raise DocParseError(msg, suggested_fix=suggested_fix)
+            raise AuthError(msg, 401, suggested_fix=suggested_fix,
+                            details=details, request_id=request_id)
+        raise DocParseError(msg, suggested_fix=suggested_fix,
+                            details=details, request_id=request_id)
 
     @classmethod
     def _unwrap(cls, outer: Dict[str, Any]) -> Dict[str, Any]:
@@ -311,7 +350,15 @@ class DocParse:
                 suggested = outer.get("suggested_fix", "")
                 msg = outer.get("message", err)
                 cls._raise_envelope_error(msg, suggested_fix=suggested)
-            # Dict errors (e.g. device auth poll) — return as-is for caller handling
+            if isinstance(err, dict):
+                # Structured error envelope: {error: {code, message, details, ...}, request_id}
+                msg = err.get("message", str(err))
+                suggested = err.get("suggested_fix", "")
+                details = err.get("details")
+                request_id = outer.get("request_id", "")
+                cls._raise_envelope_error(msg, suggested_fix=suggested,
+                                          details=details, request_id=request_id)
+            # Unknown error shape — return as-is for caller handling
             return outer
         result_str = outer.get("result", "")
         if not result_str:
@@ -323,8 +370,15 @@ class DocParse:
         # Check for error in inner result (API wraps errors in envelope too)
         if isinstance(inner, dict) and "error" in inner and inner["error"]:
             err = inner["error"]
-            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-            cls._raise_envelope_error(msg)
+            if isinstance(err, dict):
+                msg = err.get("message", str(err))
+                suggested = err.get("suggested_fix", "")
+                details = err.get("details")
+                request_id = inner.get("request_id", "")
+                cls._raise_envelope_error(msg, suggested_fix=suggested,
+                                          details=details, request_id=request_id)
+            else:
+                cls._raise_envelope_error(str(err))
         return inner
 
     # ── HTTP layer ──

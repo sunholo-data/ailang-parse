@@ -10,11 +10,13 @@
 #' @name errors
 NULL
 
-.docparse_error <- function(message, status_code = 0L, suggested_fix = "", ..., class = character()) {
+.docparse_error <- function(message, status_code = 0L, suggested_fix = "",
+                            details = NULL, request_id = "", ..., class = character()) {
   structure(
     class = c(class, "ailang_docparse_error", "error", "condition"),
     list(message = message, call = NULL, status_code = status_code,
-         suggested_fix = suggested_fix, ...)
+         suggested_fix = suggested_fix, details = details,
+         request_id = request_id, ...)
   )
 }
 
