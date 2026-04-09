@@ -75,16 +75,25 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         # typed items (heading/text/table/list/image) plus image and chart
         # metadata. Fall back to markdown if the JSON endpoint is unavailable
         # for some file types.
+        json_result = None
         try:
             json_result = parser.get_json_result(str(filepath))
         except Exception:
             json_result = None
 
-        if json_result:
-            return self._from_json(json_result)
+        # Empty/missing JSON result is a soft failure (e.g. credit exhaustion
+        # where the SDK swallows the API error and returns []). Treat that as
+        # a hard error so the eval records ERROR rather than silently scoring
+        # the file with empty data — that would publish a fake low score.
+        if not json_result or (isinstance(json_result, list) and not any(json_result)):
+            documents = parser.load_data(str(filepath))
+            if not documents:
+                raise RuntimeError(
+                    "LlamaParse returned no content (likely credit exhaustion or job failure)"
+                )
+            return self._from_markdown(documents)
 
-        documents = parser.load_data(str(filepath))
-        return self._from_markdown(documents)
+        return self._from_json(json_result)
 
     # ------------------------------------------------------------------ JSON
 
