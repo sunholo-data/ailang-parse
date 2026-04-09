@@ -130,6 +130,11 @@ type Client struct {
 	BaseURL string
 	HTTP    *http.Client
 
+	// KeyID is the id of the currently configured key, populated from
+	// saved credentials or a successful DeviceAuth flow. Used by KeyInfo
+	// when the caller has not passed an explicit id.
+	KeyID string
+
 	// Keys provides API key management methods.
 	Keys *KeyManager
 }
@@ -168,6 +173,7 @@ func New(apiKey string, opts ...Option) *Client {
 	if c.APIKey == "" {
 		if saved := loadSavedKey(c.BaseURL); saved != nil {
 			c.APIKey = saved.APIKey
+			c.KeyID = saved.KeyID
 		}
 	}
 
@@ -181,6 +187,10 @@ type DeviceAuthResult struct {
 	KeyID  string `json:"key_id"`
 	Tier   string `json:"tier"`
 	Label  string `json:"label"`
+	// VerificationURL is the user-facing URL printed during the flow.
+	VerificationURL string `json:"verification_url"`
+	// PollURL is the /api/v1/auth/device/poll endpoint used during the flow.
+	PollURL string `json:"poll_url"`
 }
 
 // DeviceAuth runs the full RFC 8628 device authorization flow.
@@ -270,12 +280,15 @@ func (c *Client) DeviceAuth(ctx context.Context, label string) (*DeviceAuthResul
 
 			if poll.Status == "approved" && poll.APIKey != "" {
 				c.APIKey = poll.APIKey
+				c.KeyID = poll.KeyID
 				_ = saveKey(poll.APIKey, c.BaseURL, poll.KeyID, poll.Tier, poll.Label)
 				return &DeviceAuthResult{
-					APIKey: poll.APIKey,
-					KeyID:  poll.KeyID,
-					Tier:   poll.Tier,
-					Label:  poll.Label,
+					APIKey:          poll.APIKey,
+					KeyID:           poll.KeyID,
+					Tier:            poll.Tier,
+					Label:           poll.Label,
+					VerificationURL: deviceResp.VerificationURL,
+					PollURL:         c.BaseURL + "/api/v1/auth/device/poll",
 				}, nil
 			}
 

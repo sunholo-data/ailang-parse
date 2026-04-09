@@ -191,6 +191,39 @@ class TestParse:
         assert r.metadata.title == "Sample"
         assert r.summary.total_blocks == 2
 
+    def test_parse_file_markdown_returns_text(self, mock_server, tmp_path):
+        """Regression for #2: when output_format='markdown', the API returns
+        a raw string. The SDK must surface it as ParseResult.text instead of
+        silently producing an empty result."""
+        _set_response(200, {"result": "# Title\n\nBody paragraph\n"})
+        local = tmp_path / "doc.md"
+        local.write_bytes(b"# hi")
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse_file(str(local), output_format="markdown")
+        assert r.status == "ok"
+        assert r.text == "# Title\n\nBody paragraph\n"
+        assert r.format == "markdown"
+        assert r.blocks == []
+
+    def test_parse_html_returns_text(self, mock_server):
+        """Same as markdown — output_format='html' returns raw string."""
+        _set_response(200, {"result": "<h1>Title</h1>"})
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse("doc.html", output_format="html")
+        assert r.status == "ok"
+        assert r.text == "<h1>Title</h1>"
+        assert r.format == "html"
+
+    def test_parse_file_bad_key_envelope_raises_auth_error(self, mock_server, tmp_path):
+        """Regression for #1: server returns 200 + envelope error for a bad
+        key inside parse_file. Must raise AuthError, not generic DocParseError."""
+        _set_response(200, {"error": "Invalid or expired API key"})
+        local = tmp_path / "doc.docx"
+        local.write_bytes(b"PK")
+        c = DocParse(api_key="dp_bad", base_url=mock_server)
+        with pytest.raises(AuthError):
+            c.parse_file(str(local))
+
     def test_parse_file_uploads_local_file(self, mock_server, tmp_path):
         """Regression test: parse_file must build a multipart upload from a real
         local path. Previously this method referenced ``Path`` without importing
@@ -286,6 +319,65 @@ class TestKeyManager:
         u = c.keys.usage(key_id="k1")
         assert u.usage.requests_today == 3
         assert u.quota.requests_per_day == 50
+
+    def test_key_info_uses_stored_key_id(self, mock_server, tmp_path, monkeypatch):
+        """If the client has a stored key_id (from saved credentials),
+        key_info() should call usage() directly without listing."""
+        from ailang_parse import _credentials
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        monkeypatch.delenv("DOCPARSE_API_KEY", raising=False)
+        _credentials.save_key(
+            api_key="dp_saved", base_url=mock_server, key_id="k_saved", tier="pro",
+        )
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok", "keyId": "k_saved", "tier": "pro",
+                "usage": {"requestsToday": 7, "requestsThisMonth": 70, "totalRequests": 700},
+                "quota": {"requestsPerDay": 100},
+            })
+        })
+        c = DocParse(base_url=mock_server)
+        assert c._key_id == "k_saved"
+        info = c.key_info()
+        assert info.usage.requests_today == 7
+        assert info.tier == "pro"
+
+    def test_key_info_falls_back_to_list(self, mock_server):
+        """Without a stored key_id, key_info() should call keys.list() and
+        find the entry whose 'key' field matches the configured api_key."""
+        _set_response(200, {
+            "result": json.dumps({
+                "status": "ok",
+                "keys": [
+                    {"key_id": "k_other", "key": "dp_other"},
+                    {"key_id": "k_match", "key": "dp_test"},
+                ],
+            })
+        })
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        # First call: keys.list() — sets _key_id
+        # We can't easily mock two responses with the simple handler, so just
+        # verify that the resolution path runs and caches.
+        # Stub out keys.usage to avoid the second HTTP roundtrip.
+        from ailang_parse.types import UsageInfo
+        called = {}
+        def fake_usage(key_id, *a, **k):
+            called["key_id"] = key_id
+            return UsageInfo(status="ok", key_id=key_id)
+        c.keys.usage = fake_usage  # type: ignore[assignment]
+        info = c.key_info()
+        assert called["key_id"] == "k_match"
+        assert c._key_id == "k_match"
+        # Second call: cached, no list lookup
+        called.clear()
+        c.key_info()
+        assert called["key_id"] == "k_match"
+
+    def test_key_info_no_api_key_raises(self, monkeypatch):
+        monkeypatch.delenv("DOCPARSE_API_KEY", raising=False)
+        c = DocParse(base_url="http://nokey.test")
+        with pytest.raises(DocParseError):
+            c.key_info()
 
     def test_keymanager_propagates_auth_error(self, mock_server):
         # Server returns 200 envelope but with auth error string

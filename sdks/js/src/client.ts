@@ -15,6 +15,12 @@ export class DocParse {
   private apiKey: string;
   private baseUrl: string;
   private timeout: number;
+  /**
+   * Stored key id, populated from saved credentials or a successful
+   * `deviceAuth()` flow. Used by {@link keyInfo} when no explicit id is
+   * passed.
+   */
+  private keyId: string;
 
   /** Key management methods. */
   keys: KeyManager;
@@ -33,15 +39,20 @@ export class DocParse {
 
     // Resolve API key: explicit > env var > saved credentials
     let key = opts?.apiKey || "";
+    let keyId = "";
     if (!key) {
       try { key = process.env.DOCPARSE_API_KEY || ""; } catch { /* browser */ }
     }
     if (!key) {
       const saved = loadSavedKey(this.baseUrl);
-      if (saved) key = saved.api_key;
+      if (saved) {
+        key = saved.api_key;
+        keyId = saved.key_id || "";
+      }
     }
 
     this.apiKey = key;
+    this.keyId = keyId;
     this.keys = new KeyManager(this);
   }
 
@@ -66,7 +77,7 @@ export class DocParse {
       if (resp.status === 401) throw new AuthError();
       if (resp.status === 429) throw new QuotaError("Quota exceeded");
       if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
-      return this._unwrap(await resp.json()) as ParseResult;
+      return DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
     } finally {
       clearTimeout(timer);
     }
@@ -128,10 +139,40 @@ export class DocParse {
       if (resp.status === 429) throw new QuotaError("Quota exceeded");
       if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
 
-      return this._unwrap(await resp.json()) as ParseResult;
+      return DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Build a ParseResult from a possibly-raw API response. For
+   * `outputFormat: "markdown"` / `"html"` the API returns a raw rendered
+   * string; `_unwrap` surfaces it as `{raw: "<str>"}`. We promote that to
+   * `ParseResult.text` so callers receive the rendered output instead of
+   * a silently-empty result.
+   */
+  private static _buildParseResult(data: any, outputFormat: string): ParseResult {
+    if (data && typeof data === "object" && typeof data.raw === "string") {
+      return {
+        status: "ok",
+        filename: "",
+        format: outputFormat,
+        blocks: [],
+        metadata: {} as any,
+        summary: {} as any,
+        text: data.raw,
+      };
+    }
+    return {
+      status: data?.status || "",
+      filename: data?.filename || "",
+      format: data?.format || "",
+      blocks: data?.blocks || [],
+      metadata: data?.metadata || ({} as any),
+      summary: data?.summary || ({} as any),
+      text: data?.text || "",
+    };
   }
 
   /** Check API health. */
@@ -142,6 +183,48 @@ export class DocParse {
   /** List supported formats. */
   async formats(): Promise<FormatsResult> {
     return this._call("GET", "/api/v1/formats") as Promise<FormatsResult>;
+  }
+
+  /**
+   * Return live usage + quota info for the *currently configured* key.
+   *
+   * Resolution order for the key id:
+   * 1. The id stored on the client (saved credentials or {@link deviceAuth}).
+   * 2. Otherwise call `keys.list("")` and find the entry whose `key`
+   *    matches `apiKey`. The resolved id is cached for future calls.
+   *
+   * Throws if neither path can resolve a key id — the AILANG API has no
+   * `/auth/whoami` endpoint, so the SDK needs either a saved credential or
+   * a list-able admin key.
+   */
+  async keyInfo(): Promise<any> {
+    if (!this.apiKey) {
+      throw new DocParseError("client.keyInfo() requires an API key on the client");
+    }
+    if (!this.keyId) {
+      let listing: any;
+      try {
+        listing = await this.keys.list("");
+      } catch (e) {
+        throw new DocParseError(
+          "client.keyInfo() requires a saved credential or deviceAuth flow — " +
+          "pass keyId explicitly to client.keys.usage(): " + (e as Error).message,
+        );
+      }
+      const keys = Array.isArray(listing?.keys) ? listing.keys : [];
+      for (const k of keys) {
+        if (k && (k.key === this.apiKey || k.api_key === this.apiKey)) {
+          this.keyId = k.key_id || k.keyId || "";
+          if (this.keyId) break;
+        }
+      }
+      if (!this.keyId) {
+        throw new DocParseError(
+          "client.keyInfo() could not resolve key_id — pass it explicitly to client.keys.usage()",
+        );
+      }
+    }
+    return this.keys.usage(this.keyId);
   }
 
   /**
@@ -161,7 +244,14 @@ export class DocParse {
     scope?: string;
     pollInterval?: number;
     timeout?: number;
-  }): Promise<{ api_key: string; key_id: string; tier: string; label: string }> {
+  }): Promise<{
+    api_key: string;
+    key_id: string;
+    tier: string;
+    label: string;
+    verification_url: string;
+    poll_url: string;
+  }> {
     const label = opts?.label || "default";
     const scope = opts?.scope || "parse";
     const timeout = opts?.timeout || 900_000;
@@ -198,11 +288,14 @@ export class DocParse {
 
       if (pollData.status === "approved" && pollData.api_key) {
         this.apiKey = pollData.api_key;
+        this.keyId = pollData.key_id || "";
         const result = {
           api_key: pollData.api_key,
           key_id: pollData.key_id || "",
           tier: pollData.tier || "free",
           label: pollData.label || label,
+          verification_url: url,
+          poll_url: this.baseUrl + "/api/v1/auth/device/poll",
         };
         saveKey(result.api_key, this.baseUrl, result.key_id, result.tier, result.label);
         return result;

@@ -160,10 +160,36 @@ as.data.frame.ailang_block_table <- function(x, row.names = NULL,
     format   = .s(d$format),
     blocks   = blocks,
     metadata = .doc_metadata_from_list(d$metadata),
-    summary  = .summary_from_list(d$summary)
+    summary  = .summary_from_list(d$summary),
+    text     = .s(d$text)
   )
   class(res) <- "ailang_parse_result"
   res
+}
+
+#' Build a parse result, handling raw markdown/html string responses.
+#'
+#' For \code{output_format = "markdown"} / \code{"html"} the API returns a
+#' raw rendered string. \code{.unwrap()} surfaces it as
+#' \code{list(raw = "<str>")}; we promote that to \code{result$text} so the
+#' caller receives the rendered output instead of a silently empty result.
+#'
+#' @keywords internal
+.build_parse_result <- function(data, output_format) {
+  if (is.list(data) && !is.null(data$raw) && is.character(data$raw)) {
+    res <- list(
+      status   = "ok",
+      filename = "",
+      format   = output_format,
+      blocks   = list(),
+      metadata = .doc_metadata_from_list(list()),
+      summary  = .summary_from_list(list()),
+      text     = data$raw
+    )
+    class(res) <- "ailang_parse_result"
+    return(res)
+  }
+  .parse_result_from_list(data)
 }
 
 #' @export
@@ -195,11 +221,48 @@ print.ailang_parse_result <- function(x, ...) {
 .formats_result_from_list <- function(d) {
   if (!is.list(d)) d <- list()
   to_chr <- function(x) if (is.null(x)) character() else vapply(x, .s, character(1))
-  list(
+  res <- list(
     parse       = to_chr(d$parse),
     generate    = to_chr(d$generate),
     ai_required = to_chr(d$ai_required)
   )
+  class(res) <- "ailang_formats_result"
+  res
+}
+
+.normalize_format <- function(fmt) {
+  sub("^\\.", "", tolower(fmt))
+}
+
+#' Check whether a format is supported
+#'
+#' Case-insensitive and tolerant of a leading \code{"."}.
+#'
+#' @param formats An \code{ailang_formats_result} as returned by \code{client$formats()}.
+#' @param fmt The format to check (e.g. \code{"docx"}, \code{".PDF"}).
+#' @param operation Either \code{"parse"} (default) or \code{"generate"}.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @export
+formats_supports <- function(formats, fmt, operation = "parse") {
+  target <- .normalize_format(fmt)
+  haystack <- if (identical(operation, "generate")) formats$generate else formats$parse
+  any(vapply(haystack, function(x) identical(.normalize_format(x), target), logical(1)))
+}
+
+#' Check whether a format is parseable without an AI backend
+#'
+#' True iff the format is in \code{formats$parse} and not in
+#' \code{formats$ai_required}. Useful for routing decisions in wrappers
+#' that want to avoid burning AI quota for Office files.
+#'
+#' @param formats An \code{ailang_formats_result}.
+#' @param fmt The format to check.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @export
+formats_is_deterministic <- function(formats, fmt) {
+  if (!formats_supports(formats, fmt, "parse")) return(FALSE)
+  target <- .normalize_format(fmt)
+  !any(vapply(formats$ai_required, function(x) identical(.normalize_format(x), target), logical(1)))
 }
 
 .quota_from_list <- function(d) {

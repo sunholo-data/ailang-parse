@@ -205,6 +205,54 @@ class TestElement:
         assert e.metadata.filename == "test.docx"
 
 
+# ── FormatsResult helpers (#6) ──
+
+class TestFormatsResultHelpers:
+    def _f(self):
+        return FormatsResult(
+            parse=["docx", "pdf", "html"],
+            generate=["docx", "html"],
+            ai_required=["pdf"],
+        )
+
+    def test_supports_basic(self):
+        assert self._f().supports("docx") is True
+        assert self._f().supports("xlsx") is False
+
+    def test_supports_case_insensitive(self):
+        assert self._f().supports("DOCX") is True
+
+    def test_supports_strips_leading_dot(self):
+        assert self._f().supports(".docx") is True
+        assert self._f().supports(".PDF") is True
+
+    def test_supports_generate(self):
+        assert self._f().supports("docx", "generate") is True
+        assert self._f().supports("pdf", "generate") is False
+
+    def test_is_deterministic(self):
+        f = self._f()
+        assert f.is_deterministic("docx") is True
+        assert f.is_deterministic("html") is True
+        assert f.is_deterministic("pdf") is False  # AI-required
+        assert f.is_deterministic("xlsx") is False  # not supported
+
+    def test_is_deterministic_case_insensitive(self):
+        assert self._f().is_deterministic(".DOCX") is True
+
+
+# ── ParseResult.text field (#2) ──
+
+class TestParseResultText:
+    def test_text_default_empty(self):
+        r = ParseResult.from_dict({"status": "ok", "blocks": []})
+        assert r.text == ""
+
+    def test_text_populated_from_dict(self):
+        r = ParseResult.from_dict({"status": "ok", "text": "# Heading"})
+        assert r.text == "# Heading"
+
+
 # ── Errors ──
 
 class TestErrors:

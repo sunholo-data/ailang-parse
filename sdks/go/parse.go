@@ -69,7 +69,22 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 	if err != nil {
 		return nil, err
 	}
+	return buildParseResult(inner, format)
+}
 
+// buildParseResult builds a ParseResult from the inner unwrapped bytes.
+// For outputFormat="markdown" / "html" the API returns a raw rendered string
+// (not a JSON object), which we surface as ParseResult.Text instead of
+// failing to unmarshal it.
+func buildParseResult(inner []byte, format string) (*ParseResult, error) {
+	trimmed := bytes.TrimSpace(inner)
+	if len(trimmed) > 0 && trimmed[0] != '{' && trimmed[0] != '[' {
+		return &ParseResult{
+			Status: "ok",
+			Format: format,
+			Text:   string(inner),
+		}, nil
+	}
 	var result ParseResult
 	if err := json.Unmarshal(inner, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal parse result: %w", err)
@@ -143,12 +158,7 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 	if err != nil {
 		return nil, err
 	}
-
-	var result ParseResult
-	if err := json.Unmarshal(inner, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal parse result: %w", err)
-	}
-	return &result, nil
+	return buildParseResult(inner, format)
 }
 
 // Health checks the API health.

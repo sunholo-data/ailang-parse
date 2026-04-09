@@ -30,6 +30,10 @@ DocParse <- R6::R6Class(
     timeout = NULL,
     #' @field api_key Active API key, or \code{""} if unauthenticated.
     api_key = NULL,
+    #' @field key_id Stored key id, populated from saved credentials or
+    #'   \code{$device_auth()}. Used by \code{$key_info()} when no explicit
+    #'   id is passed.
+    key_id = NULL,
     #' @field keys A \code{KeyManager} bound to this client.
     keys = NULL,
 
@@ -45,14 +49,19 @@ DocParse <- R6::R6Class(
       self$timeout  <- timeout
 
       key <- if (is.null(api_key)) "" else api_key
+      kid <- ""
       if (!nzchar(key)) {
         key <- Sys.getenv("DOCPARSE_API_KEY", unset = "")
       }
       if (!nzchar(key)) {
         saved <- load_saved_key(self$base_url)
-        if (!is.null(saved)) key <- saved$api_key
+        if (!is.null(saved)) {
+          key <- saved$api_key
+          if (!is.null(saved$key_id)) kid <- saved$key_id
+        }
       }
       self$api_key <- key
+      self$key_id  <- kid
       self$keys <- KeyManager$new(self)
       invisible(self)
     },
@@ -75,7 +84,7 @@ DocParse <- R6::R6Class(
       req <- .build_request(self$base_url, "/api/v1/parse",
                             self$api_key, self$timeout)
       req <- httr2::req_body_json(req, body, auto_unbox = FALSE)
-      .parse_result_from_list(.unwrap(.perform(req)))
+      .build_parse_result(.unwrap(.perform(req)), output_format)
     },
 
     #' @description Upload a local file (multipart) and parse it.
@@ -93,7 +102,7 @@ DocParse <- R6::R6Class(
         outputFormat = output_format,
         apiKey       = self$api_key
       )
-      .parse_result_from_list(.unwrap(.perform(req)))
+      .build_parse_result(.unwrap(.perform(req)), output_format)
     },
 
     #' @description Check API health.
@@ -112,6 +121,60 @@ DocParse <- R6::R6Class(
         .call(self$base_url, "/api/v1/formats", "GET",
               self$api_key, timeout = self$timeout)
       )
+    },
+
+    #' @description Return live usage + quota info for the *currently
+    #'   configured* key.
+    #'
+    #' Resolution order for the key id:
+    #' \enumerate{
+    #'   \item \code{self$key_id} (set by saved credentials or
+    #'         \code{$device_auth()}).
+    #'   \item Otherwise call \code{self$keys$list("")} and find the entry
+    #'         whose \code{key} field matches \code{self$api_key}. The
+    #'         resolved id is cached for future calls.
+    #' }
+    #'
+    #' Stops if neither path can resolve a key id — the AILANG API has no
+    #' \code{/auth/whoami} endpoint, so the SDK needs either a saved
+    #' credential or a list-able admin key.
+    key_info = function() {
+      if (!nzchar(.s(self$api_key))) {
+        stop(.docparse_error("client$key_info() requires an API key on the client"))
+      }
+      if (!nzchar(.s(self$key_id))) {
+        listing <- tryCatch(
+          self$keys$list(""),
+          error = function(e) {
+            stop(.docparse_error(paste0(
+              "client$key_info() requires a saved credential or device_auth ",
+              "flow — pass key_id explicitly to client$keys$usage(): ",
+              conditionMessage(e)
+            )))
+          }
+        )
+        keys <- if (is.list(listing) && !is.null(listing$keys)) listing$keys else list()
+        for (k in keys) {
+          if (!is.list(k)) next
+          k_field <- .s(k$key)
+          if (!nzchar(k_field)) k_field <- .s(k$api_key)
+          if (identical(k_field, self$api_key)) {
+            kid <- .s(k$key_id)
+            if (!nzchar(kid)) kid <- .s(k$keyId)
+            if (nzchar(kid)) {
+              self$key_id <- kid
+              break
+            }
+          }
+        }
+        if (!nzchar(.s(self$key_id))) {
+          stop(.docparse_error(paste0(
+            "client$key_info() could not resolve key_id — pass it ",
+            "explicitly to client$keys$usage()"
+          )))
+        }
+      }
+      self$keys$usage(self$key_id)
     },
 
     #' @description Run the RFC 8628 device-authorization flow to obtain an
@@ -171,11 +234,14 @@ DocParse <- R6::R6Class(
 
         if (identical(.s(poll$status), "approved") && nzchar(.s(poll$api_key))) {
           self$api_key <- poll$api_key
+          self$key_id  <- .s(poll$key_id)
           result <- list(
-            api_key = .s(poll$api_key),
-            key_id  = .s(poll$key_id),
-            tier    = .s(poll$tier, "free"),
-            label   = if (nzchar(.s(poll$label))) .s(poll$label) else label
+            api_key          = .s(poll$api_key),
+            key_id           = .s(poll$key_id),
+            tier             = .s(poll$tier, "free"),
+            label            = if (nzchar(.s(poll$label))) .s(poll$label) else label,
+            verification_url = verify_url,
+            poll_url         = paste0(self$base_url, "/api/v1/auth/device/poll")
           )
           save_key(
             api_key  = result$api_key,

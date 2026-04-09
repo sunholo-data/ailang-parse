@@ -643,6 +643,212 @@ func TestCredentials_ClientPicksUpSavedKey(t *testing.T) {
 	}
 }
 
+// ── #2 Markdown raw-string handling ──
+
+func TestParse_MarkdownReturnsText(t *testing.T) {
+	srv := mockServer(200, map[string]any{"result": "# Title\n\nBody paragraph\n"})
+	defer srv.Close()
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.Parse(context.Background(), "doc.md", ParseOptions{OutputFormat: "markdown"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if r.Text != "# Title\n\nBody paragraph\n" {
+		t.Fatalf("expected raw markdown in Text, got %q", r.Text)
+	}
+	if r.Format != "markdown" {
+		t.Fatalf("expected format=markdown, got %q", r.Format)
+	}
+	if len(r.Blocks) != 0 {
+		t.Fatalf("expected empty blocks, got %d", len(r.Blocks))
+	}
+	if r.Status != "ok" {
+		t.Fatalf("expected status=ok, got %q", r.Status)
+	}
+}
+
+func TestParseFile_HTMLReturnsText(t *testing.T) {
+	srv := mockServer(200, map[string]any{"result": "<h1>Title</h1>"})
+	defer srv.Close()
+	dir := t.TempDir()
+	local := filepath.Join(dir, "doc.html")
+	if err := os.WriteFile(local, []byte("<h1>x</h1>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.ParseFile(context.Background(), local, ParseOptions{OutputFormat: "html"})
+	if err != nil {
+		t.Fatalf("parse_file: %v", err)
+	}
+	if r.Text != "<h1>Title</h1>" {
+		t.Fatalf("expected raw html in Text, got %q", r.Text)
+	}
+	if r.Format != "html" {
+		t.Fatalf("expected format=html, got %q", r.Format)
+	}
+}
+
+// ── #6 FormatsResult helpers ──
+
+func TestFormatsResult_Supports(t *testing.T) {
+	f := &FormatsResult{
+		Parse:      []string{"docx", "pdf", "html"},
+		Generate:   []string{"docx", "html"},
+		AIRequired: []string{"pdf"},
+	}
+	cases := []struct {
+		fmt, op string
+		want    bool
+	}{
+		{"docx", "parse", true},
+		{"DOCX", "parse", true},
+		{".docx", "parse", true},
+		{"xlsx", "parse", false},
+		{"pdf", "generate", false},
+		{"html", "generate", true},
+	}
+	for _, tc := range cases {
+		if got := f.Supports(tc.fmt, tc.op); got != tc.want {
+			t.Errorf("Supports(%q, %q) = %v, want %v", tc.fmt, tc.op, got, tc.want)
+		}
+	}
+}
+
+func TestFormatsResult_IsDeterministic(t *testing.T) {
+	f := &FormatsResult{
+		Parse:      []string{"docx", "pdf"},
+		AIRequired: []string{"pdf"},
+	}
+	if !f.IsDeterministic("docx") {
+		t.Error("docx should be deterministic")
+	}
+	if f.IsDeterministic("pdf") {
+		t.Error("pdf is in ai_required, should not be deterministic")
+	}
+	if f.IsDeterministic("xlsx") {
+		t.Error("xlsx not supported, should not be deterministic")
+	}
+	if !f.IsDeterministic(".DOCX") {
+		t.Error("case + dot tolerance failed")
+	}
+}
+
+// ── #8 KeyInfo ──
+
+func TestKeyInfo_FallsBackToList(t *testing.T) {
+	// Server returns a keys.list response with two keys; the matching one
+	// should be picked up. We then stub out Usage by replacing the handler
+	// after the first request.
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/keys/list") {
+			body := envelope(map[string]any{
+				"status": "ok",
+				"keys": []map[string]any{
+					{"key_id": "k_other", "key": "dp_other"},
+					{"key_id": "k_match", "key": "dp_test"},
+				},
+			})
+			json.NewEncoder(w).Encode(body)
+			return
+		}
+		// usage
+		body := envelope(map[string]any{
+			"status": "ok",
+			"keyId":  "k_match",
+			"tier":   "free",
+			"usage":  map[string]any{"requestsToday": 5},
+		})
+		json.NewEncoder(w).Encode(body)
+	}))
+	defer srv.Close()
+
+	c := New("dp_test", WithBaseURL(srv.URL))
+	info, err := c.KeyInfo(context.Background())
+	if err != nil {
+		t.Fatalf("KeyInfo: %v", err)
+	}
+	if c.KeyID != "k_match" {
+		t.Fatalf("expected cached KeyID=k_match, got %q", c.KeyID)
+	}
+	if info.Usage.RequestsToday != 5 {
+		t.Fatalf("expected requests_today=5, got %d", info.Usage.RequestsToday)
+	}
+	// Second call: should skip the list lookup (one fewer call than first time)
+	prev := calls
+	if _, err := c.KeyInfo(context.Background()); err != nil {
+		t.Fatalf("second KeyInfo: %v", err)
+	}
+	if calls-prev != 1 {
+		t.Fatalf("second call should hit /keys/usage only (1 request), got %d", calls-prev)
+	}
+}
+
+func TestKeyInfo_NoAPIKeyErrors(t *testing.T) {
+	t.Setenv("DOCPARSE_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	c := New("", WithBaseURL("http://nokey.test"))
+	_, err := c.KeyInfo(context.Background())
+	if err == nil {
+		t.Fatal("expected error when no api key")
+	}
+	var dpe *DocParseError
+	if !errors.As(err, &dpe) {
+		t.Fatalf("expected DocParseError, got %T", err)
+	}
+}
+
+// ── #5 DeviceAuth poll URL ──
+//
+// We can't easily run the full poll loop in a test, but we can at least
+// confirm the result struct exposes the new fields and they get populated
+// when the device-poll endpoint reports approved on the first try.
+func TestDeviceAuth_ReturnsURLs(t *testing.T) {
+	var step int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch step {
+		case 0:
+			step++
+			json.NewEncoder(w).Encode(envelope(map[string]any{
+				"device_code":      "DCODE",
+				"user_code":        "UCODE",
+				"verification_url": "https://example.test/verify",
+				"interval":         1,
+			}))
+		default:
+			json.NewEncoder(w).Encode(envelope(map[string]any{
+				"status":  "approved",
+				"api_key": "dp_new",
+				"key_id":  "k_new",
+				"tier":    "free",
+				"label":   "test",
+			}))
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	c := New("", WithBaseURL(srv.URL))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res, err := c.DeviceAuth(ctx, "test")
+	if err != nil {
+		t.Fatalf("DeviceAuth: %v", err)
+	}
+	if res.VerificationURL != "https://example.test/verify" {
+		t.Errorf("expected verification_url, got %q", res.VerificationURL)
+	}
+	if res.PollURL != srv.URL+"/api/v1/auth/device/poll" {
+		t.Errorf("expected poll_url, got %q", res.PollURL)
+	}
+	if c.KeyID != "k_new" {
+		t.Errorf("expected client.KeyID=k_new, got %q", c.KeyID)
+	}
+}
+
 func TestKeyInfoJSON(t *testing.T) {
 	raw := `{"status":"active","key":"dp_abc","keyId":"k1","label":"test","tier":"free","quota":{"requestsPerDay":50}}`
 	var k KeyInfo

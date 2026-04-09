@@ -1,7 +1,10 @@
 // Package docparse provides a Go client for the AILANG Parse document parsing API.
 package docparse
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Block represents a parsed content block (9 variants discriminated by Type).
 type Block struct {
@@ -91,6 +94,9 @@ type ParseResult struct {
 	Blocks   []Block     `json:"blocks"`
 	Metadata DocMetadata `json:"metadata"`
 	Summary  Summary     `json:"summary"`
+	// Text is the raw rendered output for outputFormat="markdown" / "html".
+	// Empty for the default "blocks" output, which populates Blocks instead.
+	Text string `json:"text,omitempty"`
 }
 
 // HealthResult is the response from /api/v1/health.
@@ -108,6 +114,42 @@ type FormatsResult struct {
 	Generate   []string `json:"generate"`
 	AIRequired []string `json:"ai_required"`
 	Status     string   `json:"status"`
+}
+
+// normalizeFormat lowercases and strips a leading "." for tolerant matching.
+func normalizeFormat(fmt string) string {
+	return strings.TrimPrefix(strings.ToLower(fmt), ".")
+}
+
+// Supports reports whether fmt is supported for the given operation
+// ("parse" or "generate"). Case-insensitive and tolerant of a leading ".".
+func (f *FormatsResult) Supports(format, operation string) bool {
+	target := normalizeFormat(format)
+	haystack := f.Parse
+	if operation == "generate" {
+		haystack = f.Generate
+	}
+	for _, x := range haystack {
+		if normalizeFormat(x) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDeterministic reports whether fmt is parseable without an AI backend.
+// True iff Supports(fmt, "parse") and fmt is not in AIRequired.
+func (f *FormatsResult) IsDeterministic(format string) bool {
+	if !f.Supports(format, "parse") {
+		return false
+	}
+	target := normalizeFormat(format)
+	for _, x := range f.AIRequired {
+		if normalizeFormat(x) == target {
+			return false
+		}
+	}
+	return true
 }
 
 // Quota contains tier quota limits.

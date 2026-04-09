@@ -53,12 +53,14 @@ class DocParse:
         self._session = requests.Session()
 
         # Resolve API key: explicit > env var > saved credentials
+        self._key_id = ""
         if not api_key:
             api_key = os.environ.get("DOCPARSE_API_KEY", "")
         if not api_key:
             saved = _load_saved_key(self.base_url)
             if saved:
                 api_key = saved["api_key"]
+                self._key_id = saved.get("key_id", "")
 
         self.api_key = api_key
         if api_key:
@@ -85,7 +87,7 @@ class DocParse:
             raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
-        return ParseResult.from_dict(self._unwrap(resp.json()))
+        return self._build_parse_result(self._unwrap(resp.json()), output_format)
 
     def parse_file(self, filepath: str, output_format: str = "blocks") -> ParseResult:
         """Upload a local file and parse it. Returns structured blocks.
@@ -112,7 +114,23 @@ class DocParse:
             raise QuotaError("Quota exceeded")
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
-        return ParseResult.from_dict(self._unwrap(resp.json()))
+        return self._build_parse_result(self._unwrap(resp.json()), output_format)
+
+    @staticmethod
+    def _build_parse_result(data: Any, output_format: str) -> ParseResult:
+        """Build a ParseResult, handling raw markdown/html string responses.
+
+        For ``output_format="markdown"`` / ``"html"`` the API returns a raw
+        rendered string instead of a JSON object. ``_unwrap`` surfaces that
+        as ``{"raw": "<str>"}``; we promote it to ``ParseResult.text``.
+        """
+        if isinstance(data, dict) and "raw" in data and isinstance(data["raw"], str):
+            return ParseResult(
+                status="ok",
+                format=output_format,
+                text=data["raw"],
+            )
+        return ParseResult.from_dict(data)
 
     def health(self) -> HealthResult:
         """Check API health."""
@@ -123,6 +141,47 @@ class DocParse:
         """List supported formats."""
         data = self._call("GET", "/api/v1/formats")
         return FormatsResult.from_dict(data)
+
+    def key_info(self):
+        """Return live usage + quota info for the *currently configured* key.
+
+        Resolves the ``key_id`` in this order:
+
+        1. ``self._key_id`` (set by saved credentials or :meth:`device_auth`)
+        2. Fall back to ``self.keys.list("")`` and find the entry whose
+           ``key`` matches ``self.api_key``. The resolved id is cached.
+
+        Raises :class:`DocParseError` if neither path can resolve a key id —
+        the AILANG API has no ``/auth/whoami`` endpoint, so the SDK needs
+        either a saved credential or a list-able admin key.
+        """
+        if not self.api_key:
+            raise DocParseError(
+                "client.key_info() requires an API key on the client"
+            )
+        if not self._key_id:
+            try:
+                listing = self.keys.list("")
+            except DocParseError as e:
+                raise DocParseError(
+                    "client.key_info() requires a saved credential or "
+                    "device_auth flow — pass key_id explicitly to "
+                    f"client.keys.usage(): {e}"
+                )
+            keys = listing.get("keys", []) if isinstance(listing, dict) else []
+            for k in keys:
+                if not isinstance(k, dict):
+                    continue
+                if k.get("key") == self.api_key or k.get("api_key") == self.api_key:
+                    self._key_id = k.get("key_id") or k.get("keyId") or ""
+                    if self._key_id:
+                        break
+            if not self._key_id:
+                raise DocParseError(
+                    "client.key_info() could not resolve key_id — "
+                    "pass key_id explicitly to client.keys.usage()"
+                )
+        return self.keys.usage(self._key_id)
 
     # ── Device Auth (RFC 8628) ──
 
@@ -140,7 +199,9 @@ class DocParse:
         opens the browser), then polls until the user approves.  On success
         the key is stored on this client instance.
 
-        Returns dict with ``api_key``, ``key_id``, ``tier``, ``label``.
+        Returns dict with ``api_key``, ``key_id``, ``tier``, ``label``,
+        ``verification_url`` and ``poll_url`` (the
+        ``/api/v1/auth/device/poll`` endpoint used during the flow).
         """
         # 1. Request device code (unauthenticated)
         resp = self._session.post(
@@ -183,11 +244,14 @@ class DocParse:
             if poll_data.get("status") == "approved" and poll_data.get("api_key"):
                 self.api_key = poll_data["api_key"]
                 self._session.headers["x-api-key"] = self.api_key
+                self._key_id = poll_data.get("key_id", "")
                 result = {
                     "api_key": poll_data["api_key"],
                     "key_id": poll_data.get("key_id", ""),
                     "tier": poll_data.get("tier", "free"),
                     "label": poll_data.get("label", label),
+                    "verification_url": url,
+                    "poll_url": self.base_url + "/api/v1/auth/device/poll",
                 }
                 _save_key(
                     api_key=result["api_key"],

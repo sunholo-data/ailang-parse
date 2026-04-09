@@ -7,7 +7,11 @@ import assert from "node:assert/strict";
 import http from "node:http";
 
 import { DocParse } from "../src/client.ts";
-import { DocParseError, AuthError, QuotaError } from "../src/types.ts";
+import {
+  DocParseError, AuthError, QuotaError,
+  supportsFormat, isDeterministic,
+  type FormatsResult,
+} from "../src/types.ts";
 import { UnstructuredClient } from "../src/compat.ts";
 
 // ── Mock HTTP server ──
@@ -134,6 +138,57 @@ describe("formats", () => {
     const f = await c.formats();
     assert.ok(f.parse.includes("docx"));
     assert.deepEqual(f.ai_required, ["pdf"]);
+  });
+});
+
+describe("FormatsResult helpers (#6)", () => {
+  const f: FormatsResult = {
+    parse: ["docx", "pdf", "html"],
+    generate: ["docx", "html"],
+    ai_required: ["pdf"],
+    status: "ok",
+  };
+  it("supportsFormat is case-insensitive", () => {
+    assert.equal(supportsFormat(f, "docx"), true);
+    assert.equal(supportsFormat(f, "DOCX"), true);
+    assert.equal(supportsFormat(f, ".docx"), true);
+    assert.equal(supportsFormat(f, "xlsx"), false);
+  });
+  it("supportsFormat operation defaults to parse", () => {
+    assert.equal(supportsFormat(f, "pdf"), true);
+    assert.equal(supportsFormat(f, "pdf", "generate"), false);
+  });
+  it("isDeterministic excludes ai_required", () => {
+    assert.equal(isDeterministic(f, "docx"), true);
+    assert.equal(isDeterministic(f, "html"), true);
+    assert.equal(isDeterministic(f, "pdf"), false);
+    assert.equal(isDeterministic(f, "xlsx"), false);
+  });
+});
+
+describe("parse markdown raw-string (#2)", () => {
+  it("parse() returns ParseResult.text for raw markdown response", async () => {
+    setMock(200, { result: "# Title\n\nBody paragraph\n" });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parse("doc.md", "markdown");
+    assert.equal(r.status, "ok");
+    assert.equal(r.text, "# Title\n\nBody paragraph\n");
+    assert.equal(r.format, "markdown");
+    assert.deepEqual(r.blocks, []);
+  });
+
+  it("parseFile() returns ParseResult.text for raw html response", async () => {
+    setMock(200, { result: "<h1>Title</h1>" });
+    const { mkdtempSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+    const dir = mkdtempSync(join(tmpdir(), "ailang-md-test-"));
+    const local = join(dir, "doc.html");
+    writeFileSync(local, Buffer.from("<h1>x</h1>"));
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parseFile(local, "html");
+    assert.equal(r.text, "<h1>Title</h1>");
+    assert.equal(r.format, "html");
   });
 });
 
@@ -319,6 +374,46 @@ describe("KeyManager", () => {
     setMock(200, { error: "Invalid or expired API key" });
     const c = new DocParse({ apiKey: "dp_bad", baseUrl });
     await assert.rejects(() => c.keys.list("u1"), AuthError);
+  });
+});
+
+describe("keyInfo (#8)", () => {
+  it("falls back to keys.list to resolve key_id, then caches", async () => {
+    // First mock = keys.list response. Replace before second call.
+    setMock(200, {
+      result: JSON.stringify({
+        status: "ok",
+        keys: [
+          { key_id: "k_other", key: "dp_other" },
+          { key_id: "k_match", key: "dp_test" },
+        ],
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    // Stub usage() to avoid juggling two mock responses on the shared server.
+    const calls: string[] = [];
+    (c as any).keys.usage = async (kid: string) => {
+      calls.push(kid);
+      return { status: "ok", keyId: kid };
+    };
+    const info: any = await c.keyInfo();
+    assert.equal(info.keyId, "k_match");
+    assert.deepEqual(calls, ["k_match"]);
+    // Second call should be cached — no extra list lookup needed.
+    setMock(500, { error: "would fail if list re-queried" });
+    await c.keyInfo();
+    assert.deepEqual(calls, ["k_match", "k_match"]);
+  });
+
+  it("throws when no api key configured", async () => {
+    const prev = process.env.DOCPARSE_API_KEY;
+    delete process.env.DOCPARSE_API_KEY;
+    try {
+      const c = new DocParse({ baseUrl: "http://nokey.test" });
+      await assert.rejects(() => c.keyInfo(), DocParseError);
+    } finally {
+      if (prev !== undefined) process.env.DOCPARSE_API_KEY = prev;
+    }
   });
 });
 

@@ -41,6 +41,57 @@ func (km *KeyManager) Rotate(ctx context.Context, keyID, userID string) (*KeyInf
 	return &result, nil
 }
 
+// KeyInfo returns live usage + quota info for the *currently configured* key.
+//
+// Resolution order for the key id:
+//  1. c.KeyID (set by saved credentials or DeviceAuth)
+//  2. Otherwise call Keys.List("") and find the entry whose `key` field
+//     matches c.APIKey. The resolved id is cached on the client.
+//
+// Returns an error if neither path can resolve a key id — the AILANG API
+// has no /auth/whoami endpoint, so the SDK needs either a saved credential
+// or a list-able admin key.
+func (c *Client) KeyInfo(ctx context.Context) (*UsageInfo, error) {
+	if c.APIKey == "" {
+		return nil, newDocParseError("client.KeyInfo() requires an API key on the client", 0)
+	}
+	if c.KeyID == "" {
+		listing, err := c.Keys.List(ctx, "")
+		if err != nil {
+			return nil, newDocParseError(
+				"client.KeyInfo() requires a saved credential or DeviceAuth flow — "+
+					"pass keyID explicitly to client.Keys.Usage(): "+err.Error(), 0)
+		}
+		var parsed struct {
+			Keys []struct {
+				KeyID  string `json:"key_id"`
+				KeyID2 string `json:"keyId"`
+				Key    string `json:"key"`
+				APIKey string `json:"api_key"`
+			} `json:"keys"`
+		}
+		if err := json.Unmarshal(listing, &parsed); err == nil {
+			for _, k := range parsed.Keys {
+				if k.Key == c.APIKey || k.APIKey == c.APIKey {
+					if k.KeyID != "" {
+						c.KeyID = k.KeyID
+					} else {
+						c.KeyID = k.KeyID2
+					}
+					if c.KeyID != "" {
+						break
+					}
+				}
+			}
+		}
+		if c.KeyID == "" {
+			return nil, newDocParseError(
+				"client.KeyInfo() could not resolve key_id — pass it explicitly to client.Keys.Usage()", 0)
+		}
+	}
+	return c.Keys.Usage(ctx, c.KeyID, "")
+}
+
 // Usage returns usage statistics for a key.
 func (km *KeyManager) Usage(ctx context.Context, keyID, userID string) (*UsageInfo, error) {
 	data, err := km.client.call(ctx, "POST", "/api/v1/keys/usage", []string{keyID, userID})

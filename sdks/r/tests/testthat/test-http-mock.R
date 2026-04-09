@@ -92,6 +92,97 @@ test_that("keys$list propagates auth_error from 401", {
   })
 })
 
+# ── #2 Markdown raw-string ──
+
+test_that("parse() returns text field for raw markdown response", {
+  resp <- .mock_resp(200L, list(result = "# Title\n\nBody paragraph\n"))
+  httr2::with_mocked_responses(list(resp), {
+    client <- DocParse$new(api_key = "dp_test")
+    r <- client$parse("doc.md", output_format = "markdown")
+    expect_equal(r$status, "ok")
+    expect_equal(r$text, "# Title\n\nBody paragraph\n")
+    expect_equal(r$format, "markdown")
+    expect_length(r$blocks, 0L)
+  })
+})
+
+test_that("parse_file() returns text field for raw html response", {
+  resp <- .mock_resp(200L, list(result = "<h1>Title</h1>"))
+  httr2::with_mocked_responses(list(resp), {
+    tmp <- tempfile(fileext = ".html")
+    writeLines("<h1>x</h1>", tmp)
+    on.exit(unlink(tmp))
+    client <- DocParse$new(api_key = "dp_test")
+    r <- client$parse_file(tmp, output_format = "html")
+    expect_equal(r$text, "<h1>Title</h1>")
+    expect_equal(r$format, "html")
+  })
+})
+
+# ── #6 FormatsResult helpers ──
+
+test_that("formats_supports is case- and dot-tolerant", {
+  f <- list(
+    parse = c("docx", "pdf", "html"),
+    generate = c("docx", "html"),
+    ai_required = c("pdf")
+  )
+  expect_true(formats_supports(f, "docx"))
+  expect_true(formats_supports(f, "DOCX"))
+  expect_true(formats_supports(f, ".docx"))
+  expect_false(formats_supports(f, "xlsx"))
+  expect_true(formats_supports(f, "html", "generate"))
+  expect_false(formats_supports(f, "pdf", "generate"))
+})
+
+test_that("formats_is_deterministic excludes ai_required", {
+  f <- list(
+    parse = c("docx", "pdf"),
+    generate = character(),
+    ai_required = c("pdf")
+  )
+  expect_true(formats_is_deterministic(f, "docx"))
+  expect_false(formats_is_deterministic(f, "pdf"))
+  expect_false(formats_is_deterministic(f, "xlsx"))
+  expect_true(formats_is_deterministic(f, ".DOCX"))
+})
+
+# ── #8 client$key_info() ──
+
+test_that("client$key_info() falls back to keys$list and caches", {
+  list_resp <- .envelope_resp(list(
+    status = "ok",
+    keys = list(
+      list(key_id = "k_other", key = "dp_other"),
+      list(key_id = "k_match", key = "dp_test")
+    )
+  ))
+  usage_resp <- .envelope_resp(list(
+    status = "ok", keyId = "k_match", tier = "free",
+    usage = list(requestsToday = 5L)
+  ))
+  # Two responses for two HTTP calls in sequence (list, then usage).
+  httr2::with_mocked_responses(list(list_resp, usage_resp), {
+    client <- DocParse$new(api_key = "dp_test")
+    info <- client$key_info()
+    expect_equal(client$key_id, "k_match")
+    expect_equal(info$usage$requests_today, 5L)
+  })
+  # Second call should hit usage only (one mocked response is enough).
+  httr2::with_mocked_responses(list(usage_resp), {
+    client <- DocParse$new(api_key = "dp_test")
+    client$key_id <- "k_match"  # cached state
+    info <- client$key_info()
+    expect_equal(info$usage$requests_today, 5L)
+  })
+})
+
+test_that("client$key_info() errors when no api key configured", {
+  client <- DocParse$new(api_key = "dp_test")
+  client$api_key <- ""  # simulate no key resolved
+  expect_error(client$key_info(), class = "ailang_docparse_error")
+})
+
 # ── UnstructuredClient compat ──
 
 test_that("UnstructuredClient$partition returns elements", {

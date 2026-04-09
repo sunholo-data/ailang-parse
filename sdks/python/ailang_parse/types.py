@@ -155,6 +155,10 @@ class ParseResult:
     blocks: List[Block] = field(default_factory=list)
     metadata: DocMetadata = field(default_factory=DocMetadata)
     summary: Summary = field(default_factory=Summary)
+    #: Raw rendered output for ``output_format="markdown"`` / ``"html"``.
+    #: Empty string for the default ``"blocks"`` output, which populates
+    #: :attr:`blocks` instead.
+    text: str = ""
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ParseResult":
@@ -165,6 +169,7 @@ class ParseResult:
             blocks=[Block.from_dict(b) for b in d.get("blocks", [])],
             metadata=DocMetadata.from_dict(d.get("metadata", {})),
             summary=Summary.from_dict(d.get("summary", {})),
+            text=d.get("text", ""),
         )
 
 
@@ -202,6 +207,35 @@ class FormatsResult:
             generate=d.get("generate", []),
             ai_required=d.get("ai_required", []),
         )
+
+    @staticmethod
+    def _normalize(fmt: str) -> str:
+        return fmt.lower().lstrip(".")
+
+    def supports(self, fmt: str, operation: str = "parse") -> bool:
+        """Check whether ``fmt`` is supported for the given operation.
+
+        Both case-insensitive and tolerant of a leading ``.``::
+
+            f.supports("docx")              # True
+            f.supports(".DOCX")             # True
+            f.supports("pdf", "generate")   # depends on server
+        """
+        target = self._normalize(fmt)
+        haystack = self.generate if operation == "generate" else self.parse
+        return any(self._normalize(x) == target for x in haystack)
+
+    def is_deterministic(self, fmt: str) -> bool:
+        """True iff ``fmt`` is parseable without an AI backend.
+
+        A format is deterministic when it is in :attr:`parse` and *not*
+        in :attr:`ai_required`. Useful for routing decisions in wrappers
+        that want to avoid burning AI quota for Office files.
+        """
+        if not self.supports(fmt, "parse"):
+            return False
+        target = self._normalize(fmt)
+        return not any(self._normalize(x) == target for x in self.ai_required)
 
 
 # ── Key management types ──

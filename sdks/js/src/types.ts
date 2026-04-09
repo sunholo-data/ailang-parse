@@ -93,6 +93,12 @@ export interface ParseResult {
   blocks: Block[];
   metadata: DocMetadata;
   summary: Summary;
+  /**
+   * Raw rendered output for `outputFormat: "markdown"` / `"html"`.
+   * Empty string for the default `"blocks"` output, which populates
+   * `blocks` instead.
+   */
+  text: string;
 }
 
 export interface HealthResult {
@@ -108,6 +114,34 @@ export interface FormatsResult {
   generate: string[];
   ai_required: string[];
   status: string;
+}
+
+/**
+ * Free-function helpers for FormatsResult — case-insensitive and tolerant
+ * of a leading dot. Exported as standalone functions (rather than methods)
+ * so the FormatsResult interface stays a plain destructurable object.
+ */
+function _normalizeFormat(fmt: string): string {
+  return fmt.toLowerCase().replace(/^\./, "");
+}
+
+export function supportsFormat(
+  formats: FormatsResult,
+  fmt: string,
+  operation: "parse" | "generate" = "parse",
+): boolean {
+  const target = _normalizeFormat(fmt);
+  const haystack = operation === "generate" ? formats.generate : formats.parse;
+  return haystack.some((x) => _normalizeFormat(x) === target);
+}
+
+export function isDeterministic(
+  formats: FormatsResult,
+  fmt: string,
+): boolean {
+  if (!supportsFormat(formats, fmt, "parse")) return false;
+  const target = _normalizeFormat(fmt);
+  return !formats.ai_required.some((x) => _normalizeFormat(x) === target);
 }
 
 // ── Key management ──
