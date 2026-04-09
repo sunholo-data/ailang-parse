@@ -1,6 +1,6 @@
 # Workbench Page
 
-**Status**: Planned (v0.9.0)
+**Status**: IMPLEMENTED (v0.9.1)
 **Category**: Growth / Frontend
 **Priority**: P1 — bridges the gap between 30-second homepage demo and full CLI/API adoption
 **Related**: [valuable_friction_onboarding.md](valuable_friction_onboarding.md), [api_playground.md](../../implemented/v0_8_0/api_playground.md), [website.md](../../implemented/v0_8_0/website.md)

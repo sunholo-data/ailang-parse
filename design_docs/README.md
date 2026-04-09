@@ -10,12 +10,13 @@ design_docs/
 │   ├── v0_5_0/              # Spec audit, external benchmarks, large file perf
 │   ├── v0_6_0/              # Document generation (8 formats), verification loop
 │   ├── v0_7_0/              # API server & Unstructured compatibility
-│   └── v0_8_0/              # API keys, auth, agent API, SDKs, website, playground,
-│                            #   ecosystem benchmarks, Gemini Files API, WASM threat model
-├── planned/                  # Future features (> v0.8.2)
-│   ├── v0_9_0/              # PDF pipeline, Ollama, email follow-ups, auth providers,
-│   │                        #   WASM images, manifest API page
-│   ├── v0_10_0/             # Quarto integration, API privacy & trust
+│   ├── v0_8_0/              # API keys, auth, agent API, SDKs, website, playground,
+│   │                        #   ecosystem benchmarks, Gemini Files API, WASM threat model
+│   └── v0_9_0/              # Email parsing, MCP server, workbench,
+│                            #   OfficeDocBench v2, GTM, markdown+metadata
+├── planned/                  # Future features (> v0.9.3)
+│   ├── v0_10_0/             # Quarto, trust, PDF pipeline, Ollama, auth providers,
+│   │                        #   WASM images, manifest API, friction onboarding
 │   ├── v0_11_0/             # Structured extraction (FAST-TRACK)
 │   ├── v0_12_0/             # AILANG package registry
 │   ├── v0_13_0/             # RAG pipeline (chunking, hierarchy, embeddings)
@@ -27,9 +28,10 @@ design_docs/
 └── README.md
 ```
 
-> **Current version**: v0.8.2 (`ailang.toml`). Folders in `implemented/` reflect
+> **Current version**: v0.9.3 (`ailang.toml`). Folders in `implemented/` reflect
 > the version each feature actually shipped in. Folders in `planned/` are target
-> versions for upcoming work.
+> versions for upcoming work. See also [CHANGELOG.md](../CHANGELOG.md) for a
+> concise release-by-release summary.
 
 ## Document Organization
 
@@ -84,7 +86,7 @@ Designs that were superseded or abandoned (never delete — move here).
 - Cloud Run `concurrency=80` safe
 - [Design Doc](implemented/v0_7_0/v0_7_0_api_server.md)
 
-### v0.8.0 — Current Release (v0.8.2)
+### v0.8.0 — Platform & Ecosystem
 - Per-user API keys & Cloud deployment (Terraform, Firestore, Firebase Auth)
 - Agent-friendly API: capabilities manifest, typed errors, device auth, pricing, tools
 - Firebase JWT verification, removed unauthenticated key generation
@@ -98,29 +100,51 @@ Designs that were superseded or abandoned (never delete — move here).
 - [SDKs](implemented/v0_8_0/sdks.md) | [Website](implemented/v0_8_0/website.md) | [Playground](implemented/v0_8_0/api_playground.md)
 - [Ecosystem](implemented/v0_8_0/ecosystem.md) | [Gemini Files API](implemented/v0_8_0/gemini_files_api/gemini_files_api.md) | [WASM Threat Model](implemented/v0_8_0/wasm_threat_model.md)
 
+### v0.9.0 — Email, Benchmarks v2, MCP & GTM (April 2026)
+- Full EML/MBOX email parsing: attachments, thread reconstruction, `--deep` two-pass Office parsing
+- OfficeDocBench v2: 69 files, 8 parsers, 7 metrics, 9 ECMA-376 scoring dimensions
+- MCP stdio bridge, auth/billing/estimate tools for agent self-discovery
+- SDK multipart file upload (`parse_file`), device auth, key persistence
+- Website GTM: WASM demo, pricing page, format landing pages, FirebaseUI auth
+- Batch mode, folder parsing, Windows CLI
+- HTML email sanitization, QP decoder optimization, Z3 contracts
+- Kreuzberg added as benchmark competitor (77.2% composite)
+- [Email Parsing](implemented/v0_9_0/email_parsing.md) | [MCP Server](implemented/v0_9_0/mcp_server.md) | [Workbench](implemented/v0_9_0/workbench.md)
+
+### v0.9.1 — Workbench & R SDK
+- Workbench page: dedicated multi-file WASM playground with shared frontend module
+- R SDK (v0.4.0) with full feature parity
+- MCP modules reorganized into `docparse/services/mcp/`
+- Shared credential helpers and auto-load saved API key in MCP bridges
+
+### v0.9.2 — MCP Registry & Agent Discoverability
+- MCP Registry publishing with CI job and badge
+- llms.txt + llms-full.txt for AI agent discoverability
+- Workbench polish: copy-to-clipboard, mini tutorial, format list, progress bar
+- SDKs v0.4.1–v0.4.6: MCP registry metadata, markdown field, FormatsResult helpers
+
+### v0.9.3 — Markdown+Metadata (Current)
+- Markdown+metadata renderer: change attribution, merged-cell annotation
+- SDKs v0.5.0–v0.5.3: sourceUrl, ResponseMeta, structured errors, key_id parameter
+
 ---
 
 ## Roadmap (Planned)
 
-### v0.9.0 — PDF Pipeline, Email & Platform Polish
+### v0.10.0 — Quarto, Trust & Deferred v0.9.0 Items
+- Quarto Markdown generation with two rendering engines
+- API privacy & trust commitments for hosted API
 - Two-stage PDF pipeline (OCR → heuristic structuring) for Ollama models
 - Ollama model-aware prompting (target: local models >50%)
 - Email follow-ups: calendar invite parsing (P4), inbox monitoring (P2), Outlook .msg (P3), S/MIME (P5)
 - Additional auth providers: Microsoft, Phone SMS, Apple, SAML/OIDC
 - WASM image rendering (currently placeholder-only)
 - Manifest-driven API page (3 missing endpoints: formats, pricing, capabilities)
-- Valuable friction onboarding: structural insights banner, guided sample tour, intent selector, CLI/SDK/MCP education
-- [PDF Pipeline](planned/v0_9_0/pdf_pipeline.md) | [Ollama](planned/v0_9_0/ollama_model_aware_prompting.md)
-- [Email Follow-ups](planned/v0_9_0/email-parsing-followups.md) | [Auth Providers](planned/v0_9_0/v0_9_0_auth_providers.md)
-- [WASM Images](planned/v0_9_0/v0_9_0_wasm_images.md) | [Manifest API](planned/v0_9_0/v0_9_0_manifest_driven_api_page.md)
-- [Valuable Friction Onboarding](planned/v0_9_0/valuable_friction_onboarding.md)
-- Workbench page: dedicated multi-file WASM playground with Firebase-auth API engine for PDFs/large files/conversion, persistent friction nudges
-- [Workbench](planned/v0_9_0/workbench.md)
-
-### v0.10.0 — Quarto & Trust
-- Quarto Markdown generation with two rendering engines
-- API privacy & trust commitments for hosted API
+- Valuable friction onboarding: structural insights banner, guided sample tour
 - [Quarto](planned/v0_10_0/v0_10_0_quarto_integration.md) | [Privacy & Trust](planned/v0_10_0/api_privacy_trust.md)
+- [PDF Pipeline](planned/v0_10_0/pdf_pipeline.md) | [Ollama](planned/v0_10_0/ollama_model_aware_prompting.md)
+- [Auth Providers](planned/v0_10_0/auth_providers.md) | [WASM Images](planned/v0_10_0/wasm_images.md)
+- [Manifest API](planned/v0_10_0/manifest_driven_api_page.md) | [Valuable Friction](planned/v0_10_0/valuable_friction_onboarding.md)
 
 ### v0.11.0 — Structured Extraction `FAST-TRACK`
 - JSON Schema-driven extraction: `--extract --schema`, `--template invoice`

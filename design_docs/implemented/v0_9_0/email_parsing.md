@@ -1,6 +1,6 @@
 # Email Parsing — Follow-up Design Doc
 
-**Status:** In Progress  
+**Status:** IMPLEMENTED (v0.9.0) — P0, P0a, P1, P6 shipped; P2–P5 remain planned  
 **Author:** Mark + Claude  
 **Date:** 2026-04-02  
 **Updated:** 2026-04-02  

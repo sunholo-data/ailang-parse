@@ -1,6 +1,6 @@
 # v0.9.0 — Production MCP Server
 
-**Status**: PLANNED
+**Status**: IMPLEMENTED (v0.9.0–v0.9.2)
 **Theme**: Ship a polished, 3-tool MCP server that agents actually want to use
 **Depends on**: v0.8.0 agent-friendly API, v0.7.0 serve-api
 
