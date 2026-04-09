@@ -160,7 +160,7 @@ DocParse <- R6::R6Class(
     #'         resolved id is cached for future calls.
     #' }
     #'
-    #' Stops if neither path can resolve a key id — the AILANG API has no
+    #' Stops if neither path can resolve a key id -- the AILANG API has no
     #' \code{/auth/whoami} endpoint, so the SDK needs either a saved
     #' credential or a list-able admin key.
     key_info = function() {
@@ -173,7 +173,7 @@ DocParse <- R6::R6Class(
           error = function(e) {
             stop(.docparse_error(paste0(
               "client$key_info() requires a saved credential or device_auth ",
-              "flow — pass key_id explicitly to client$keys$usage(): ",
+              "flow -- pass key_id explicitly to client$keys$usage(): ",
               conditionMessage(e)
             )))
           }
@@ -194,7 +194,7 @@ DocParse <- R6::R6Class(
         }
         if (!nzchar(.s(self$key_id))) {
           stop(.docparse_error(paste0(
-            "client$key_info() could not resolve key_id — pass it ",
+            "client$key_info() could not resolve key_id -- pass it ",
             "explicitly to client$keys$usage()"
           )))
         }
