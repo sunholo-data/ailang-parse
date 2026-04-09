@@ -22,7 +22,7 @@ import docparse/services/html_parser (parseHtml)
 import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
 import docparse/services/direct_ai_parser (parsePdf, parseDocumentImage, parseAudio, parseVideo, parsePdfMetadata)
-import docparse/services/output_formatter (formatResult, renderMarkdown, blocksToJson)
+import docparse/services/output_formatter (formatResult, renderMarkdown, renderMarkdownMetaJson, blocksToJson)
 import docparse/services/html_generator (generateHtml)
 import docparse/services/docx_generator (generateDocx)
 import docparse/services/pptx_generator (generatePptx)
@@ -137,6 +137,7 @@ func mcpParseAI(filepath: string, ext: string, format: string, outputFormat: str
 -- Format output based on requested format.
 func mcpFormatOutput(doc: ParsedDocument, outputFormat: string) -> string ! {} {
   if outputFormat == "markdown" then renderMarkdown(doc)
+  else if outputFormat == "markdown+metadata" then renderMarkdownMetaJson(doc)
   else if outputFormat == "html" then generateHtml(doc)
   else {
     -- Default: blocks (JSON)

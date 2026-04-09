@@ -238,6 +238,67 @@ pure func countMergedInRows(rows: [[TableCell]]) -> int =
 pure func countSpannedInRows(rows: [[TableCell]]) -> int =
   foldl(\acc row. acc + countSpannedCells(row), 0, rows)
 
+-- Render a markdown+metadata bundle as JSON.
+-- Returns:
+--   {
+--     "format": "markdown+metadata",
+--     "filename": "...",
+--     "markdown": "...full markdown body...",
+--     "metadata": {title, author, created, modified, pageCount},
+--     "summary": {totalBlocks, headings, tables, images, changes},
+--     "sections": [{"heading": "Intro", "level": 1, "markdown": "..."}, ...]
+--   }
+-- The "sections" array slices the document at heading boundaries so agents can
+-- pick the part of the document they want without re-parsing the markdown body.
+export pure func renderMarkdownMetaJson(doc: ParsedDocument) -> string {
+  let body = renderMarkdown(doc);
+  let sections = sliceSections(doc.blocks);
+  encode(jo([
+    kv("format", js("markdown+metadata")),
+    kv("filename", js(doc.filename)),
+    kv("markdown", js(body)),
+    kv("metadata", metadataToJson(doc.metadata)),
+    kv("summary", summaryToJson(doc.blocks)),
+    kv("sections", ja(sections))
+  ]))
+}
+
+-- Slice a flat block list into sections at heading boundaries.
+-- Each section becomes {heading, level, markdown}. Content before the first
+-- heading is emitted as a "preamble" section with level=0.
+pure func sliceSections(blocks: [Block]) -> [Json] =
+  reverseJsonList(sliceLoop(blocks, "", 0, "", []))
+
+-- Tail-recursive scan over blocks. Accumulator is a list of section JSONs
+-- in reverse order (so we don't have to ++ for every section).
+pure func sliceLoop(blocks: [Block], curHeading: string, curLevel: int,
+                    curMd: string, acc: [Json]) -> [Json] =
+  match blocks {
+    [] => if length(curMd) > 0 || length(curHeading) > 0
+            then sectionJson(curHeading, curLevel, curMd) :: acc
+            else acc,
+    b :: rest => match b {
+      HeadingBlock(h) => {
+        let acc2 = if length(curMd) > 0 || length(curHeading) > 0
+          then sectionJson(curHeading, curLevel, curMd) :: acc
+          else acc;
+        sliceLoop(rest, h.text, h.level, headingPrefix(h.level) ++ h.text ++ "\n\n", acc2)
+      },
+      _ => sliceLoop(rest, curHeading, curLevel, curMd ++ renderBlockMd(b), acc)
+    }
+  }
+
+pure func sectionJson(heading: string, level: int, md: string) -> Json =
+  jo([
+    kv("heading", js(heading)),
+    kv("level", jnum(intToFloat(level))),
+    kv("markdown", js(md))
+  ])
+
+-- Reverse a [Json] list (sliceLoop accumulates in reverse).
+pure func reverseJsonList(xs: [Json]) -> [Json] =
+  foldl(\acc x. x :: acc, [], xs)
+
 -- Render blocks to markdown text suitable for LLM consumption
 -- Strips binary image data, keeps descriptions, renders tables as markdown tables
 export pure func renderMarkdown(doc: ParsedDocument) -> string {
@@ -313,14 +374,20 @@ pure func renderSectionMd(kind: string, blocks: [Block]) -> string {
 }
 
 -- Render a track change annotation as markdown
--- Deletions/move-from use strikethrough; insertions/move-to use bold
+-- Uses a blockquote with an attribution prefix:
+--   > [insert by Alice on 2026-03-29] text
+--   > [delete by Bob on 2026-03-29] ~~text~~
+-- This format is easier for downstream LLMs to parse than inline bold/italic.
 pure func renderChangeMd(changeType: string, author: string, date: string, text: string) -> string
   ensures { length(result) > 0 }
 {
-  let attribution = " *(" ++ changeType ++ " by " ++ author ++ ", " ++ date ++ ")*";
-  if changeType == "delete" || changeType == "move-from"
-  then "~~" ++ text ++ "~~" ++ attribution ++ "\n\n"
-  else "**" ++ text ++ "**" ++ attribution ++ "\n\n"
+  let who = if length(author) > 0 then author else "unknown";
+  let when = if length(date) > 0 then " on " ++ date else "";
+  let prefix = "> [" ++ changeType ++ " by " ++ who ++ when ++ "] ";
+  let body = if changeType == "delete" || changeType == "move-from"
+    then "~~" ++ text ++ "~~"
+    else text;
+  prefix ++ body ++ "\n\n"
 }
 
 -- Render a table as markdown
@@ -334,9 +401,22 @@ pure func renderTableMd(headers: [TableCell], rows: [[TableCell]]) -> string {
 pure func renderCellsMd(cells: [TableCell]) -> string =
   match cells {
     [] => "",
-    c :: [] => cellText(c) ++ " |",
-    c :: rest => cellText(c) ++ " | " ++ renderCellsMd(rest)
+    c :: [] => cellTextMd(c) ++ " |",
+    c :: rest => cellTextMd(c) ++ " | " ++ renderCellsMd(rest)
   }
+
+-- Render a single cell to markdown text. Cells with colSpan > 1 or merged=true
+-- get a Pandoc-style attribute suffix so downstream tools and LLMs can recover
+-- the table topology from the markdown alone:
+--   "Total {colspan=2}"      -- spans two columns
+--   "Header {merged}"        -- continuation of a merged region
+pure func cellTextMd(cell: TableCell) -> string {
+  let suffix = if cell.colSpan > 1
+    then " {colspan=" ++ show(cell.colSpan) ++ "}"
+    else if cell.merged then " {merged}"
+    else "";
+  cell.text ++ suffix
+}
 
 pure func renderSepMd(cells: [TableCell]) -> string =
   match cells {
