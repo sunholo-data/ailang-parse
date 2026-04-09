@@ -185,19 +185,27 @@ class DocParse:
         data = self._call("GET", "/api/v1/formats")
         return FormatsResult.from_dict(data)
 
-    def key_info(self):
+    def key_info(self, key_id: str = ""):
         """Return live usage + quota info for the *currently configured* key.
+
+        Args:
+            key_id: Explicit key ID to look up. When provided, skips all
+                resolution logic and queries usage directly.
 
         Resolves the ``key_id`` in this order:
 
-        1. ``self._key_id`` (set by saved credentials or :meth:`device_auth`)
-        2. Fall back to ``self.keys.list("")`` and find the entry whose
+        1. Explicit ``key_id`` parameter
+        2. ``self._key_id`` (set by saved credentials or :meth:`device_auth`)
+        3. Fall back to ``self.keys.list("")`` and find the entry whose
            ``key`` matches ``self.api_key``. The resolved id is cached.
 
-        Raises :class:`DocParseError` if neither path can resolve a key id —
+        Raises :class:`DocParseError` if no path can resolve a key id —
         the AILANG API has no ``/auth/whoami`` endpoint, so the SDK needs
-        either a saved credential or a list-able admin key.
+        either a saved credential, a list-able admin key, or an explicit
+        ``key_id``.
         """
+        if key_id:
+            return self.keys.usage(key_id)
         if not self.api_key:
             raise DocParseError(
                 "client.key_info() requires an API key on the client"

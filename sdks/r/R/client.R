@@ -152,7 +152,11 @@ DocParse <- R6::R6Class(
     #'   configured* key.
     #'
     #' Resolution order for the key id:
+    #' @param key_id Optional explicit key ID. When provided, skips all
+    #'   resolution logic and queries usage directly.
+    #'
     #' \enumerate{
+    #'   \item Explicit \code{key_id} parameter.
     #'   \item \code{self$key_id} (set by saved credentials or
     #'         \code{$device_auth()}).
     #'   \item Otherwise call \code{self$keys$list("")} and find the entry
@@ -160,10 +164,13 @@ DocParse <- R6::R6Class(
     #'         resolved id is cached for future calls.
     #' }
     #'
-    #' Stops if neither path can resolve a key id -- the AILANG API has no
+    #' Stops if no path can resolve a key id -- the AILANG API has no
     #' \code{/auth/whoami} endpoint, so the SDK needs either a saved
-    #' credential or a list-able admin key.
-    key_info = function() {
+    #' credential, a list-able admin key, or an explicit \code{key_id}.
+    key_info = function(key_id = NULL) {
+      if (!is.null(key_id) && nzchar(key_id)) {
+        return(self$keys$usage(key_id))
+      }
       if (!nzchar(.s(self$api_key))) {
         stop(.docparse_error("client$key_info() requires an API key on the client"))
       }

@@ -42,16 +42,22 @@ func (km *KeyManager) Rotate(ctx context.Context, keyID, userID string) (*KeyInf
 }
 
 // KeyInfo returns live usage + quota info for the *currently configured* key.
+// An optional keyID can be passed to skip all resolution logic and query
+// usage directly.
 //
 // Resolution order for the key id:
-//  1. c.KeyID (set by saved credentials or DeviceAuth)
-//  2. Otherwise call Keys.List("") and find the entry whose `key` field
+//  1. Explicit keyID variadic parameter.
+//  2. c.KeyID (set by saved credentials or DeviceAuth)
+//  3. Otherwise call Keys.List("") and find the entry whose `key` field
 //     matches c.APIKey. The resolved id is cached on the client.
 //
-// Returns an error if neither path can resolve a key id — the AILANG API
-// has no /auth/whoami endpoint, so the SDK needs either a saved credential
-// or a list-able admin key.
-func (c *Client) KeyInfo(ctx context.Context) (*UsageInfo, error) {
+// Returns an error if no path can resolve a key id — the AILANG API
+// has no /auth/whoami endpoint, so the SDK needs either a saved credential,
+// a list-able admin key, or an explicit keyID.
+func (c *Client) KeyInfo(ctx context.Context, keyID ...string) (*UsageInfo, error) {
+	if len(keyID) > 0 && keyID[0] != "" {
+		return c.Keys.Usage(ctx, keyID[0], "")
+	}
 	if c.APIKey == "" {
 		return nil, newDocParseError("client.KeyInfo() requires an API key on the client", 0)
 	}

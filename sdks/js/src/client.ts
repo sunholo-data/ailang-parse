@@ -218,16 +218,23 @@ export class DocParse {
   /**
    * Return live usage + quota info for the *currently configured* key.
    *
+   * @param keyId - Explicit key ID to look up. When provided, skips all
+   *   resolution logic and queries usage directly.
+   *
    * Resolution order for the key id:
-   * 1. The id stored on the client (saved credentials or {@link deviceAuth}).
-   * 2. Otherwise call `keys.list("")` and find the entry whose `key`
+   * 1. Explicit `keyId` parameter.
+   * 2. The id stored on the client (saved credentials or {@link deviceAuth}).
+   * 3. Otherwise call `keys.list("")` and find the entry whose `key`
    *    matches `apiKey`. The resolved id is cached for future calls.
    *
-   * Throws if neither path can resolve a key id — the AILANG API has no
-   * `/auth/whoami` endpoint, so the SDK needs either a saved credential or
-   * a list-able admin key.
+   * Throws if no path can resolve a key id — the AILANG API has no
+   * `/auth/whoami` endpoint, so the SDK needs either a saved credential,
+   * a list-able admin key, or an explicit `keyId`.
    */
-  async keyInfo(): Promise<any> {
+  async keyInfo(keyId?: string): Promise<any> {
+    if (keyId) {
+      return this.keys.usage(keyId);
+    }
     if (!this.apiKey) {
       throw new DocParseError("client.keyInfo() requires an API key on the client");
     }
