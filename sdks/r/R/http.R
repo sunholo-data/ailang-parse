@@ -48,11 +48,11 @@ NULL
     grepl("api key required", m, fixed = TRUE)
 }
 
-.raise_envelope_error <- function(msg) {
+.raise_envelope_error <- function(msg, suggested_fix = "") {
   if (.is_auth_error_message(msg)) {
     stop(.auth_error(msg))
   }
-  stop(.docparse_error(msg))
+  stop(.docparse_error(msg, suggested_fix = suggested_fix))
 }
 
 .unwrap <- function(body_text) {
@@ -65,7 +65,12 @@ NULL
   )
   if (!is.null(outer$error) && length(outer$error) > 0L) {
     err <- outer$error
-    if (is.character(err)) .raise_envelope_error(err)
+    if (is.character(err)) {
+      # Structured error: {error: "CODE", message: "...", suggested_fix: "..."}
+      msg <- if (!is.null(outer$message) && nzchar(outer$message)) outer$message else err
+      fix <- if (!is.null(outer$suggested_fix)) .s(outer$suggested_fix) else ""
+      .raise_envelope_error(msg, suggested_fix = fix)
+    }
     # Dict errors (e.g. device-auth poll) — return the whole envelope so
     # the caller can inspect status fields.
     return(outer)

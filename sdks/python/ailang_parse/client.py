@@ -118,11 +118,16 @@ class DocParse:
 
     @staticmethod
     def _build_parse_result(data: Any, output_format: str) -> ParseResult:
-        """Build a ParseResult, handling raw markdown/html string responses.
+        """Build a ParseResult, handling raw markdown/html and markdown+metadata.
 
         For ``output_format="markdown"`` / ``"html"`` the API returns a raw
         rendered string instead of a JSON object. ``_unwrap`` surfaces that
         as ``{"raw": "<str>"}``; we promote it to ``ParseResult.text``.
+
+        For ``output_format="markdown+metadata"`` the API returns a JSON object
+        with ``markdown``, ``metadata``, ``summary``, and ``sections``. It goes
+        through ``from_dict`` normally but has no ``status`` field — we default
+        it to ``"ok"``.
         """
         if isinstance(data, dict) and "raw" in data and isinstance(data["raw"], str):
             return ParseResult(
@@ -130,7 +135,10 @@ class DocParse:
                 format=output_format,
                 text=data["raw"],
             )
-        return ParseResult.from_dict(data)
+        result = ParseResult.from_dict(data)
+        if not result.status and result.format:
+            result.status = "ok"
+        return result
 
     def health(self) -> HealthResult:
         """Check API health."""
@@ -287,11 +295,11 @@ class DocParse:
         )
 
     @classmethod
-    def _raise_envelope_error(cls, msg: str) -> None:
+    def _raise_envelope_error(cls, msg: str, suggested_fix: str = "") -> None:
         """Raise AuthError for auth-like messages, otherwise DocParseError."""
         if cls._is_auth_error_message(msg):
-            raise AuthError(msg, 401)
-        raise DocParseError(msg)
+            raise AuthError(msg, 401, suggested_fix=suggested_fix)
+        raise DocParseError(msg, suggested_fix=suggested_fix)
 
     @classmethod
     def _unwrap(cls, outer: Dict[str, Any]) -> Dict[str, Any]:
@@ -299,7 +307,10 @@ class DocParse:
         if "error" in outer and outer["error"]:
             err = outer["error"]
             if isinstance(err, str):
-                cls._raise_envelope_error(err)
+                # Check for structured error with message + suggested_fix
+                suggested = outer.get("suggested_fix", "")
+                msg = outer.get("message", err)
+                cls._raise_envelope_error(msg, suggested_fix=suggested)
             # Dict errors (e.g. device auth poll) — return as-is for caller handling
             return outer
         result_str = outer.get("result", "")

@@ -89,6 +89,10 @@ func buildParseResult(inner []byte, format string) (*ParseResult, error) {
 	if err := json.Unmarshal(inner, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal parse result: %w", err)
 	}
+	// markdown+metadata responses have no status field — default to "ok".
+	if result.Status == "" && result.Format != "" {
+		result.Status = "ok"
+	}
 	return &result, nil
 }
 

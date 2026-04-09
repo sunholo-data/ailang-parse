@@ -849,6 +849,68 @@ func TestDeviceAuth_ReturnsURLs(t *testing.T) {
 	}
 }
 
+// ── markdown+metadata ──
+
+func TestParse_MarkdownMetadata(t *testing.T) {
+	inner := map[string]any{
+		"format":   "markdown+metadata",
+		"filename": "report.docx",
+		"markdown": "# Title\n\nBody paragraph",
+		"metadata": map[string]any{"title": "Report", "author": "Alice"},
+		"summary":  map[string]any{"totalBlocks": 3, "headings": 1},
+		"sections": []map[string]any{
+			{"heading": "", "level": 0, "markdown": "Preamble"},
+			{"heading": "Title", "level": 1, "markdown": "Body paragraph"},
+		},
+	}
+	srv := mockServer(200, envelope(inner))
+	defer srv.Close()
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.Parse(context.Background(), "report.docx", ParseOptions{OutputFormat: "markdown+metadata"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if r.Status != "ok" {
+		t.Fatalf("expected status=ok, got %q", r.Status)
+	}
+	if r.Format != "markdown+metadata" {
+		t.Fatalf("expected format=markdown+metadata, got %q", r.Format)
+	}
+	if r.Markdown != "# Title\n\nBody paragraph" {
+		t.Fatalf("expected markdown body, got %q", r.Markdown)
+	}
+	if r.Metadata.Title != "Report" {
+		t.Fatalf("expected metadata.title=Report, got %q", r.Metadata.Title)
+	}
+	if len(r.Sections) != 2 {
+		t.Fatalf("expected 2 sections, got %d", len(r.Sections))
+	}
+	if r.Sections[1].Heading != "Title" || r.Sections[1].Level != 1 {
+		t.Fatalf("unexpected section[1]: %+v", r.Sections[1])
+	}
+}
+
+func TestStructuredErrorCarriesSuggestedFix(t *testing.T) {
+	srv := mockServer(200, map[string]any{
+		"error":         "AUTH_REQUIRED",
+		"message":       "An API key is required.",
+		"suggested_fix": "Call mcpAuth to start device authorization.",
+	})
+	defer srv.Close()
+	c := New("", WithBaseURL(srv.URL))
+	_, err := c.Health(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var dpe *DocParseError
+	if !errors.As(err, &dpe) {
+		t.Fatalf("expected DocParseError, got %T", err)
+	}
+	if dpe.SuggestedFix != "Call mcpAuth to start device authorization." {
+		t.Fatalf("expected suggested_fix, got %q", dpe.SuggestedFix)
+	}
+}
+
 func TestKeyInfoJSON(t *testing.T) {
 	raw := `{"status":"active","key":"dp_abc","keyId":"k1","label":"test","tier":"free","quota":{"requestsPerDay":50}}`
 	var k KeyInfo

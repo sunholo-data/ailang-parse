@@ -214,6 +214,49 @@ class TestParse:
         assert r.text == "<h1>Title</h1>"
         assert r.format == "html"
 
+    def test_parse_markdown_metadata_returns_sections(self, mock_server):
+        """Regression for markdown+metadata: returns structured result with
+        markdown body, metadata, summary, and heading-sliced sections."""
+        inner = {
+            "format": "markdown+metadata",
+            "filename": "report.docx",
+            "markdown": "# Title\n\nBody paragraph",
+            "metadata": {"title": "Report", "author": "Alice"},
+            "summary": {"totalBlocks": 3, "headings": 1},
+            "sections": [
+                {"heading": "", "level": 0, "markdown": "Preamble"},
+                {"heading": "Title", "level": 1, "markdown": "Body paragraph"},
+            ],
+        }
+        _set_response(200, {"result": json.dumps(inner)})
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse("report.docx", output_format="markdown+metadata")
+        assert r.status == "ok"
+        assert r.format == "markdown+metadata"
+        assert r.markdown == "# Title\n\nBody paragraph"
+        assert r.metadata.title == "Report"
+        assert r.summary.headings == 1
+        assert len(r.sections) == 2
+        assert r.sections[0].heading == ""
+        assert r.sections[0].level == 0
+        assert r.sections[1].heading == "Title"
+        assert r.sections[1].level == 1
+        assert r.sections[1].markdown == "Body paragraph"
+        # blocks should be empty for this format
+        assert r.blocks == []
+
+    def test_structured_error_carries_suggested_fix(self, mock_server):
+        """Server returns structured error with error code + suggested_fix."""
+        _set_response(200, {
+            "error": "AUTH_REQUIRED",
+            "message": "An API key is required for hosted parsing.",
+            "suggested_fix": "Call mcpAuth to start device authorization.",
+        })
+        c = DocParse(api_key="", base_url=mock_server)
+        with pytest.raises(DocParseError) as exc_info:
+            c.parse("report.docx")
+        assert exc_info.value.suggested_fix == "Call mcpAuth to start device authorization."
+
     def test_parse_file_bad_key_envelope_raises_auth_error(self, mock_server, tmp_path):
         """Regression for #1: server returns 200 + envelope error for a bad
         key inside parse_file. Must raise AuthError, not generic DocParseError."""

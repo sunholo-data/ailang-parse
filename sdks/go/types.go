@@ -86,6 +86,14 @@ type Summary struct {
 	Changes     int `json:"changes"`
 }
 
+// Section is a heading-delimited section of a document.
+// Returned when outputFormat="markdown+metadata".
+type Section struct {
+	Heading  string `json:"heading"`
+	Level    int    `json:"level"`
+	Markdown string `json:"markdown"`
+}
+
 // ParseResult is the response from /api/v1/parse.
 type ParseResult struct {
 	Status   string      `json:"status"`
@@ -97,6 +105,10 @@ type ParseResult struct {
 	// Text is the raw rendered output for outputFormat="markdown" / "html".
 	// Empty for the default "blocks" output, which populates Blocks instead.
 	Text string `json:"text,omitempty"`
+	// Markdown is the full rendered markdown body for outputFormat="markdown+metadata".
+	Markdown string `json:"markdown,omitempty"`
+	// Sections are heading-sliced document sections for outputFormat="markdown+metadata".
+	Sections []Section `json:"sections,omitempty"`
 }
 
 // HealthResult is the response from /api/v1/health.

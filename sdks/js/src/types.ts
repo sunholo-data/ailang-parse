@@ -4,10 +4,12 @@
 
 export class DocParseError extends Error {
   statusCode: number;
-  constructor(message: string, statusCode: number = 0) {
+  suggestedFix: string;
+  constructor(message: string, statusCode: number = 0, suggestedFix: string = "") {
     super(message);
     this.name = "DocParseError";
     this.statusCode = statusCode;
+    this.suggestedFix = suggestedFix;
   }
 }
 
@@ -86,6 +88,13 @@ export interface Summary {
 
 // ── Results ──
 
+/** A heading-delimited section of a document (markdown+metadata output). */
+export interface Section {
+  heading: string;
+  level: number;
+  markdown: string;
+}
+
 export interface ParseResult {
   status: string;
   filename: string;
@@ -99,6 +108,10 @@ export interface ParseResult {
    * `blocks` instead.
    */
   text: string;
+  /** Full rendered markdown body for `outputFormat: "markdown+metadata"`. */
+  markdown: string;
+  /** Heading-sliced sections for `outputFormat: "markdown+metadata"`. */
+  sections: Section[];
 }
 
 export interface HealthResult {

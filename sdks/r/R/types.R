@@ -148,12 +148,24 @@ as.data.frame.ailang_block_table <- function(x, row.names = NULL,
   )
 }
 
+#' Convert a raw section list into an S3 Section object.
+#' @keywords internal
+.section_from_list <- function(d) {
+  if (!is.list(d)) d <- list()
+  list(
+    heading  = .s(d$heading),
+    level    = .i(d$level),
+    markdown = .s(d$markdown)
+  )
+}
+
 #' Convert a raw API response into a ParseResult S3 object.
 #' @keywords internal
 .parse_result_from_list <- function(d) {
   if (!is.list(d)) d <- list()
   blocks <- lapply(if (is.null(d$blocks)) list() else d$blocks, .block_from_list)
   blocks <- Filter(Negate(is.null), blocks)
+  sections <- lapply(if (is.null(d$sections)) list() else d$sections, .section_from_list)
   res <- list(
     status   = .s(d$status),
     filename = .s(d$filename),
@@ -161,7 +173,9 @@ as.data.frame.ailang_block_table <- function(x, row.names = NULL,
     blocks   = blocks,
     metadata = .doc_metadata_from_list(d$metadata),
     summary  = .summary_from_list(d$summary),
-    text     = .s(d$text)
+    text     = .s(d$text),
+    markdown = .s(d$markdown),
+    sections = sections
   )
   class(res) <- "ailang_parse_result"
   res
@@ -184,12 +198,19 @@ as.data.frame.ailang_block_table <- function(x, row.names = NULL,
       blocks   = list(),
       metadata = .doc_metadata_from_list(list()),
       summary  = .summary_from_list(list()),
-      text     = data$raw
+      text     = data$raw,
+      markdown = "",
+      sections = list()
     )
     class(res) <- "ailang_parse_result"
     return(res)
   }
-  .parse_result_from_list(data)
+  result <- .parse_result_from_list(data)
+  # markdown+metadata responses have no status field — default to "ok".
+  if (!nzchar(result$status) && nzchar(result$format)) {
+    result$status <- "ok"
+  }
+  result
 }
 
 #' @export

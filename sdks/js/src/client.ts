@@ -162,16 +162,21 @@ export class DocParse {
         metadata: {} as any,
         summary: {} as any,
         text: data.raw,
+        markdown: "",
+        sections: [],
       };
     }
+    const status = data?.status || (data?.format ? "ok" : "");
     return {
-      status: data?.status || "",
+      status,
       filename: data?.filename || "",
       format: data?.format || "",
       blocks: data?.blocks || [],
       metadata: data?.metadata || ({} as any),
       summary: data?.summary || ({} as any),
       text: data?.text || "",
+      markdown: data?.markdown || "",
+      sections: data?.sections || [],
     };
   }
 
@@ -323,16 +328,18 @@ export class DocParse {
   }
 
   /** Throw AuthError for auth-like messages, otherwise DocParseError. */
-  private static _raiseEnvelopeError(msg: string): never {
+  private static _raiseEnvelopeError(msg: string, suggestedFix = ""): never {
     if (DocParse._isAuthErrorMessage(msg)) throw new AuthError(msg);
-    throw new DocParseError(msg);
+    throw new DocParseError(msg, 0, suggestedFix);
   }
 
   /** Unwrap serve-api response envelope. */
   private _unwrap(outer: any): any {
     if (outer.error) {
       if (typeof outer.error === "string") {
-        DocParse._raiseEnvelopeError(outer.error);
+        const suggested = outer.suggested_fix || "";
+        const msg = outer.message || outer.error;
+        DocParse._raiseEnvelopeError(msg, suggested);
       }
       // Dict errors (e.g. device-auth poll) — return for caller handling
       return outer;

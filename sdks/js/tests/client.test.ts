@@ -192,6 +192,54 @@ describe("parse markdown raw-string (#2)", () => {
   });
 });
 
+describe("parse markdown+metadata", () => {
+  it("returns ParseResult with markdown, sections, metadata", async () => {
+    const inner = {
+      format: "markdown+metadata",
+      filename: "report.docx",
+      markdown: "# Title\n\nBody paragraph",
+      metadata: { title: "Report", author: "Alice" },
+      summary: { totalBlocks: 3, headings: 1 },
+      sections: [
+        { heading: "", level: 0, markdown: "Preamble" },
+        { heading: "Title", level: 1, markdown: "Body paragraph" },
+      ],
+    };
+    setMock(200, { result: JSON.stringify(inner) });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parse("report.docx", "markdown+metadata");
+    assert.equal(r.status, "ok");
+    assert.equal(r.format, "markdown+metadata");
+    assert.equal(r.markdown, "# Title\n\nBody paragraph");
+    assert.equal(r.metadata.title, "Report");
+    assert.equal(r.summary.headings, 1);
+    assert.equal(r.sections.length, 2);
+    assert.equal(r.sections[0].level, 0);
+    assert.equal(r.sections[1].heading, "Title");
+    assert.equal(r.sections[1].markdown, "Body paragraph");
+    assert.deepEqual(r.blocks, []);
+  });
+});
+
+describe("structured error", () => {
+  it("carries suggestedFix from server", async () => {
+    setMock(200, {
+      error: "AUTH_REQUIRED",
+      message: "An API key is required.",
+      suggested_fix: "Call mcpAuth to start device authorization.",
+    });
+    const c = new DocParse({ apiKey: "", baseUrl });
+    await assert.rejects(
+      () => c.parse("report.docx"),
+      (e: any) => {
+        assert.ok(e instanceof DocParseError);
+        assert.equal(e.suggestedFix, "Call mcpAuth to start device authorization.");
+        return true;
+      },
+    );
+  });
+});
+
 describe("parse", () => {
   it("returns ParseResult with blocks", async () => {
     setMock(200, {

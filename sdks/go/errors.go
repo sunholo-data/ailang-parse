@@ -21,8 +21,9 @@ import (
 //	if errors.Is(err, ErrAuth) { ... }
 //	if errors.Is(err, ErrQuota) { ... }
 type DocParseError struct {
-	Message    string
-	StatusCode int
+	Message      string
+	StatusCode   int
+	SuggestedFix string
 }
 
 func (e *DocParseError) Error() string {
@@ -101,4 +102,16 @@ func envelopeError(msg string) error {
 		return newAuthError(msg)
 	}
 	return newDocParseError(msg, 0)
+}
+
+// envelopeErrorWithFix is like envelopeError but includes a suggested_fix.
+func envelopeErrorWithFix(msg, suggestedFix string) error {
+	if isAuthErrorMessage(msg) {
+		e := newAuthError(msg)
+		e.SuggestedFix = suggestedFix
+		return e
+	}
+	e := newDocParseError(msg, 0)
+	e.SuggestedFix = suggestedFix
+	return e
 }

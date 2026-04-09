@@ -311,7 +311,23 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
 	if outer.Error != "" {
-		return nil, envelopeError(outer.Error)
+		// Try structured error: {error: "CODE", message: "...", suggested_fix: "..."}
+		msg := outer.Error
+		var suggestedFix string
+		var structured struct {
+			Message      string `json:"message"`
+			SuggestedFix string `json:"suggested_fix"`
+		}
+		if json.Unmarshal(data, &structured) == nil {
+			if structured.Message != "" {
+				msg = structured.Message
+			}
+			suggestedFix = structured.SuggestedFix
+		}
+		if suggestedFix != "" {
+			return nil, envelopeErrorWithFix(msg, suggestedFix)
+		}
+		return nil, envelopeError(msg)
 	}
 	inner := []byte(outer.Result)
 	// If no result field, return the raw response (e.g. health, formats)

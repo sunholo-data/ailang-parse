@@ -119,6 +119,50 @@ test_that("parse_file() returns text field for raw html response", {
   })
 })
 
+# ── markdown+metadata ──
+
+test_that("parse() returns sections for markdown+metadata format", {
+  inner <- list(
+    format   = "markdown+metadata",
+    filename = "report.docx",
+    markdown = "# Title\n\nBody paragraph",
+    metadata = list(title = "Report", author = "Alice"),
+    summary  = list(totalBlocks = 3L, headings = 1L),
+    sections = list(
+      list(heading = "", level = 0L, markdown = "Preamble"),
+      list(heading = "Title", level = 1L, markdown = "Body paragraph")
+    )
+  )
+  resp <- .envelope_resp(inner)
+  httr2::with_mocked_responses(list(resp), {
+    client <- DocParse$new(api_key = "dp_test")
+    r <- client$parse("report.docx", output_format = "markdown+metadata")
+    expect_equal(r$status, "ok")
+    expect_equal(r$format, "markdown+metadata")
+    expect_equal(r$markdown, "# Title\n\nBody paragraph")
+    expect_equal(r$metadata$title, "Report")
+    expect_equal(r$summary$headings, 1L)
+    expect_length(r$sections, 2L)
+    expect_equal(r$sections[[1]]$level, 0L)
+    expect_equal(r$sections[[2]]$heading, "Title")
+    expect_equal(r$sections[[2]]$markdown, "Body paragraph")
+  })
+})
+
+test_that("structured error carries suggested_fix", {
+  resp <- .mock_resp(200L, list(
+    error = "AUTH_REQUIRED",
+    message = "An API key is required.",
+    suggested_fix = "Call mcpAuth to start device authorization."
+  ))
+  httr2::with_mocked_responses(list(resp), {
+    client <- DocParse$new(api_key = "dp_test")
+    err <- tryCatch(client$parse("report.docx"), error = function(e) e)
+    expect_s3_class(err, "ailang_docparse_error")
+    expect_equal(err$suggested_fix, "Call mcpAuth to start device authorization.")
+  })
+})
+
 # ── #6 FormatsResult helpers ──
 
 test_that("formats_supports is case- and dot-tolerant", {

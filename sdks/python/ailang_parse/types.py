@@ -8,9 +8,10 @@ from typing import Any, Dict, List, Optional, Union
 
 class DocParseError(Exception):
     """Base error for all AILANG Parse API errors."""
-    def __init__(self, message: str, status_code: int = 0):
+    def __init__(self, message: str, status_code: int = 0, suggested_fix: str = ""):
         super().__init__(message)
         self.status_code = status_code
+        self.suggested_fix = suggested_fix
 
 
 class AuthError(DocParseError):
@@ -145,6 +146,29 @@ class Summary:
         )
 
 
+# ── Section (for markdown+metadata) ──
+
+@dataclass
+class Section:
+    """A heading-delimited section of a document.
+
+    Returned when ``output_format="markdown+metadata"``.  Each section
+    contains the heading text, its level (1–6, or 0 for preamble content
+    before the first heading), and the rendered markdown for that section.
+    """
+    heading: str = ""
+    level: int = 0
+    markdown: str = ""
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Section":
+        return cls(
+            heading=d.get("heading", ""),
+            level=d.get("level", 0),
+            markdown=d.get("markdown", ""),
+        )
+
+
 # ── Parse result ──
 
 @dataclass
@@ -159,6 +183,10 @@ class ParseResult:
     #: Empty string for the default ``"blocks"`` output, which populates
     #: :attr:`blocks` instead.
     text: str = ""
+    #: Full rendered markdown body for ``output_format="markdown+metadata"``.
+    markdown: str = ""
+    #: Heading-sliced sections for ``output_format="markdown+metadata"``.
+    sections: List[Section] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ParseResult":
@@ -170,6 +198,8 @@ class ParseResult:
             metadata=DocMetadata.from_dict(d.get("metadata", {})),
             summary=Summary.from_dict(d.get("summary", {})),
             text=d.get("text", ""),
+            markdown=d.get("markdown", ""),
+            sections=[Section.from_dict(s) for s in d.get("sections", [])],
         )
 
 
