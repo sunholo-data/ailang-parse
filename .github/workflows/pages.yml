@@ -35,13 +35,16 @@ jobs:
         run: python3 docs/scripts/check-wasm-bindings.py
 
       - name: Download AILANG WASM runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           WASM_DIR="docs/wasm"
 
           echo "::group::Fetching latest AILANG release"
-          RELEASE_TAG=$(curl -sfL \
+          RELEASE_TAG=$(curl -sfL --retry 3 --retry-delay 5 \
             -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/sunholo-data/ailang/releases/latest | \
             python3 -c "import json,sys; print(json.loads(sys.stdin.read())['tag_name'])")
           echo "Release: $RELEASE_TAG"
@@ -49,6 +52,7 @@ jobs:
 
           echo "::group::Downloading ailang-wasm.tar.gz"
           curl -sfL --retry 3 --retry-delay 5 \
+            -H "Authorization: Bearer $GH_TOKEN" \
             -o ailang-wasm.tar.gz \
             "https://github.com/sunholo-data/ailang/releases/download/${RELEASE_TAG}/ailang-wasm.tar.gz"
           echo "::endgroup::"
