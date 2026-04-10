@@ -57,7 +57,7 @@ def run_competitors(competitor: str | None = None, json_output: bool = False):
         "llamaparse": competitors_dir / "run_llamaparse.py",
     }
     # OfficeDocBench-integrated adapters (run via eval_officedocbench.py --adapter)
-    odbench_adapters = {"pandoc", "ooxml"}
+    odbench_adapters = {"pandoc", "ooxml", "liteparse"}
 
     all_names = list(script_adapters.keys()) + sorted(odbench_adapters)
 

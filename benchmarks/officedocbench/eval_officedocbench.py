@@ -103,6 +103,12 @@ def load_adapter(name: str):
             return PandocAdapter()
         except Exception:
             return None
+    elif name == "liteparse":
+        try:
+            from adapters.liteparse_adapter import LiteParseAdapter
+            return LiteParseAdapter()
+        except Exception:
+            return None
     elif name == "ooxml":
         try:
             from adapters.ooxml_adapter import OOXMLAdapter
@@ -206,7 +212,7 @@ def evaluate_adapter(
 
 def main():
     parser = argparse.ArgumentParser(description="OfficeDocBench Evaluation")
-    parser.add_argument("--adapter", help="Evaluate a single adapter (docparse, unstructured, docling, llamaparse, markitdown, kreuzberg, pandoc, ooxml)")
+    parser.add_argument("--adapter", help="Evaluate a single adapter (docparse, unstructured, docling, llamaparse, markitdown, kreuzberg, pandoc, ooxml, liteparse)")
     parser.add_argument("--all", action="store_true", help="Evaluate all installed adapters")
     parser.add_argument("--format", help="Filter by format (docx, pptx, xlsx, etc.)")
     parser.add_argument("--json", action="store_true", help="JSON output")
@@ -225,7 +231,7 @@ def main():
     if args.adapter:
         adapter_names = [args.adapter]
     elif args.all:
-        adapter_names = ["docparse", "unstructured", "docling", "llamaparse", "markitdown", "kreuzberg", "pandoc", "ooxml"]
+        adapter_names = ["docparse", "unstructured", "docling", "llamaparse", "markitdown", "kreuzberg", "pandoc", "ooxml", "liteparse"]
     else:
         adapter_names = ["docparse"]
 
@@ -273,6 +279,7 @@ _ADAPTER_ID = {
     "Kreuzberg": "kreuzberg",
     "Pandoc": "pandoc",
     "Raw OOXML": "ooxml",
+    "LiteParse": "liteparse",
 }
 
 
