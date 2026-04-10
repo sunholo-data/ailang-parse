@@ -4,6 +4,9 @@ set -euo pipefail
 # AILANG Parse CLI — Universal Document Parsing
 # Wrapper around ailang that handles caps, AI model, and flags automatically.
 
+# Disable auto-trace for production (2-5x speedup); set AILANG_NO_TRACE=0 to re-enable
+export AILANG_NO_TRACE="${AILANG_NO_TRACE:-1}"
+
 # Resolve symlinks to find the real script location
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
@@ -78,6 +81,15 @@ Examples:
   docparse report.docx --summarize      With AI summary
   docparse scan.pdf                     PDF (auto-enables AI)
   docparse photo.png                    Image (auto-enables AI)
+
+Performance:
+  Pass multiple files or a folder for best throughput. Batch mode
+  compiles once and parses all files — up to 10x faster per file
+  than parsing one at a time.
+
+    FAST:  docparse *.docx              (compile once, parse many)
+    FAST:  docparse ~/Documents/        (same — folder expansion)
+    SLOW:  for f in *.docx; do docparse "$f"; done  (recompiles each time)
 
 Options:
   --describe        Enable AI image descriptions

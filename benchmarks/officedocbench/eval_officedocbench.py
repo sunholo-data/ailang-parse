@@ -36,7 +36,7 @@ if _env_path.exists():
                 os.environ.setdefault(_key.strip(), _val.strip())
 
 from scoring import score_file
-from report import print_summary, print_per_format, print_feature_heatmap, print_latex
+from report import print_summary, print_timing, print_per_format, print_feature_heatmap, print_latex
 from datetime import datetime, timezone
 
 # Paths
@@ -128,6 +128,10 @@ def evaluate_adapter(
     results = []
     supported = adapter.supported_formats()
 
+    # Collect files to parse and their ground truth
+    parse_jobs: list[tuple[Path, dict, Path]] = []  # (test_path, gt, gt_path)
+    skip_results: list[dict] = []
+
     for gt_path in gt_files:
         with open(gt_path) as f:
             gt = json.load(f)
@@ -135,53 +139,70 @@ def evaluate_adapter(
         fmt = gt["format"]
         source_file = gt["file"]
 
-        # Apply format filter
         if format_filter and fmt != format_filter:
             continue
 
-        # Skip if adapter doesn't support this format
         if fmt not in supported:
-            results.append({
+            skip_results.append({
                 "file": source_file,
                 "format": fmt,
                 "status": "UNSUPPORTED",
             })
             continue
 
-        # Get adapter output
+        test_path = _find_test_file(source_file)
+        if test_path is None:
+            skip_results.append({
+                "file": source_file,
+                "format": fmt,
+                "status": "MISSING",
+            })
+            continue
+
+        parse_jobs.append((test_path, gt, gt_path))
+
+    # If adapter supports batch, parse all files in one call and
+    # distribute the total time evenly across files for fair comparison
+    batch_outputs: dict[str, dict] | None = None
+    batch_time_per_file_ms: float = 0.0
+
+    if hasattr(adapter, "parse_batch") and not use_golden and len(parse_jobs) > 0:
+        batch_paths = [job[0] for job in parse_jobs]
+        start = time.time()
         try:
-            start = time.time()
-            if use_golden and hasattr(adapter, "parse_from_golden"):
+            batch_outputs = adapter.parse_batch(batch_paths)
+            total_ms = (time.time() - start) * 1000
+            batch_time_per_file_ms = round(total_ms / len(batch_paths), 1)
+        except BaseException as e:
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            # Fall back to per-file parsing
+            batch_outputs = None
+
+    # Process each file
+    for test_path, gt, gt_path in parse_jobs:
+        source_file = gt["file"]
+        fmt = gt["format"]
+
+        try:
+            if batch_outputs is not None and test_path.name in batch_outputs:
+                output = batch_outputs[test_path.name]
+                elapsed_ms = batch_time_per_file_ms
+            elif use_golden and hasattr(adapter, "parse_from_golden"):
                 golden_path = GOLDEN_DIR / gt_path.name
                 if golden_path.exists():
+                    start = time.time()
                     output = adapter.parse_from_golden(golden_path)
+                    elapsed_ms = round((time.time() - start) * 1000, 1)
                 else:
-                    # No golden file (e.g., challenge files) — parse live
-                    test_path = _find_test_file(source_file)
-                    if test_path is None:
-                        results.append({
-                            "file": source_file,
-                            "format": fmt,
-                            "status": "MISSING",
-                        })
-                        continue
+                    start = time.time()
                     output = adapter.parse(test_path)
+                    elapsed_ms = round((time.time() - start) * 1000, 1)
             else:
-                test_path = _find_test_file(source_file)
-                if test_path is None:
-                    results.append({
-                        "file": source_file,
-                        "format": fmt,
-                        "status": "MISSING",
-                    })
-                    continue
+                start = time.time()
                 output = adapter.parse(test_path)
-            elapsed_ms = round((time.time() - start) * 1000, 1)
+                elapsed_ms = round((time.time() - start) * 1000, 1)
         except BaseException as e:
-            # BaseException (not Exception) so a pyo3_runtime.PanicException
-            # from a Rust-backed adapter (e.g. kreuzberg's comrak panic on
-            # certain EPUBs) records as a per-file ERROR instead of crashing
-            # the entire benchmark run. KeyboardInterrupt still re-raises.
             if isinstance(e, KeyboardInterrupt):
                 raise
             results.append({
@@ -192,7 +213,6 @@ def evaluate_adapter(
             })
             continue
 
-        # Score
         scores = score_file(gt, output)
 
         results.append({
@@ -202,6 +222,8 @@ def evaluate_adapter(
             "time_ms": elapsed_ms,
             "scores": scores,
         })
+
+    results = skip_results + results
 
     return {
         "adapter": adapter.name(),
@@ -217,8 +239,13 @@ def main():
     parser.add_argument("--format", help="Filter by format (docx, pptx, xlsx, etc.)")
     parser.add_argument("--json", action="store_true", help="JSON output")
     parser.add_argument("--latex", action="store_true", help="LaTeX table output")
-    parser.add_argument("--live", action="store_true", help="Re-parse files instead of using golden outputs")
+    parser.add_argument("--live", action="store_true", default=True,
+                        help="Re-parse files (default: True)")
+    parser.add_argument("--golden", action="store_true",
+                        help="Use golden outputs for DocParse (faster, no timing)")
     args = parser.parse_args()
+    if args.golden:
+        args.live = False
 
     # Load ground truth files
     gt_files = sorted(GT_DIR.glob("*.json"))
@@ -243,7 +270,7 @@ def main():
             continue
 
         print(f"  Evaluating {adapter.name()} v{adapter.version()}...", file=sys.stderr)
-        use_golden = not args.live and name == "docparse"
+        use_golden = not args.live
         result = evaluate_adapter(adapter, gt_files, args.format, use_golden=use_golden)
         all_results.append(result)
 
@@ -265,6 +292,7 @@ def main():
         print_latex(all_results)
     else:
         print_summary(all_results)
+        print_timing(all_results)
         print_per_format(all_results)
         print_feature_heatmap(all_results)
 
@@ -309,6 +337,19 @@ def _write_summary(all_results: list[dict]) -> None:
             for fmt, scores in sorted(by_fmt.items())
         }
 
+        # Timing stats
+        times = [r["time_ms"] for r in ok if "time_ms" in r]
+        import statistics
+        timing = {}
+        if times:
+            timing = {
+                "median_ms": round(statistics.median(times), 1),
+                "mean_ms": round(statistics.mean(times), 1),
+                "min_ms": round(min(times), 1),
+                "max_ms": round(max(times), 1),
+                "total_ms": round(sum(times), 1),
+            }
+
         adapters_summary.append({
             "id": _ADAPTER_ID.get(ar["adapter"], ar["adapter"].lower().replace(" ", "_")),
             "name": ar["adapter"],
@@ -325,6 +366,7 @@ def _write_summary(all_results: list[dict]) -> None:
             "text_jaccard": round(_avg("text_jaccard"), 4),
             "element_count": round(_avg("element_count"), 4),
             "metadata": round(_avg("metadata"), 4),
+            "timing": timing,
             "per_format": per_format,
         })
 

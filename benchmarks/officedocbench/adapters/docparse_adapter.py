@@ -1,15 +1,18 @@
 """AILANG Parse adapter for OfficeDocBench — reference implementation.
 
 Runs AILANG Parse on a file and converts the output to the
-OfficeDocBench adapter output schema.
+OfficeDocBench adapter output schema. Uses batch mode (compile once)
+and AILANG_NO_TRACE=1 for fair timing comparisons.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +29,9 @@ OUTPUT_DIR = REPO_DIR / "docparse" / "data"
 class DocParseAdapter(OfficeDocBenchAdapter):
     """Reference adapter using AILANG Parse."""
 
+    def __init__(self):
+        self._batch_cache: dict[str, dict] = {}
+
     def name(self) -> str:
         return "AILANG Parse"
 
@@ -33,19 +39,24 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         return "0.3.0"
 
     def parse(self, filepath: Path) -> dict[str, Any]:
-        """Run AILANG Parse via AILANG and convert output."""
+        """Run AILANG Parse on a single file. Uses batch cache if available."""
+        basename = filepath.name
+        if basename in self._batch_cache:
+            return self._batch_cache.pop(basename)
+
+        env = {**os.environ, "AILANG_NO_TRACE": "1"}
         result = subprocess.run(
             ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
              "--max-recursion-depth", "50000",
              "docparse/main.ail", str(filepath)],
             capture_output=True, text=True, cwd=str(REPO_DIR),
-            timeout=120,
+            timeout=120, env=env,
         )
 
         if result.returncode != 0:
             raise RuntimeError(f"AILANG Parse failed (exit {result.returncode}): {result.stderr[:200]}")
 
-        output_json_path = OUTPUT_DIR / f"{filepath.name}.json"
+        output_json_path = OUTPUT_DIR / f"{basename}.json"
         if not output_json_path.exists():
             raise RuntimeError(f"No output file: {output_json_path}")
 
@@ -54,11 +65,37 @@ class DocParseAdapter(OfficeDocBenchAdapter):
 
         return self._convert(raw)
 
-    def parse_from_golden(self, golden_path: Path) -> dict[str, Any]:
-        """Convert a golden output file directly (no re-parsing needed)."""
-        with open(golden_path) as f:
-            raw = json.load(f)
-        return self._convert(raw)
+    def parse_batch(self, filepaths: list[Path]) -> dict[str, dict[str, Any]]:
+        """Parse all files in one AILANG invocation (compile once).
+
+        Returns {filename: converted_output} for each successfully parsed file.
+        """
+        if not filepaths:
+            return {}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {**os.environ, "AILANG_NO_TRACE": "1", "DOCPARSE_OUTPUT_DIR": tmpdir}
+            cmd = [
+                "ailang", "run", "--batch", "--entry", "main",
+                "--caps", "IO,FS,Env", "--max-recursion-depth", "50000",
+                "docparse/main.ail",
+            ] + [str(f) for f in filepaths]
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                cwd=str(REPO_DIR), timeout=300, env=env,
+            )
+
+            outputs = {}
+            for fp in filepaths:
+                out_path = Path(tmpdir) / f"{fp.name}.json"
+                if out_path.exists():
+                    with open(out_path) as f:
+                        raw = json.load(f)
+                    outputs[fp.name] = self._convert(raw)
+
+        self._batch_cache = outputs
+        return outputs
 
     def supported_formats(self) -> set[str]:
         return {"docx", "pptx", "xlsx", "odt", "odp", "ods", "epub", "html", "csv", "tsv", "md"}

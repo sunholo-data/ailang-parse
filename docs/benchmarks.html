@@ -371,6 +371,7 @@
       <nav>
         <a href="#head-to-head" class="active">Head-to-Head</a>
         <a href="#full-suite">Full Suite</a>
+        <a href="#performance">Performance</a>
         <a href="#exclusive-features">Exclusive Features</a>
         <a href="#feature-heatmap">Feature Detection Heatmap</a>
         <a href="#what-we-measure">What We Measure</a>
@@ -492,6 +493,41 @@
       <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">MD</div><div class="dp-format-chip-count">3 files</div><div class="dp-format-chip-status">97.7%</div></div>
     </div>
     <p style="font-size:12px;color:var(--text-muted)">DOCX score drops to 90.9% due to aspirational metrics (bookmarks, footnotes, section breaks, hyperlinks). Scores below 100% represent real roadmap targets. Formats with blue borders are not supported by most competitors.</p>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- Performance -->
+  <section class="dp-bench-section reveal">
+    <h2 id="performance">Performance: Folder Parsing</h2>
+    <p>Real-world use case: parse a folder of <strong><span data-bench="folder_benchmark.total_files">58</span> mixed Office documents</strong> (<span data-bench="folder_benchmark.total_size_mb">22.9</span>MB across <span data-bench="folder_benchmark.formats">11</span> formats, including a 10MB DOCX and 11MB PPTX). AILANG Parse uses <strong>batch mode</strong> &mdash; compile once, parse all files &mdash; matching how <code>docparse ~/Documents/</code> works in practice.</p>
+
+    <div class="dp-bench-callout">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <div><strong>Fair comparison.</strong> Python-native tools (Kreuzberg, MarkItDown, Docling) run in-process with zero startup cost. AILANG Parse and Pandoc are subprocess-based. The total time reflects what users actually experience when parsing a folder. All tools tested on the same files, same machine.</div>
+    </div>
+
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <table class="dp-results-table">
+      <thead>
+        <tr><th>Tool</th><th>Files Parsed</th><th>Total Time</th><th>Per File</th><th>Quality (Composite)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Kreuzberg</td><td>55/58</td><td>318ms</td><td>6ms</td><td data-bench="kreuzberg.composite">71.3%</td></tr>
+        <tr><td>MarkItDown</td><td>46/58</td><td>905ms</td><td>20ms</td><td data-bench="markitdown.composite">67.9%</td></tr>
+        <tr style="font-weight:600"><td>AILANG Parse</td><td class="pass">58/58</td><td>2.54s</td><td>44ms</td><td class="pass" data-bench="ailang_parse.composite">92.2%</td></tr>
+        <tr><td>Unstructured</td><td>39/58</td><td>3.46s</td><td>89ms</td><td data-bench="unstructured.composite">62.1%</td></tr>
+        <tr><td>Pandoc</td><td>51/58</td><td>3.64s</td><td>71ms</td><td data-bench="pandoc.composite">74.6%</td></tr>
+        <tr><td>Docling</td><td>42/58</td><td>8.64s</td><td>206ms</td><td data-bench="docling.composite">64.0%</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted)"><span data-bench="folder_benchmark.total_files">58</span> files across 11 formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, EPUB, HTML, Markdown, CSV, TSV). AILANG Parse is the only tool that parses all files. LlamaParse and LiteParse omitted (API-based / >120s). Run date: <span data-bench="folder_benchmark.run_date">2026-04-10</span>.</p>
+
+    <div class="dp-bench-callout" style="margin-top:16px">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <div><strong>No quality compromise.</strong> The fastest tools (Kreuzberg 318ms, MarkItDown 905ms) fail on 3&ndash;12 files and score 20+ points lower on structural quality. AILANG Parse parses every file at 92.2% composite &mdash; competitive speed without sacrificing extraction quality. See our <a href="performance.html" style="color:#16a34a;font-weight:600">performance guide</a> for tuning tips.</div>
+    </div>
   </section>
 
   <hr class="dp-divider">

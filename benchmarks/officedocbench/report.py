@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import statistics
 from typing import Any
 
 
@@ -91,6 +92,58 @@ def print_summary(all_results: list[dict]) -> None:
         )
 
     print()
+
+
+def print_timing(all_results: list[dict]) -> None:
+    """Print a performance timing comparison table."""
+    print("## Performance (Timing)\n")
+    print("| Tool | Files | Median | Mean | Min | Max | Total |")
+    print("|------|-------|--------|------|-----|-----|-------|")
+
+    for ar in all_results:
+        ok_results = [r for r in ar["results"] if r["status"] == "OK"]
+        times = [r["time_ms"] for r in ok_results if "time_ms" in r]
+        n = len(times)
+        if not times:
+            print(f"| {ar['adapter']} | {n} | — | — | — | — | — |")
+            continue
+        med = statistics.median(times)
+        mean = statistics.mean(times)
+        total = sum(times)
+
+        def _fmt_time(ms: float) -> str:
+            if ms >= 1000:
+                return f"{ms/1000:.1f}s"
+            return f"{ms:.1f}ms"
+
+        print(
+            f"| {ar['adapter']} "
+            f"| {n} "
+            f"| {_fmt_time(med)} "
+            f"| {_fmt_time(mean)} "
+            f"| {_fmt_time(min(times))} "
+            f"| {_fmt_time(max(times))} "
+            f"| {_fmt_time(total)} |"
+        )
+
+    print()
+
+    # Per-file timing breakdown for largest files
+    print("### Per-File Timing (top 10 slowest per tool)\n")
+    for ar in all_results:
+        ok_results = [r for r in ar["results"] if r["status"] == "OK" and "time_ms" in r]
+        if not ok_results:
+            continue
+        ok_results.sort(key=lambda r: r["time_ms"], reverse=True)
+        top = ok_results[:10]
+        print(f"**{ar['adapter']}** v{ar.get('version', '?')}")
+        print(f"| File | Time | Format |")
+        print(f"|------|------|--------|")
+        for r in top:
+            t = r["time_ms"]
+            tstr = f"{t/1000:.2f}s" if t >= 1000 else f"{t:.1f}ms"
+            print(f"| {r['file']} | {tstr} | {r['format']} |")
+        print()
 
 
 def print_per_format(all_results: list[dict]) -> None:

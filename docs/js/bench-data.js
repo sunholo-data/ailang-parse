@@ -46,6 +46,29 @@
       // Top-level field like total_files / run_date
       return summary[top];
     }
+    // folder_benchmark.* → resolve into folder_benchmark object
+    if (top === 'folder_benchmark') {
+      var fb = summary.folder_benchmark;
+      if (!fb) return undefined;
+      // folder_benchmark.ailang_parse.total_ms → find in results array
+      var fbAdapter = (fb.results || []).find(function (r) { return r.id === parts[1]; });
+      if (fbAdapter) {
+        var fbNode = fbAdapter;
+        for (var j = 2; j < parts.length; j++) {
+          if (fbNode == null) return undefined;
+          fbNode = fbNode[parts[j]];
+        }
+        return fbNode;
+      }
+      // folder_benchmark.total_files etc.
+      var fbNode2 = fb;
+      for (var k = 1; k < parts.length; k++) {
+        if (fbNode2 == null) return undefined;
+        fbNode2 = fbNode2[parts[k]];
+      }
+      return fbNode2;
+    }
+
     // First segment is an adapter id, rest is a path into the adapter object
     var adapter = (summary.adapters || []).find(function (a) { return a.id === top; });
     if (!adapter) return undefined;

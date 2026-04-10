@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Parsing Performance Guide — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Get the best document parsing performance from AILANG Parse. Batch mode, tracing control, folder parsing tips — 58 files in 2.5 seconds.">
+<meta property="og:title" content="Document Parsing Performance Guide — AILANG Parse">
+<meta property="og:description" content="Parse 58 Office documents in 2.5 seconds. Batch mode, tracing control, and tuning tips for maximum document parsing performance.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/performance.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0;
+}
+@media (max-width: 768px) {
+  .dp-perf-grid { grid-template-columns: 1fr; }
+}
+.dp-perf-card {
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+}
+.dp-perf-card h3 {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+.dp-perf-card code {
+  font-size: 12px;
+}
+.dp-perf-do { border-color: var(--dp-green-border); }
+.dp-perf-do h3::before { content: "FAST "; color: var(--dp-green); }
+.dp-perf-dont { border-color: #ef444433; }
+.dp-perf-dont h3::before { content: "SLOW "; color: #ef4444; }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How fast is AILANG Parse compared to other document parsers?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse parses 58 mixed Office files (22.9MB, 11 formats) in 2.5 seconds using batch mode. This is faster than Unstructured (3.5s), Pandoc (3.6s), and Docling (8.6s) while parsing every file — competitors skip 7-19 files they don't support."}},
+    {"@type": "Question", "name": "Why is AILANG Parse slow on a single file?", "acceptedAnswer": {"@type": "Answer", "text": "Single-file invocations pay ~400ms of AILANG runtime startup (module compilation). Use batch mode to amortize this: pass multiple files or a folder to docparse, and per-file time drops to ~44ms."}},
+    {"@type": "Question", "name": "How do I enable batch mode in AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "The docparse CLI enables batch mode automatically when you pass multiple files or a folder. Just run: docparse ~/Documents/ or docparse *.docx *.pptx. No flags needed."}},
+    {"@type": "Question", "name": "What does AILANG_NO_TRACE do?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG_NO_TRACE=1 disables auto-trace collection, which creates millions of objects per run when OpenTelemetry endpoints are configured. This gives a 2-5x speedup. The docparse CLI sets this by default."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Document Parsing Performance</span> Guide</h1>
+    <p class="subtitle reveal reveal-delay-1">58 files, 22.9MB, 11 formats — 2.5 seconds. How to get the best throughput from AILANG Parse.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#batch-mode" class="active">Batch Mode</a>
+        <a href="#tracing">Tracing Control</a>
+        <a href="#folder-benchmark">Folder Benchmark</a>
+        <a href="#cli-vs-api">CLI vs API</a>
+        <a href="#single-file">Single-File Overhead</a>
+        <a href="#tips">Quick Tips</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="batch-mode">Batch Mode: Compile Once, Parse Many</h2>
+      <p>AILANG Parse compiles 38 modules before parsing starts. In batch mode, this happens once — then every file is parsed with zero recompilation. This is the single most important document parsing performance optimisation.</p>
+
+      <div class="dp-perf-grid">
+        <div class="dp-perf-card dp-perf-do">
+          <h3>Batch (multiple files or folder)</h3>
+          <pre style="margin:0"><code class="language-bash"># Pass multiple files
+docparse *.docx *.pptx *.xlsx
+
+# Or an entire folder
+docparse ~/Documents/
+
+# Both auto-enable batch mode</code></pre>
+          <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0">58 files in <strong>2.5s</strong> (44ms/file)</p>
+        </div>
+        <div class="dp-perf-card dp-perf-dont">
+          <h3>Loop (recompiles each time)</h3>
+          <pre style="margin:0"><code class="language-bash"># Don't do this — each invocation
+# recompiles all 38 modules
+for f in *.docx; do
+  docparse "$f"
+done</code></pre>
+          <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0">58 files in <strong>~25s</strong> (~430ms/file)</p>
+        </div>
+      </div>
+
+      <p>The <code>docparse</code> CLI detects multiple arguments automatically and passes <code>--batch</code> to AILANG. No extra flags needed.</p>
+
+      <h2 id="tracing">Tracing Control</h2>
+      <p>AILANG's auto-trace collector creates ~2.7M objects per run when <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> or <code>GOOGLE_CLOUD_PROJECT</code> is set. The <code>docparse</code> CLI disables this by default for a 2&ndash;5x speedup.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>File</th><th>With Trace</th><th>No Trace</th><th>Speedup</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Alice EPUB (185KB)</td><td>2.59s</td><td><span class="dp-preserved">1.26s</span></td><td>2.1x</td></tr>
+          <tr><td>Moby Dick EPUB (797KB)</td><td>9.79s</td><td><span class="dp-preserved">2.82s</span></td><td>3.5x</td></tr>
+          <tr><td>10MB DOCX</td><td>1.95s</td><td><span class="dp-preserved">0.40s</span></td><td>4.9x</td></tr>
+        </tbody>
+      </table>
+
+      <p>If you call <code>ailang run</code> directly (bypassing the CLI wrapper), set the environment variable yourself:</p>
+
+      <pre><code class="language-bash"># Direct ailang invocation with tracing disabled
+AILANG_NO_TRACE=1 ailang run --batch --entry main --caps IO,FS,Env \
+  --max-recursion-depth 50000 docparse/main.ail file1.docx file2.pptx
+
+# Re-enable tracing for debugging
+AILANG_NO_TRACE=0 docparse report.docx</code></pre>
+
+      <h2 id="folder-benchmark">Folder Benchmark</h2>
+      <p>58 files across 11 formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, EPUB, HTML, Markdown, CSV, TSV), including a 10MB DOCX and 11MB PPTX. Same files, same machine, measured wall-clock time.</p>
+
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Tool</th><th>Files Parsed</th><th>Total Time</th><th>Per File</th><th>Quality</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Kreuzberg v4.7.2</td><td>55/58</td><td>318ms</td><td>6ms</td><td>71.3%</td></tr>
+          <tr><td>MarkItDown v0.1.5</td><td>46/58</td><td>905ms</td><td>20ms</td><td>67.9%</td></tr>
+          <tr style="font-weight:600"><td>AILANG Parse v0.3.0</td><td>58/58</td><td>2.54s</td><td>44ms</td><td>92.2%</td></tr>
+          <tr><td>Unstructured v0.22.16</td><td>39/58</td><td>3.46s</td><td>89ms</td><td>62.1%</td></tr>
+          <tr><td>Pandoc v3.9.0</td><td>51/58</td><td>3.64s</td><td>71ms</td><td>74.6%</td></tr>
+          <tr><td>Docling v2.84.0</td><td>42/58</td><td>8.64s</td><td>206ms</td><td>64.0%</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>No quality compromise.</strong> The fastest tools skip 3&ndash;19 files and score 20+ points lower on structural quality. AILANG Parse parses every file at 92.2% composite — competitive speed, best extraction. See <a href="benchmarks.html" style="color:var(--dp-blue);font-weight:600">full benchmark results</a>.</div>
+      </div>
+
+      <h2 id="cli-vs-api">CLI vs API Server</h2>
+
+      <div class="dp-perf-grid">
+        <div class="dp-perf-card">
+          <h3>CLI (docparse)</h3>
+          <p style="font-size:13px;color:var(--text-secondary)">Best for: batch processing folders, CI/CD pipelines, one-off conversions.</p>
+          <ul style="font-size:13px;margin:8px 0 0;padding-left:16px">
+            <li>Batch mode amortises compilation</li>
+            <li>Zero network overhead</li>
+            <li>Processes local files directly</li>
+          </ul>
+        </div>
+        <div class="dp-perf-card">
+          <h3>API Server</h3>
+          <p style="font-size:13px;color:var(--text-secondary)">Best for: web apps, real-time parsing, multi-user access.</p>
+          <ul style="font-size:13px;margin:8px 0 0;padding-left:16px">
+            <li>AILANG modules stay compiled in memory</li>
+            <li>No startup cost per request</li>
+            <li>Sub-100ms response for most files</li>
+          </ul>
+        </div>
+      </div>
+
+      <p>For sustained throughput (e.g., processing uploads), the API server avoids compilation overhead entirely. For batch jobs against local files, the CLI with folder input is optimal.</p>
+
+      <h2 id="single-file">Single-File Overhead</h2>
+      <p>Parsing a single file via <code>docparse report.docx</code> takes ~400&ndash;500ms regardless of file size. This is AILANG runtime startup (module compilation), not parse time. The actual parse of a 5KB DOCX is <1ms.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>File</th><th>Single File</th><th>In Batch</th><th>Startup Overhead</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>sample.docx (5KB)</td><td>411ms</td><td>~2ms</td><td>~409ms</td></tr>
+          <tr><td>tables.docx (31KB)</td><td>466ms</td><td>~5ms</td><td>~461ms</td></tr>
+          <tr><td>10MB DOCX</td><td>472ms</td><td>~70ms</td><td>~402ms</td></tr>
+          <tr><td>Moby Dick EPUB (797KB)</td><td>2.78s</td><td>~2.3s</td><td>~480ms</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12px;color:var(--text-muted)">AILANG incremental compilation caching (M-INCREMENTAL-TYPECHECK) will reduce startup further in a future release.</p>
+
+      <h2 id="tips">Quick Performance Tips</h2>
+      <ol>
+        <li><strong>Always batch.</strong> Pass folders or globs: <code>docparse ~/inbox/</code> or <code>docparse *.docx *.xlsx</code></li>
+        <li><strong>Use the CLI wrapper.</strong> <code>docparse</code> sets <code>AILANG_NO_TRACE=1</code> and auto-enables batch mode.</li>
+        <li><strong>Use the API for real-time.</strong> Compilation stays in memory — every request is pure parse time.</li>
+        <li><strong>Skip AI for Office files.</strong> DOCX/PPTX/XLSX/ODF parsing is deterministic and needs no AI model. Only PDFs and images require <code>--ai</code>.</li>
+        <li><strong>Profile if needed.</strong> Pass <code>-cpuprofile profile.out</code> or <code>-memprofile mem.out</code> to <code>ailang run</code> for Go pprof analysis.</li>
+      </ol>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How fast is AILANG Parse compared to other document parsers?</summary>
+          <div class="dp-faq-answer"><p>58 mixed Office files (22.9MB, 11 formats) in 2.5 seconds using batch mode. Faster than Unstructured (3.5s), Pandoc (3.6s), and Docling (8.6s) while parsing every file.</p></div>
+        </details>
+        <details>
+          <summary>Why is AILANG Parse slow on a single file?</summary>
+          <div class="dp-faq-answer"><p>Single-file invocations pay ~400ms of AILANG runtime startup. Use batch mode (pass multiple files or a folder) to amortise this — per-file time drops to ~44ms.</p></div>
+        </details>
+        <details>
+          <summary>How do I enable batch mode?</summary>
+          <div class="dp-faq-answer"><p>The <code>docparse</code> CLI enables it automatically when you pass multiple files or a folder. Just run <code>docparse ~/Documents/</code>. No flags needed.</p></div>
+        </details>
+        <details>
+          <summary>What does AILANG_NO_TRACE do?</summary>
+          <div class="dp-faq-answer"><p>Disables auto-trace collection (2.7M objects per run when OTEL endpoints are configured). Gives 2&ndash;5x speedup. The <code>docparse</code> CLI sets this by default.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/bench-data.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
