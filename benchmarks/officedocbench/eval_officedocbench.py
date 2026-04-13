@@ -272,14 +272,34 @@ def main():
         print(f"  Evaluating {adapter.name()} v{adapter.version()}...", file=sys.stderr)
         use_golden = not args.live
         result = evaluate_adapter(adapter, gt_files, args.format, use_golden=use_golden)
+
+        # If the run produced 0 OK results, fall back to previous results on disk
+        ok_count = sum(1 for r in result["results"] if r["status"] == "OK")
+        result_dir = RESULTS_DIR / name
+        prev_path = result_dir / "results.json"
+        if ok_count == 0 and prev_path.exists():
+            with open(prev_path) as f:
+                prev = json.load(f)
+            prev_ok = sum(1 for r in prev["results"] if r["status"] == "OK")
+            if prev_ok > 0:
+                print(f"  WARNING: {adapter.name()} returned 0 results this run "
+                      f"(likely API credit exhaustion). Using previous results "
+                      f"({prev_ok}/{len(prev['results'])} files).", file=sys.stderr)
+                result = prev
+            else:
+                print(f"  WARNING: {adapter.name()} returned 0 results and no "
+                      f"previous results available.", file=sys.stderr)
+
         all_results.append(result)
 
-        # Save results
+        # Save results (only overwrite if we got actual results)
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        result_dir = RESULTS_DIR / name
         result_dir.mkdir(parents=True, exist_ok=True)
-        with open(result_dir / "results.json", "w") as f:
-            json.dump(result, f, indent=2)
+        if ok_count > 0:
+            with open(result_dir / "results.json", "w") as f:
+                json.dump(result, f, indent=2)
+        else:
+            print(f"  Skipping save for {adapter.name()} (0 results, preserving previous).", file=sys.stderr)
 
     # Write summary.json — single source of truth for headline numbers used by docs.
     # Only refresh when running --all or a single adapter wouldn't give a complete picture.
