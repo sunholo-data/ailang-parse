@@ -35,6 +35,7 @@ import docparse/services/odt_parser (odtExtractBody, odtParseMetadata, odtExtrac
 import docparse/services/odp_parser (odpExtractSlides, odpParseMetadata)
 import docparse/services/ods_parser (odsExtractSheets, odsParseMetadata)
 import docparse/services/epub_parser (epubFindOpfPath, epubExtractSpine, epubParseOpfMetadata)
+import docparse/services/tex_parser (parseLatex)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
 import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert, documentToA2UI, a2ui_jsonToBlockList)
 
@@ -180,6 +181,12 @@ export pure func parseCsvContent(content: string, delimiter: string) -> string {
 -- Parse Markdown content -> JSON array of blocks
 export pure func parseMarkdownContent(content: string) -> string {
   encode(ja(blocksToJson(parseMarkdown(content))))
+}
+
+-- Parse LaTeX content -> JSON array of blocks
+-- Single-file only — \input/\include resolution requires FS and runs server-side.
+export pure func parseTexContent(content: string) -> string {
+  encode(ja(blocksToJson(parseLatex(content))))
 }
 
 -- Parse EML email content -> JSON array of blocks
