@@ -244,14 +244,15 @@ data/test_files/arxiv_sample.tex            (representative fixture)
 ### Archive handling (iteration 2)
 
 arXiv source arrives as `.tar.gz`. [zip_extract.ail](../../../docparse/services/zip_extract.ail)
-handles `.zip` (used for DOCX/PPTX); `.tar.gz` is adjacent work. Ship
-order:
+handles `.zip` (used for DOCX/PPTX); `.tar.gz` support landed in
+ailang-parse v0.11.0 once `std/tar` + `std/gzip` shipped in AILANG v0.11.5.
 
-- **v0.15.0-beta:** raw `.tex` file input only. Users extract tar.gz
-  themselves.
-- **v0.15.0 GA:** `.tar.gz` bundle support — auto-detect main `.tex`
-  (heuristics: `\documentclass` presence + filename matches title), walk
-  `\input`/`\include`, resolve `\includegraphics` against bundled images.
+**Status: shipped.** See [tex_archive_extract.ail](../../../docparse/services/tex_archive_extract.ail).
+Flow: `std/gzip.decompressFile` → `std/bytes.fromBase64` →
+`std/fs.writeFileBytes` to a temp `.tar` → `std/tar.extractAll` → scan
+extracted files for `\documentclass` to locate main `.tex` → feed to the
+existing `expandInputs` resolver. BERT (`devlin_bert.tar.gz`) parses
+end-to-end with 13 `\input` files recursively resolved.
 
 ---
 

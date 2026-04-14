@@ -19,6 +19,7 @@ import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
+import docparse/services/tex_archive_extract (extractArxivBundle, isTarGz)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
@@ -118,8 +119,12 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=30, Env} 
   }
   else {
     -- Step 1: Detect format
-    let ext = getExtension(filepath);
-    let format = detectFormat(ext);
+    -- Special case: archive extensions (.tar.gz, .tgz, .tex.gz) route to
+    -- the LaTeX pipeline — arXiv source bundles. getExtension only returns
+    -- the last dotted suffix (".gz"), so we check the full filename first.
+    let rawExt = getExtension(filepath);
+    let ext = if isTarGz(filepath) then "tar.gz" else rawExt;
+    let format = if isTarGz(filepath) then "latex" else detectFormat(rawExt);
     let strategy = strategyDescription(format);
     println("File:     " ++ filepath);
     println("Format:   " ++ format ++ " (" ++ ext ++ ")");
@@ -748,21 +753,46 @@ func parseMarkdownDocument(filepath: string, convertTarget: string) -> () ! {IO,
   writeOutputs(doc, result, false, filepath, convertTarget)
 }
 
+-- Resolve the main .tex path. If the input is a .tar.gz / .tgz / .tex.gz
+-- bundle (arXiv source), extract it and pick the file containing
+-- \documentclass. Otherwise return the path unchanged.
+func resolveLatexSource(filepath: string) -> string ! {IO, FS} {
+  if isTarGz(filepath) then {
+    let _ = println("Archive detected (" ++ filepath ++ ") — extracting...");
+    match extractArxivBundle(filepath) {
+      Ok(r) => {
+        let _ = println("Extracted to " ++ r.dir ++ ". Main .tex: " ++ r.main);
+        r.main
+      },
+      Err(msg) => {
+        let _ = println("Extract failed: " ++ msg);
+        filepath
+      }
+    }
+  } else filepath
+}
+
 -- Parse a LaTeX/TeX document (pure AILANG, no dependencies)
 -- Effectful wrapper around the pure core parseLatex / parseLatexMetadata.
 -- Scientific-paper wedge: deterministic parsing of .tex source (as found in
 -- ~89% of arXiv papers) where competitors are OCR-bound on the rendered PDF.
+-- Accepts raw .tex files or .tar.gz / .tgz arXiv source bundles.
 func parseLatexDocument(filepath: string, convertTarget: string) -> () ! {IO, FS, AI, Env} {
   println("--- Parsing LaTeX (pure AILANG, deterministic) ---");
   println("");
 
-  let rawContent = readFile(filepath);
+  -- Detect arXiv-style .tar.gz / .tgz bundles and extract before parsing.
+  -- The main .tex file is auto-detected (one containing \documentclass).
+  -- Requires std/tar + std/gzip (AILANG v0.11.4+).
+  let mainTexPath = resolveLatexSource(filepath);
+
+  let rawContent = readFile(mainTexPath);
   println("Parsing " ++ show(length(rawContent)) ++ " chars of LaTeX source...");
 
   -- Resolve \input{...} and \include{...} against the main file's
   -- directory before parsing. Single-file papers are unaffected; multi-file
   -- bundles (BERT, Vaswani, etc.) get their fragments spliced inline.
-  let basedir = texDirname(filepath);
+  let basedir = texDirname(mainTexPath);
   let content = expandInputs(basedir, rawContent);
   if length(content) != length(rawContent) then
     println("After \\input expansion: " ++ show(length(content)) ++ " chars.")
