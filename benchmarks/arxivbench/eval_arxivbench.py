@@ -10,6 +10,14 @@ and, optionally, a .pdf rendering), this harness:
      equations, tables, citations, bibliography, lists, figures).
   4. Reports per-paper, per-adapter, and per-dimension coverage.
 
+Scoring definition: all scores measure STRUCTURAL PRESERVATION —
+i.e., whether the parser emits each element as a typed, separable
+block (a \bibitem as one bibliography entry record, a $...$ span as
+an equation block with LaTeX source preserved). Raw text capture is
+a separate concern; an OCR parser that dumps the reference list as
+paragraphs correctly scores 0 on bibliography_entries here, even if
+every citation word is present in the flat output. See README.md.
+
 The whole point of the benchmark is the source-vs-OCR contrast, so
 adapters that read .tex (AILANG, Pandoc) are compared on equal terms
 while PDF-OCR baselines (Docling, LlamaParse, MarkItDown, Unstructured)
@@ -273,7 +281,9 @@ def print_text_report(results: dict[str, Any]) -> None:
         print("  " + "  ".join(row))
 
     # Per-adapter coverage matrix
-    print("\n=== Coverage (mean across papers where truth > 0) ===")
+    print("\n=== Structural coverage (mean across papers where truth > 0) ===")
+    print("  (Scores measure structural preservation — e.g. \\bibitem entries")
+    print("   as typed records, not whether reference-list text is present.)")
     header = ["adapter", "input", "papers", "sec", "eq_d", "eq_i", "tab", "fig", "cite", "bib", "list", "thm", "avg_s"]
     print("  " + "  ".join(h.ljust(8) for h in header))
     for key, s in summary.items():

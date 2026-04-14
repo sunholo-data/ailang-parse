@@ -28,6 +28,32 @@ This benchmark quantifies how much better.
 3. **Scoring.** Per dimension, `score = min(observed, truth) / truth`.
    Aggregated per adapter as the mean across papers where `truth > 0`.
 
+### What these scores actually measure
+
+**Structural preservation, not raw text capture.** A PDF-OCR parser
+scoring 0% on `equations_display` is not failing to read the equation —
+it is failing to emit it as a structurally distinct, re-renderable
+block. The rendered equation text is typically still present in the
+adapter output, often as mangled unicode (`E = mc2` with subscripts
+lost, or `∫ x dx` glyph-stitched). What's gone is the `$…$` source,
+the equation number, and the cross-reference linkage.
+
+Same for `bibliography_entries`: OCR adapters dump the reference list
+as paragraphs. The text of each entry is there, but there's no typed
+record per entry with a backlinkable citation key. Downstream RAG
+cannot build a citation graph from that.
+
+This distinction matters because "the words are there" is the bar for
+full-text search, while "the structure is there" is the bar for
+scientific RAG, citation graph construction, equation search, and
+reference resolution. arxivbench measures the second bar; the first
+bar is OmniDocBench territory.
+
+The counts are deliberately strict (`\bibitem`, `$…$`, `\cite{…}` etc.
+as exact markers) to avoid false-positives from flat text. An adapter
+that emits 42 bibliography entries as plain paragraphs scores 0 — it
+did not do the work of separating them.
+
 ## Scoring dimensions
 
 | Dimension | What it measures |
@@ -48,10 +74,13 @@ The corpus lives at [`data/test_files/arxiv/`](../../data/test_files/arxiv/).
 Each directory is one paper; the main `.tex` file is auto-selected
 (preferring `main.tex` / `<dirname>.tex` / single-file directories).
 
-Current scope: **single-file LaTeX only**. Multi-file bundles that rely
-on `\input`/`\include` are excluded until effectful `\input` resolution
-lands (v0.15.1). Plain TeX (harvmac-style, `\chap`/`\sec`) is out of
-scope by design — see [design_docs/planned/v0_15_0/latex_parser.md](../../design_docs/planned/v0_15_0/latex_parser.md).
+Current scope: **multi-file LaTeX supported** as of v0.15.0 —
+`\input`/`\include` directives are resolved depth-first with cycle
+detection (see [tex_input_resolver.ail](../../docparse/services/tex_input_resolver.ail)).
+Plain TeX (harvmac-style, `\chap`/`\sec`) remains out of scope by
+design — see [design_docs/planned/v0_15_0/latex_parser.md](../../design_docs/planned/v0_15_0/latex_parser.md).
+arXiv `.tar.gz` bundle handling is deferred to v0.15.1, blocked on
+upstream [ailang-core#156](https://github.com/sunholo-data/ailang/issues/156).
 
 ## Usage
 
