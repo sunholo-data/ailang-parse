@@ -133,9 +133,49 @@ def extract_truth(tex_source: str) -> dict[str, Any]:
     }
 
 
+_INPUT_RE = re.compile(r"\\(?:input|include)\s*\{([^}]+)\}")
+
+
+def _resolve_inputs(tex_source: str, basedir: Path, depth: int = 0,
+                    visited: set[Path] | None = None) -> str:
+    """Expand \\input{...} and \\include{...} directives by reading the
+    referenced files relative to basedir. Mirrors the AILANG resolver:
+    DFS, depth cap 10, cycle detection, try `<arg>.tex` then `<arg>`.
+    """
+    if depth > 10:
+        return tex_source
+    if visited is None:
+        visited = set()
+
+    def repl(m: re.Match) -> str:
+        arg = m.group(1).strip()
+        for candidate in (basedir / f"{arg}.tex", basedir / arg):
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                continue
+            if not resolved.is_file():
+                continue
+            if resolved in visited:
+                return f"% [input cycle: {arg}]"
+            try:
+                inner = resolved.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            return "\n" + _resolve_inputs(inner, resolved.parent,
+                                          depth + 1, visited | {resolved}) + "\n"
+        return f"% [input not found: {arg}]"
+
+    return _INPUT_RE.sub(repl, tex_source)
+
+
 def extract_truth_from_file(tex_path: Path) -> dict[str, Any]:
     with open(tex_path, encoding="utf-8", errors="replace") as f:
-        return extract_truth(f.read())
+        raw = f.read()
+    # Resolve \input/\include so truth counts reflect the full paper, not
+    # just the thin wrapper file (vaswani_attention, devlin_bert, etc.).
+    expanded = _resolve_inputs(raw, tex_path.parent)
+    return extract_truth(expanded)
 
 
 if __name__ == "__main__":

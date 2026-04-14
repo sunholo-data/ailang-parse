@@ -18,6 +18,7 @@ import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStr
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
+import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
@@ -755,8 +756,17 @@ func parseLatexDocument(filepath: string, convertTarget: string) -> () ! {IO, FS
   println("--- Parsing LaTeX (pure AILANG, deterministic) ---");
   println("");
 
-  let content = readFile(filepath);
-  println("Parsing " ++ show(length(content)) ++ " chars of LaTeX source...");
+  let rawContent = readFile(filepath);
+  println("Parsing " ++ show(length(rawContent)) ++ " chars of LaTeX source...");
+
+  -- Resolve \input{...} and \include{...} against the main file's
+  -- directory before parsing. Single-file papers are unaffected; multi-file
+  -- bundles (BERT, Vaswani, etc.) get their fragments spliced inline.
+  let basedir = texDirname(filepath);
+  let content = expandInputs(basedir, rawContent);
+  if length(content) != length(rawContent) then
+    println("After \\input expansion: " ++ show(length(content)) ++ " chars.")
+  else println("");
 
   let meta = parseLatexMetadata(content);
   let blocks = parseLatex(content);
