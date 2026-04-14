@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LaTeX & arXiv Parsing — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse LaTeX and arXiv papers deterministically from source. 100% equation, 100% bibliography, 93% citation coverage — where PDF-OCR parsers score 0%.">
+<meta property="og:title" content="LaTeX & arXiv Parsing — AILANG Parse">
+<meta property="og:description" content="Deterministic LaTeX parser for scientific RAG. Reads .tex source directly — no OCR. 19/19 arXiv papers parsed with full equation and bibliography fidelity.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/latex-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.coverage-table td:first-child { font-weight: 600; }
+.coverage-table td.metric { font-family: var(--font-mono); text-align: right; }
+.coverage-table td.ailang { background: rgba(34, 197, 94, 0.08); font-weight: 600; }
+.coverage-table td.zero { color: var(--dp-red, #dc2626); }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Why parse the .tex source instead of the PDF?",
+     "acceptedAnswer": {"@type": "Answer", "text": "The .tex file is the authored source. PDF is a rendering that loses equation structure, citation keys, and bibliography metadata. OCR-based parsers score 0% on equations and bibliography because those signals don't survive rendering."}},
+    {"@type": "Question", "name": "Does AILANG Parse handle multi-file LaTeX papers?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. \\input and \\include directives are resolved recursively with a depth cap of 10 and cycle detection. Multi-file papers like the Vaswani Attention paper and BERT parse end-to-end."}},
+    {"@type": "Question", "name": "What about custom macros and \\newcommand?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Standard LaTeX sectioning, math environments, tables, figures, lists, theorems, and citations are supported. Deeply macro-driven papers (harvmac sectioning, custom \\newcolumntype) degrade gracefully — the paper still parses, with macro-defined structure counted lower. Pandoc fails outright on these; AILANG keeps going."}},
+    {"@type": "Question", "name": "Can I get the raw LaTeX equations back?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. Equations are preserved as raw LaTeX inside TextBlock entries with style set to equation. This is what downstream LLMs and RAG systems actually want — don't render to MathML or Unicode."}},
+    {"@type": "Question", "name": "Is arXiv source freely available?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. arXiv provides bulk .tex source for ~89% of its 2M+ papers. The remaining ~11% are PDF-only submissions; those fall through to the PDF parsing path."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">LaTeX & arXiv</span> parsing — deterministic, from source</h1>
+    <p class="subtitle reveal reveal-delay-1">Every PDF-OCR parser scores 0% on equations and bibliography. AILANG Parse reads the <code>.tex</code> source directly — 100% equation preservation, 93% citation coverage, 19/19 papers on the arxivbench corpus.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#coverage">Coverage</a>
+        <a href="#multi-file">Multi-File Papers</a>
+        <a href="#example-output">Example Output</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">The Problem</h2>
+      <p>Scientific RAG runs on a corpus that's LaTeX-native: <strong>arXiv alone holds 2M+ papers, ~89% with <code>.tex</code> source available</strong>. Every mainstream document parser — Docling, LlamaParse, MarkItDown, Unstructured — converts those papers to PDF first, then OCRs the rendering. Equations become garbled unicode. Citations lose their keys. Bibliography entries disappear into the reference list as plain text.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>On the <a href="benchmarks.html">arxivbench</a> corpus of 19 peer-reviewed papers, every PDF-based parser scored <strong>0% on equation preservation</strong> and <strong>0% on bibliography entries</strong>. The signal isn't weak — it's absent.</div>
+      </div>
+
+      <h2 id="how-it-works">How It Works</h2>
+      <p>AILANG Parse treats <code>.tex</code> as a first-class input format alongside DOCX and XLSX. The parser is pure, deterministic AILANG — no OCR, no rendering step, no model calls.</p>
+
+      <p>The <code>\input</code> / <code>\include</code> resolver runs before the pure parser, reading referenced files depth-first with a cycle detector and a depth cap of 10. Unresolved references become LaTeX comments so the downstream parser stays effect-free. Equations, citations, and bibliography entries are mapped onto the existing Block ADT — no new variants needed.</p>
+
+      <pre><code class="language-bash"># Parse an arXiv paper directly from .tex source
+./bin/docparse data/test_files/arxiv/vaswani_attention/ms.tex
+
+# Multi-file papers: \input is resolved automatically
+#   [\input] introduction -> introduction.tex (5300 chars)
+#   [\input] background -> background.tex (8376 chars)
+#   ...
+#   After \input expansion: 79593 chars.
+#   Extracted 125 blocks.</code></pre>
+
+      <h2 id="coverage">Coverage on arxivbench</h2>
+      <p>Every adapter is scored against structural truth extracted from the raw <code>.tex</code> source. Score = <code>min(observed, truth) / truth</code>, averaged across papers where truth &gt; 0.</p>
+
+      <table class="dp-config-table coverage-table">
+        <thead>
+          <tr>
+            <th>Dimension</th>
+            <th>AILANG (tex)</th>
+            <th>Pandoc (tex)</th>
+            <th>Docling (pdf)</th>
+            <th>MarkItDown (pdf)</th>
+            <th>Unstructured (pdf)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Papers parsed</td><td class="metric ailang">19/19</td><td class="metric">15/19</td><td class="metric">13/19</td><td class="metric">13/19</td><td class="metric">13/19</td></tr>
+          <tr><td>Sections</td><td class="metric ailang">94%</td><td class="metric">77%</td><td class="metric">64%</td><td class="metric zero">1%</td><td class="metric">75%</td></tr>
+          <tr><td>Equations (display)</td><td class="metric ailang">79%</td><td class="metric">63%</td><td class="metric zero">0%</td><td class="metric zero">0%</td><td class="metric zero">0%</td></tr>
+          <tr><td>Equations (inline)</td><td class="metric ailang">76%</td><td class="metric">57%</td><td class="metric zero">0%</td><td class="metric zero">0%</td><td class="metric zero">0%</td></tr>
+          <tr><td>Tables</td><td class="metric ailang">79%</td><td class="metric">32%</td><td class="metric">63%</td><td class="metric">56%</td><td class="metric zero">0%</td></tr>
+          <tr><td>Figures</td><td class="metric ailang">100%</td><td class="metric">61%</td><td class="metric">70%</td><td class="metric zero">0%</td><td class="metric zero">0%</td></tr>
+          <tr><td>Citations</td><td class="metric ailang">93%</td><td class="metric">66%</td><td class="metric">19%</td><td class="metric">23%</td><td class="metric">23%</td></tr>
+          <tr><td>Bibliography</td><td class="metric ailang">100%</td><td class="metric zero">0%</td><td class="metric zero">0%</td><td class="metric zero">0%</td><td class="metric zero">0%</td></tr>
+          <tr><td>Lists</td><td class="metric ailang">93%</td><td class="metric">51%</td><td class="metric">46%</td><td class="metric">23%</td><td class="metric">55%</td></tr>
+          <tr><td>Theorems</td><td class="metric ailang">100%</td><td class="metric">47%</td><td class="metric zero">0%</td><td class="metric zero">0%</td><td class="metric zero">0%</td></tr>
+        </tbody>
+      </table>
+
+      <p>Pandoc also reads <code>.tex</code> source but fails outright on 4 of 19 papers — custom <code>\newcolumntype</code> macros, <code>\input harvmac</code>, and a handful of package-specific primitives. AILANG degrades gracefully: the paper still parses, with unrecognized constructs preserved as raw text rather than killing the run.</p>
+
+      <h2 id="multi-file">Multi-File Papers</h2>
+      <p>Most papers over ~15 pages ship as a thin <code>main.tex</code> or <code>ms.tex</code> that pulls in per-section files via <code>\input{background}</code>, <code>\input{introduction}</code>, and so on. Parsing just the wrapper captures almost nothing — the real content lives behind the directives.</p>
+
+      <p>Resolution is depth-first with a depth cap of 10 and cycle detection via a visited-set. Paths are tried in the order <code>&lt;basedir&gt;/&lt;arg&gt;.tex</code> → <code>&lt;basedir&gt;/&lt;arg&gt;</code>. Unresolved or cyclic references become LaTeX comments so downstream code stays silent.</p>
+
+      <pre><code class="language-bash"># Vaswani "Attention Is All You Need" — 10 \input files
+./bin/docparse data/test_files/arxiv/vaswani_attention/ms.tex
+# Parsing 17611 chars of LaTeX source...
+#     [\input] introduction -> introduction.tex (5300 chars)
+#     [\input] background -> background.tex (8376 chars)
+#     [\input] model_architecture -> model_architecture.tex (17109 chars)
+#     [\input] why_self_attention -> why_self_attention.tex (7867 chars)
+#     [\input] training -> training.tex (4444 chars)
+#     [\input] results -> results.tex (11800 chars)
+#     [\input] visualizations -> visualizations.tex (1543 chars)
+#     [\input] parameter_attention -> parameter_attention.tex (3489 chars)
+#     [\input] sqrt_d_trick -> sqrt_d_trick.tex (2226 chars)
+# After \input expansion: 79593 chars.
+# Extracted 125 blocks.</code></pre>
+
+      <h2 id="example-output">Example Output</h2>
+      <p>Equations are preserved as raw LaTeX inside <code>TextBlock</code> entries with <code>style: "equation"</code>. This is what LLMs and downstream RAG systems actually want — don't render to MathML or Unicode; keep the source.</p>
+
+      <pre><code class="language-json">{
+  "blocks": [
+    {"kind": "HeadingBlock", "level": 1, "text": "Attention Is All You Need"},
+    {"kind": "HeadingBlock", "level": 2, "text": "3.2 Attention"},
+    {
+      "kind": "TextBlock",
+      "style": "equation",
+      "text": "\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right) V"
+    },
+    {
+      "kind": "TextBlock",
+      "text": "The dot-product attention is identical to our algorithm, except for the scaling factor of [cite:bahdanau2014neural]."
+    },
+    {"kind": "TableBlock", "rows": [...], "caption": "Table 1: Maximum path lengths..."},
+    {
+      "kind": "SectionBlock",
+      "heading": "References",
+      "blocks": [
+        {"kind": "TextBlock", "style": "bibitem", "key": "vaswani2017attention",
+         "text": "Vaswani, A., Shazeer, N., ..."}
+      ]
+    }
+  ]
+}</code></pre>
+
+      <h2 id="try-it">Try It</h2>
+      <p>LaTeX is one of <span data-dp="formats.input_count">15</span> supported input formats. The parser is pure AILANG — zero model calls, zero OCR, fully deterministic.</p>
+
+      <pre><code class="language-bash"># Upload a .tex file
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -F "filepath=@paper.tex" \
+  -F "outputFormat=markdown" \
+  -F "apiKey=YOUR_API_KEY"
+
+# Or via the CLI with a local arXiv paper
+./bin/docparse paper.tex --convert paper.md</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="benchmarks.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">See Benchmarks</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>Why parse the .tex source instead of the PDF?</summary>
+          <div class="dp-faq-answer"><p>The <code>.tex</code> file is the authored source. PDF is a rendering that loses equation structure, citation keys, and bibliography metadata. OCR-based parsers score 0% on equations and bibliography because those signals don't survive rendering. See the <a href="#coverage">coverage table</a>.</p></div>
+        </details>
+        <details>
+          <summary>Does AILANG Parse handle multi-file LaTeX papers?</summary>
+          <div class="dp-faq-answer"><p>Yes. <code>\input</code> and <code>\include</code> directives are resolved recursively with a depth cap of 10 and cycle detection. Multi-file papers like Vaswani's Attention paper and BERT parse end-to-end. See <a href="#multi-file">Multi-File Papers</a>.</p></div>
+        </details>
+        <details>
+          <summary>What about custom macros and \newcommand?</summary>
+          <div class="dp-faq-answer"><p>Standard LaTeX sectioning, math environments, tables, figures, lists, theorems, and citations are supported. Deeply macro-driven papers (harvmac sectioning, custom <code>\newcolumntype</code>) degrade gracefully — the paper still parses, with macro-defined structure counted lower. Pandoc fails outright on these; AILANG keeps going.</p></div>
+        </details>
+        <details>
+          <summary>Can I get the raw LaTeX equations back?</summary>
+          <div class="dp-faq-answer"><p>Yes. Equations are preserved as raw LaTeX inside <code>TextBlock</code> entries with <code>style: "equation"</code>. This is what downstream LLMs and RAG systems actually want — don't render to MathML or Unicode.</p></div>
+        </details>
+        <details>
+          <summary>Is arXiv source freely available?</summary>
+          <div class="dp-faq-answer"><p>Yes. arXiv provides bulk <code>.tex</code> source for ~89% of its 2M+ papers. The remaining ~11% are PDF-only submissions; those fall through to the <a href="pdf-parsing.html">PDF parsing path</a>.</p></div>
+        </details>
+        <details>
+          <summary>Does it handle .tar.gz arXiv source bundles?</summary>
+          <div class="dp-faq-answer"><p>Not yet — current intake accepts raw <code>.tex</code> files and their referenced siblings. Bundle handling is planned for v0.15.1. Extract the tarball first; the parser will follow <code>\input</code> from there.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

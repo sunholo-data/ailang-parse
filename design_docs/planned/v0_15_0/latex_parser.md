@@ -424,3 +424,94 @@ valuable, and underserved.
 
 This is the parser that makes the deterministic-first story concrete
 in a way no Office-format parser ever will.
+
+---
+
+## 9. Post-ship update — 2026-04-14
+
+This section records what actually shipped vs. the plan above.
+
+### Delivered
+
+- **Pure LaTeX parser** (`docparse/services/tex_parser.ail`) — recognizes
+  sectioning, display/inline math, `tabular`, `figure`, `itemize`/
+  `enumerate`/`description`, theorem-like envs (28 names recognized),
+  `\cite`/`\ref` as inline markers, `thebibliography` + `\bibitem`.
+- **`\input` / `\include` resolution** (`docparse/services/tex_input_resolver.ail`).
+  Originally scoped for v0.15.1 per §5 "Risks & open questions" — pulled
+  into v0.15.0 once the 10-paper benchmark showed multi-file papers
+  (Vaswani, BERT, GPT-3) returned <10 blocks each because only the thin
+  wrapper was parsed. DFS with depth cap 10 and cycle detection; paths
+  tried in the order `<basedir>/<arg>.tex` → `<basedir>/<arg>`; unresolved
+  or cyclic references become LaTeX comments so the pure parser stays
+  effect-free.
+- **arxivbench benchmark** (`benchmarks/arxivbench/`) — 20-paper corpus,
+  6 adapters, truth extracted directly from `.tex` source. Corpus covers
+  ML, physics, math, CS, plus deliberate edge cases (plain-TeX harvmac,
+  book-length bundles, PDF-only submissions).
+
+### Measured coverage (19 papers, perelman_ricci excluded as duplicate)
+
+| Dimension | AILANG (tex) | Pandoc (tex) | Docling (pdf) | MarkItDown (pdf) | Unstructured (pdf) | LiteParse (pdf) |
+|---|---|---|---|---|---|---|
+| Papers parsed | **19/19** | 15/19 | 13/19 | 13/19 | 13/19 | 13/19 |
+| Sections | **94%** | 77% | 64% | 1% | 75% | 0% |
+| Equations (display) | **79%** | 63% | 0% | 0% | 0% | 0% |
+| Equations (inline) | **76%** | 57% | 0% | 0% | 0% | 0% |
+| Tables | **79%** | 32% | 63% | 56% | 0% | 5% |
+| Figures | **100%** | 61% | 70% | 0% | 0% | 0% |
+| Citations | **93%** | 66% | 19% | 23% | 23% | 23% |
+| Bibliography | **100%** | 0% | 0% | 0% | 0% | 0% |
+| Lists | **93%** | 51% | 46% | 23% | 55% | 31% |
+| Theorems | **100%** | 47% | 0% | 0% | 0% | 0% |
+| Avg time/paper | 8.4s | 0.3s | 10.8s | 1.5s | 2.9s | 3.4s |
+
+The headline result is §6 in numbers: every PDF-OCR adapter is at **0%
+on equations** and **0% on bibliography entries** because those signals
+don't survive the OCR pass. LlamaParse is excluded from the table (API
+credits exhausted mid-run); behavior is expected to match the other
+OCR-based adapters on the dimensions where they struggle.
+
+### Why `\input` resolution jumped scope
+
+The original plan (§5) listed it as an open question — "common in
+book-length papers." The 20-paper corpus showed it's far more common
+than that: multi-file layout is standard for anything over ~15 pages,
+and the wrapper files (ms.tex, main.tex) themselves contain almost no
+parseable content. Without resolution, coverage on sections, equations,
+and tables stayed in the 50-75% range because the largest and most
+structurally rich papers parsed as near-empty documents. After
+resolution, coverage jumped 10-27 percentage points across all
+dimensions.
+
+### Known gaps vs. ~11% ceiling
+
+arXiv submissions break down roughly as:
+- **~89% LaTeX source available** — we parse these
+- **~11% PDF-only** — no LaTeX to parse; falls through to the PDF path
+  (AI-based, user supplies the backend)
+
+Within the LaTeX-available slice, the remaining ~6-24% miss per
+dimension is dominated by:
+- **Macro-defined sectioning** (harvmac `\chap`, `\sec`; custom
+  `\newcommand` wrappers) — maldacena_adscft still shows 0 sections
+  because `\input harvmac` redefines the sectioning primitives. Out of
+  scope for v0.15.0 per the original §1 decision; revisit in v0.15.2 if
+  the benchmark shows demand.
+- **Custom column types** (`\newcolumntype`) — affects ~15% of papers
+  with complex tables; pandoc also fails on these. AILANG degrades
+  gracefully (falls back to plain cells) so paper still parses.
+- **In-text math rendered as figures** — not the parser's problem; the
+  source uses `\includegraphics` for equations rather than `equation`,
+  which means the author already made the structure-losing choice.
+
+### Follow-ups
+
+- **tar.gz bundle handling** (v0.15.1 per original §3) — arXiv ships
+  source as `.tar.gz`; currently users must extract manually.
+- **Website landing page** (this session) — `/latex-parsing.html`
+  covering the deterministic-vs-OCR story with the coverage table above.
+- **Format list update** (this session) — add "LaTeX (`.tex`) — arXiv
+  scientific papers" to `/supported-formats` on the docs site.
+- **Macro-aware preprocessing** — deferred. Only justifies work if a
+  future benchmark corpus shows the tail of affected papers is large.

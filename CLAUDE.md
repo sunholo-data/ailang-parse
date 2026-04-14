@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-AILANG Parse is a standalone AILANG module for universal document parsing and generation. It extracts structured content from Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB) deterministically and from PDFs/images via pluggable AI. It also generates documents in 9 formats (including Quarto Markdown) from parsed content or AI prompts.
+AILANG Parse is a standalone AILANG module for universal document parsing and generation. It extracts structured content from Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, EML, TEX) deterministically and from PDFs/images via pluggable AI. LaTeX/arXiv parsing resolves `\input`/`\include` recursively with cycle detection, so multi-file papers (Vaswani, BERT, GPT-3) parse end-to-end. It also generates documents in 9 formats (including Quarto Markdown) from parsed content or AI prompts.
 
 This is a production AILANG module, not a demo. Every change must exercise AILANG code paths.
 

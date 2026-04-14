@@ -54,9 +54,9 @@ var DP_DATA = {
     }
   },
   formats: {
-    input: ['DOCX', 'PPTX', 'XLSX', 'ODT', 'ODP', 'ODS', 'CSV', 'MD', 'HTML', 'EPUB', 'EML', 'PDF', 'PNG', 'JPG'],
+    input: ['DOCX', 'PPTX', 'XLSX', 'ODT', 'ODP', 'ODS', 'CSV', 'MD', 'HTML', 'EPUB', 'EML', 'TEX', 'PDF', 'PNG', 'JPG'],
     output: ['JSON', 'Markdown', 'HTML', 'Text', 'Quarto', 'A2UI', 'Unstructured', 'DOCX', 'PPTX'],
-    input_count: 14,
+    input_count: 15,
     output_count: 9
   },
   page_estimates: {
