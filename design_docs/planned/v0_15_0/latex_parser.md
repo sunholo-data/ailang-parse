@@ -245,7 +245,7 @@ data/test_files/arxiv_sample.tex            (representative fixture)
 
 arXiv source arrives as `.tar.gz`. [zip_extract.ail](../../../docparse/services/zip_extract.ail)
 handles `.zip` (used for DOCX/PPTX); `.tar.gz` support landed in
-ailang-parse v0.11.0 once `std/tar` + `std/gzip` shipped in AILANG v0.11.5.
+ailang-parse v0.11.0 once `std/tar` + `std/gzip` shipped in AILANG v0.12.0.
 
 **Status: shipped.** See [tex_archive_extract.ail](../../../docparse/services/tex_archive_extract.ail).
 Flow: `std/gzip.decompressFile` → `std/bytes.fromBase64` →
