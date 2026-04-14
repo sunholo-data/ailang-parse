@@ -1436,9 +1436,22 @@
     if (!root) return;
     ensureMathJax(function () {
       if (window.MathJax && window.MathJax.typesetPromise) {
+        // texReset clears the AMS label registry so switching tabs or
+        // re-rendering the same doc doesn't emit "Label 'x' multiply defined".
+        if (typeof window.MathJax.texReset === 'function') {
+          try { window.MathJax.texReset(); } catch (_) {}
+        }
         window.MathJax.typesetPromise([root]).catch(function (e) { console.warn('MathJax typeset failed:', e); });
       }
     });
+  }
+
+  // Strip \label{...} directives from math source before MathJax sees it.
+  // Labels are useful for cross-references in a compiled TeX run but have
+  // no visual effect on display — and MathJax's global label store throws
+  // "multiply defined" if the same label is typeset twice.
+  function stripTexLabels(src) {
+    return (src || '').replace(/\\label\{[^}]*\}/g, '');
   }
 
   // Inline LaTeX-ish markers inside paragraph text:
@@ -1471,7 +1484,7 @@
           // Equation blocks: preserve the raw LaTeX source and let MathJax typeset it.
           if (b.style === 'equation-display' || b.style === 'equation') {
             var isDisplay = b.style === 'equation-display';
-            var raw = b.text || '';
+            var raw = stripTexLabels(b.text || '');
             // MathJax handles \begin{equation}/\begin{align} natively — pass through.
             // For bare inline equations, wrap in \(...\) if not already delimited.
             var body = raw;
@@ -1611,7 +1624,23 @@
       if (p.style && p.style !== 'normal' && p.style !== '') {
         div.setAttribute('data-style', p.style);
       }
-      div.textContent = p.text || '';
+      // Equation styles: strip \label{} and wrap in \[...\]/\(...\) so
+      // MathJax typesets the formula (must call typesetMath on the panel
+      // after buildA2UIDemo completes).
+      if (p.style === 'equation-display' || p.style === 'equation') {
+        var isDisp = p.style === 'equation-display';
+        var rawEq = stripTexLabels(p.text || '');
+        var bodyEq = rawEq;
+        var hasEnv2 = /\\begin\{[a-zA-Z*]+\}/.test(rawEq);
+        var hasDelim2 = /^\s*(\$\$|\\\[|\\\()/.test(rawEq);
+        if (!hasEnv2 && !hasDelim2) {
+          bodyEq = isDisp ? ('\\[' + rawEq + '\\]') : ('\\(' + rawEq + '\\)');
+        }
+        div.textContent = bodyEq;
+      } else {
+        // Paragraph text: strip stray \label{} and render inline cite/xref pills.
+        div.innerHTML = renderInlineTex(stripTexLabels(p.text || ''));
+      }
       return div;
     }
 
@@ -1837,6 +1866,13 @@
       demo: demo,
       docPanel: docPanel
     };
+
+    // Typeset any inline / display math emitted by equation-styled text nodes.
+    // Safe to call unconditionally — ensureMathJax skips if no math is present
+    // (the script isn't loaded until something actually needs it).
+    if (/\\begin\{|\\\[|\\\(|\$[^$]/.test(docPanel.textContent || '')) {
+      typesetMath(docPanel);
+    }
   }
 
   // Trigger the streaming animation. `container` defaults to the homepage's

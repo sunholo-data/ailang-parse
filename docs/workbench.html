@@ -2816,7 +2816,7 @@ body.wb { background: var(--bg); }
     // LaTeX: display/inline equations rendered via MathJax
     if (b.type === 'text' && (b.style === 'equation-display' || b.style === 'equation')) {
       var isDisplay = b.style === 'equation-display';
-      var raw = b.text || '';
+      var raw = wbStripTexLabels(b.text || '');
       var body = raw;
       var hasEnv = /\\begin\{[a-zA-Z*]+\}/.test(raw);
       var hasDelim = /^\s*(\$\$|\\\[|\\\()/.test(raw);
@@ -2840,7 +2840,7 @@ body.wb { background: var(--bg); }
 
   // Inline cite/xref pills + raw-text passthrough (HTML-escaped).
   function renderWbInlineTex(text) {
-    var out = escHtml(text || '');
+    var out = escHtml(wbStripTexLabels(text || ''));
     out = out.replace(/\[cite:([^\]]+)\]/g, function (_, k) {
       return '<span class="wb-cite">[' + escHtml(k) + ']</span>';
     });
@@ -2878,9 +2878,20 @@ body.wb { background: var(--bg); }
     if (!root) return;
     wbEnsureMathJax(function () {
       if (window.MathJax && window.MathJax.typesetPromise) {
+        // Reset AMS label registry — otherwise switching tabs or reparsing
+        // surfaces "Label 'x' multiply defined" errors from MathJax.
+        if (typeof window.MathJax.texReset === 'function') {
+          try { window.MathJax.texReset(); } catch (_) {}
+        }
         window.MathJax.typesetPromise([root]).catch(function () {});
       }
     });
+  }
+
+  // Strip \label{...} from math bodies — labels are compile-time only and
+  // MathJax's global store throws "multiply defined" on re-render.
+  function wbStripTexLabels(src) {
+    return (src || '').replace(/\\label\{[^}]*\}/g, '');
   }
 
   var blocksToMarkdown = DPB.toMarkdown;
