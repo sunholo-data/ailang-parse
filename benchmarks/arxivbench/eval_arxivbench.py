@@ -319,6 +319,10 @@ def main():
                     help="run all adapters whose dependencies are available")
     ap.add_argument("--paper", action="append",
                     help="restrict to specific paper directory names (repeatable)")
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="exclude paper directory names (repeatable)")
+    ap.add_argument("--max-bytes", type=int, default=500_000,
+                    help="skip papers whose .tex exceeds this size (default 500KB; set 0 for no limit)")
     ap.add_argument("--json", action="store_true", help="emit JSON")
     ap.add_argument("--out", type=Path, help="write JSON to this path")
     args = ap.parse_args()
@@ -343,6 +347,10 @@ def main():
         sys.exit(2)
 
     papers = discover_papers(CORPUS_DIR, only=args.paper)
+    if args.exclude:
+        papers = [p for p in papers if p["name"] not in args.exclude]
+    if args.max_bytes:
+        papers = [p for p in papers if p["tex_path"].stat().st_size <= args.max_bytes]
     if not papers:
         print(f"No papers found under {CORPUS_DIR}", file=sys.stderr)
         sys.exit(2)

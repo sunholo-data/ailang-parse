@@ -13,6 +13,7 @@ precisely what the OCR-vs-source comparison is supposed to demonstrate.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -21,10 +22,59 @@ from typing import Any
 from .base_adapter import ArxivBenchAdapter
 
 
-# Make officedocbench adapters importable.
-_OFFICEDOCBENCH = Path(__file__).parent.parent.parent / "officedocbench"
-if str(_OFFICEDOCBENCH) not in sys.path:
-    sys.path.insert(0, str(_OFFICEDOCBENCH))
+# The officedocbench adapters live in a sibling `adapters/` package whose
+# name collides with ours. Load each one by file path via importlib so
+# Python's name-based package cache doesn't redirect back to our own
+# arxivbench/adapters/ directory.
+_OFFICEDOCBENCH_ADAPTERS = Path(__file__).parent.parent.parent / "officedocbench" / "adapters"
+
+
+def _load_officedocbench_module(stem: str):
+    """Import officedocbench/adapters/<stem>.py under a unique module name."""
+    unique_name = f"_odb_{stem}"
+    if unique_name in sys.modules:
+        return sys.modules[unique_name]
+    src = _OFFICEDOCBENCH_ADAPTERS / f"{stem}.py"
+    # Base class lives alongside; load it first under its expected name so
+    # `from .base_adapter import ...` inside the module resolves.
+    base_path = _OFFICEDOCBENCH_ADAPTERS / "base_adapter.py"
+    if "_odb_base_adapter" not in sys.modules:
+        spec = importlib.util.spec_from_file_location("_odb_base_adapter", base_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_odb_base_adapter"] = mod
+        spec.loader.exec_module(mod)
+    # Rewrite the relative import by executing the target module with the
+    # officedocbench adapters dir first on sys.path just for this load.
+    prev_path = sys.path[:]
+    sys.path.insert(0, str(_OFFICEDOCBENCH_ADAPTERS.parent))
+    try:
+        # Temporarily swap our `adapters` package cache so officedocbench's
+        # `from .base_adapter import ...` resolves to the right file.
+        saved_adapters = sys.modules.pop("adapters", None)
+        saved_base = sys.modules.pop("adapters.base_adapter", None)
+        odb_pkg_spec = importlib.util.spec_from_file_location(
+            "adapters", _OFFICEDOCBENCH_ADAPTERS / "__init__.py",
+            submodule_search_locations=[str(_OFFICEDOCBENCH_ADAPTERS)],
+        )
+        odb_pkg = importlib.util.module_from_spec(odb_pkg_spec)
+        sys.modules["adapters"] = odb_pkg
+        odb_pkg_spec.loader.exec_module(odb_pkg)
+        module_name = f"adapters.{stem}"
+        spec = importlib.util.spec_from_file_location(module_name, src)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+        sys.modules[unique_name] = mod
+        return mod
+    finally:
+        sys.path[:] = prev_path
+        # Restore arxivbench's adapters package
+        if saved_adapters is not None:
+            sys.modules["adapters"] = saved_adapters
+        else:
+            sys.modules.pop("adapters", None)
+        if saved_base is not None:
+            sys.modules["adapters.base_adapter"] = saved_base
 
 
 # Heuristic post-processing on flattened PDF text. OCR'd papers have math
@@ -118,37 +168,37 @@ class DoclingAdapter(_PdfWrapper):
     _display_name = "Docling"
 
     def _load_inner(self):
-        from adapters.docling_adapter import DoclingAdapter as Inner
-        return Inner()
+        mod = _load_officedocbench_module("docling_adapter")
+        return mod.DoclingAdapter()
 
 
 class LlamaParseAdapter(_PdfWrapper):
     _display_name = "LlamaParse"
 
     def _load_inner(self):
-        from adapters.llamaparse_adapter import LlamaParseAdapter as Inner
-        return Inner()
+        mod = _load_officedocbench_module("llamaparse_adapter")
+        return mod.LlamaParseAdapter()
 
 
 class MarkItDownAdapter(_PdfWrapper):
     _display_name = "MarkItDown"
 
     def _load_inner(self):
-        from adapters.markitdown_adapter import MarkItDownAdapter as Inner
-        return Inner()
+        mod = _load_officedocbench_module("markitdown_adapter")
+        return mod.MarkItDownAdapter()
 
 
 class UnstructuredAdapter(_PdfWrapper):
     _display_name = "Unstructured"
 
     def _load_inner(self):
-        from adapters.unstructured_adapter import UnstructuredAdapter as Inner
-        return Inner()
+        mod = _load_officedocbench_module("unstructured_adapter")
+        return mod.UnstructuredAdapter()
 
 
 class LiteParseAdapter(_PdfWrapper):
     _display_name = "LiteParse"
 
     def _load_inner(self):
-        from adapters.liteparse_adapter import LiteParseAdapter as Inner
-        return Inner()
+        mod = _load_officedocbench_module("liteparse_adapter")
+        return mod.LiteParseAdapter()
