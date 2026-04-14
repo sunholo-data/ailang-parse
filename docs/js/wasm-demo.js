@@ -388,7 +388,7 @@
     lastFileExt = ext;
 
     // Capture buffer upfront so preview works for all file types
-    var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox', 'tex', 'latex', 'ltx'];
+    var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox'];
     if (textFormats.indexOf(ext) !== -1) {
       lastFileContent = await file.text();
     } else {
@@ -467,24 +467,6 @@
       r = engine.call('parseCsvContent', content, '\t');
     } else if (ext === 'md') {
       r = engine.call('parseMarkdownContent', content);
-    } else if (ext === 'tex' || ext === 'latex' || ext === 'ltx') {
-      // LaTeX parser is not yet bundled into the WASM build (\input resolution
-      // needs FS, and the pure parser hasn't been exported yet). Show the
-      // raw source with a pointer to CLI/API where it does work.
-      pipelineLog('route', 'LaTeX parsing requires API/CLI (WASM export pending)');
-      var preview = content.substring(0, 8000);
-      var blocks = [
-        { type: 'heading', level: 2, text: 'LaTeX — run via API or CLI' },
-        { type: 'text', style: 'normal',
-          text: 'In-browser LaTeX parsing is pending a WASM rebuild. The server-side parser handles .tex end-to-end (including \\input resolution for multi-file papers). See latex-parsing.html for usage.' },
-        { type: 'heading', level: 3, text: 'Source preview' },
-        { type: 'text', style: 'code', text: preview + (content.length > 8000 ? '\n\n... (' + (content.length - 8000) + ' more chars)' : '') }
-      ];
-      pipelineLog('done', 'Showing raw source (' + content.length + ' chars)', 'done');
-      setDotState('ready');
-      setStatus('LaTeX source shown — use API or CLI for structured output');
-      showOutput(blocks, content);
-      return;
     } else {
       // Fallback for unknown text formats
       var blocks = [{ type: 'text', text: content.substring(0, 10000), style: 'normal' }];
@@ -2055,7 +2037,7 @@
       var ext = file.name.split('.').pop().toLowerCase();
       var sizeKB = parseFloat((file.size / 1024).toFixed(1));
 
-      var textFormats = ['html', 'htm', 'md', 'txt', 'csv', 'tsv', 'eml', 'mbox', 'tex', 'latex', 'ltx'];
+      var textFormats = ['html', 'htm', 'md', 'txt', 'csv', 'tsv', 'eml', 'mbox'];
       var zipFormats  = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'epub'];
       // Formats that need an AI vision/multimodal model. WASM still drives
       // the parse — it just delegates the visual extraction step to whichever
