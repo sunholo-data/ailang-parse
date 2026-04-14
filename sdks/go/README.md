@@ -1,6 +1,6 @@
 # ailang-parse-go
 
-Go client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats, generate 8 — standard library only.
+Go client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 15 formats (including LaTeX/arXiv), generate 8 — standard library only.
 
 ## Install
 

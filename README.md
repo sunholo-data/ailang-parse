@@ -82,7 +82,7 @@ Every run produces:
 
 ## Supported Formats
 
-**Parsing (13 formats):** DOCX, PPTX, XLSX, ODT, ODP, ODS, PDF, HTML, Markdown, CSV, EPUB, EML, MBOX
+**Parsing (15 formats):** DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, EML, MBOX, TEX, PDF, images (JPG/PNG)
 
 **Generation (9 formats):** DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto)
 

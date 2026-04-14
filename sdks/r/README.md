@@ -1,6 +1,6 @@
 # AILANG Parse R SDK
 
-R client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 13 formats into a structured Block ADT, manage API keys, and run as a Claude Desktop / Cursor / VS Code MCP server — all from R.
+R client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 15 formats (including LaTeX/arXiv) into a structured Block ADT, manage API keys, and run as a Claude Desktop / Cursor / VS Code MCP server — all from R.
 
 This SDK is feature-equivalent to the [Python](../python), [JavaScript](../js) and [Go](../go) SDKs and shares the same on-disk credential format, so a key saved by one SDK is usable from any other.
 
