@@ -1,0 +1,106 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+
+\title{Deterministic Parsing of Scientific Documents}
+\author{A.\ Example \and B.\ Example}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We demonstrate that deterministic parsing of LaTeX source preserves
+structural fidelity that PDF-based OCR pipelines lose. We report
+results on a 19-paper arXiv corpus across equations, tables,
+citations, and bibliographies.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Scientific documents rely on structured notation that survives poorly
+through rasterisation. When a paper is typeset to PDF and then OCR'd
+back into text, equations become glyph soup and tables lose their
+grid. Parsing the LaTeX source directly avoids this loss entirely.
+
+Our contributions are threefold:
+\begin{enumerate}
+  \item A deterministic LaTeX parser producing a typed block ADT.
+  \item Recursive \texttt{\textbackslash input} resolution with
+        depth cap and cycle detection.
+  \item Structural benchmarks against five PDF-based baselines.
+\end{enumerate}
+
+\section{Method}
+
+Let $x \in \mathbb{R}^d$ denote an input token embedding and
+$W \in \mathbb{R}^{d \times k}$ a projection matrix. The attention
+weight for query $q$ and key $k$ is given by
+\begin{equation}
+  \label{eq:attention}
+  a(q, k) = \frac{\exp(q^\top k / \sqrt{d})}{\sum_{j} \exp(q^\top k_j / \sqrt{d})}.
+\end{equation}
+Equation~\eqref{eq:attention} is preserved verbatim as raw LaTeX
+inside a \texttt{TextBlock} with \texttt{style="equation"}, which is
+what downstream RAG pipelines actually want~\cite{vaswani2017}.
+
+For a sequence of length $n$, the full attention matrix is
+\begin{align}
+  A &= \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d}}\right) V, \\
+  Q &= XW_Q, \quad K = XW_K, \quad V = XW_V.
+\end{align}
+
+\section{Results}
+
+Table~\ref{tab:results} shows structural coverage across the corpus.
+Every PDF-based parser scores zero on equations because they emit
+unstructured text; our parser emits typed equation blocks with the
+LaTeX source preserved.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrr}
+\hline
+Parser & Sections & Equations & Bibliography \\
+\hline
+AILANG Parse       & 94\% & 79\% & 100\% \\
+Docling (PDF-OCR)  & 88\% &  0\% &   0\% \\
+MarkItDown (PDF)   & 71\% &  0\% &   0\% \\
+Pandoc (on .tex)   & 79\% & 74\% &  89\% \\
+\hline
+\end{tabular}
+\caption{Structural preservation across 19 arXiv papers.}
+\label{tab:results}
+\end{table}
+
+See \cite{devlin2019bert} and \cite{brown2020gpt3} for comparable
+multi-file papers parsed end-to-end via recursive \texttt{\textbackslash input}
+resolution.
+
+\section{Conclusion}
+
+Deterministic LaTeX parsing is not a marginal improvement over OCR
+for scientific content --- it is a categorically different
+capability. The source is the ground truth; rendering then re-parsing
+the rendering discards information that cannot be recovered.
+
+\begin{thebibliography}{9}
+\bibitem{vaswani2017}
+  A.\ Vaswani et al.
+  \emph{Attention is all you need}.
+  NeurIPS, 2017.
+
+\bibitem{devlin2019bert}
+  J.\ Devlin et al.
+  \emph{BERT: Pre-training of deep bidirectional transformers for
+  language understanding}.
+  NAACL, 2019.
+
+\bibitem{brown2020gpt3}
+  T.\ Brown et al.
+  \emph{Language models are few-shot learners}.
+  NeurIPS, 2020.
+\end{thebibliography}
+
+\end{document}
