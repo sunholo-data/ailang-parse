@@ -2172,6 +2172,7 @@
         else if (ext === 'tsv')                     r = engine.call('parseCsvContent', content, '\t');
         else if (ext === 'md')                      r = engine.call('parseMarkdownContent', content);
         else if (ext === 'txt')                     r = engine.call('parseMarkdownContent', content);
+        else if (ext === 'tex' || ext === 'latex' || ext === 'ltx') r = engine.call('parseTexContent', content);
         if (!r || !r.success) {
           // Surface the full WASM result so callers can inspect it in DevTools.
           var rawErr = r ? r.error : 'no result from engine.call';
@@ -2183,7 +2184,8 @@
                  : ext === 'html' || ext === 'htm' ? 'parseHtmlContent'
                  : ext === 'csv' ? 'parseCsvContent'
                  : ext === 'tsv' ? 'parseCsvContent'
-                 : ext === 'md' || ext === 'txt' ? 'parseMarkdownContent' : 'unknown',
+                 : ext === 'md' || ext === 'txt' ? 'parseMarkdownContent'
+                 : ext === 'tex' || ext === 'latex' || ext === 'ltx' ? 'parseTexContent' : 'unknown',
             wasmResult: r,
             error: rawErr
           });
