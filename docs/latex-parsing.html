@@ -76,7 +76,7 @@
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>On the <a href="benchmarks.html">arxivbench</a> corpus of 19 peer-reviewed papers, every PDF-based parser scored <strong>0% on equation preservation</strong> and <strong>0% on bibliography entries</strong>. The signal isn't weak — it's absent.</div>
+        <div>On the <a href="benchmarks.html">arxivbench</a> corpus of 19 peer-reviewed papers, every PDF-based parser scores <strong>0% on structured equations</strong> and <strong>0% on structured bibliography entries</strong>. The raw text is usually still there in the output — what's gone is the structure downstream RAG needs: the LaTeX source of each equation, citation keys that back-link to their bibliography entries, and reference records as typed blocks rather than paragraphs of prose.</div>
       </div>
 
       <h2 id="how-it-works">How It Works</h2>
@@ -96,6 +96,8 @@
 
       <h2 id="coverage">Coverage on arxivbench</h2>
       <p>Every adapter is scored against structural truth extracted from the raw <code>.tex</code> source. Score = <code>min(observed, truth) / truth</code>, averaged across papers where truth &gt; 0.</p>
+
+      <p><strong>What the scores measure:</strong> structural preservation, not raw text capture. A PDF-OCR parser scoring 0% on equations can still read the rendered equation as flattened text — what it can't produce is the LaTeX source of the equation as a separable, re-renderable block. Same for bibliography: OCR parsers dump the reference list as paragraphs; they don't emit each entry as a typed record with its citation key. Downstream RAG pipelines need the structure, not the prose.</p>
 
       <table class="dp-config-table coverage-table">
         <thead>
