@@ -379,6 +379,7 @@
         <a href="#eval-driven">Eval-Driven Development</a>
         <a href="#submit-document">Help Us Find Gaps</a>
         <a href="#pdf-benchmark">PDF Benchmark</a>
+        <a href="#arxivbench">arxivbench (LaTeX)</a>
         <a href="#run-benchmarks">Run the Benchmarks</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -821,6 +822,52 @@ export pure func detectFormat(ext: string) -> string
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       <div><strong>Recommended:</strong> <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-input);padding:1px 6px;border-radius:3px">gemini-2.5-flash</code> &mdash; best balance of accuracy and cost. Ollama models score low due to structured JSON output limitations.</div>
     </div>
+  </section>
+
+  <hr class="dp-divider">
+
+  <!-- arxivbench -->
+  <section class="dp-bench-section reveal">
+    <h2 id="arxivbench">arxivbench &mdash; LaTeX / arXiv papers</h2>
+    <p>The same deterministic-vs-OCR story as OfficeDocBench, but for scientific papers. arxivbench scores each adapter on 19 peer-reviewed arXiv papers spanning ML, physics, math, and CS. Truth counts are extracted directly from the <code>.tex</code> source; score is <code>min(observed, truth) / truth</code> averaged across papers. <a href="latex-parsing.html">Full LaTeX parsing docs &rarr;</a></p>
+
+    <table class="dp-results-table">
+      <thead>
+        <tr>
+          <th>Adapter</th>
+          <th>Input</th>
+          <th>Papers</th>
+          <th>Sec</th>
+          <th>Eq&nbsp;D</th>
+          <th>Eq&nbsp;I</th>
+          <th>Tab</th>
+          <th>Fig</th>
+          <th>Cite</th>
+          <th>Bib</th>
+          <th>Thm</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:rgba(34,197,94,0.08)">
+          <td style="font-weight:600;color:var(--dp-blue)">AILANG Parse</td>
+          <td>tex</td><td>19/19</td>
+          <td><strong>94%</strong></td><td><strong>79%</strong></td><td><strong>76%</strong></td><td><strong>79%</strong></td><td><strong>100%</strong></td><td><strong>93%</strong></td><td><strong>100%</strong></td><td><strong>100%</strong></td>
+        </tr>
+        <tr><td>Pandoc</td><td>tex</td><td>15/19</td><td>77%</td><td>63%</td><td>57%</td><td>32%</td><td>61%</td><td>66%</td><td>0%</td><td>47%</td></tr>
+        <tr><td>Docling</td><td>pdf</td><td>13/19</td><td>64%</td><td>0%</td><td>0%</td><td>63%</td><td>70%</td><td>19%</td><td>0%</td><td>0%</td></tr>
+        <tr><td>MarkItDown</td><td>pdf</td><td>13/19</td><td>1%</td><td>0%</td><td>0%</td><td>56%</td><td>0%</td><td>23%</td><td>0%</td><td>0%</td></tr>
+        <tr><td>Unstructured</td><td>pdf</td><td>13/19</td><td>75%</td><td>0%</td><td>0%</td><td>0%</td><td>0%</td><td>23%</td><td>0%</td><td>0%</td></tr>
+        <tr><td>LiteParse</td><td>pdf</td><td>13/19</td><td>0%</td><td>0%</td><td>0%</td><td>5%</td><td>0%</td><td>23%</td><td>0%</td><td>0%</td></tr>
+      </tbody>
+    </table>
+
+    <div class="dp-bench-callout">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <div>Every PDF-based parser scores <strong>0% on equations</strong> and <strong>0% on bibliography</strong> &mdash; those signals don't survive the rendering pass. Pandoc (the other source-based parser) fails outright on 4 of 19 papers due to custom <code>\newcolumntype</code> macros and plain-TeX primitives. AILANG degrades gracefully on those constructs instead of aborting.</div>
+    </div>
+
+    <p style="margin-top:18px"><strong>Reproduce:</strong></p>
+    <pre><code class="language-bash">uv run benchmarks/arxivbench/eval_arxivbench.py --all</code></pre>
   </section>
 
   <hr class="dp-divider">

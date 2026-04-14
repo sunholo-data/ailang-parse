@@ -507,8 +507,13 @@ dimension is dominated by:
 
 ### Follow-ups
 
-- **tar.gz bundle handling** (v0.15.1 per original §3) — arXiv ships
-  source as `.tar.gz`; currently users must extract manually.
+- **tar.gz bundle handling** — arXiv ships source as `.tar.gz`; currently
+  users must extract manually. Blocked on upstream AILANG feature request
+  [ailang-core#156](https://github.com/sunholo-data/ailang/issues/156)
+  for native `std/tar` + `std/gzip` modules paralleling the existing
+  `std/zip`. Shelling out via `std/process` was rejected as a workaround —
+  it would regress the portability and determinism guarantees that
+  `std/zip` gives us for the Office family. Unblock + ship in v0.15.1.
 - **Website landing page** (this session) — `/latex-parsing.html`
   covering the deterministic-vs-OCR story with the coverage table above.
 - **Format list update** (this session) — add "LaTeX (`.tex`) — arXiv
