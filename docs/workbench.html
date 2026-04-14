@@ -1292,6 +1292,45 @@ body.wb { background: var(--bg); }
   border-radius: 2px;
   text-decoration: none;
 }
+.wb-block-body--equation {
+  font-size: 14px;
+  padding: 10px 12px;
+  background: var(--dp-blue-faded, rgba(59, 130, 246, 0.06));
+  border-left: 3px solid var(--dp-blue-border, rgba(59, 130, 246, 0.25));
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.wb-block-body--equation-display { text-align: center; padding: 14px 12px; }
+.wb-block-body--bibitem {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  padding-left: 20px;
+  text-indent: -20px;
+}
+.wb-block-body--abstract {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  background: var(--dp-blue-faded, rgba(59, 130, 246, 0.06));
+  border-left: 3px solid var(--dp-blue, #3b82f6);
+  border-radius: 4px;
+}
+.wb-cite {
+  display: inline-block; padding: 0 6px; margin: 0 2px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--dp-blue, #3b82f6);
+  background: var(--dp-blue-faded, rgba(59, 130, 246, 0.08));
+  border-radius: 3px;
+}
+.wb-xref {
+  display: inline-block; padding: 0 6px; margin: 0 2px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--border-light, rgba(0, 0, 0, 0.05));
+  border-radius: 3px;
+}
 
 /* Track-change attribution row */
 .wb-block-attr {
@@ -2603,6 +2642,9 @@ body.wb { background: var(--bg); }
     if (state.tab === 'blocks') {
       panelBlocks.style.display = '';
       panelBlocks.innerHTML = renderBlocksHtml(f.blocks);
+      if (panelBlocks.querySelector('.wb-block-body--equation, .wb-block-body--bibitem, .wb-cite')) {
+        wbTypesetMath(panelBlocks);
+      }
     } else if (state.tab === 'json') {
       panelJsonWrap.style.display = '';
       panelJson.textContent = JSON.stringify(f.blocks, null, 2);
@@ -2771,12 +2813,74 @@ body.wb { background: var(--bg); }
       var items = b.items.map(function (it) { return '<li>' + escHtml(it) + '</li>'; }).join('');
       return '<div class="wb-block-body">' + (b.ordered ? '<ol>' : '<ul>') + items + (b.ordered ? '</ol>' : '</ul>') + '</div>';
     }
+    // LaTeX: display/inline equations rendered via MathJax
+    if (b.type === 'text' && (b.style === 'equation-display' || b.style === 'equation')) {
+      var isDisplay = b.style === 'equation-display';
+      var raw = b.text || '';
+      var body = raw;
+      var hasEnv = /\\begin\{[a-zA-Z*]+\}/.test(raw);
+      var hasDelim = /^\s*(\$\$|\\\[|\\\()/.test(raw);
+      if (!hasEnv && !hasDelim) body = isDisplay ? ('\\[' + raw + '\\]') : ('\\(' + raw + '\\)');
+      var eqCls = isDisplay ? 'wb-block-body wb-block-body--equation wb-block-body--equation-display' : 'wb-block-body wb-block-body--equation';
+      return '<div class="' + eqCls + '">' + escHtml(body) + '</div>';
+    }
+    if (b.type === 'text' && b.style === 'bibitem') {
+      return '<div class="wb-block-body wb-block-body--bibitem">' + renderWbInlineTex(b.text || '') + '</div>';
+    }
+    if (b.type === 'text' && b.style === 'abstract') {
+      return '<div class="wb-block-body wb-block-body--abstract">' + renderWbInlineTex(b.text || '') + '</div>';
+    }
     // Section / header / footer / paragraph fallback
     var text = b.text || '';
     if (!text && Array.isArray(b.blocks)) {
       text = b.blocks.map(function (sub) { return cellText(sub) || sub.text || ''; }).filter(Boolean).join(' · ');
     }
-    return '<div class="wb-block-body">' + escHtml(text || '(empty)') + '</div>';
+    return '<div class="wb-block-body">' + renderWbInlineTex(text || '(empty)') + '</div>';
+  }
+
+  // Inline cite/xref pills + raw-text passthrough (HTML-escaped).
+  function renderWbInlineTex(text) {
+    var out = escHtml(text || '');
+    out = out.replace(/\[cite:([^\]]+)\]/g, function (_, k) {
+      return '<span class="wb-cite">[' + escHtml(k) + ']</span>';
+    });
+    out = out.replace(/\[ref:([^\]]+)\]/g, function (_, k) {
+      return '<span class="wb-xref">' + escHtml(k) + '</span>';
+    });
+    return out;
+  }
+
+  // MathJax lazy loader — only fetched when a parsed doc contains LaTeX.
+  var wbMathState = { loaded: false, loading: false, queue: [] };
+  function wbEnsureMathJax(cb) {
+    if (wbMathState.loaded) { cb(); return; }
+    wbMathState.queue.push(cb);
+    if (wbMathState.loading) return;
+    wbMathState.loading = true;
+    window.MathJax = window.MathJax || {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] },
+      startup: {
+        ready: function () {
+          window.MathJax.startup.defaultReady();
+          wbMathState.loaded = true;
+          wbMathState.queue.forEach(function (fn) { try { fn(); } catch (e) {} });
+          wbMathState.queue = [];
+        }
+      }
+    };
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
+    s.async = true;
+    document.head.appendChild(s);
+  }
+  function wbTypesetMath(root) {
+    if (!root) return;
+    wbEnsureMathJax(function () {
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([root]).catch(function () {});
+      }
+    });
   }
 
   var blocksToMarkdown = DPB.toMarkdown;

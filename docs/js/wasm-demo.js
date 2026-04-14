@@ -1018,7 +1018,13 @@
     lastOutput.a2uiNodes = a2uiNodes;
 
     // Blocks view
-    if (panelBlocks) panelBlocks.innerHTML = renderBlocks(blocks);
+    if (panelBlocks) {
+      panelBlocks.innerHTML = renderBlocks(blocks);
+      // If any equation/bibitem/cite content is present, typeset with MathJax.
+      if (panelBlocks.querySelector('.dp-block-equation, .dp-block-bibitem, .dp-cite')) {
+        typesetMath(panelBlocks);
+      }
+    }
 
     // JSON view
     if (panelJson) panelJson.innerHTML = '<pre>' + escHtml(lastOutput.json) + '</pre>';
@@ -1399,6 +1405,57 @@
     }
   };
 
+  // ── MathJax lazy loader ──
+  // Only load MathJax once, and only when we actually see LaTeX content.
+  // Keeps the initial homepage payload small for the common (non-LaTeX) case.
+  var mathjaxState = { loaded: false, loading: false, queue: [] };
+  function ensureMathJax(cb) {
+    if (mathjaxState.loaded) { cb(); return; }
+    mathjaxState.queue.push(cb);
+    if (mathjaxState.loading) return;
+    mathjaxState.loading = true;
+    window.MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] },
+      startup: {
+        ready: function () {
+          window.MathJax.startup.defaultReady();
+          mathjaxState.loaded = true;
+          mathjaxState.queue.forEach(function (fn) { try { fn(); } catch (e) { console.warn(e); } });
+          mathjaxState.queue = [];
+        }
+      }
+    };
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
+    s.async = true;
+    document.head.appendChild(s);
+  }
+
+  function typesetMath(root) {
+    if (!root) return;
+    ensureMathJax(function () {
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([root]).catch(function (e) { console.warn('MathJax typeset failed:', e); });
+      }
+    });
+  }
+
+  // Inline LaTeX-ish markers inside paragraph text:
+  //   [cite:key]  → citation pill
+  //   [ref:label] → cross-reference pill
+  //   $...$ kept as-is so MathJax can typeset it
+  function renderInlineTex(text) {
+    var out = escHtml(text || '');
+    out = out.replace(/\[cite:([^\]]+)\]/g, function (_, k) {
+      return '<span class="dp-cite" title="' + escHtml(k) + '">[' + escHtml(k) + ']</span>';
+    });
+    out = out.replace(/\[ref:([^\]]+)\]/g, function (_, k) {
+      return '<span class="dp-xref" title="' + escHtml(k) + '">' + escHtml(k) + '</span>';
+    });
+    return out;
+  }
+
   function renderBlocks(blocks) {
     if (!Array.isArray(blocks)) return '<div class="dp-block"><div class="dp-block-text">No blocks</div></div>';
 
@@ -1411,7 +1468,30 @@
           return '<div class="dp-block"><div class="dp-block-heading" data-level="' + lvl + '">' + escHtml(b.text || '') + '</div></div>';
 
         case 'text':
-          return '<div class="dp-block"><div class="dp-block-text">' + escHtml(b.text || '') + '</div></div>';
+          // Equation blocks: preserve the raw LaTeX source and let MathJax typeset it.
+          if (b.style === 'equation-display' || b.style === 'equation') {
+            var isDisplay = b.style === 'equation-display';
+            var raw = b.text || '';
+            // MathJax handles \begin{equation}/\begin{align} natively — pass through.
+            // For bare inline equations, wrap in \(...\) if not already delimited.
+            var body = raw;
+            var hasEnv = /\\begin\{[a-zA-Z*]+\}/.test(raw);
+            var hasDelim = /^\s*(\$\$|\\\[|\\\()/.test(raw);
+            if (!hasEnv && !hasDelim) {
+              body = isDisplay ? ('\\[' + raw + '\\]') : ('\\(' + raw + '\\)');
+            }
+            var cls = isDisplay ? 'dp-block-equation dp-block-equation--display' : 'dp-block-equation';
+            return '<div class="dp-block"><div class="' + cls + '">' + escHtml(body) + '</div></div>';
+          }
+          // Bibliography entries: compact, hanging-indent style.
+          if (b.style === 'bibitem') {
+            return '<div class="dp-block"><div class="dp-block-bibitem">' + renderInlineTex(b.text) + '</div></div>';
+          }
+          // Abstract: italic callout, inline math still typeset.
+          if (b.style === 'abstract') {
+            return '<div class="dp-block"><div class="dp-block-abstract">' + renderInlineTex(b.text) + '</div></div>';
+          }
+          return '<div class="dp-block"><div class="dp-block-text">' + renderInlineTex(b.text) + '</div></div>';
 
         case 'table':
           var html = '<table class="dp-block-table"><thead><tr>';

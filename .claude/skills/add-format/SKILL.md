@@ -1,9 +1,21 @@
 ---
 name: add-format
-description: End-to-end checklist for adding a new input/output format to AILANG Parse. Use when user says 'add support for X format', 'wire up a new parser', 'add .foo format', or equivalent. Covers the parser, package exports, WASM demo, homepage, workbench, all format-list surfaces, SDK READMEs, release tag, and downstream notification.
+description: End-to-end checklist for adding a new input or output format to AILANG Parse (docparse). Use when the user says 'add support for X format', 'wire up a new parser', 'add .foo format', 'add a parser for .bar', 'support .baz files', 'ship format X', 'can we parse .qux', 'new format rollout', or mentions a file extension that isn't yet supported (e.g. 'what about RTF', 'add Jupyter notebooks'). Covers parser code, ailang.toml exports, WASM demo, vendor-wasm-packages.sh, homepage, workbench, all format-list surfaces across the docs site, SDK READMEs, release tag, registry publish, and the ailang messages send docparse downstream notification. Use even when only part of this is requested — the skill tells you which surfaces you'd otherwise miss.
 ---
 
 # Add a new format to AILANG Parse
+
+## When to Use
+
+Invoke this skill any time a new input or output format is being added to AILANG Parse — no matter how the request is phrased. The cost of forgetting a surface (Pages deploys failing silently, registry out of sync with docs, SDK READMEs stale) is far higher than the cost of running through the checklist. Also use it when the user asks "what's left?" mid-rollout, to audit which surfaces are still missing.
+
+## Quick Start
+
+1. Confirm scope with user (see [Before you start](#before-you-start)).
+2. Work through phases 1→7 in order. Do not batch phases 3+ before phases 1–2 type-check and smoke-test cleanly.
+3. Use the [Files checklist](#files-checklist-use-this-to-audit-a-pr) at the end as the final PR audit.
+
+## Workflow
 
 Adding a format hits ~20 distinct files across parser code, WASM bundle, docs, SDKs, release manifests, and deployment messaging. Skipping any one of them breaks something silently — the LaTeX/v0.15.0 rollout missed the vendor script and two Pages deploys failed before anyone noticed. Work through this list in order; do not batch steps 6-8 before 1-5 are green.
 
