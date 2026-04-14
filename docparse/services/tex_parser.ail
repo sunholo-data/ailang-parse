@@ -36,10 +36,26 @@ export pure func parseLatex(content: string) -> [Block]
 {
   let body = texExtractDocumentBody(content);
   let stripped = texStripComments(body);
-  let lines = split(stripped, "\n");
+  -- Normalize paragraph and env markers so each starts a fresh virtual line.
+  -- This lets mid-line `\par`, `\begin{X}`, and `\end{X}` produce their own
+  -- block boundaries without a full mid-line tokenizer.
+  let normalized = texNormalizeMarkers(stripped);
+  let lines = split(normalized, "\n");
   let state = foldl(texProcessLine, texEmptyState(), lines);
   reverse(texFlushState(state))
 }
+
+-- Insert newlines before \par, \begin{...}, and \end{...} markers so the
+-- line-oriented parser sees each as a fresh line. Also handles the common
+-- pattern `\end{X}\begin{Y}` by splitting into two lines.
+pure func texNormalizeMarkers(s: string) -> string =
+  replaceMany(s, [
+    ("\\par ",    "\n"),
+    ("\\par\t",   "\n"),
+    ("\\par\n",   "\n"),
+    ("\\begin{",  "\n\\begin{"),
+    ("\\end{",    "\n\\end{")
+  ])
 
 -- Extract metadata (title, author) from preamble
 -- Contract: results never exceed source length (extraction is a shrinking operation)
@@ -258,8 +274,61 @@ pure func texHandleBeginEnv(state: TexState, t: string) -> TexState {
   else if envName == "abstract" then texEnterEnvMode(flushed, "abstract", envName)
   else if envName == "thebibliography" then texEnterEnvMode(flushed, "biblio", envName)
   else if envName == "verbatim" || envName == "lstlisting" then texEnterEnvMode(flushed, "verbatim", envName)
+  -- Theorem-like envs: emit a labelled heading, then continue accumulating
+  -- the body as regular text. Content between \begin and \end is not given a
+  -- dedicated mode — the heading alone preserves the structural landmark.
+  else if texTheoremLabel(envName) != "" then
+    let label = texTheoremLabel(envName) in
+    let opt = texExtractOptionalAfterBegin(t, envName) in
+    let heading = if length(opt) == 0 then label else label ++ " (" ++ opt ++ ")" in
+    {
+      blocks: HeadingBlock({text: heading, level: 4}) :: flushed.blocks,
+      mode: "none",
+      envName: "",
+      buf: [],
+      textLines: [],
+      listItems: [],
+      tableRows: [],
+      figPath: "",
+      figCaption: ""
+    }
   -- Unknown env: treat as transparent (keep accumulating at top level)
   else flushed
+}
+
+-- Map theorem-like environment names to their display labels. Empty string =
+-- not a theorem environment. Covers the standard `amsthm`/`theorem` package
+-- names plus a handful of common variants used in arXiv papers.
+pure func texTheoremLabel(envName: string) -> string =
+  if envName == "theorem" || envName == "thm" then "Theorem"
+  else if envName == "lemma" || envName == "lem" then "Lemma"
+  else if envName == "corollary" || envName == "cor" then "Corollary"
+  else if envName == "proposition" || envName == "prop" then "Proposition"
+  else if envName == "definition" || envName == "defn" || envName == "defi" then "Definition"
+  else if envName == "remark" || envName == "rem" then "Remark"
+  else if envName == "claim" then "Claim"
+  else if envName == "observation" || envName == "obs" then "Observation"
+  else if envName == "conjecture" || envName == "conj" then "Conjecture"
+  else if envName == "example" || envName == "ex" then "Example"
+  else if envName == "problem" || envName == "prob" then "Problem"
+  else if envName == "exercise" then "Exercise"
+  else if envName == "fact" then "Fact"
+  else if envName == "note" then "Note"
+  else if envName == "parag" then "Paragraph"
+  else ""
+
+-- Extract the optional title from \begin{ENV}[title] — returns "" if absent.
+-- Example: texExtractOptionalAfterBegin("\\begin{thm}[Uniqueness]", "thm")
+--   => "Uniqueness"
+pure func texExtractOptionalAfterBegin(line: string, envName: string) -> string {
+  let marker = "\\begin{" ++ envName ++ "}";
+  let afterIdx = length(marker);
+  if afterIdx >= length(line) then ""
+  else if charAt(line, afterIdx) == "[" then
+    let closeIdx = find(substring(line, afterIdx, length(line)), "]") in
+    if closeIdx < 0 then ""
+    else trim(substring(line, afterIdx + 1, afterIdx + closeIdx))
+  else ""
 }
 
 pure func texEnterEnvMode(state: TexState, mode: string, envName: string) -> TexState = {
