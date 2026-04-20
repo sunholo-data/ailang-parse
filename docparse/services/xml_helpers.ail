@@ -27,8 +27,8 @@ export pure func xmlAttrEscape(text: string) -> string =
 export pure func xmlElem(tag: string, attrs: [{key: string, val: string}], content: string) -> string {
   let attrStr = xmlRenderAttrs(attrs);
   if length(content) == 0
-  then "<" ++ tag ++ attrStr ++ "/>"
-  else "<" ++ tag ++ attrStr ++ ">" ++ content ++ "</" ++ tag ++ ">"
+  then "<${tag}${attrStr}/>"
+  else "<${tag}${attrStr}>${content}</${tag}>"
 }
 
 -- Build an XML element wrapping child elements (not text)
@@ -36,13 +36,13 @@ export pure func xmlElem(tag: string, attrs: [{key: string, val: string}], conte
 export pure func xmlWrap(tag: string, attrs: [{key: string, val: string}], children: string) -> string {
   let attrStr = xmlRenderAttrs(attrs);
   if length(children) == 0
-  then "<" ++ tag ++ attrStr ++ "/>"
-  else "<" ++ tag ++ attrStr ++ ">" ++ children ++ "</" ++ tag ++ ">"
+  then "<${tag}${attrStr}/>"
+  else "<${tag}${attrStr}>${children}</${tag}>"
 }
 
 -- Render attribute list to string: [("w:val", "Heading1")] => " w:val=\"Heading1\""
 pure func xmlRenderAttrs(attrs: [{key: string, val: string}]) -> string =
-  foldl(\acc a. acc ++ " " ++ a.key ++ "=\"" ++ xmlAttrEscape(a.val) ++ "\"", "", attrs)
+  foldl(\acc a. "${acc} ${a.key}=\"${xmlAttrEscape(a.val)}\"", "", attrs)
 
 -- XML declaration header
 export pure func xmlDecl() -> string =
@@ -63,20 +63,12 @@ export pure func docxRelTypeDoc() -> string =
 
 -- Build a DOCX [Content_Types].xml with standard entries
 export pure func docxContentTypes() -> string {
-  xmlDecl() ++
-  "<Types xmlns=\"" ++ docxContentTypesNs() ++ "\">" ++
-  "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" ++
-  "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" ++
-  "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>" ++
-  "</Types>"
+  "${xmlDecl()}<Types xmlns=\"${docxContentTypesNs()}\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>"
 }
 
 -- Build a DOCX _rels/.rels with document relationship
 export pure func docxRootRels() -> string {
-  xmlDecl() ++
-  "<Relationships xmlns=\"" ++ docxRelsNs() ++ "\">" ++
-  "<Relationship Id=\"rId1\" Type=\"" ++ docxRelTypeDoc() ++ "\" Target=\"word/document.xml\"/>" ++
-  "</Relationships>"
+  "${xmlDecl()}<Relationships xmlns=\"${docxRelsNs()}\"><Relationship Id=\"rId1\" Type=\"${docxRelTypeDoc()}\" Target=\"word/document.xml\"/></Relationships>"
 }
 
 -- Wrap content in a Word paragraph run: <w:r><w:t>text</w:t></w:r>
@@ -88,11 +80,11 @@ export pure func docxRun(text: string) -> string =
 
 -- Wrap a run in a paragraph: <w:p>...</w:p>
 export pure func docxParagraph(content: string) -> string =
-  "<w:p>" ++ content ++ "</w:p>"
+  "<w:p>${content}</w:p>"
 
 -- Build a styled paragraph (e.g., heading)
 export pure func docxStyledParagraph(style: string, text: string) -> string =
-  "<w:p><w:pPr><w:pStyle w:val=\"" ++ xmlAttrEscape(style) ++ "\"/></w:pPr>" ++ docxRun(text) ++ "</w:p>"
+  "<w:p><w:pPr><w:pStyle w:val=\"${xmlAttrEscape(style)}\"/></w:pPr>${docxRun(text)}</w:p>"
 
 -- Tree API: generators can import std/xml (xmlElement, xmlText, serialize) directly
 -- for tree-based XML construction. xmlText auto-escapes on serialize.

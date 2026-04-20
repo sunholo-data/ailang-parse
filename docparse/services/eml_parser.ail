@@ -124,7 +124,7 @@ pure func emlFoldHeaderLines(lines: [string], acc: [EmlHeader]) -> [EmlHeader] =
         match acc {
           [] => emlFoldHeaderLines(rest, acc),
           prev :: others => {
-            let unfolded = { name: prev.name, value: prev.value ++ " " ++ trim(line) };
+            let unfolded = { name: prev.name, value: "${prev.value} ${trim(line)}" };
             emlFoldHeaderLines(rest, unfolded :: others)
           }
         }
@@ -167,7 +167,7 @@ pure func emlFindHeader(headers: [EmlHeader], lowerName: string) -> string =
 
 -- Convert headers to TextBlock list for output (decode RFC 2047 encoded-words)
 pure func emlHeadersToBlocks(headers: [EmlHeader]) -> [Block] =
-  map(\h. TextBlock({text: h.name ++ ": " ++ emlDecodeHeaderValue(h.value), style: "email-header", level: 0}), headers)
+  map(\h. TextBlock({text: "${h.name}: ${emlDecodeHeaderValue(h.value)}", style: "email-header", level: 0}), headers)
 
 -- Extract display name from From header
 -- "Alice Smith <alice@example.com>" → "Alice Smith"
@@ -235,7 +235,7 @@ pure func emlExtractBoundary(contentType: string) -> string {
 -- Boundary lines: "--" + boundary
 -- Closing: "--" + boundary + "--"
 pure func emlSplitMultipart(body: string, boundary: string) -> [string] {
-  let delimiter = "--" ++ boundary;
+  let delimiter = "--${boundary}";
   let parts = split(body, delimiter);
   -- First part is preamble (before first boundary), skip it
   -- Last part is epilogue (after closing boundary --), skip it
@@ -327,21 +327,21 @@ pure func emlParseMimePart(part: string) -> [Block] {
       -- Text-based attachment: decode and parse inline
       let decoded = emlDecodeBody(splitResult.body, partEnc);
       let parsedBlocks = emlParseAttachmentContent(decoded, mimeType);
-      let metaBlock = TextBlock({text: filename ++ " (" ++ mimeType ++ ")", style: "attachment-meta", level: 0});
+      let metaBlock = TextBlock({text: "${filename} (${mimeType})", style: "attachment-meta", level: 0});
       [SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks})]
     }
     else if emlIsOfficeMime(mimeType) then {
       -- Office attachment: preserve base64 data for two-pass resolution
       let rawBody = emlStripBodyWhitespace(splitResult.body);
       let ext = emlOfficeExtension(mimeType);
-      let metaBlock = TextBlock({text: filename ++ " (" ++ mimeType ++ ")", style: "attachment-meta", level: 0});
+      let metaBlock = TextBlock({text: "${filename} (${mimeType})", style: "attachment-meta", level: 0});
       let dataBlock = TextBlock({text: rawBody, style: "attachment-data", level: 0});
       let extBlock = TextBlock({text: ext, style: "attachment-ext", level: 0});
       [SectionBlock({kind: "attachment", blocks: [metaBlock, dataBlock, extBlock]})]
     }
     else {
       -- Binary attachment: placeholder
-      [TextBlock({text: "[attachment: " ++ filename ++ ", " ++ mimeType ++ "]", style: "attachment", level: 0})]
+      [TextBlock({text: "[attachment: ${filename}, ${mimeType}]", style: "attachment", level: 0})]
     }
   }
   else if contains(lowerCt, "multipart/") then {
@@ -367,7 +367,7 @@ pure func emlParseMimePart(part: string) -> [Block] {
     let mimeType = emlExtractMimeType(partCt);
     let filename = emlExtractFilename(disposition, partCt);
     let label = if length(filename) > 0 then filename else mimeType;
-    [TextBlock({text: "[attachment: " ++ label ++ ", " ++ mimeType ++ "]", style: "attachment", level: 0})]
+    [TextBlock({text: "[attachment: ${label}, ${mimeType}]", style: "attachment", level: 0})]
   }
 }
 
@@ -390,7 +390,7 @@ pure func emlExtractFilename(disposition: string, contentType: string) -> string
 -- Extract a parameter value from a header: "attachment; filename=\"report.csv\""
 pure func emlExtractParam(header: string, paramName: string) -> string {
   let lower = toLower(header);
-  let searchTerm = toLower(paramName) ++ "=";
+  let searchTerm = "${toLower(paramName)}=";
   let pos = find(lower, searchTerm);
   if pos < 0 then ""
   else {
@@ -502,7 +502,7 @@ export pure func emlDecodeHeaderValue(value: string) -> string
                         else encodedText;
           -- Skip whitespace between adjacent encoded-words (RFC 2047 §6.2)
           let trimmedRest = if startsWith(trim(rest), "=?") then trim(rest) else rest;
-          before ++ decoded ++ emlDecodeHeaderValue(trimmedRest)
+          "${before}${decoded}${emlDecodeHeaderValue(trimmedRest)}"
         }
       }
     }
@@ -541,7 +541,7 @@ pure func emlAccumulateMboxMessages(lines: [string], current: string, acc: [stri
         emlAccumulateMboxMessages(rest, "", acc)
       }
       else {
-        let newCurrent = if length(current) == 0 then line else current ++ "\n" ++ line;
+        let newCurrent = if length(current) == 0 then line else "${current}\n${line}";
         emlAccumulateMboxMessages(rest, newCurrent, acc)
       }
     }

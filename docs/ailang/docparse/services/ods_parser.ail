@@ -34,7 +34,7 @@ export func parseOds(filepath: string) -> [Block] ! {FS}
   then [TextBlock({text: "ODS error: could not read content.xml", style: "error", level: 0})]
   else match parse(xml) {
     Ok(root) => odsExtractSheets(root),
-    Err(e) => [TextBlock({text: "ODS XML parse error: " ++ e, style: "error", level: 0})]
+    Err(e) => [TextBlock({text: "ODS XML parse error: ${e}", style: "error", level: 0})]
   }
 }
 
@@ -82,7 +82,7 @@ pure func odsParseSheet(table: XmlNode) -> [Block] {
       firstRow :: dataRows =>
         TableBlock({rows: dataRows, headers: firstRow})
     };
-    [SectionBlock({kind: "sheet:" ++ sheetName, blocks: [tableBlock]})]
+    [SectionBlock({kind: "sheet:${sheetName}", blocks: [tableBlock]})]
   }
 }
 

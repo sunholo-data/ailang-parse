@@ -42,7 +42,7 @@ export func mcpAccount(apiKey: string, action: string) -> string ! {Env, Net} {
     else
       encode(jo([
         kv("error", js("INVALID_ACTION")),
-        kv("message", js("Unknown action: " ++ act)),
+        kv("message", js("Unknown action: ${act}")),
         kv("supported_actions", js("status, pricing, usage, history, keys"))
       ]))
   }
@@ -50,34 +50,34 @@ export func mcpAccount(apiKey: string, action: string) -> string ! {Env, Net} {
 
 -- Get pricing tiers (no auth needed).
 func mcpAccountPricing(baseUrl: string) -> string ! {Net} {
-  let resp = httpGet(baseUrl ++ "/api/v1/pricing");
+  let resp = httpGet("${baseUrl}/api/v1/pricing");
   resp
 }
 
 -- Get entitlements and quota status.
 func mcpAccountStatus(baseUrl: string, apiKey: string) -> string ! {Net} {
-  let body = "{\"apiKey\":\"" ++ apiKey ++ "\"}";
-  let resp = httpPost(baseUrl ++ "/me/entitlements", body);
+  let body = "{\"apiKey\":\"${apiKey}\"}";
+  let resp = httpPost("${baseUrl}/me/entitlements", body);
   resp
 }
 
 -- Get per-key usage stats.
 func mcpAccountUsage(baseUrl: string, apiKey: string) -> string ! {Net} {
-  let body = "{\"apiKey\":\"" ++ apiKey ++ "\"}";
-  let resp = httpPost(baseUrl ++ "/api/v1/keys/usage", body);
+  let body = "{\"apiKey\":\"${apiKey}\"}";
+  let resp = httpPost("${baseUrl}/api/v1/keys/usage", body);
   resp
 }
 
 -- Get parse request history.
 func mcpAccountHistory(baseUrl: string, apiKey: string) -> string ! {Net} {
-  let body = "{\"apiKey\":\"" ++ apiKey ++ "\"}";
-  let resp = httpPost(baseUrl ++ "/api/v1/requests/history", body);
+  let body = "{\"apiKey\":\"${apiKey}\"}";
+  let resp = httpPost("${baseUrl}/api/v1/requests/history", body);
   resp
 }
 
 -- List API keys.
 func mcpAccountKeys(baseUrl: string, apiKey: string) -> string ! {Net} {
-  let body = "{\"apiKey\":\"" ++ apiKey ++ "\"}";
-  let resp = httpPost(baseUrl ++ "/api/v1/keys/list", body);
+  let body = "{\"apiKey\":\"${apiKey}\"}";
+  let resp = httpPost("${baseUrl}/api/v1/keys/list", body);
   resp
 }

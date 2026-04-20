@@ -5,7 +5,7 @@ import std/zip (scanFold)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr)
-import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse)
+import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry)
@@ -38,10 +38,10 @@ export func parseXlsx(filepath: string) -> [Block] ! {FS} {
   let sheetEntries = findSheetEntries(filepath);
   let sheetBlocks = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames, 0);
   -- Warn if shared strings were truncated
-  if stringCount >= 100000
+  if stringCount >= 50000
   then {
     let warning = TextBlock({
-      text: "Warning: spreadsheet has more than 100,000 unique text values. Some cell text may be missing. For large datasets, consider CSV format.",
+      text: "Warning: spreadsheet has more than 50,000 unique text values. Some cell text may be missing. For large datasets, consider CSV format.",
       style: "warning", level: 0
     });
     warning :: sheetBlocks
@@ -73,10 +73,22 @@ func loadSharedStrings(filepath: string) -> Map[int, string] ! {FS} {
 -- Fold function for scanFold: extract text from <si> and prepend (idx, text) pair
 -- Stops accumulating after 100K strings (scanFold still scans but fold is O(1) skip)
 pure func xlsxFoldSi(acc: { pairs: [(int, string)], idx: int }, si: XmlNode) -> { pairs: [(int, string)], idx: int } {
-  if acc.idx >= 100000 then acc
+  if acc.idx >= 50000 then acc
   else {
     let text = extractSiText(si);
     { pairs: (acc.idx, text) :: acc.pairs, idx: acc.idx + 1 }
+  }
+}
+
+-- Fold function for parseFold: parse row and accumulate cells
+-- Carries sharedStrings in the accumulator to avoid closure capture
+pure func xlsxFoldRow(acc: { rows: [[TableCell]], count: int, ss: Map[int, string] }, rowNode: XmlNode) -> { rows: [[TableCell]], count: int, ss: Map[int, string] } {
+  if acc.count >= 5000 then acc
+  else {
+    let cells = parseXlsxRow(rowNode, acc.ss);
+    if listLength(cells) > 0
+    then { rows: cells :: acc.rows, count: acc.count + 1, ss: acc.ss }
+    else acc
   }
 }
 
@@ -142,14 +154,16 @@ func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Ma
 
 -- Parse a single worksheet's XML into blocks
 -- Emits a HeadingBlock with the sheet name followed by the table data.
-export pure func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetName: string) -> [Block] {
+export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetName: string) -> [Block] ! {} {
   if length(xml) == 0 then []
   else {
-    -- Use parseElements for streaming: only builds subtrees for <row> elements
-    -- O(largest row) memory instead of O(entire document)
-    -- 5K row cap per sheet — balances coverage vs performance
-    let parsedRows = match parseElements(xml, "row", 5000) {
-      Ok(rowNodes) => parseXlsxRows(rowNodes, sharedStrings),
+    -- Use parseFold for streaming: fold directly over <row> elements without
+    -- collecting them into a list first. O(1) memory per row, 5K row cap.
+    let foldResult = parseFold(xml, "row",
+      { rows: [], count: 0, ss: sharedStrings },
+      xlsxFoldRow);
+    let parsedRows = match foldResult {
+      Ok(acc2) => reverse(acc2.rows),
       Err(_) => []
     };
     let heading = HeadingBlock({text: xlsxCleanSheetName(sheetName), level: 1});
@@ -199,7 +213,7 @@ pure func xlsxStripSuffix(s: string) -> string {
 pure func xlsxFormatSheetName(name: string) -> string {
   if startsWith(name, "sheet") then {
     let numPart = substring(name, 5, length(name));
-    "Sheet " ++ numPart
+    "Sheet ${numPart}"
   }
   else name
 }
@@ -207,12 +221,17 @@ pure func xlsxFormatSheetName(name: string) -> string {
 -- Row cap per sheet: 5000 (inlined in parseSheetXml to work around Go codegen bug
 -- where module-level let bindings used as function args kill codegen)
 
--- Parse all rows
+-- Parse all rows (direct recursion to avoid closure allocation)
 pure func parseXlsxRows(rows: [XmlNode], sharedStrings: Map[int, string]) -> [[TableCell]] =
-  flatMap(\row.
-    let cells = parseXlsxRow(row, sharedStrings) in
-    if listLength(cells) > 0 then [cells] else [],
-    rows)
+  match rows {
+    [] => [],
+    row :: rest => {
+      let cells = parseXlsxRow(row, sharedStrings);
+      if listLength(cells) > 0
+      then cells :: parseXlsxRows(rest, sharedStrings)
+      else parseXlsxRows(rest, sharedStrings)
+    }
+  }
 
 -- Parse a single row
 pure func parseXlsxRow(row: XmlNode, sharedStrings: Map[int, string]) -> [TableCell] {
@@ -221,10 +240,15 @@ pure func parseXlsxRow(row: XmlNode, sharedStrings: Map[int, string]) -> [TableC
 }
 
 -- Parse all cells in a row
+-- Uses direct recursion instead of map+lambda to avoid per-cell
+-- environment cloning (sharedStrings map clone per cell was 13.9% of CPU)
 pure func parseXlsxCells(cells: [XmlNode], sharedStrings: Map[int, string]) -> [TableCell]
   ensures { listLength(result) == listLength(cells) }
 {
-  map(\cell. parseXlsxCell(cell, sharedStrings), cells)
+  match cells {
+    [] => [],
+    cell :: rest => parseXlsxCell(cell, sharedStrings) :: parseXlsxCells(rest, sharedStrings)
+  }
 }
 
 -- Parse a single cell

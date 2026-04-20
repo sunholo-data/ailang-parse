@@ -21,6 +21,7 @@ import std/option (Some, None)
 -- "epub"       = EPUB ebooks (ZIP of XHTML)
 -- "zip-odf"    = ODT, ODP, ODS (ZIP archives with ODF XML)
 -- "email"      = EML, MBOX (RFC 5322 email)
+-- "latex"      = LaTeX/TeX source (structured text → Block ADT)
 -- "text"       = Plain text, XML, etc
 -- "unknown"    = Unrecognized format
 
@@ -29,7 +30,8 @@ export pure func detectFormat(ext: string) -> string
     result == "zip-office" || result == "pdf" || result == "image" ||
     result == "audio" || result == "video" || result == "csv" ||
     result == "markdown" || result == "html" || result == "epub" ||
-    result == "zip-odf" || result == "email" || result == "text" || result == "unknown"
+    result == "zip-odf" || result == "email" || result == "latex" ||
+    result == "text" || result == "unknown"
   }
   tests [
     ("docx", "zip-office"),
@@ -58,6 +60,9 @@ export pure func detectFormat(ext: string) -> string
     ("ods", "zip-odf"),
     ("eml", "email"),
     ("mbox", "email"),
+    ("tex", "latex"),
+    ("latex", "latex"),
+    ("ltx", "latex"),
     ("txt", "text"),
     ("xml", "text"),
     ("foo", "unknown")
@@ -78,6 +83,7 @@ export pure func detectFormat(ext: string) -> string
   else if ext == "epub" then "epub"
   else if ext == "odt" || ext == "odp" || ext == "ods" then "zip-odf"
   else if ext == "eml" || ext == "mbox" then "email"
+  else if ext == "tex" || ext == "latex" || ext == "ltx" then "latex"
   else if ext == "txt" || ext == "xml" || ext == "json" then "text"
   else "unknown"
 }
@@ -133,11 +139,12 @@ export pure func needsAI(format: string) -> bool
     ("epub", false),
     ("zip-odf", false),
     ("email", false),
+    ("latex", false),
     ("text", false),
     ("unknown", true)
   ]
 {
-  if format == "zip-office" || format == "text" || format == "csv" || format == "markdown" || format == "html" || format == "epub" || format == "zip-odf" || format == "email" then false
+  if format == "zip-office" || format == "text" || format == "csv" || format == "markdown" || format == "html" || format == "epub" || format == "zip-odf" || format == "email" || format == "latex" then false
   else true
 }
 
@@ -156,6 +163,7 @@ export pure func strategyDescription(format: string) -> string
     ("epub", "ZIP extraction + XHTML parsing + optional AI for images/tables"),
     ("zip-odf", "ZIP extraction + ODF XML parsing + optional AI for images/tables"),
     ("email", "RFC 5322 + MIME parsing (pure AILANG)"),
+    ("latex", "LaTeX structural parsing (pure AILANG, deterministic)"),
     ("text", "Direct text reading"),
     ("unknown", "AI multimodal extraction (best effort)")
   ]
@@ -171,6 +179,7 @@ export pure func strategyDescription(format: string) -> string
   else if format == "epub" then "ZIP extraction + XHTML parsing + optional AI for images/tables"
   else if format == "zip-odf" then "ZIP extraction + ODF XML parsing + optional AI for images/tables"
   else if format == "email" then "RFC 5322 + MIME parsing (pure AILANG)"
+  else if format == "latex" then "LaTeX structural parsing (pure AILANG, deterministic)"
   else if format == "text" then "Direct text reading"
   else "AI multimodal extraction (best effort)"
 }

@@ -155,7 +155,10 @@ export pure func epubExtractSpine(opfXml: string, opfDir: string) -> [string] {
         let xhtmlItems = filter(\item.
           getOrElse(getAttr(item, "media-type"), "") == "application/xhtml+xml",
           items);
-        map(\item. opfDir ++ getOrElse(getAttr(item, "href"), ""), xhtmlItems)
+        map(\item. {
+          let href = getOrElse(getAttr(item, "href"), "");
+          "${opfDir}${href}"
+        }, xhtmlItems)
       }
     },
     Err(_) => []
@@ -170,7 +173,7 @@ pure func epubLookupManifest(items: [XmlNode], targetId: string, opfDir: string)
       let itemId = getOrElse(getAttr(item, "id"), "") in
       if itemId == targetId then
         let href = getOrElse(getAttr(item, "href"), "") in
-        if length(href) > 0 then [opfDir ++ href]
+        if length(href) > 0 then ["${opfDir}${href}"]
         else []
       else epubLookupManifest(rest, targetId, opfDir)
   }
@@ -201,7 +204,7 @@ func epubParseContentFile(filepath: string, entryPath: string) -> [Block] ! {FS}
       let chapterDir = epubDirName(entryPath);
       let resolvedBlocks = epubResolveImagePaths(blocks, chapterDir);
       let chapterName = epubBaseName(entryPath);
-      [SectionBlock({kind: "chapter:" ++ chapterName, blocks: resolvedBlocks})]
+      [SectionBlock({kind: "chapter:${chapterName}", blocks: resolvedBlocks})]
     }
   }
 }
@@ -257,14 +260,12 @@ pure func epubResolveOneImage(b: Block, chapterDir: string) -> Block =
 -- Resolve a relative path against a directory base
 -- "image.jpg" with base "OEBPS/Text/" => "OEBPS/Text/image.jpg"
 -- "../Images/img.png" with base "OEBPS/Text/" => "OEBPS/Images/img.png"
-pure func epubResolvePath(baseDir: string, relPath: string) -> string {
+pure func epubResolvePath(baseDir: string, relPath: string) -> string =
   if startsWith(relPath, "http://") || startsWith(relPath, "https://") then relPath
   else if startsWith(relPath, "/") then substring(relPath, 1, length(relPath))
   else if startsWith(relPath, "../") then
-    let parent = epubParentDir(baseDir) in
-    epubResolvePath(parent, substring(relPath, 3, length(relPath)))
-  else baseDir ++ relPath
-}
+    epubResolvePath(epubParentDir(baseDir), substring(relPath, 3, length(relPath)))
+  else "${baseDir}${relPath}"
 
 -- Get parent directory (e.g., "OEBPS/Text/" -> "OEBPS/")
 -- Strips trailing slash, then finds last slash

@@ -89,7 +89,7 @@ pure func texStripComments(content: string) -> string
 -- Contract: joining with \n grows the accumulator by at most length(line)+1
 pure func texJoinNewline(acc: string, line: string) -> string
   ensures { length(result) >= length(line) }
-= if length(acc) == 0 then line else acc ++ "\n" ++ line
+= if length(acc) == 0 then line else "${acc}\n${line}"
 
 -- Contract: a per-line comment strip is a shrinking operation
 pure func texStripLineComment(line: string) -> string
@@ -290,7 +290,7 @@ pure func texHandleBeginEnv(state: TexState, t: string) -> TexState {
   else if texTheoremLabel(envName) != "" then
     let label = texTheoremLabel(envName) in
     let opt = texExtractOptionalAfterBegin(t, envName) in
-    let heading = if length(opt) == 0 then label else label ++ " (" ++ opt ++ ")" in
+    let heading = if length(opt) == 0 then label else "${label} (${opt})" in
     {
       blocks: HeadingBlock({text: heading, level: 4}) :: flushed.blocks,
       mode: "none",
@@ -331,7 +331,7 @@ pure func texTheoremLabel(envName: string) -> string =
 -- Example: texExtractOptionalAfterBegin("\\begin{thm}[Uniqueness]", "thm")
 --   => "Uniqueness"
 pure func texExtractOptionalAfterBegin(line: string, envName: string) -> string {
-  let marker = "\\begin{" ++ envName ++ "}";
+  let marker = "\\begin{${envName}}";
   let afterIdx = length(marker);
   if afterIdx >= length(line) then ""
   else if charAt(line, afterIdx) == "[" then
@@ -376,7 +376,7 @@ pure func texEnterEquation(state: TexState, opener: string, t: string) -> TexSta
     let eqEnd = find(afterOpener, closer) in
     let eqText = substring(afterOpener, 0, eqEnd) in
     {
-      blocks: TextBlock({text: opener ++ eqText ++ closer, style: "equation-display", level: 0}) :: flushed.blocks,
+      blocks: TextBlock({text: "${opener}${eqText}${closer}", style: "equation-display", level: 0}) :: flushed.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -406,7 +406,7 @@ pure func texHandleEquationLine(state: TexState, line: string, t: string) -> Tex
   let isClose =
     (state.envName == "$$" && contains(t, "$$"))
     || (state.envName == "\\[" && contains(t, "\\]"))
-    || startsWith(t, "\\end{" ++ state.envName ++ "}");
+    || startsWith(t, "\\end{${state.envName}}");
   if isClose then {
     -- buf is stored reversed (prepend O(1)) — reverse before joining.
     let raw = texJoinLines(reverse([line] ++ state.buf)) in
@@ -438,7 +438,7 @@ pure func texHandleEquationLine(state: TexState, line: string, t: string) -> Tex
 -- Verbatim mode — accumulate raw until \end{NAME}
 -- ---------------------------------------------------------------------------
 pure func texHandleVerbatimLine(state: TexState, line: string, t: string) -> TexState {
-  if startsWith(t, "\\end{" ++ state.envName ++ "}") then
+  if startsWith(t, "\\end{${state.envName}}") then
     let raw = texJoinLines(reverse(state.buf)) in
     {
       blocks: TextBlock({text: raw, style: "verbatim", level: 0}) :: state.blocks,
@@ -468,7 +468,7 @@ pure func texHandleVerbatimLine(state: TexState, line: string, t: string) -> Tex
 -- List mode (itemize / enumerate) — split on \item
 -- ---------------------------------------------------------------------------
 pure func texHandleListLine(state: TexState, line: string, t: string) -> TexState {
-  if startsWith(t, "\\end{" ++ state.envName ++ "}") then
+  if startsWith(t, "\\end{${state.envName}}") then
     let ordered = state.envName == "enumerate" in
     {
       blocks: ListBlock({items: map(texCleanInline, reverse(state.listItems)), ordered: ordered}) :: state.blocks,
@@ -521,14 +521,14 @@ pure func texHandleListLine(state: TexState, line: string, t: string) -> TexStat
 pure func texUpdateLastItem(items: [string], extra: string) -> [string] =
   match items {
     [] => [extra],
-    head :: rest => (head ++ " " ++ extra) :: rest
+    head :: rest => "${head} ${extra}" :: rest
   }
 
 -- ---------------------------------------------------------------------------
 -- Tabular mode — split rows on \\ and cells on &
 -- ---------------------------------------------------------------------------
 pure func texHandleTabularLine(state: TexState, line: string, t: string) -> TexState {
-  if startsWith(t, "\\end{" ++ state.envName ++ "}") then
+  if startsWith(t, "\\end{${state.envName}}") then
     -- tableRows is stored reversed — reverse to restore document order.
     let rowStrs = reverse(state.tableRows) in
     match rowStrs {
@@ -596,7 +596,7 @@ pure func texAbsorbTabularSegs(state: TexState, segs: [string]) -> TexState =
 -- Figure mode — look for \includegraphics and \caption, emit ImageBlock at \end
 -- ---------------------------------------------------------------------------
 pure func texHandleFigureLine(state: TexState, line: string, t: string) -> TexState {
-  if startsWith(t, "\\end{" ++ state.envName ++ "}") then
+  if startsWith(t, "\\end{${state.envName}}") then
     {
       blocks: ImageBlock({data: state.figPath, description: texCleanInline(state.figCaption), mime: "image/*"}) :: state.blocks,
       mode: "none",
@@ -801,7 +801,7 @@ pure func texJoinLines(lines: [string]) -> string
 -- Contract: appending preserves at least the length of the appended line
 pure func texAppendLine(acc: string, line: string) -> string
   ensures { length(result) >= length(line) }
-= if length(acc) == 0 then line else acc ++ " " ++ line
+= if length(acc) == 0 then line else "${acc} ${line}"
 
 -- ============================================================================
 -- Brace-arg extraction
@@ -926,7 +926,7 @@ pure func texCleanInlineSlow(s: string) -> string {
 -- Replace all occurrences of \cmd{content} with openMark++content++closeMark.
 -- Uses brace-matching so nested braces inside content are preserved.
 pure func texWrapCmd(s: string, cmd: string, openMark: string, closeMark: string) -> string {
-  let idx = find(s, cmd ++ "{");
+  let idx = find(s, "${cmd}{");
   if idx < 0 then s
   else
     let braceStart = idx + length(cmd) in
@@ -934,7 +934,7 @@ pure func texWrapCmd(s: string, cmd: string, openMark: string, closeMark: string
     if closeIdx < 0 then s
     else
       let inner = substring(s, braceStart + 1, closeIdx) in
-      let replaced = substring(s, 0, idx) ++ openMark ++ inner ++ closeMark ++ substring(s, closeIdx + 1, length(s)) in
+      let replaced = "${substring(s, 0, idx)}${openMark}${inner}${closeMark}${substring(s, closeIdx + 1, length(s))}" in
       texWrapCmd(replaced, cmd, openMark, closeMark)
 }
 
@@ -958,7 +958,7 @@ pure func texStripStyleGroupsAt(s: string, i: int) -> string =
             if styleEnd > 0 then
               -- Found a style group: replace {\STYLE content} with "content"
               let content = trim(substring(inner, styleEnd, length(inner))) in
-              let replaced = substring(s, 0, i) ++ content ++ substring(s, close + 1, length(s)) in
+              let replaced = "${substring(s, 0, i)}${content}${substring(s, close + 1, length(s))}" in
               texStripStyleGroupsAt(replaced, i + length(content))
             else texStripStyleGroupsAt(s, i + 1)
         else texStripStyleGroupsAt(s, i + 1)
@@ -1009,7 +1009,7 @@ pure func texSkipSpace(s: string, i: int) -> int =
 
 -- Replace \CMD{key} with "[MARK:key]" for cite/ref/label style commands.
 pure func texReplaceCiteRef(s: string, cmd: string, mark: string) -> string {
-  let idx = find(s, cmd ++ "{");
+  let idx = find(s, "${cmd}{");
   if idx < 0 then s
   else
     let braceStart = idx + length(cmd) in
@@ -1017,7 +1017,7 @@ pure func texReplaceCiteRef(s: string, cmd: string, mark: string) -> string {
     if closeIdx < 0 then s
     else
       let key = substring(s, braceStart + 1, closeIdx) in
-      let replaced = substring(s, 0, idx) ++ "[" ++ mark ++ ":" ++ key ++ "]" ++ substring(s, closeIdx + 1, length(s)) in
+      let replaced = "${substring(s, 0, idx)}[${mark}:${key}]${substring(s, closeIdx + 1, length(s))}" in
       texReplaceCiteRef(replaced, cmd, mark)
 }
 
@@ -1040,7 +1040,7 @@ pure func texStripUnknownCmdsAt(s: string, i: int) -> string =
               if close < 0 then s
               else
                 let inner = substring(s, cmdEnd + 1, close) in
-                let replaced = substring(s, 0, i) ++ inner ++ substring(s, close + 1, length(s)) in
+                let replaced = "${substring(s, 0, i)}${inner}${substring(s, close + 1, length(s))}" in
                 let nextI = if length(inner) == 0 then i + 1 else i + length(inner) in
                 texStripUnknownCmdsAt(replaced, nextI)
             else texStripUnknownCmdsAt(s, cmdEnd)

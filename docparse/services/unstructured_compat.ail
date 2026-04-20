@@ -74,16 +74,16 @@ pure func unstBlockToElements(block: Block, filename: string, filetype: string, 
       [unstElement("Image", i.description, filename, filetype, idx, 0, extra)],
 
     AudioBlock(a) =>
-      [unstElement("NarrativeText", "[Audio: " ++ a.transcription ++ "]", filename, filetype, idx, 0, jn())],
+      [unstElement("NarrativeText", "[Audio: ${a.transcription}]", filename, filetype, idx, 0, jn())],
 
     VideoBlock(v) =>
-      [unstElement("NarrativeText", "[Video: " ++ v.description ++ "]", filename, filetype, idx, 0, jn())],
+      [unstElement("NarrativeText", "[Video: ${v.description}]", filename, filetype, idx, 0, jn())],
 
     SectionBlock(s) =>
       unstSectionToElements(s.kind, s.blocks, filename, filetype, idx),
 
     ChangeBlock(c) =>
-      let text = "[" ++ c.changeType ++ "] " ++ c.text ++ " (by " ++ c.author ++ ", " ++ c.date ++ ")" in
+      let text = "[${c.changeType}] ${c.text} (by ${c.author}, ${c.date})" in
       [unstElement("NarrativeText", text, filename, filetype, idx, 0, jn())]
   }
 
@@ -108,7 +108,7 @@ pure func unstElement(typ: string, text: string, filename: string, filetype: str
 -- Unstructured uses SHA-256; we use a simpler hash since we don't have crypto stdlib.
 -- Format: hex-like string derived from content.
 pure func unstElementId(typ: string, text: string, idx: int) -> string {
-  let seed = typ ++ ":" ++ text ++ ":" ++ intToStr(idx);
+  let seed = "${typ}:${text}:${intToStr(idx)}";
   unstSimpleHash(seed)
 }
 
@@ -168,7 +168,7 @@ pure func unstIntToHexHelper(n: int, digits: int, hexChars: string) -> string =
   else
     let remainder = n - ((n / 16) * 16) in
     let digit = substring(hexChars, remainder, remainder + 1) in
-    unstIntToHexHelper(n / 16, digits - 1, hexChars) ++ digit
+    "${unstIntToHexHelper(n / 16, digits - 1, hexChars)}${digit}"
 
 -- Merge base metadata with extra metadata fields
 -- If extra is null, return base. Otherwise combine.
@@ -178,10 +178,10 @@ pure func unstMergeMeta(base: Json, extra: Json) -> Json =
 -- Convert table to flattened text (Unstructured format: space-separated cells, newline-separated rows)
 pure func unstTableToText(headers: [TableCell], rows: [[TableCell]]) -> string {
   let headerLine = if listLength(headers) > 0
-    then unstCellsToText(headers) ++ "\n"
+    then "${unstCellsToText(headers)}\n"
     else "";
-  let rowLines = foldl(\acc row. acc ++ unstCellsToText(row) ++ "\n", "", rows);
-  headerLine ++ rowLines
+  let rowLines = foldl(\acc row. "${acc}${unstCellsToText(row)}\n", "", rows);
+  "${headerLine}${rowLines}"
 }
 
 pure func unstCellsToText(cells: [TableCell]) -> string =
@@ -190,32 +190,32 @@ pure func unstCellsToText(cells: [TableCell]) -> string =
 -- Convert table to HTML string for text_as_html metadata field
 export pure func unstTableToHtml(headers: [TableCell], rows: [[TableCell]]) -> string {
   let headerHtml = if listLength(headers) > 0
-    then "<thead><tr>" ++ unstHeaderCellsHtml(headers) ++ "</tr></thead>"
+    then "<thead><tr>${unstHeaderCellsHtml(headers)}</tr></thead>"
     else "";
   let bodyHtml = if listLength(rows) > 0
-    then "<tbody>" ++ foldl(\acc row. acc ++ "<tr>" ++ unstDataCellsHtml(row) ++ "</tr>", "", rows) ++ "</tbody>"
+    then "<tbody>${foldl(\acc row. "${acc}<tr>${unstDataCellsHtml(row)}</tr>", "", rows)}</tbody>"
     else "";
-  "<table>" ++ headerHtml ++ bodyHtml ++ "</table>"
+  "<table>${headerHtml}${bodyHtml}</table>"
 }
 
 pure func unstHeaderCellsHtml(cells: [TableCell]) -> string =
-  foldl(\acc c. acc ++ unstHeaderCellHtml(c), "", cells)
+  foldl(\acc c. "${acc}${unstHeaderCellHtml(c)}", "", cells)
 
 pure func unstHeaderCellHtml(cell: TableCell) -> string {
   if cell.merged then ""
   else if cell.colSpan > 1
-    then "<th colspan=\"" ++ intToStr(cell.colSpan) ++ "\">" ++ xmlEscape(cell.text) ++ "</th>"
-    else "<th>" ++ xmlEscape(cell.text) ++ "</th>"
+    then "<th colspan=\"${intToStr(cell.colSpan)}\">${xmlEscape(cell.text)}</th>"
+    else "<th>${xmlEscape(cell.text)}</th>"
 }
 
 pure func unstDataCellsHtml(cells: [TableCell]) -> string =
-  foldl(\acc c. acc ++ unstDataCellHtml(c), "", cells)
+  foldl(\acc c. "${acc}${unstDataCellHtml(c)}", "", cells)
 
 pure func unstDataCellHtml(cell: TableCell) -> string {
   if cell.merged then ""
   else if cell.colSpan > 1
-    then "<td colspan=\"" ++ intToStr(cell.colSpan) ++ "\">" ++ xmlEscape(cell.text) ++ "</td>"
-    else "<td>" ++ xmlEscape(cell.text) ++ "</td>"
+    then "<td colspan=\"${intToStr(cell.colSpan)}\">${xmlEscape(cell.text)}</td>"
+    else "<td>${xmlEscape(cell.text)}</td>"
 }
 
 -- Convert ListBlock items to individual ListItem elements

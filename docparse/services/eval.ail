@@ -90,16 +90,16 @@ export func evalMain() -> () ! {IO, FS, Env} {
         evalRunChecks(goldenPath, goldenJson, actualJson, goldenEls, actualEls)
       },
       Err(e) => {filename: goldenPath, score: 0.0, applicableChecks: 0, passedChecks: 0,
-                  checks: [{name: "parse", applicable: true, passed: false, detail: "actual JSON parse error: " ++ e}]}
+                  checks: [{name: "parse", applicable: true, passed: false, detail: "actual JSON parse error: ${e}"}]}
     },
     Err(e) => {filename: goldenPath, score: 0.0, applicableChecks: 0, passedChecks: 0,
-                checks: [{name: "parse", applicable: true, passed: false, detail: "golden JSON parse error: " ++ e}]}
+                checks: [{name: "parse", applicable: true, passed: false, detail: "golden JSON parse error: ${e}"}]}
   };
 
   -- Print results
-  println("File: " ++ result.filename);
-  println("Score: " ++ evalFloatToString(result.score));
-  println("Checks: " ++ evalIntToString(result.passedChecks) ++ "/" ++ evalIntToString(result.applicableChecks));
+  println("File: ${result.filename}");
+  println("Score: ${evalFloatToString(result.score)}");
+  println("Checks: ${evalIntToString(result.passedChecks)}/${evalIntToString(result.applicableChecks)}");
   evalPrintChecks(result.checks)
   }
 }
@@ -300,7 +300,7 @@ pure func evalCheckTables(golden: [EvalElement], actual: [EvalElement]) -> Check
     let jaccard = evalJaccard(goldenWords, actualWords);
     let passed = countMatch && mergeMatch && jaccard >= 0.9;
     {name: "tables", applicable: true, passed: passed,
-     detail: "count:" ++ evalBoolToStr(countMatch) ++ " merge:" ++ evalBoolToStr(mergeMatch) ++ " jaccard:" ++ evalFloatToString(jaccard)}
+     detail: "count:${evalBoolToStr(countMatch)} merge:${evalBoolToStr(mergeMatch)} jaccard:${evalFloatToString(jaccard)}"}
   }
 }
 
@@ -320,7 +320,7 @@ pure func evalCheckTrackChanges(golden: [EvalElement], actual: [EvalElement]) ->
     let authorsMatch = listLength(goldenAuthors) == listLength(actualAuthors);
     let passed = countMatch && typesMatch && authorsMatch;
     {name: "track_changes", applicable: true, passed: passed,
-     detail: "count:" ++ evalBoolToStr(countMatch) ++ " types:" ++ evalBoolToStr(typesMatch) ++ " authors:" ++ evalBoolToStr(authorsMatch)}
+     detail: "count:${evalBoolToStr(countMatch)} types:${evalBoolToStr(typesMatch)} authors:${evalBoolToStr(authorsMatch)}"}
   }
 }
 
@@ -333,7 +333,7 @@ pure func evalCheckComments(golden: [EvalElement], actual: [EvalElement]) -> Che
   else {
     let countMatch = listLength(goldenComments) == listLength(actualComments);
     {name: "comments", applicable: true, passed: countMatch,
-     detail: "golden:" ++ evalIntToString(listLength(goldenComments)) ++ " actual:" ++ evalIntToString(listLength(actualComments))}
+     detail: "golden:${evalIntToString(listLength(goldenComments))} actual:${evalIntToString(listLength(actualComments))}"}
   }
 }
 
@@ -350,7 +350,7 @@ pure func evalCheckHeadersFooters(golden: [EvalElement], actual: [EvalElement]) 
     let footerMatch = listLength(goldenFooters) == listLength(actualFooters);
     let passed = headerMatch && footerMatch;
     {name: "headers_footers", applicable: true, passed: passed,
-     detail: "headers:" ++ evalBoolToStr(headerMatch) ++ " footers:" ++ evalBoolToStr(footerMatch)}
+     detail: "headers:${evalBoolToStr(headerMatch)} footers:${evalBoolToStr(footerMatch)}"}
   }
 }
 
@@ -363,7 +363,7 @@ pure func evalCheckTextBoxes(golden: [EvalElement], actual: [EvalElement]) -> Ch
   else {
     let countMatch = listLength(goldenBoxes) == listLength(actualBoxes);
     {name: "text_boxes", applicable: true, passed: countMatch,
-     detail: "golden:" ++ evalIntToString(listLength(goldenBoxes)) ++ " actual:" ++ evalIntToString(listLength(actualBoxes))}
+     detail: "golden:${evalIntToString(listLength(goldenBoxes))} actual:${evalIntToString(listLength(actualBoxes))}"}
   }
 }
 
@@ -376,7 +376,7 @@ pure func evalCheckImages(golden: [EvalElement], actual: [EvalElement]) -> Check
   else {
     let countMatch = listLength(goldenImages) == listLength(actualImages);
     {name: "images", applicable: true, passed: countMatch,
-     detail: "golden:" ++ evalIntToString(listLength(goldenImages)) ++ " actual:" ++ evalIntToString(listLength(actualImages))}
+     detail: "golden:${evalIntToString(listLength(goldenImages))} actual:${evalIntToString(listLength(actualImages))}"}
   }
 }
 
@@ -407,7 +407,7 @@ pure func evalCheckMetadata(goldenJson: Json, actualJson: Json) -> CheckResult {
   else {
     let passed = checks.applicable == checks.passed;
     {name: "metadata", applicable: true, passed: passed,
-     detail: evalIntToString(checks.passed) ++ "/" ++ evalIntToString(checks.applicable) ++ " fields match" ++ checks.details}
+     detail: "${evalIntToString(checks.passed)}/${evalIntToString(checks.applicable)} fields match${checks.details}"}
   }
 }
 
@@ -419,7 +419,7 @@ pure func evalMetaFieldChecks(golden: string, actual: string, fieldName: string,
     let matched = golden == actual;
     {applicable: acc.applicable + 1,
      passed: if matched then acc.passed + 1 else acc.passed,
-     details: acc.details ++ " " ++ fieldName ++ ":" ++ evalBoolToStr(matched)}
+     details: "${acc.details} ${fieldName}:${evalBoolToStr(matched)}"}
   }
 
 -- 8. Text Jaccard (overall text similarity)
@@ -429,7 +429,7 @@ pure func evalCheckTextJaccard(golden: [EvalElement], actual: [EvalElement]) -> 
   let jaccard = evalJaccard(goldenWords, actualWords);
   let passed = jaccard >= 0.95;
   {name: "text_similarity", applicable: true, passed: passed,
-   detail: "jaccard:" ++ evalFloatToString(jaccard) ++ " golden_words:" ++ evalIntToString(listLength(goldenWords)) ++ " actual_words:" ++ evalIntToString(listLength(actualWords))}
+   detail: "jaccard:${evalFloatToString(jaccard)} golden_words:${evalIntToString(listLength(goldenWords))} actual_words:${evalIntToString(listLength(actualWords))}"}
 }
 
 -- ================================================================
@@ -476,7 +476,7 @@ pure func evalBoolToStr(b: bool) -> string =
   if b then "PASS" else "FAIL"
 
 pure func evalFloatToString(f: float) -> string =
-  floatToStr(f * 100.0) ++ "%"
+  "${floatToStr(f * 100.0)}%"
 
 pure func evalIntToString(n: int) -> string = intToStr(n)
 
@@ -488,7 +488,7 @@ func evalPrintChecks(checks: [CheckResult]) -> () ! {IO} =
       let status = if c.applicable == false then "N/A"
                    else if c.passed then "PASS"
                    else "FAIL";
-      println("  " ++ c.name ++ ": " ++ status ++ " (" ++ c.detail ++ ")");
+      println("  ${c.name}: ${status} (${c.detail})");
       evalPrintChecks(rest)
     }
   }

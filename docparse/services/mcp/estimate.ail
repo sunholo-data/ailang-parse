@@ -31,7 +31,7 @@ func mcpEstimateLocal(filepath: string, outputFormat: string) -> string ! {FS} {
   if not fileExists(filepath) then
     encode(jo([
       kv("error", js("FILE_NOT_FOUND")),
-      kv("message", js("File not found: " ++ filepath)),
+      kv("message", js("File not found: ${filepath}")),
       kv("suggested_fix", js("Check the file path or use a sample_id from mcpFormats"))
     ]))
   else {
@@ -59,7 +59,7 @@ func mcpEstimateLocal(filepath: string, outputFormat: string) -> string ! {FS} {
 -- Hosted estimate: call the API.
 func mcpEstimateHosted(filepath: string, outputFormat: string) -> string ! {Env, Net} {
   let baseUrl = getEnvOr("DOCPARSE_API_URL", "https://docparse.ailang.sunholo.com");
-  let body = "{\"filepath\":\"" ++ filepath ++ "\",\"outputFormat\":\"" ++ outputFormat ++ "\"}";
-  let resp = httpPost(baseUrl ++ "/api/v1/estimate", body);
+  let body = "{\"filepath\":\"${filepath}\",\"outputFormat\":\"${outputFormat}\"}";
+  let resp = httpPost("${baseUrl}/api/v1/estimate", body);
   resp
 }

@@ -63,13 +63,13 @@ func mcpParseHosted(filepath: string, outputFormat: string, apiKey: string, requ
 
     -- Build request body
     let body = if length(requestId) > 0 then
-      "{\"request_id\":\"" ++ requestId ++ "\",\"outputFormat\":\"" ++ fmt ++ "\",\"apiKey\":\"" ++ apiKey ++ "\"}"
+      "{\"request_id\":\"${requestId}\",\"outputFormat\":\"${fmt}\",\"apiKey\":\"${apiKey}\"}"
     else if contains(filepath, ".") then
-      "{\"filepath\":\"" ++ filepath ++ "\",\"outputFormat\":\"" ++ fmt ++ "\",\"apiKey\":\"" ++ apiKey ++ "\"}"
+      "{\"filepath\":\"${filepath}\",\"outputFormat\":\"${fmt}\",\"apiKey\":\"${apiKey}\"}"
     else
-      "{\"sample_id\":\"" ++ filepath ++ "\",\"outputFormat\":\"" ++ fmt ++ "\",\"apiKey\":\"" ++ apiKey ++ "\"}";
+      "{\"sample_id\":\"${filepath}\",\"outputFormat\":\"${fmt}\",\"apiKey\":\"${apiKey}\"}";
 
-    let resp = httpPost(baseUrl ++ "/api/v1/parse", body);
+    let resp = httpPost("${baseUrl}/api/v1/parse", body);
     resp
   }
 }
@@ -84,7 +84,7 @@ func mcpParseLocal(filepath: string, outputFormat: string) -> string ! {AI, Env,
   if not fileExists(resolved) then
     encode(jo([
       kv("error", js("FILE_NOT_FOUND")),
-      kv("message", js("File not found: " ++ resolved)),
+      kv("message", js("File not found: ${resolved}")),
       kv("suggested_fix", js("Check the file path or use a sample_id from mcpFormats"))
     ]))
   else {
@@ -282,7 +282,7 @@ export func mcpConvert(input: string, outputFormat: string, outputPath: string, 
   if not fileExists(resolved) then
     encode(jo([
       kv("error", js("FILE_NOT_FOUND")),
-      kv("message", js("File not found: " ++ resolved))
+      kv("message", js("File not found: ${resolved}"))
     ]))
   else {
     let ext = getExtension(resolved);
@@ -366,7 +366,7 @@ func mcpGenerate(doc: ParsedDocument, outFmt: string, outPath: string) -> string
   else
     encode(jo([
       kv("error", js("UNSUPPORTED_FORMAT")),
-      kv("message", js("Unsupported output format: " ++ outFmt)),
+      kv("message", js("Unsupported output format: ${outFmt}")),
       kv("supported", ja(map(js, ["html", "docx", "pptx", "xlsx", "odt", "odp", "ods", "md", "qmd"])))
     ]))
 }
@@ -375,9 +375,9 @@ func mcpGenerate(doc: ParsedDocument, outFmt: string, outPath: string) -> string
 pure func mcpReplaceExt(filepath: string, newExt: string) -> string {
   let parts = split(filepath, ".");
   match parts {
-    [] => filepath ++ "." ++ newExt,
-    [single] => single ++ "." ++ newExt,
-    _ => mcpJoinButLast(parts) ++ "." ++ newExt
+    [] => "${filepath}.${newExt}",
+    [single] => "${single}.${newExt}",
+    _ => "${mcpJoinButLast(parts)}.${newExt}"
   }
 }
 
@@ -386,7 +386,7 @@ pure func mcpJoinButLast(parts: [string]) -> string =
     [] => "",
     [_] => "",
     [a, _] => a,
-    head :: rest => head ++ "." ++ mcpJoinButLast(rest)
+    head :: rest => "${head}.${mcpJoinButLast(rest)}"
   }
 
 -- List all supported formats, features, samples, and service capabilities.

@@ -37,7 +37,7 @@ export pure func parseHtml(content: string) -> [Block]
   let sanitized = htmlSanitize(content);
   match parse(sanitized) {
     Ok(root) => htmlExtractBlocks(root),
-    Err(e) => [TextBlock({text: "HTML parse error: " ++ e, style: "error", level: 0})]
+    Err(e) => [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})]
   }
 }
 
@@ -73,7 +73,7 @@ pure func htmlStripStyleBlocks(content: string) -> string
     if closePos < 0 then content
     else {
       let rest = substring(afterStyle, closePos + 8, length(afterStyle));
-      htmlStripStyleBlocks(before ++ rest)
+      htmlStripStyleBlocks("${before}${rest}")
     }
   }
 }
@@ -105,7 +105,7 @@ pure func htmlStripDoctype(content: string) -> string
     else {
       let before = substring(content, 0, pos);
       let after = substring(content, pos + closePos + 1, length(content));
-      htmlStripDoctype(before ++ after)
+      htmlStripDoctype("${before}${after}")
     }
   }
 }
@@ -155,7 +155,7 @@ pure func htmlCloseVoidElements(content: string) -> string
     [] => content,
     first :: rest => {
       let fixed = map(htmlFixVoidFragment, rest);
-      first ++ join("", fixed)
+      "${first}${join("", fixed)}"
     }
   }
 }
@@ -165,17 +165,17 @@ pure func htmlCloseVoidElements(content: string) -> string
 -- Always prepends "<" back since we split on it.
 pure func htmlFixVoidFragment(fragment: string) -> string {
   let voidTag = htmlMatchVoidTag(fragment);
-  if length(voidTag) == 0 then "<" ++ fragment
+  if length(voidTag) == 0 then "<${fragment}"
   else {
     -- Found a void tag — check if it needs closing
     let closeAngle = find(fragment, ">");
-    if closeAngle < 0 then "<" ++ fragment
+    if closeAngle < 0 then "<${fragment}"
     else {
       let beforeClose = substring(fragment, 0, closeAngle);
-      if endsWith(trim(beforeClose), "/") then "<" ++ fragment
+      if endsWith(trim(beforeClose), "/") then "<${fragment}"
       else {
         -- Insert / before >
-        "<" ++ beforeClose ++ "/" ++ substring(fragment, closeAngle, length(fragment))
+        "<${beforeClose}/${substring(fragment, closeAngle, length(fragment))}"
       }
     }
   }
@@ -342,7 +342,7 @@ pure func htmlChildTextWithSpacing(node: XmlNode) -> string {
   let text = htmlDeepText(node);
   if length(trim(text)) == 0 then ""
   else if tag == "br" then "\n"
-  else if htmlIsBlockTag(tag) then "\n" ++ text
+  else if htmlIsBlockTag(tag) then "\n${text}"
   else text
 }
 

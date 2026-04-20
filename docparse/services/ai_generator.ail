@@ -35,29 +35,12 @@ export func aiGenerateBlocks(prompt: string, targetFormat: string) -> [Block] ! 
 
 -- Build the system prompt with Block ADT schema
 pure func aiSystemPrompt(userPrompt: string, formatHint: string) -> string =
-  "You are a document generator. Given a description, produce structured document content as a JSON array of blocks.\n\n" ++
-  "BLOCK TYPES (return a JSON array of these):\n" ++
-  "- {\"type\":\"heading\", \"text\":\"...\", \"level\":N}  — N is 1-6\n" ++
-  "- {\"type\":\"text\", \"text\":\"...\"}  — paragraph text\n" ++
-  "- {\"type\":\"table\", \"headers\":[\"col1\",\"col2\",...], \"rows\":[[\"a\",\"b\",...],[...]]}  — tabular data\n" ++
-  "- {\"type\":\"list\", \"items\":[\"item1\",\"item2\",...], \"ordered\":true/false}  — bulleted or numbered list\n" ++
-  "- {\"type\":\"section\", \"kind\":\"slide\", \"blocks\":[...]}  — for presentations, wrap each slide's content\n" ++
-  "- {\"type\":\"section\", \"kind\":\"sheet\", \"blocks\":[...]}  — for spreadsheets, wrap each sheet's content\n\n" ++
-  formatHint ++
-  "RULES:\n" ++
-  "1. Generate realistic, useful content — not placeholder text.\n" ++
-  "2. Use appropriate heading levels (h1 for title, h2 for sections, h3 for subsections).\n" ++
-  "3. Tables must have headers and at least 2 data rows with realistic data.\n" ++
-  "4. Lists should have 3-7 items with meaningful content.\n" ++
-  "5. Return ONLY the JSON array. No markdown, no explanation.\n" ++
-  "6. Use compact JSON (no extra whitespace).\n\n" ++
-  "USER REQUEST: " ++ userPrompt
+  "You are a document generator. Given a description, produce structured document content as a JSON array of blocks.\n\nBLOCK TYPES (return a JSON array of these):\n- {\"type\":\"heading\", \"text\":\"...\", \"level\":N}  — N is 1-6\n- {\"type\":\"text\", \"text\":\"...\"}  — paragraph text\n- {\"type\":\"table\", \"headers\":[\"col1\",\"col2\",...], \"rows\":[[\"a\",\"b\",...],[...]]}  — tabular data\n- {\"type\":\"list\", \"items\":[\"item1\",\"item2\",...], \"ordered\":true/false}  — bulleted or numbered list\n- {\"type\":\"section\", \"kind\":\"slide\", \"blocks\":[...]}  — for presentations, wrap each slide's content\n- {\"type\":\"section\", \"kind\":\"sheet\", \"blocks\":[...]}  — for spreadsheets, wrap each sheet's content\n\n${formatHint}RULES:\n1. Generate realistic, useful content — not placeholder text.\n2. Use appropriate heading levels (h1 for title, h2 for sections, h3 for subsections).\n3. Tables must have headers and at least 2 data rows with realistic data.\n4. Lists should have 3-7 items with meaningful content.\n5. Return ONLY the JSON array. No markdown, no explanation.\n6. Use compact JSON (no extra whitespace).\n\nUSER REQUEST: ${userPrompt}"
 
 -- Format-specific hints to guide the AI
 pure func aiFormatHint(format: string) -> string =
   if format == "pptx" || format == "odp"
-  then "FORMAT: Presentation. Wrap each slide in {\"type\":\"section\",\"kind\":\"slide\",\"blocks\":[...]}.\n" ++
-       "Include a title slide (heading level 1) and 3-7 content slides.\n\n"
+  then "FORMAT: Presentation. Wrap each slide in {\"type\":\"section\",\"kind\":\"slide\",\"blocks\":[...]}.\nInclude a title slide (heading level 1) and 3-7 content slides.\n\n"
   else if format == "xlsx" || format == "ods"
   then "FORMAT: Spreadsheet. Use table blocks for data. If multiple datasets, wrap each in {\"type\":\"section\",\"kind\":\"sheet\",\"blocks\":[...]}.\n\n"
   else if format == "html" || format == "md"
@@ -72,7 +55,7 @@ pure func aiParseResponse(response: string) -> [Block] {
       Some(items) => aiParseBlockItems(items),
       None => [TextBlock({text: trimmed, style: "ai-raw", level: 0})]
     },
-    Err(_) => [TextBlock({text: "AI generation failed: could not parse response as JSON. Raw: " ++ trimmed, style: "error", level: 0})]
+    Err(_) => [TextBlock({text: "AI generation failed: could not parse response as JSON. Raw: ${trimmed}", style: "error", level: 0})]
   }
 }
 

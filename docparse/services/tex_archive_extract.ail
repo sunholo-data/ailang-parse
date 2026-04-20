@@ -122,25 +122,25 @@ pure func archiveNth(xs: [string], i: int) -> string =
 -- etc. remain resolvable during parsing.
 export func extractArxivBundle(archivePath: string) -> Result[ArchiveResult, string] ! {IO, FS} {
   let base = archiveBasename(archivePath);
-  let destDir = "/tmp/ailang_parse_tex_" ++ base;
-  let tmpTarPath = "/tmp/ailang_parse_tex_" ++ base ++ ".tar";
+  let destDir = "/tmp/ailang_parse_tex_${base}";
+  let tmpTarPath = "/tmp/ailang_parse_tex_${base}.tar";
   mkdirAll(destDir);
   -- Step 1: decompress .tar.gz → raw .tar bytes (base64-encoded over the
   -- AILANG boundary, per std/gzip convention).
   match decompressFile(archivePath) {
-    Err(msg) => Err("gzip decompress failed: " ++ msg),
+    Err(msg) => Err("gzip decompress failed: ${msg}"),
     Ok(b64) => match fromBase64(b64) {
       None => Err("gzip output was not valid base64"),
       Some(tarBytes) => {
         -- Step 2: write raw .tar to temp, extract, return file list.
         writeFileBytes(tmpTarPath, tarBytes);
         match extractAll(tmpTarPath, destDir) {
-          Err(msg) => Err("tar extract failed: " ++ msg),
+          Err(msg) => Err("tar extract failed: ${msg}"),
           Ok(files) => {
-            if listLength(files) == 0 then Err("archive is empty: " ++ archivePath)
+            if listLength(files) == 0 then Err("archive is empty: ${archivePath}")
             else {
               let main = findMainByContent(files);
-              if length(main) == 0 then Err("no .tex file found in " ++ archivePath)
+              if length(main) == 0 then Err("no .tex file found in ${archivePath}")
               else Ok({ dir: destDir, main: main, files: files })
             }
           }

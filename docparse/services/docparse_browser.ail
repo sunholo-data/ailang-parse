@@ -43,7 +43,7 @@ import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert,
 export pure func parseDocxBody(xml: string) -> string {
   match parse(xml) {
     Ok(root) => encode(ja(blocksToJson(extractBodyBlocks(root)))),
-    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("XML parse error: " ++ e))])]))
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("XML parse error: ${e}"))])]))
   }
 }
 
@@ -125,15 +125,7 @@ export func parseFileFromBase64(base64Data: string, mimeType: string, filename: 
       kv("data", js(base64Data)),
       kv("fileName", js(filename)),
       kv("prompt", js(
-        "Extract content from this file as a compact JSON array of blocks. " ++
-        "For documents: use {\"type\":\"heading\",\"text\":\"...\",\"level\":N}, " ++
-        "{\"type\":\"text\",\"text\":\"...\"}, " ++
-        "{\"type\":\"table\",\"headers\":[...],\"rows\":[[...]]}, " ++
-        "{\"type\":\"list\",\"items\":[...],\"ordered\":bool}. " ++
-        "For images: describe what you see in detail using " ++
-        "{\"type\":\"text\",\"text\":\"...\"} blocks. Include any visible text, " ++
-        "objects, people, colors, layout, and context. " ++
-        "Merge adjacent text into single blocks. Use compact JSON (no whitespace). Return ONLY the JSON array."
+        "Extract content from this file as a compact JSON array of blocks. For documents: use {\"type\":\"heading\",\"text\":\"...\",\"level\":N}, {\"type\":\"text\",\"text\":\"...\"}, {\"type\":\"table\",\"headers\":[...],\"rows\":[[...]]}, {\"type\":\"list\",\"items\":[...],\"ordered\":bool}. For images: describe what you see in detail using {\"type\":\"text\",\"text\":\"...\"} blocks. Include any visible text, objects, people, colors, layout, and context. Merge adjacent text into single blocks. Use compact JSON (no whitespace). Return ONLY the JSON array."
       ))
     ]));
     callJsonSimple(request)
@@ -156,9 +148,7 @@ export func describeImageBase64(base64Data: string, mimeType: string) -> string 
       kv("mimeType", js(mimeType)),
       kv("data", js(base64Data)),
       kv("prompt", js(
-        "Describe this image concisely in one or two sentences. " ++
-        "Focus on the key content and any text visible. " ++
-        "Return ONLY the description text, no JSON."
+        "Describe this image concisely in one or two sentences. Focus on the key content and any text visible. Return ONLY the description text, no JSON."
       ))
     ]));
     callJsonSimple(request)
@@ -224,7 +214,7 @@ export pure func parseOdtContent(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
   else match parse(xml) {
     Ok(root) => encode(ja(blocksToJson(odtExtractBody(root)))),
-    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODT XML parse error: " ++ e))])]))
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODT XML parse error: ${e}"))])]))
   }
 }
 
@@ -251,7 +241,7 @@ export pure func parseOdpContent(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
   else match parse(xml) {
     Ok(root) => encode(ja(blocksToJson(odpExtractSlides(root)))),
-    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODP XML parse error: " ++ e))])]))
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODP XML parse error: ${e}"))])]))
   }
 }
 
@@ -269,7 +259,7 @@ export pure func parseOdsContent(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
   else match parse(xml) {
     Ok(root) => encode(ja(blocksToJson(odsExtractSheets(root)))),
-    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODS XML parse error: " ++ e))])]))
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODS XML parse error: ${e}"))])]))
   }
 }
 
@@ -321,7 +311,7 @@ pure func parseCommentNodes(nodes: [XmlNode]) -> [Block] =
       let texts = extractCommentTexts(paragraphs);
       let commentText = join(" ", texts);
       let block = SectionBlock({kind: "comment", blocks: [
-        TextBlock({text: "[" ++ author ++ "] " ++ commentText, style: "CommentText", level: 0})
+        TextBlock({text: "[${author}] ${commentText}", style: "CommentText", level: 0})
       ]});
       block :: parseCommentNodes(rest)
     }

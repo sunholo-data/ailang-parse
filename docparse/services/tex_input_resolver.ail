@@ -45,8 +45,8 @@ pure func texJoinPath(dir: string, sub: string) -> string {
   if length(sub) == 0 then dir
   else if length(dir) == 0 then sub
   else if substring(sub, 0, 1) == "/" then sub
-  else if substring(dir, length(dir) - 1, length(dir)) == "/" then dir ++ sub
-  else dir ++ "/" ++ sub
+  else if substring(dir, length(dir) - 1, length(dir)) == "/" then "${dir}${sub}"
+  else "${dir}/${sub}"
 }
 
 -- --- Visited-set membership (simple linear scan) -----------------------------
@@ -115,12 +115,12 @@ func expandOne(basedir: string, before: string, after: string, arg: string,
                resolved: string, depth: int, visited: [string], insertAt: int) -> string ! {IO, FS} {
   if length(resolved) == 0 then
     -- Unresolved: replace directive with a comment so scan continues cleanly.
-    let replacement = "% [input not found: " ++ arg ++ "]" in
-    let patched = before ++ replacement ++ after in
+    let replacement = "% [input not found: ${arg}]" in
+    let patched = "${before}${replacement}${after}" in
     expandScan(basedir, patched, insertAt + length(replacement), depth, visited)
   else if texVisited(visited, resolved) then
-    let replacement = "% [input cycle: " ++ arg ++ "]" in
-    let patched = before ++ replacement ++ after in
+    let replacement = "% [input cycle: ${arg}]" in
+    let patched = "${before}${replacement}${after}" in
     expandScan(basedir, patched, insertAt + length(replacement), depth, visited)
   else readAndExpand(basedir, before, after, arg, resolved, depth, visited, insertAt)
 }
@@ -130,19 +130,19 @@ func expandOne(basedir: string, before: string, after: string, arg: string,
 func readAndExpand(basedir: string, before: string, after: string, arg: string,
                    resolved: string, depth: int, visited: [string], insertAt: int) -> string ! {IO, FS} {
   let inner = readFile(resolved) in
-  let _ = println("    [\\input] " ++ arg ++ " -> " ++ resolved ++ " (" ++ show(length(inner)) ++ " chars)") in
+  let _ = println("    [\\input] ${arg} -> ${resolved} (${show(length(inner))} chars)") in
   let newVisited = [resolved] ++ visited in
   let innerDir = texDirname(resolved) in
   let expanded = expandAtDepth(innerDir, inner, depth + 1, newVisited) in
-  let replacement = "\n" ++ expanded ++ "\n" in
-  let patched = before ++ replacement ++ after in
+  let replacement = "\n${expanded}\n" in
+  let patched = "${before}${replacement}${after}" in
   expandScan(basedir, patched, insertAt + length(replacement), depth, visited)
 }
 
 -- Resolve `arg` against `basedir`. Try `basedir/arg.tex`, then `basedir/arg`.
 -- Returns "" if neither exists.
 func resolveTexPath(basedir: string, arg: string) -> string ! {FS} {
-  let withExt = texJoinPath(basedir, arg ++ ".tex") in
+  let withExt = texJoinPath(basedir, "${arg}.tex") in
   if fileExists(withExt) then withExt
   else
     let bare = texJoinPath(basedir, arg) in

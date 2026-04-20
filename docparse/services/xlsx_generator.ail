@@ -61,8 +61,8 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
 
   let result = createArchive(outputPath, allEntries);
   match result {
-    Ok(_) => "Generated XLSX: " ++ outputPath ++ " (" ++ intToStr(sheetCount) ++ " sheets)",
-    Err(e) => "Error generating XLSX: " ++ e
+    Ok(_) => "Generated XLSX: ${outputPath} (${intToStr(sheetCount)} sheets)",
+    Err(e) => "Error generating XLSX: ${e}"
   }
 }
 
@@ -80,12 +80,12 @@ pure func xlsxCollectSheetsAcc(blocks: [Block], acc: [XlsxSheet], sheetIdx: int)
     SectionBlock(s) :: rest =>
       if s.kind == "sheet"
       then xlsxCollectSheetsAcc(rest,
-        xlsxAppendSheet(acc, {name: "Sheet" ++ intToStr(sheetIdx), rows: xlsxBlocksToRows(s.blocks)}),
+        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxBlocksToRows(s.blocks)}),
         sheetIdx + 1)
       else xlsxCollectSheetsAcc(rest, acc, sheetIdx),
     TableBlock(t) :: rest =>
       xlsxCollectSheetsAcc(rest,
-        xlsxAppendSheet(acc, {name: "Sheet" ++ intToStr(sheetIdx), rows: xlsxTableToRows(t.headers, t.rows)}),
+        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxTableToRows(t.headers, t.rows)}),
         sheetIdx + 1),
     b :: rest =>
       -- Non-table blocks: accumulate text into a "Content" sheet
@@ -101,11 +101,11 @@ pure func xlsxBlockToText(block: Block) -> string =
   match block {
     HeadingBlock(h) => h.text,
     TextBlock(t) => t.text,
-    ListBlock(l) => foldl(\acc item. if length(acc) > 0 then acc ++ ", " ++ item else item, "", l.items),
-    ImageBlock(i) => "[Image: " ++ i.description ++ "]",
-    AudioBlock(a) => "[Audio: " ++ a.transcription ++ "]",
-    VideoBlock(v) => "[Video: " ++ v.description ++ "]",
-    ChangeBlock(c) => c.text ++ " (" ++ c.changeType ++ " by " ++ c.author ++ ")",
+    ListBlock(l) => foldl(\acc item. if length(acc) > 0 then "${acc}, ${item}" else item, "", l.items),
+    ImageBlock(i) => "[Image: ${i.description}]",
+    AudioBlock(a) => "[Audio: ${a.transcription}]",
+    VideoBlock(v) => "[Video: ${v.description}]",
+    ChangeBlock(c) => "${c.text} (${c.changeType} by ${c.author})",
     _ => ""
   }
 
@@ -195,10 +195,7 @@ pure func xlsxBuildStringIndex(strings: [string], idx: int) -> Map[string, int] 
 -- Build shared strings XML
 pure func xlsxBuildSharedStrings(strings: [string]) -> string {
   let count = intToStr(listLength(strings));
-  xmlDecl() ++
-  "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"" ++ count ++ "\" uniqueCount=\"" ++ count ++ "\">" ++
-  foldl(\acc s. acc ++ "<si><t>" ++ xmlEscape(s) ++ "</t></si>", "", strings) ++
-  "</sst>"
+  "${xmlDecl()}<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"${count}\" uniqueCount=\"${count}\">${foldl(\acc s. "${acc}<si><t>${xmlEscape(s)}</t></si>", "", strings)}</sst>"
 }
 
 -- Build sheet XML entries
@@ -206,27 +203,20 @@ pure func xlsxBuildSheetEntries(sheets: [XlsxSheet], stringIndex: Map[string, in
   match sheets {
     [] => [],
     s :: rest =>
-      let entry = {name: "xl/worksheets/sheet" ++ intToStr(idx) ++ ".xml", content: xlsxSheetXml(s.rows, stringIndex)} in
+      let entry = {name: "xl/worksheets/sheet${intToStr(idx)}.xml", content: xlsxSheetXml(s.rows, stringIndex)} in
       entry :: xlsxBuildSheetEntries(rest, stringIndex, idx + 1)
   }
 
 -- Build a single worksheet XML
 pure func xlsxSheetXml(rows: [[string]], stringIndex: Map[string, int]) -> string {
-  xmlDecl() ++
-  "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" ++
-  "<sheetData>" ++
-  xlsxRowsToXml(rows, stringIndex, 1) ++
-  "</sheetData></worksheet>"
+  "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData></worksheet>"
 }
 
 pure func xlsxRowsToXml(rows: [[string]], stringIndex: Map[string, int], rowIdx: int) -> string =
   match rows {
     [] => "",
     row :: rest =>
-      "<row r=\"" ++ intToStr(rowIdx) ++ "\">" ++
-      xlsxCellsToXml(row, stringIndex, rowIdx, 1) ++
-      "</row>" ++
-      xlsxRowsToXml(rest, stringIndex, rowIdx + 1)
+      "<row r=\"${intToStr(rowIdx)}\">${xlsxCellsToXml(row, stringIndex, rowIdx, 1)}</row>${xlsxRowsToXml(rest, stringIndex, rowIdx + 1)}"
   }
 
 pure func xlsxCellsToXml(cells: [string], stringIndex: Map[string, int], rowIdx: int, colIdx: int) -> string =
@@ -234,17 +224,16 @@ pure func xlsxCellsToXml(cells: [string], stringIndex: Map[string, int], rowIdx:
     [] => "",
     cell :: rest =>
       let colLetter = xlsxColLetter(colIdx) in
-      let cellRef = colLetter ++ intToStr(rowIdx) in
+      let cellRef = "${colLetter}${intToStr(rowIdx)}" in
       let sIdx = getOrElse(mapLookup(stringIndex, cell), 0) in
-      "<c r=\"" ++ cellRef ++ "\" t=\"s\"><v>" ++ intToStr(sIdx) ++ "</v></c>" ++
-      xlsxCellsToXml(rest, stringIndex, rowIdx, colIdx + 1)
+      "<c r=\"${cellRef}\" t=\"s\"><v>${intToStr(sIdx)}</v></c>${xlsxCellsToXml(rest, stringIndex, rowIdx, colIdx + 1)}"
   }
 
 -- Convert column number to letter (1=A, 2=B, ... 26=Z, 27=AA)
 pure func xlsxColLetter(col: int) -> string =
   if col <= 0 then "A"
   else if col <= 26 then xlsxSingleLetter(col)
-  else xlsxSingleLetter((col - 1) / 26) ++ xlsxSingleLetter(((col - 1) % 26) + 1)
+  else "${xlsxSingleLetter((col - 1) / 26)}${xlsxSingleLetter(((col - 1) % 26) + 1)}"
 
 pure func xlsxSingleLetter(n: int) -> string =
   if n == 1 then "A" else if n == 2 then "B" else if n == 3 then "C"
@@ -266,67 +255,36 @@ pure func xlsxAppendList(a: [{name: string, content: string}], b: [{name: string
 
 -- [Content_Types].xml
 pure func xlsxContentTypes(sheetCount: int) -> string {
-  xmlDecl() ++
-  "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" ++
-  "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" ++
-  "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" ++
-  "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" ++
-  "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" ++
-  "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>" ++
-  xlsxSheetContentTypes(sheetCount, 1) ++
-  "</Types>"
+  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>${xlsxSheetContentTypes(sheetCount, 1)}</Types>"
 }
 
 pure func xlsxSheetContentTypes(count: int, idx: int) -> string =
   if idx > count then ""
-  else "<Override PartName=\"/xl/worksheets/sheet" ++ intToStr(idx) ++ ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" ++
-       xlsxSheetContentTypes(count, idx + 1)
+  else "<Override PartName=\"/xl/worksheets/sheet${intToStr(idx)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>${xlsxSheetContentTypes(count, idx + 1)}"
 
 -- Root rels
 pure func xlsxRootRels() -> string =
-  xmlDecl() ++
-  "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" ++
-  "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>" ++
-  "</Relationships>"
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"
 
 -- Workbook XML
 pure func xlsxWorkbook(sheets: [XlsxSheet]) -> string =
-  xmlDecl() ++
-  "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" " ++
-  "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" ++
-  "<sheets>" ++ xlsxSheetEntries(sheets, 1) ++ "</sheets>" ++
-  "</workbook>"
+  "${xmlDecl()}<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>${xlsxSheetEntries(sheets, 1)}</sheets></workbook>"
 
 pure func xlsxSheetEntries(sheets: [XlsxSheet], idx: int) -> string =
   match sheets {
     [] => "",
     s :: rest =>
-      "<sheet name=\"" ++ xmlEscape(s.name) ++ "\" sheetId=\"" ++ intToStr(idx) ++ "\" r:id=\"rId" ++ intToStr(idx) ++ "\"/>" ++
-      xlsxSheetEntries(rest, idx + 1)
+      "<sheet name=\"${xmlEscape(s.name)}\" sheetId=\"${intToStr(idx)}\" r:id=\"rId${intToStr(idx)}\"/>${xlsxSheetEntries(rest, idx + 1)}"
   }
 
 -- Workbook rels
 pure func xlsxWorkbookRels(sheetCount: int) -> string =
-  xmlDecl() ++
-  "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" ++
-  xlsxSheetRelsEntries(sheetCount, 1) ++
-  "<Relationship Id=\"rId" ++ intToStr(sheetCount + 1) ++ "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" ++
-  "<Relationship Id=\"rId" ++ intToStr(sheetCount + 2) ++ "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/>" ++
-  "</Relationships>"
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${xlsxSheetRelsEntries(sheetCount, 1)}<Relationship Id=\"rId${intToStr(sheetCount + 1)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId${intToStr(sheetCount + 2)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>"
 
 pure func xlsxSheetRelsEntries(count: int, idx: int) -> string =
   if idx > count then ""
-  else "<Relationship Id=\"rId" ++ intToStr(idx) ++ "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet" ++ intToStr(idx) ++ ".xml\"/>" ++
-       xlsxSheetRelsEntries(count, idx + 1)
+  else "<Relationship Id=\"rId${intToStr(idx)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet${intToStr(idx)}.xml\"/>${xlsxSheetRelsEntries(count, idx + 1)}"
 
 -- Minimal styles
 pure func xlsxMinimalStyles() -> string =
-  xmlDecl() ++
-  "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" ++
-  "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>" ++
-  "<fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills>" ++
-  "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>" ++
-  "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>" ++
-  "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>" ++
-  "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>" ++
-  "</styleSheet>"
+  "${xmlDecl()}<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>"
