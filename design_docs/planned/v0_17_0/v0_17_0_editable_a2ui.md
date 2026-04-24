@@ -1,6 +1,6 @@
 # Design Doc: Editable A2UI Components + Write-Path (v0.17.0)
 
-**Status**: Proposed  
+**Status**: Implemented (both phases complete as of 2026-04-24)  
 **Date**: 2026-04-24  
 **Author**: Mark + Claude  
 **Source**: Aitana Platform v6 request (msg `8db938c6`) — July 2026 workshop deadline  
@@ -217,14 +217,131 @@ Response: `Content-Type: application/octet-stream`, raw bytes on success. On err
 
 ---
 
+---
+
+## Implementation notes (Phase 2 decisions)
+
+### Delta format — actual vs. planned
+
+The design proposed `"cell": [row, col]` as an array field for table cell coordinates. The actual implementation uses separate integer fields to avoid needing `asInt` on raw JSON values (which isn't exposed from `std/json`):
+
+```json
+{"block_index": 2, "op": "set_cell", "cell_row": 1, "cell_col": 0, "new_text": "€2.8M"}
+{"block_index": 2, "op": "set_header", "cell_col": 0, "new_text": "Category"}
+```
+
+The `op` field distinguishes delta types. Auto-detection (when `op` is absent) inspects field presence: `new_items` → `set_items`, `cell_row` present → `set_cell`, otherwise → `set_text`.
+
+### Response format — JSON blocks, not raw bytes
+
+The design proposed returning raw bytes with `Content-Type: application/octet-stream`. In practice, AILANG `serve-api` with `@nowrap` always JSON-encodes the `result` field — binary bytes in a string become `"PK..."` rather than raw bytes.
+
+The implemented response returns **modified blocks as JSON** (same shape as `POST /api/v1/parse` with `outputFormat=blocks`):
+
+```json
+{
+  "status": "success",
+  "format": "zip-office",
+  "blocks": [...],
+  "metadata": {...},
+  "deltas_applied": 2,
+  "meta": {"request_id": "...", "replayable": true}
+}
+```
+
+To regenerate a file from the returned blocks, use the AILANG SDK or CLI:
+```bash
+ailang run --entry main --caps IO,FS docparse/main.ail blocks.json --convert output.docx
+```
+
+### Contracts
+
+Four `ensures` contracts added to `edit_apply.ail`, all asserting length preservation (deltas mutate content but never add/remove blocks or cells):
+
+| Function | Contract |
+|---|---|
+| `editApply_applyDeltas` | `listLength(result) == listLength(blocks)` |
+| `editApply_applyDelta` | `listLength(result) == listLength(blocks)` |
+| `editApply_replaceCellText` | `listLength(result) == listLength(cells)` |
+| `editApply_replaceRowCellText` | `listLength(result) == listLength(rows)` |
+
+Z3 skips these (list types not SMT-encodable — same as all other list contracts in the codebase). Runtime-verified via `ailang run --verify-contracts`.
+
+### Resolved open questions
+
+1. **`block_index` for SectionBlock children.** Implemented: child `block_index` is its position in the *flattened* list (consistent with `applyDeltas` indexing). SectionBlock itself also gets `block_index` when `editable=true`.
+
+2. **Table delta granularity.** Implemented cell-level only (`set_cell` for rows, `set_header` for header row). Row/table-level can be added on request.
+
+3. **Round-trip fidelity.** Parse → apply → return blocks. Formatting not in the Block ADT (custom fonts, cell colours) is silently dropped at generation time. Acceptable per Aitana confirmation.
+
+4. **Output format.** Resolved as JSON blocks (see above). Raw bytes not feasible via current serve-api.
+
+5. **Naming.** Implemented as `editApply_*` prefix in `docparse/services/edit_apply.ail` and route `editDocument` in `api_server.ail`. No collision with the AI-driven `generateDocument` in `main.ail`.
+
+---
+
+## Usage example
+
+### 1. Parse with editable A2UI (Phase 1)
+
+```bash
+curl -X POST https://<host>/api/v1/parse \
+  -H 'Content-Type: application/json' \
+  -d '{"filepath":"sample_docx_formatting","outputFormat":"a2ui","editable":"true","apiKey":"dp_..."}'
+```
+
+Response contains nodes with `block_index` props and editable component types (`text-field`, `heading-field`, `table-editable`, `list-editable`).
+
+### 2. Apply edits (Phase 2)
+
+```bash
+curl -X POST https://<host>/api/v1/edit \
+  -F 'filepath=@report.docx' \
+  -F 'apiKey=dp_...' \
+  -F 'deltas=[
+    {"block_index":0,"op":"set_text","new_text":"Q2 Revenue Report"},
+    {"block_index":3,"op":"set_cell","cell_row":1,"cell_col":1,"new_text":"€3.1M"},
+    {"block_index":5,"op":"set_items","new_items":["Revenue up 12%","Costs stable","EBITDA €2.0M"]}
+  ]'
+```
+
+Response:
+```json
+{
+  "result": {
+    "status": "success",
+    "format": "zip-office",
+    "blocks": [...modified blocks...],
+    "deltas_applied": 3
+  },
+  "_headers": {"X-Request-Id": "req_abc123", ...}
+}
+```
+
+### 3. Op auto-detection (convenience)
+
+When `op` is absent, the delta type is inferred from field presence:
+
+```json
+[
+  {"block_index": 0, "new_text": "Updated heading"},
+  {"block_index": 2, "cell_row": 1, "cell_col": 0, "new_text": "New value"},
+  {"block_index": 4, "new_items": ["Item A", "Item B"]}
+]
+```
+
+### 4. Error codes
+
+| Code | Trigger |
+|---|---|
+| `INVALID_API_KEY` | Missing or invalid `dp_` key |
+| `INPUT_NOT_FOUND` | Uploaded file not found at temp path |
+| `FORMAT_NOT_SUPPORTED` | AI-required format (pdf, image, audio, video) |
+| `QUOTA_EXCEEDED` | Daily/monthly request limit reached |
+
 ## Open questions
 
-1. **`block_index` for SectionBlock children.** Currently SectionBlocks flatten their children into the top-level list. The child's `block_index` should be its position in the *flattened* list (consistent with how `applyDeltas` indexes). Need to confirm this matches what the Aitana frontend will use.
+1. **Binary download.** If Aitana needs the modified file as bytes (not blocks), options are: (a) GCS upload + signed URL from edit endpoint; (b) a separate download endpoint; (c) SDK-side generation from returned blocks. Deferred.
 
-2. **Table delta granularity.** The `cell: [row, col]` delta replaces individual cell text. Should we also support replacing an entire row (`new_row: [string]`) or the full table (`new_rows: [[string]]`)? Start with cell-level only; row/table-level can be added if asked.
-
-3. **Round-trip fidelity.** Parse → apply delta → regenerate will lose formatting that the Block ADT doesn't capture (custom fonts, per-cell background colours, etc.). This is expected and should be documented in the API response (a `warnings` field listing lost attributes). Aitana confirmed this is acceptable for their use case.
-
-4. **Output format of `/api/v1/edit`.** Should the response be raw bytes (simplest) or a new JSON envelope with `{"bytes": "<base64>", "warnings": [...]}`? Lean toward raw bytes + `X-DocParse-Warnings` header to avoid base64 overhead.
-
-5. **`generate_document()` vs `applyEdits()` naming.** The Aitana request uses `generate_document()` to describe the write-path, but that function already exists in `main.ail` as an AI-driven generator (takes a prompt, not edited blocks). The new function is `applyEdits` to avoid confusion.
+2. **Table row/table-level deltas.** `set_row` and `set_table` ops not yet implemented. Add if requested.
