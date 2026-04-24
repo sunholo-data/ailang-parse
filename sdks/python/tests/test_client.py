@@ -63,6 +63,30 @@ def _set_response(status=200, body=None, headers=None):
     MockHandler.last_request_body = None
 
 
+# ── _build_parse_result unit tests ──
+
+class TestBuildParseResult:
+    def test_a2ui_list_returns_nodes(self):
+        nodes = [{"id": "doc", "type": "container"}, {"id": "b_0", "type": "text"}]
+        result = DocParse._build_parse_result(nodes, "a2ui")
+        assert result.status == "ok"
+        assert result.format == "a2ui"
+        assert result.nodes == nodes
+        assert result.blocks == []
+
+    def test_dict_blocks_nodes_empty(self):
+        data = {"status": "ok", "format": "blocks", "filename": "x.docx", "blocks": []}
+        result = DocParse._build_parse_result(data, "blocks")
+        assert result.status == "ok"
+        assert result.nodes == []
+
+    def test_raw_string_returns_text(self):
+        result = DocParse._build_parse_result({"raw": "# Title"}, "markdown")
+        assert result.status == "ok"
+        assert result.text == "# Title"
+        assert result.nodes == []
+
+
 # ── Unwrap tests ──
 
 class TestUnwrap:
@@ -250,6 +274,22 @@ class TestParse:
         assert r.sections[1].level == 1
         assert r.sections[1].markdown == "Body paragraph"
         # blocks should be empty for this format
+        assert r.blocks == []
+
+    def test_parse_a2ui_returns_nodes(self, mock_server):
+        """Regression for a2ui: API returns a list, not a dict. SDK must
+        surface it as ParseResult.nodes without raising AttributeError."""
+        nodes = [
+            {"id": "doc", "type": "container", "children": ["b_0"]},
+            {"id": "b_0", "type": "text", "props": [{"key": "text", "value": "Hello"}]},
+        ]
+        _set_response(200, {"result": json.dumps(nodes)})
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        r = c.parse("sample.docx", output_format="a2ui")
+        assert r.status == "ok"
+        assert r.format == "a2ui"
+        assert len(r.nodes) == 2
+        assert r.nodes[0]["id"] == "doc"
         assert r.blocks == []
 
     def test_structured_error_carries_suggested_fix(self, mock_server):

@@ -133,6 +133,8 @@ export interface ParseResult {
   markdown: string;
   /** Heading-sliced sections for `outputFormat: "markdown+metadata"`. */
   sections: Section[];
+  /** A2UI adjacency-list nodes for `outputFormat: "a2ui"`. */
+  nodes?: any[];
   /** HTTP response metadata (request ID, tier, quota remaining). */
   responseMeta?: ResponseMeta;
 }

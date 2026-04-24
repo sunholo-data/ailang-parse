@@ -16,7 +16,7 @@ import (
 
 // ParseOptions configures a parse request.
 type ParseOptions struct {
-	OutputFormat string // "blocks" (default), "markdown", "html"
+	OutputFormat string // "blocks" (default), "markdown", "html", "markdown+metadata", "a2ui", "a2ui+editable"
 	SourceURL    string // URL to fetch and parse (instead of a local file path)
 }
 
@@ -109,6 +109,13 @@ func buildParseResult(inner []byte, format string) (*ParseResult, error) {
 			Format: format,
 			Text:   string(inner),
 		}, nil
+	}
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var nodes []interface{}
+		if err := json.Unmarshal(inner, &nodes); err != nil {
+			return nil, fmt.Errorf("unmarshal a2ui nodes: %w", err)
+		}
+		return &ParseResult{Status: "ok", Format: format, Nodes: nodes}, nil
 	}
 	var result ParseResult
 	if err := json.Unmarshal(inner, &result); err != nil {

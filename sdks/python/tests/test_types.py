@@ -157,6 +157,10 @@ class TestParseResult:
         assert r.blocks == []
         assert r.metadata.title == ""
 
+    def test_nodes_defaults_empty(self):
+        r = ParseResult.from_dict({"status": "ok", "format": "blocks"})
+        assert r.nodes == []
+
 
 # ── HealthResult / FormatsResult ──
 

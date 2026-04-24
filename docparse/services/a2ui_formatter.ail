@@ -18,13 +18,16 @@ import std/string (join, length)
 import std/list (map, foldl, concat, length as listLength, flatMap)
 import std/math (intToFloat)
 import std/option (getOrElse)
-import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI)
+import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages)
 
--- Convert a full ParsedDocument to A2UI JSON string
-export pure func documentToA2UI(doc: ParsedDocument) -> string {
+-- Convert a full ParsedDocument to A2UI JSON string.
+-- When editable=true, content nodes use editable component variants
+-- (text-field, heading-field, table-editable, list-editable) and every
+-- content node carries a block_index prop for edit delta correlation.
+export pure func documentToA2UI(doc: ParsedDocument, editable: bool) -> string {
   let metaNodes = a2uiMetadataNodes(doc.metadata, doc.format, doc.filename);
-  let blockResult = a2uiFlattenBlocks(doc.blocks, 0);
+  let blockResult = a2uiFlattenBlocks(doc.blocks, 0, editable);
   let blockNodes = blockResult.nodes;
   let topIds = blockResult.topIds;
   let metaIds = map(\n. n.id, metaNodes);
@@ -35,62 +38,81 @@ export pure func documentToA2UI(doc: ParsedDocument) -> string {
 }
 
 -- Convert blocks to A2UI nodes (for partial rendering without metadata)
-export pure func blocksToA2UINodes(blocks: [Block]) -> [A2UINode] {
-  let result = a2uiFlattenBlocks(blocks, 0);
+export pure func blocksToA2UINodes(blocks: [Block], editable: bool) -> [A2UINode] {
+  let result = a2uiFlattenBlocks(blocks, 0, editable);
   result.nodes
 }
 
--- Internal: result of flattening blocks
+-- Internal: result of flattening blocks.
+-- editable is threaded through the accumulator so a2uiFlattenOne can be
+-- passed directly to foldl without changing its binary (acc, item) signature.
 type FlatResult = {
   nodes: [A2UINode],
   topIds: [string],
-  nextIdx: int
+  nextIdx: int,
+  editable: bool
 }
 
--- Flatten a list of blocks into A2UI nodes with sequential IDs
--- SectionBlocks become containers; their children are emitted at the top level
-pure func a2uiFlattenBlocks(blocks: [Block], startIdx: int) -> FlatResult {
-  foldl(a2uiFlattenOne, {nodes: [], topIds: [], nextIdx: startIdx}, blocks)
+-- Flatten a list of blocks into A2UI nodes with sequential IDs.
+-- SectionBlocks become containers; their children are emitted at the top level.
+pure func a2uiFlattenBlocks(blocks: [Block], startIdx: int, editable: bool) -> FlatResult {
+  foldl(a2uiFlattenOne, {nodes: [], topIds: [], nextIdx: startIdx, editable: editable}, blocks)
 }
 
--- Flatten one block, accumulating into FlatResult
+-- Flatten one block, accumulating into FlatResult.
+-- Adds a block_index prop to every content node so frontends can correlate
+-- edit events back to the originating Block at that position.
 pure func a2uiFlattenOne(acc: FlatResult, block: Block) -> FlatResult {
   let idx = acc.nextIdx;
+  let editable = acc.editable;
   let id = "b_${show(idx)}";
   match block {
     SectionBlock(s) => {
-      -- Recursively flatten child blocks
-      let childResult = a2uiFlattenBlocks(s.blocks, idx + 1);
+      -- Recursively flatten child blocks (preserve editable flag)
+      let childResult = a2uiFlattenBlocks(s.blocks, idx + 1, editable);
       let childIds = childResult.topIds;
-      let sectionNode = a2uiLabeledContainer(id, s.kind, childIds);
+      let sectionNode = a2uiFmtr_withBlockIndex(a2uiLabeledContainer(id, s.kind, childIds), idx);
       {
         nodes: concat(concat(acc.nodes, [sectionNode]), childResult.nodes),
         topIds: concat(acc.topIds, [id]),
-        nextIdx: childResult.nextIdx
+        nextIdx: childResult.nextIdx,
+        editable: editable
       }
     },
     _ => {
-      let node = a2uiBlockToNode(id, block);
+      let node = a2uiFmtr_withBlockIndex(a2uiBlockToNode(id, block, editable), idx);
       {
         nodes: concat(acc.nodes, [node]),
         topIds: concat(acc.topIds, [id]),
-        nextIdx: idx + 1
+        nextIdx: idx + 1,
+        editable: editable
       }
     }
   }
 }
 
--- Convert a single non-section Block to an A2UINode
-pure func a2uiBlockToNode(id: string, block: Block) -> A2UINode =
+-- Append a block_index prop to a node (prefixed to avoid cross-module name collision)
+pure func a2uiFmtr_withBlockIndex(node: A2UINode, idx: int) -> A2UINode =
+  {id: node.id, nodeType: node.nodeType, children: node.children,
+   props: concat(node.props, [prop("block_index", show(idx))])}
+
+-- Convert a single non-section Block to an A2UINode.
+-- When editable=true, text/heading/table/list use their editable variants.
+-- Image, audio, video, change, and section nodes are always read-only.
+pure func a2uiBlockToNode(id: string, block: Block, editable: bool) -> A2UINode =
   match block {
     HeadingBlock(h) =>
-      a2uiHeading(id, h.text, h.level),
+      if editable then a2uiHeadingField(id, h.text, h.level)
+      else a2uiHeading(id, h.text, h.level),
     TextBlock(t) =>
-      a2uiText(id, t.text, t.style),
+      if editable then a2uiTextField(id, t.text, t.style)
+      else a2uiText(id, t.text, t.style),
     TableBlock(t) =>
-      a2uiTable(id, a2uiCellsToJsonStr(t.headers), a2uiRowsToJsonStr(t.rows)),
+      if editable then a2uiTableEditable(id, a2uiCellsToJsonStr(t.headers), a2uiRowsToJsonStr(t.rows))
+      else a2uiTable(id, a2uiCellsToJsonStr(t.headers), a2uiRowsToJsonStr(t.rows)),
     ListBlock(l) =>
-      a2uiList(id, a2uiItemsToJsonStr(l.items), l.ordered),
+      if editable then a2uiListEditable(id, a2uiItemsToJsonStr(l.items), l.ordered)
+      else a2uiList(id, a2uiItemsToJsonStr(l.items), l.ordered),
     ImageBlock(i) =>
       a2uiImageRef(id, i.description, i.mime),
     AudioBlock(a) =>
@@ -169,7 +191,7 @@ export pure func convertBlocksJsonToA2UI(blocksJson: string) -> string {
     Ok(json) => {
       let blocks = a2ui_jsonToBlockList(json);
       let doc = {format: "", filename: "", metadata: emptyMetadata(), blocks: blocks};
-      documentToA2UI(doc)
+      documentToA2UI(doc, false)
     },
     Err(_) => "[]"
   }

@@ -667,6 +667,39 @@ func TestParse_MarkdownReturnsText(t *testing.T) {
 	}
 }
 
+// TestParse_A2UIReturnsNodes is a regression test: outputFormat="a2ui" returns a
+// JSON array (adjacency list), not a dict. buildParseResult must not error and
+// must surface the nodes in ParseResult.Nodes.
+func TestParse_A2UIReturnsNodes(t *testing.T) {
+	nodes := []any{
+		map[string]any{"id": "doc", "type": "container", "children": []any{"b_0"}},
+		map[string]any{"id": "b_0", "type": "text", "props": []any{map[string]any{"key": "text", "value": "Hello"}}},
+	}
+	srv := mockServer(200, envelope(nodes))
+	defer srv.Close()
+	c := New("dp_test", WithBaseURL(srv.URL))
+	r, err := c.Parse(context.Background(), "sample.docx", ParseOptions{OutputFormat: "a2ui"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if r.Status != "ok" {
+		t.Fatalf("expected status=ok, got %q", r.Status)
+	}
+	if r.Format != "a2ui" {
+		t.Fatalf("expected format=a2ui, got %q", r.Format)
+	}
+	if len(r.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(r.Nodes))
+	}
+	first := r.Nodes[0].(map[string]interface{})
+	if first["id"] != "doc" {
+		t.Fatalf("expected first node id=doc, got %v", first["id"])
+	}
+	if len(r.Blocks) != 0 {
+		t.Fatalf("expected empty blocks, got %d", len(r.Blocks))
+	}
+}
+
 func TestParseFile_HTMLReturnsText(t *testing.T) {
 	srv := mockServer(200, map[string]any{"result": "<h1>Title</h1>"})
 	defer srv.Close()

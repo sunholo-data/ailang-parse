@@ -230,6 +230,8 @@ class ParseResult:
     markdown: str = ""
     #: Heading-sliced sections for ``output_format="markdown+metadata"``.
     sections: List[Section] = field(default_factory=list)
+    #: A2UI adjacency-list nodes for ``output_format="a2ui"``.
+    nodes: List[Any] = field(default_factory=list)
     #: HTTP response metadata (request ID, tier, quota remaining).
     response_meta: Optional[ResponseMeta] = None
 

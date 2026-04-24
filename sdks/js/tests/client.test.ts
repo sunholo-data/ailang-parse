@@ -201,6 +201,23 @@ describe("parse markdown raw-string (#2)", () => {
   });
 });
 
+describe("parse a2ui list response", () => {
+  it("parse() returns ParseResult.nodes for a2ui adjacency-list response", async () => {
+    const nodes = [
+      { id: "doc", type: "container", children: ["b_0"] },
+      { id: "b_0", type: "text", props: [{ key: "text", value: "Hello" }] },
+    ];
+    setMock(200, { result: JSON.stringify(nodes) });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.parse("sample.docx", "a2ui");
+    assert.equal(r.status, "ok");
+    assert.equal(r.format, "a2ui");
+    assert.equal(r.nodes?.length, 2);
+    assert.equal(r.nodes?.[0].id, "doc");
+    assert.deepEqual(r.blocks, []);
+  });
+});
+
 describe("parse markdown+metadata", () => {
   it("returns ParseResult with markdown, sections, metadata", async () => {
     const inner = {

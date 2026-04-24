@@ -120,6 +120,8 @@ type ParseResult struct {
 	Markdown string `json:"markdown,omitempty"`
 	// Sections are heading-sliced document sections for outputFormat="markdown+metadata".
 	Sections []Section `json:"sections,omitempty"`
+	// Nodes holds the A2UI adjacency-list for outputFormat="a2ui".
+	Nodes []interface{} `json:"-"`
 	// ResponseMeta contains request ID, tier, and quota remaining from HTTP headers.
 	ResponseMeta *ResponseMeta `json:"-"`
 }

@@ -70,7 +70,9 @@ export class DocParse {
   }
 
   /** Parse a document by sample ID or server-side filepath. Returns structured blocks.
-   *  For uploading local files, use {@link parseFile} instead. */
+   *  For uploading local files, use {@link parseFile} instead.
+   *  `outputFormat`: `"blocks"` (default), `"markdown"`, `"html"`, `"markdown+metadata"`,
+   *  `"a2ui"`, or `"a2ui+editable"`. A2UI formats return an adjacency-list in `result.nodes`. */
   async parse(filepath: string, outputFormat = "blocks", opts?: { sourceUrl?: string }): Promise<ParseResult> {
     const url = this.baseUrl + "/api/v1/parse";
     const body: Record<string, string> = { filepath, outputFormat };
@@ -189,6 +191,20 @@ export class DocParse {
         text: data.raw,
         markdown: "",
         sections: [],
+      };
+    }
+    if (Array.isArray(data)) {
+      return {
+        status: "ok",
+        filename: "",
+        format: outputFormat,
+        blocks: [],
+        metadata: {} as any,
+        summary: {} as any,
+        text: "",
+        markdown: "",
+        sections: [],
+        nodes: data,
       };
     }
     const status = data?.status || (data?.format ? "ok" : "");

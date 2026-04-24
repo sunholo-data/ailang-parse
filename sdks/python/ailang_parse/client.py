@@ -81,7 +81,7 @@ class DocParse:
         Args:
             filepath: Sample ID (e.g. ``"sample_docx_formatting"``) or server path.
             output_format: ``"blocks"`` (default), ``"markdown"``, ``"html"``,
-                ``"markdown+metadata"``, or ``"a2ui"``.
+                ``"markdown+metadata"``, ``"a2ui"``, or ``"a2ui+editable"``.
             source_url: HTTPS signed URL (GCS, S3, etc.). When provided, the
                 server fetches the document from this URL instead of reading
                 a local file.
@@ -170,6 +170,8 @@ class DocParse:
                 format=output_format,
                 text=data["raw"],
             )
+        if isinstance(data, list):
+            return ParseResult(status="ok", format=output_format, nodes=data)
         result = ParseResult.from_dict(data)
         if not result.status and result.format:
             result.status = "ok"
