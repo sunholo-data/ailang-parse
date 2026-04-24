@@ -71,7 +71,8 @@ pure func a2uiFlattenOne(acc: FlatResult, block: Block) -> FlatResult {
       -- Recursively flatten child blocks (preserve editable flag)
       let childResult = a2uiFlattenBlocks(s.blocks, idx + 1, editable);
       let childIds = childResult.topIds;
-      let sectionNode = a2uiFmtr_withBlockIndex(a2uiLabeledContainer(id, s.kind, childIds), idx);
+      let baseSection = a2uiLabeledContainer(id, s.kind, childIds);
+      let sectionNode = if editable then a2uiFmtr_withBlockIndex(baseSection, idx) else baseSection;
       {
         nodes: concat(concat(acc.nodes, [sectionNode]), childResult.nodes),
         topIds: concat(acc.topIds, [id]),
@@ -80,7 +81,8 @@ pure func a2uiFlattenOne(acc: FlatResult, block: Block) -> FlatResult {
       }
     },
     _ => {
-      let node = a2uiFmtr_withBlockIndex(a2uiBlockToNode(id, block, editable), idx);
+      let baseNode = a2uiBlockToNode(id, block, editable);
+      let node = if editable then a2uiFmtr_withBlockIndex(baseNode, idx) else baseNode;
       {
         nodes: concat(acc.nodes, [node]),
         topIds: concat(acc.topIds, [id]),
