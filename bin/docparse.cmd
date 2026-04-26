@@ -226,6 +226,7 @@ exit /b 0
 :do_check
 pushd "%PROJECT_DIR%"
 echo Type-checking all AILANG Parse modules...
+set "CHECK_FAIL=0"
 for %%m in (
     docparse\types\document.ail
     docparse\services\format_router.ail
@@ -263,9 +264,14 @@ for %%m in (
     docparse\main.ail
 ) do (
     echo   %%~nxm ...
-    ailang check "%%m" >nul 2>&1 && echo     OK || echo     FAIL
+    ailang check "%%m" >nul 2>&1 && (echo     OK) || (echo     FAIL & set "CHECK_FAIL=1")
 )
 popd
+if "%CHECK_FAIL%"=="1" (
+    echo Some modules failed type-checking.
+    exit /b 1
+)
+echo All modules type-check clean.
 exit /b 0
 
 :do_test
