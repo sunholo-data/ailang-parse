@@ -9,20 +9,40 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.9.3...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.12.4...HEAD)
 
-### SDKs (v0.5.0 → v0.5.3)
-- `sourceUrl` field and `ResponseMeta` headers across all SDKs
-- Structured error types with machine-readable codes
-- Markdown+metadata output support and `Section` type
-- `key_id` parameter for `key_info()` across all SDKs
-- R SDK: fix R CMD check warnings
+(SDKs unchanged this release — they consume the API server, which gains
+new `X-AilangParse-Subtype` / `X-AilangParse-FormatSource` headers via a
+separate downstream release once the api_server picks up `resolveFormat`.)
+
+---
+
+## [0.12.4](https://github.com/sunholo-data/ailang-parse/compare/v0.12.3...v0.12.4) — 2026-04-27
+
+### Added
+- **Content-aware format detection** in `format_router.ail`: new `sniffFormat`
+  and `resolveFormat` exports plus a `ResolvedFormat` type. The sniffer
+  identifies PDF/PNG/JPG/GIF/WAV/WEBP/MP3 via base64-prefix and
+  DOCX/PPTX/XLSX/ODT/ODP/ODS/EPUB by inspecting ZIP entries
+  ([Content_Types].xml for OOXML, mimetype for ODF/EPUB). `resolveFormat`
+  composes extension + content sniffing with a clear precedence so
+  callers can confidently route files whose extension is missing,
+  ambiguous, or wrong. See [v0_12_4_format_detection_signed_urls](design_docs/implemented/v0_12_4/v0_12_4_format_detection_signed_urls.md).
 
 ### Fixed
-- Pages deploy: authenticate GitHub API calls for WASM download
-- Bump GitHub Actions to Node.js 24-compatible versions
-- Fix setup-uv version (use v7, v8 major tag doesn't exist yet)
-- Remove speed claims from docs until AILANG benchmarking is reliable
+- **DOCX heading detection** in `docx_parser.ail`: now recognizes the
+  space-separated style names some non-conformant tools emit
+  (`"Heading 1"` in addition to `"Heading1"`) and maps Word's `Title` /
+  `Subtitle` styles to H1/H2 instead of body text.
+
+### Bug Reports Addressed
+- `msg_20260427_173916_463d1f6b` (aitana-platform v6) — DOCX served via
+  signed GCS URL was producing flat-text output. Root cause: when the
+  signed-URL fetch saved the file to a temp path that lost or mangled
+  the extension, format detection fell back to the generic `unknown`
+  category and bypassed the structured DOCX parser. The new
+  `resolveFormat` is the building block; the API server in the
+  downstream `docparse` repo wires it in to fix the user-facing bug.
 
 ---
 

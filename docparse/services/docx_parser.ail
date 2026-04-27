@@ -336,25 +336,32 @@ pure func extractParagraphStyle(p: XmlNode) -> string =
       findFirst(p, "w:pPr")),
     "Normal")
 
--- Determine heading level from style name
--- Heading1 -> 1, Heading2 -> 2, etc.
+-- Determine heading level from style name.
+-- Recognizes the conformant ECMA-376 styleIds (Heading1..Heading6, Title,
+-- Subtitle), the space-separated display names some non-conformant tools
+-- emit ("Heading 1"..), and maps Word's Title/Subtitle to H1/H2.
 pure func headingLevelFromStyle(style: string) -> int
   ensures { result >= 0 && result <= 6 }
   tests [
     ("Heading1", 1),
     ("Heading2", 2),
     ("Heading3", 3),
+    ("Heading 1", 1),
+    ("Heading 4", 4),
+    ("Title", 1),
+    ("Subtitle", 2),
     ("Normal", 0),
-    ("BodyText", 0),
-    ("Title", 0)
+    ("BodyText", 0)
   ]
 {
-  if style == "Heading1" then 1
-  else if style == "Heading2" then 2
-  else if style == "Heading3" then 3
-  else if style == "Heading4" then 4
-  else if style == "Heading5" then 5
-  else if style == "Heading6" then 6
+  if style == "Heading1" || style == "Heading 1" then 1
+  else if style == "Heading2" || style == "Heading 2" then 2
+  else if style == "Heading3" || style == "Heading 3" then 3
+  else if style == "Heading4" || style == "Heading 4" then 4
+  else if style == "Heading5" || style == "Heading 5" then 5
+  else if style == "Heading6" || style == "Heading 6" then 6
+  else if style == "Title" then 1
+  else if style == "Subtitle" then 2
   else 0
 }
 

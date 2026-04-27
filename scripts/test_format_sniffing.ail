@@ -1,0 +1,94 @@
+module scripts/test_format_sniffing
+
+import std/io (println)
+import std/fs (readFileBytes, writeFileBytes)
+import std/bytes (fromBase64)
+import std/option (Some, None)
+import std/result (Ok, Err)
+import docparse/services/format_router (sniffFormat, resolveFormat, ResolvedFormat)
+
+-- Exercise sniffFormat + resolveFormat against real test files and assert
+-- they produce expected results. Compares to a hand-built table so any
+-- regression is caught immediately.
+
+func runOne(label: string, filepath: string, expectedExt: string, expectedFormat: string) -> int ! {FS, IO} {
+  let resolved = resolveFormat(filepath);
+  let sniffed = sniffFormat(filepath);
+  let extOk = resolved.ext == expectedExt;
+  let formatOk = resolved.format == expectedFormat;
+  let sniffOk = sniffed == expectedExt;
+  if extOk && formatOk && sniffOk then {
+    let _ = println("  PASS  ${label}  ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}");
+    1
+  } else {
+    let _ = println("  FAIL  ${label}");
+    let _ = println("        expected ext=${expectedExt} format=${expectedFormat}");
+    let _ = println("        got      ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}");
+    0
+  }
+}
+
+func runAll(cases: [(string, string, string, string)]) -> (int, int) ! {FS, IO} {
+  match cases {
+    [] => (0, 0),
+    [(label, path, ext, fmt), ...rest] => {
+      let pass = runOne(label, path, ext, fmt);
+      match runAll(rest) {
+        (passed, total) => (passed + pass, total + 1)
+      }
+    }
+  }
+}
+
+-- Small filesystem helper: copy one file to another path. Done at the
+-- byte level so binary contents are preserved exactly.
+func copyFile(src: string, dst: string) -> () ! {FS} {
+  match readFileBytes(src) {
+    Ok(b64) => match fromBase64(b64) {
+      Some(bs) => writeFileBytes(dst, bs),
+      None => ()
+    },
+    Err(_) => ()
+  }
+}
+
+export func main() -> () ! {FS, IO} {
+  let _ = println("=== format-sniffing smoke test ===");
+
+  -- (label, filepath, expected ext, expected format)
+  -- Files cover: extension matches content (happy path), no extension
+  -- (sniff fallback), and key Office formats.
+  let extensionOk = [
+    ("docx with extension",  "data/test_files/comments.docx",         "docx", "zip-office"),
+    ("pptx with extension",  "data/test_files/pandoc_basic.pptx",     "pptx", "zip-office"),
+    ("xlsx with extension",  "data/test_files/pandoc_basic.xlsx",     "xlsx", "zip-office"),
+    ("odt with extension",   "data/test_files/lo_image_mimetype.odt", "odt",  "zip-odf"),
+    ("ods with extension",   "data/test_files/lo_basic_cells.ods",    "ods",  "zip-odf"),
+    ("odp with extension",   "data/test_files/officeparser.odp",      "odp",  "zip-odf"),
+    ("epub with extension",  "data/test_files/gutenberg_alice.epub",  "epub", "epub"),
+    ("pdf with extension",   "data/test_files/multipage_spec.pdf",    "pdf",  "pdf")
+  ];
+
+  let _ = println("");
+  let _ = println("Extension-matched cases (should be detected by both extension AND content):");
+  let summary = match runAll(extensionOk) {
+    (passed, total) => "${show(passed)}/${show(total)} passed"
+  };
+
+  let _ = println("");
+  let _ = println("Result: ${summary}");
+
+  -- Now the bug-fix scenario: copy a docx to a path with no extension
+  -- and verify the resolver still picks it up via content sniff.
+  let _ = println("");
+  let _ = println("Signed-URL bug repro (file with no extension):");
+  let stripped = "/tmp/docparse-format-sniff-test-no-ext";
+  let _ = copyFile("data/test_files/comments.docx", stripped);
+  let resolved = resolveFormat(stripped);
+  let sniffed = sniffFormat(stripped);
+  let bugOk = resolved.ext == "docx" && resolved.format == "zip-office" && resolved.source == "content" && sniffed == "docx";
+  if bugOk then
+    println("  PASS  no-extension docx  ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}")
+  else
+    println("  FAIL  no-extension docx — got ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}")
+}

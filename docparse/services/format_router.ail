@@ -1,8 +1,11 @@
 module docparse/services/format_router
 
-import std/string (length, substring, find, split, toLower)
+import std/string (length, substring, find, split, toLower, startsWith, contains)
 import std/list (last)
 import std/option (Some, None)
+import std/result (Ok, Err)
+import std/fs (readFileBytes, fileExists)
+import std/zip (listEntries, readEntry)
 
 -- Format detection and routing
 -- Determines the file format from extension and selects parsing strategy.
@@ -182,4 +185,162 @@ export pure func strategyDescription(format: string) -> string
   else if format == "latex" then "LaTeX structural parsing (pure AILANG, deterministic)"
   else if format == "text" then "Direct text reading"
   else "AI multimodal extraction (best effort)"
+}
+
+-- ============================================================
+-- Content-Aware Format Detection (v0.12.4)
+-- ============================================================
+-- Used as a fallback when extension-based detection is unreliable
+-- (e.g. signed URLs that fetch a file to a temp path with the basename
+-- mangled). Returns a SPECIFIC extension-equivalent ("docx", "pptx",
+-- "xlsx", "odt", "pdf", ...) so callers can compose with detectFormat
+-- and officeType. Returns "unknown" if nothing matches.
+
+-- Base64-prefix signatures for non-ZIP formats. readFileBytes returns
+-- the file contents already base64-encoded, so we sniff against the
+-- base64 prefix rather than raw bytes — much simpler and avoids any
+-- string/UTF-8 hazards on binary data.
+--
+-- Mappings (raw magic -> base64 prefix):
+--   "%PDF-"            -> "JVBERi0"  (PDF)
+--   "PK\x03\x04"       -> "UEsDB"    (any ZIP — disambiguated by entries)
+--   "\x89PNG\r\n..."   -> "iVBORw0KGgo" (PNG)
+--   "\xFF\xD8\xFF"     -> "/9j/"     (JPEG)
+--   "GIF87a" / "GIF89a"-> "R0lGOD"   (GIF)
+--   "RIFF...WEBP"      -> "UklGR"    (WEBP, also matches WAV — re-checked below)
+--   "ID3"              -> "SUQz"     (MP3 with ID3 tag)
+--   "\xFF\xFB" etc     -> "//s" or "//I" (MP3 frame sync — heuristic)
+pure func sniffByBase64Prefix(b64: string) -> string {
+  if startsWith(b64, "JVBERi0") then "pdf"
+  else if startsWith(b64, "iVBORw0KGgo") then "png"
+  else if startsWith(b64, "/9j/") then "jpg"
+  else if startsWith(b64, "R0lGOD") then "gif"
+  else if startsWith(b64, "UEsDB") then "zip"
+  else if startsWith(b64, "SUQz") then "mp3"
+  else if startsWith(b64, "UklGR") then "riff"
+  else "unknown"
+}
+
+-- RIFF containers wrap both WAV (audio) and WEBP (image). Disambiguate
+-- by reading the 4-byte form name at offset 8 of the raw file. In the
+-- base64 encoding, that lives at chars 12-15 (3 raw bytes = 4 b64 chars).
+pure func sniffRiffSubtype(b64: string) -> string {
+  if length(b64) < 16 then "unknown"
+  else {
+    let formChunk = substring(b64, 12, 16);
+    if contains(formChunk, "WEBP") then "webp"
+    else if contains(formChunk, "WAVE") then "wav"
+    else "unknown"
+  }
+}
+
+-- Inspect a ZIP archive to identify the specific OOXML/ODF/EPUB subtype.
+-- Reads [Content_Types].xml (OOXML) or mimetype (ODF/EPUB).
+-- Returns: "docx" | "pptx" | "xlsx" | "odt" | "odp" | "ods" | "epub" | "zip"
+func sniffZipSubtype(filepath: string) -> string ! {FS} {
+  -- ODF/EPUB: check for top-level "mimetype" entry first (uncompressed,
+  -- always first entry by spec — distinctive and cheap to read).
+  match readEntry(filepath, "mimetype") {
+    Ok(mime) =>
+      if contains(mime, "application/vnd.oasis.opendocument.text") then "odt"
+      else if contains(mime, "application/vnd.oasis.opendocument.presentation") then "odp"
+      else if contains(mime, "application/vnd.oasis.opendocument.spreadsheet") then "ods"
+      else if contains(mime, "application/epub+zip") then "epub"
+      else sniffOoxmlSubtype(filepath),
+    Err(_) =>
+      -- No mimetype entry — try OOXML's [Content_Types].xml
+      sniffOoxmlSubtype(filepath)
+  }
+}
+
+-- Identify OOXML subtype from [Content_Types].xml by looking for the
+-- main content-type override. Each Office format has a distinct override:
+--   docx: application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml
+--   pptx: application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml
+--   xlsx: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml
+func sniffOoxmlSubtype(filepath: string) -> string ! {FS} {
+  match readEntry(filepath, "[Content_Types].xml") {
+    Ok(content) =>
+      if contains(content, "wordprocessingml.document.main") then "docx"
+      else if contains(content, "presentationml.presentation.main") then "pptx"
+      else if contains(content, "spreadsheetml.sheet.main") then "xlsx"
+      else "zip",
+    Err(_) => "zip"
+  }
+}
+
+-- Inspect a file's contents and return a specific format identifier.
+-- This is the extension-equivalent ("docx" not "zip-office") so callers
+-- can feed it through detectFormat / officeType the same way they would
+-- a real extension. Returns "unknown" if nothing matches.
+--
+-- Effects: {FS} only — does not invoke AI or network.
+-- Cost: reads up to ~512 bytes of the file plus 1-2 small ZIP entries.
+export func sniffFormat(filepath: string) -> string ! {FS} {
+  if not fileExists(filepath) then "unknown"
+  else {
+    match readFileBytes(filepath) {
+      Err(_) => "unknown",
+      Ok(b64) => {
+        let prefix = sniffByBase64Prefix(b64);
+        if prefix == "zip" then sniffZipSubtype(filepath)
+        else if prefix == "riff" then sniffRiffSubtype(b64)
+        else if prefix == "unknown" then "unknown"
+        else prefix
+      }
+    }
+  }
+}
+
+-- Result of resolveFormat: extension-equivalent + internal category +
+-- where the answer came from. The "source" field is surfaced via API
+-- response headers (X-AilangParse-FormatSource) so callers can tell
+-- when extension-based detection had to fall back to content sniffing.
+export type ResolvedFormat = {
+  ext: string,        -- e.g. "docx" — what officeType() keys on
+  format: string,     -- e.g. "zip-office" — what detectFormat() returns
+  source: string      -- "extension" | "content" | "extension-confirmed"
+}
+
+-- Combined extension + content resolution.
+-- Precedence:
+--   1. Extension recognized AND (no need to sniff) -> use extension
+--      (source = "extension")
+--   2. Extension is "" or its detectFormat is "unknown" -> sniff content
+--      (source = "content")
+--   3. Extension says one of docx/pptx/xlsx/odt/odp/ods/epub but
+--      sniffing finds a DIFFERENT specific subtype -> trust content
+--      (source = "content"). This is the case that fixes the signed-URL
+--      bug — the temp file extension may be wrong or missing entirely.
+--   4. Extension says zip-office/zip-odf/epub AND sniff agrees ->
+--      use extension (source = "extension-confirmed").
+-- The sniff is only invoked when needed, so plain-path callers (CLI on a
+-- file with a clean extension) pay no extra FS cost.
+export func resolveFormat(filepath: string) -> ResolvedFormat ! {FS} {
+  let ext = getExtension(filepath);
+  let extFormat = detectFormat(ext);
+  if extFormat == "unknown" then {
+    -- No extension or unrecognized — sniff is our only option.
+    let sniffed = sniffFormat(filepath);
+    let sniffedFormat = detectFormat(sniffed);
+    {ext: sniffed, format: sniffedFormat, source: "content"}
+  }
+  else if extFormat == "zip-office" || extFormat == "zip-odf" || extFormat == "epub" then {
+    -- Extension says ZIP-based — confirm via content sniff so a temp
+    -- file misnamed as .docx but actually a .pptx (or vice versa)
+    -- routes to the right parser.
+    let sniffed = sniffFormat(filepath);
+    if sniffed == "unknown" || sniffed == "zip" then
+      -- Sniff couldn't disambiguate — trust extension.
+      {ext: ext, format: extFormat, source: "extension"}
+    else if sniffed == ext then
+      {ext: ext, format: extFormat, source: "extension-confirmed"}
+    else {
+      let sniffedFormat = detectFormat(sniffed);
+      {ext: sniffed, format: sniffedFormat, source: "content"}
+    }
+  }
+  else
+    -- Plain extension (txt, md, csv, html, ...) — trust it.
+    {ext: ext, format: extFormat, source: "extension"}
 }
