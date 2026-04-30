@@ -17,6 +17,7 @@ CACHE="$HOME/.ailang/cache/registry"
 DEST="$ROOT/docs/ailang/pkg"
 WASM_DIR="$ROOT/docs/wasm"
 MODULES_DIR="$ROOT/docs/ailang/docparse"
+PIN_FILE="$WASM_DIR/.ailang-version"
 STALE_DAYS=7
 
 SKIP_WASM=0
@@ -65,12 +66,16 @@ if [ "$SKIP_WASM" -eq 0 ]; then
   TMPDIR_WASM=$(mktemp -d)
   trap 'rm -rf "$TMPDIR_WASM"' EXIT
 
-  echo "→ Fetching latest ailang release tag..."
-  RELEASE_TAG=$(curl -sfL \
-    -H "Accept: application/vnd.github+json" \
-    https://api.github.com/repos/sunholo-data/ailang/releases/latest | \
-    python3 -c "import json,sys; print(json.loads(sys.stdin.read())['tag_name'])")
-  echo "  release: $RELEASE_TAG"
+  if [ ! -f "$PIN_FILE" ]; then
+    echo "✗ Missing $PIN_FILE — pin file is the single source of truth for the WASM version"
+    exit 1
+  fi
+  RELEASE_TAG=$(head -n1 "$PIN_FILE" | tr -d '[:space:]')
+  if [ -z "$RELEASE_TAG" ]; then
+    echo "✗ $PIN_FILE is empty — write a release tag like 'v0.14.2' on line 1"
+    exit 1
+  fi
+  echo "→ Pinned ailang release: $RELEASE_TAG (from $PIN_FILE)"
 
   echo "→ Downloading ailang-wasm.tar.gz..."
   curl -sfL --retry 3 --retry-delay 5 \

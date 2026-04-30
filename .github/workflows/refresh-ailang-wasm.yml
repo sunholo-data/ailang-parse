@@ -1,0 +1,94 @@
+name: Refresh AILANG WASM Pin
+
+# Weekly check for new AILANG releases. If `docs/wasm/.ailang-version` is
+# behind upstream, this workflow bumps the pin, re-vendors the WASM bundle,
+# and opens a PR for human review. The PR triggers ci.yml (including the
+# wasm-smoke Playwright job) before merge — never auto-merged.
+#
+# Manual: Actions → "Refresh AILANG WASM Pin" → Run workflow.
+
+on:
+  schedule:
+    # Mondays 09:00 UTC — weekday morning so any failure is visible during
+    # work hours.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Bump pin and open PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare pinned vs latest AILANG release
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PINNED=$(head -n1 docs/wasm/.ailang-version | tr -d '[:space:]')
+          LATEST=$(curl -sfL --retry 3 --retry-delay 5 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/sunholo-data/ailang/releases/latest | \
+            python3 -c "import json,sys; print(json.loads(sys.stdin.read())['tag_name'])")
+          echo "pinned=$PINNED"   >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST"   >> "$GITHUB_OUTPUT"
+          if [ "$PINNED" = "$LATEST" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "✓ Pin is current ($PINNED) — nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "→ Bumping pin: $PINNED → $LATEST"
+          fi
+
+      - name: Bump pin and re-vendor
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          echo "${{ steps.compare.outputs.latest }}" > docs/wasm/.ailang-version
+          # Full vendor (downloads new WASM + refreshes vendored modules and
+          # the pkg/sunholo/* registry copies). Any version-drift bug between
+          # ailang.lock and the vendored bundle is what check-wasm-bindings.py
+          # already catches in CI on the resulting PR.
+          bash docs/scripts/vendor-wasm-packages.sh
+
+      - name: Open PR
+        if: steps.compare.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/bump-ailang-${{ steps.compare.outputs.latest }}
+          base: main
+          commit-message: "chore: bump AILANG WASM pin to ${{ steps.compare.outputs.latest }}"
+          title: "chore: bump AILANG WASM pin → ${{ steps.compare.outputs.latest }}"
+          body: |
+            ## Automated AILANG WASM pin bump
+
+            **From:** `${{ steps.compare.outputs.pinned }}`
+            **To:** `${{ steps.compare.outputs.latest }}`
+
+            **Release notes:** https://github.com/sunholo-data/ailang/releases/tag/${{ steps.compare.outputs.latest }}
+
+            This PR was opened automatically by the weekly `refresh-ailang-wasm.yml`
+            workflow. It is **not** auto-merged — CI runs the full suite including
+            the `wasm-smoke` Playwright job, which loads the new bundle in a
+            real browser and parses a fixture document. Merge only if green.
+
+            ### Review checklist
+            - [ ] `check` job (type-check + bindings) passes
+            - [ ] `wasm-smoke` job (Playwright) passes
+            - [ ] AILANG release notes don't flag any breaking change relevant to docparse
+            - [ ] Optional: spot-check the deployed Pages preview if your fork supports it
+
+            If the smoke test fails, **do not merge** — the new AILANG release
+            has likely regressed something. Open an issue against `sunholo-data/ailang`
+            with the smoke-test output and pin to the previous version.
+          labels: |
+            dependencies
+            ailang-runtime
+          delete-branch: true

@@ -9,6 +9,7 @@
  */
 var DP_DATA = {
   version: "0.8.2",
+  ailangVersion: "v0.14.2",
   pricing: {
     tiers: {
       browser: {

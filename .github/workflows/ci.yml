@@ -88,6 +88,79 @@ jobs:
         shell: cmd
         run: bin\docparse.cmd data\test_files\comments.docx
 
+  wasm-smoke:
+    # Browser-level smoke test for the in-browser WASM bundle. Loads the
+    # pinned ailang.wasm + vendored modules into a real Chromium, parses a
+    # fixture DOCX, and asserts on the rendered output. Catches runtime
+    # regressions inside ailang.wasm that the static check-wasm-bindings.py
+    # invariants cannot detect.
+    name: Browser WASM Smoke Test
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download pinned AILANG WASM runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PIN_FILE="docs/wasm/.ailang-version"
+          RELEASE_TAG=$(head -n1 "$PIN_FILE" | tr -d '[:space:]')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::$PIN_FILE is empty"
+            exit 1
+          fi
+          echo "Pinned release: $RELEASE_TAG"
+          curl -sfL --retry 3 --retry-delay 5 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -o ailang-wasm.tar.gz \
+            "https://github.com/sunholo-data/ailang/releases/download/${RELEASE_TAG}/ailang-wasm.tar.gz"
+          tar -xzf ailang-wasm.tar.gz
+          mv ailang.wasm docs/wasm/
+          [ -f wasm_exec.js ] && mv wasm_exec.js docs/wasm/
+          [ -f ailang-repl.js ] && mv ailang-repl.js docs/wasm/
+          rm -f ailang-wasm.tar.gz
+
+      - name: Vendor AILANG modules + packages
+        run: bash docs/scripts/vendor-wasm-packages.sh --skip-wasm
+
+      - name: Stamp ailangVersion + cache-bust (mirror pages.yml)
+        run: |
+          set -euo pipefail
+          RELEASE_TAG=$(head -n1 docs/wasm/.ailang-version | tr -d '[:space:]')
+          sed -i "s/ailangVersion: \".*\"/ailangVersion: \"$RELEASE_TAG\"/" docs/js/site-data.js
+          sed -i "s|wasm/ailang.wasm?v=[^'\"]*|wasm/ailang.wasm?v=$RELEASE_TAG|" docs/js/wasm-demo.js
+
+      - name: Build _site/
+        run: |
+          rm -rf _site
+          cp -r docs/ _site/
+          ls -lh _site/wasm/
+
+      - name: Install Playwright
+        working-directory: tests/browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        working-directory: tests/browser
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/browser/playwright-report/
+          retention-days: 14
+
   sdk-tests:
     name: SDK Unit Tests
     runs-on: ubuntu-latest

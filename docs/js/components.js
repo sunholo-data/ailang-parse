@@ -172,6 +172,13 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
           '&copy; 2026 Holosun ApS' +
           '<span class="footer-sep"></span>' +
           '<span class="footer-version">v' + (window.DP_DATA && window.DP_DATA.version || '?') + '</span>' +
+          (window.DP_DATA && window.DP_DATA.ailangVersion
+            ? '<span class="footer-sep"></span>' +
+              '<span class="footer-version" title="Pinned AILANG WASM runtime">' +
+                'AILANG <a href="https://github.com/sunholo-data/ailang/releases/tag/' +
+                window.DP_DATA.ailangVersion + '">' + window.DP_DATA.ailangVersion +
+              '</a></span>'
+            : '') +
           '<span class="footer-sep"></span>' +
           '<a href="privacy.html">Privacy</a>' +
           '<span class="footer-sep"></span>' +

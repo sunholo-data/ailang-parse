@@ -45,6 +45,10 @@ SOURCE_DOCPARSE = ROOT / "docparse"
 VENDOR_SCRIPT = DOCS_DIR / "scripts" / "vendor-wasm-packages.sh"
 VENDORED_PKG_DIR = DOCS_DIR / "ailang" / "pkg"
 VENDORED_DOCPARSE_DIR = DOCS_DIR / "ailang" / "docparse"
+PIN_FILE = DOCS_DIR / "wasm" / ".ailang-version"
+SITE_DATA_JS = DOCS_DIR / "js" / "site-data.js"
+WASM_DEMO_JS_FOR_CACHEBUST = DOCS_DIR / "js" / "wasm-demo.js"
+PIN_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-\S+)?$")
 
 # Symbols that exist on the engine wrapper itself (not in docparse_browser.ail).
 # Add to this set when wasm-demo.js gets new front-end-only call targets.
@@ -314,6 +318,68 @@ def main() -> int:
                 failures += 1
         if checked > 0 and not any(True for _ in []):
             ok(f"{checked} HTML page(s) load docparse-blocks.js before wasm-demo.js")
+
+    # ── Invariant 5: pinned AILANG version is the single source of truth ──
+    # docs/wasm/.ailang-version pins the WASM runtime version. pages.yml,
+    # vendor-wasm-packages.sh, and download.sh all read it. site-data.js gets
+    # ailangVersion stamped from it. The placeholder cache-bust query in
+    # wasm-demo.js gets rewritten from it. If any of those drift from the pin
+    # the deployed bundle ships an inconsistent version triple.
+    pin_value: str | None = None
+    if not PIN_FILE.exists():
+        fail(f"Missing {PIN_FILE.relative_to(ROOT)} — pin file is the single source of truth for the WASM runtime version")
+        failures += 1
+    else:
+        raw = PIN_FILE.read_text()
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        if len(lines) != 1:
+            fail(f"{PIN_FILE.relative_to(ROOT)} should contain exactly one non-empty line, found {len(lines)}")
+            failures += 1
+        else:
+            pin_value = lines[0]
+            if not PIN_RE.match(pin_value):
+                fail(
+                    f"{PIN_FILE.relative_to(ROOT)} value '{pin_value}' does not match expected "
+                    f"AILANG release tag pattern (e.g. v0.14.2 or v0.14.2-rc1)"
+                )
+                failures += 1
+            else:
+                ok(f"Pinned AILANG version: {pin_value}")
+
+    if pin_value and SITE_DATA_JS.exists():
+        sd = SITE_DATA_JS.read_text()
+        m = re.search(r'ailangVersion:\s*"([^"]*)"', sd)
+        if not m:
+            fail(
+                f"{SITE_DATA_JS.relative_to(ROOT)} is missing the `ailangVersion: \"...\"` field — "
+                f"pages.yml stamps this from the pin"
+            )
+            failures += 1
+        elif m.group(1) and m.group(1) != pin_value:
+            # Empty string is fine (pre-stamp state in CI); a non-empty value
+            # that doesn't match the pin means a human edited one but not the
+            # other.
+            fail(
+                f"{SITE_DATA_JS.relative_to(ROOT)} ailangVersion='{m.group(1)}' does not match pin '{pin_value}'"
+            )
+            failures += 1
+
+    if pin_value and WASM_DEMO_JS_FOR_CACHEBUST.exists():
+        wd = WASM_DEMO_JS_FOR_CACHEBUST.read_text()
+        m = re.search(r"wasm/ailang\.wasm\?v=([^'\"\s]+)", wd)
+        if not m:
+            fail(
+                f"{WASM_DEMO_JS_FOR_CACHEBUST.relative_to(ROOT)} is missing the cache-bust "
+                f"`wasm/ailang.wasm?v=...` query — pages.yml stamps this from the pin"
+            )
+            failures += 1
+        elif m.group(1) != pin_value:
+            fail(
+                f"{WASM_DEMO_JS_FOR_CACHEBUST.relative_to(ROOT)} cache-bust v='{m.group(1)}' does "
+                f"not match pin '{pin_value}' — local checked-in value should track the pin so "
+                f"local dev mirrors what CI will stamp"
+            )
+            failures += 1
 
     print()
     if failures:
