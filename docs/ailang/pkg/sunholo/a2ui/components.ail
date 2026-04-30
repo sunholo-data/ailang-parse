@@ -116,6 +116,31 @@ export pure func a2uiNode(id: string, nodeType: string, childIds: [string], node
   {id: id, nodeType: nodeType, children: childIds, props: nodeProps}
 
 -- ============================================================
+-- Editable component variants
+-- Emit these when the consumer needs inline-edit affordances.
+-- The @a2ui/react renderer maps these to controlled input components.
+-- ============================================================
+
+-- Editable text paragraph (maps to a controlled textarea/contenteditable)
+export pure func a2uiTextField(id: string, content: string, style: string) -> A2UINode =
+  {id: id, nodeType: "text-field", children: [], props: [prop("text", content), prop("style", style)]}
+
+-- Editable heading (maps to a controlled heading input)
+export pure func a2uiHeadingField(id: string, text: string, level: int) -> A2UINode =
+  {id: id, nodeType: "heading-field", children: [], props: [prop("text", text), prop("level", show(level))]}
+
+-- Editable table (maps to a grid with per-cell inputs)
+export pure func a2uiTableEditable(id: string, headersJson: string, rowsJson: string) -> A2UINode =
+  {id: id, nodeType: "table-editable", children: [], props: [prop("headers", headersJson), prop("rows", rowsJson)]}
+
+-- Editable list (maps to a reorderable list of inputs)
+export pure func a2uiListEditable(id: string, itemsJson: string, ordered: bool) -> A2UINode =
+  {id: id, nodeType: "list-editable", children: [], props: [
+    prop("items", itemsJson),
+    prop("ordered", if ordered then "true" else "false")
+  ]}
+
+-- ============================================================
 -- JSON Rendering
 -- ============================================================
 

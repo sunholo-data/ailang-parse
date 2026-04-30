@@ -43,6 +43,8 @@ BLOCKS_JS = DOCS_DIR / "js" / "docparse-blocks.js"
 SOURCE_BROWSER = ROOT / "docparse" / "services" / "docparse_browser.ail"
 SOURCE_DOCPARSE = ROOT / "docparse"
 VENDOR_SCRIPT = DOCS_DIR / "scripts" / "vendor-wasm-packages.sh"
+VENDORED_PKG_DIR = DOCS_DIR / "ailang" / "pkg"
+VENDORED_DOCPARSE_DIR = DOCS_DIR / "ailang" / "docparse"
 
 # Symbols that exist on the engine wrapper itself (not in docparse_browser.ail).
 # Add to this set when wasm-demo.js gets new front-end-only call targets.
@@ -94,6 +96,32 @@ def extract_modules_to_load(js_source: str) -> list[tuple[str, str]]:
         r"\{\s*name:\s*['\"]([^'\"]+)['\"]\s*,\s*path:\s*['\"]([^'\"]+)['\"]\s*\}"
     )
     return entry_pattern.findall(block)
+
+
+def extract_pkg_imports(ail_source: str) -> list[tuple[str, list[str]]]:
+    """Pull (pkg_path, [imported_names]) tuples from `import pkg/...` lines.
+
+    Matches both single-line and the common `(name1, name2, ...)` form. Skips
+    type-only imports inside parens — we deliberately treat all bracketed
+    names uniformly because the AILANG resolver does too.
+    """
+    pattern = re.compile(
+        r"^\s*import\s+(pkg/[A-Za-z0-9_/]+)\s*\(([^)]*)\)",
+        re.MULTILINE,
+    )
+    results: list[tuple[str, list[str]]] = []
+    for pkg_path, names_blob in pattern.findall(ail_source):
+        names: list[str] = []
+        for raw in names_blob.split(","):
+            tok = raw.strip()
+            if not tok:
+                continue
+            # Handle "X as Y" — we want the source name X.
+            tok = tok.split(" as ")[0].strip()
+            if tok:
+                names.append(tok)
+        results.append((pkg_path, names))
+    return results
 
 
 def extract_vendor_modules(vendor_source: str) -> list[str]:
@@ -208,6 +236,52 @@ def main() -> int:
             failures += len(vendored_not_loaded)
         if not loaded_not_vendored and not vendored_not_loaded:
             ok(f"vendor-wasm-packages.sh and MODULES_TO_LOAD agree on {len(vendor_set)} modules")
+
+    # ── Invariant 3b: vendored pkg/... packages export every imported symbol ──
+    # The browser bundle has no package resolution — it loads exactly the
+    # vendored .ail files. If a docparse module imports a symbol from
+    # `pkg/sunholo/foo` that the vendored copy doesn't export (e.g. version
+    # drift between ailang.lock and the vendored bundle), WASM init fails at
+    # runtime with "undefined global variable" and tests don't catch it
+    # because `ailang check` resolves against the *registry* version.
+    pkg_failures = 0
+    pkg_checked = 0
+    for vendored_module in sorted(VENDORED_DOCPARSE_DIR.rglob("*.ail")):
+        for pkg_path, imported in extract_pkg_imports(vendored_module.read_text()):
+            # pkg_path is like "pkg/sunholo/a2ui/components" — strip leading
+            # "pkg/" and append .ail to find the vendored file.
+            rel = pkg_path[len("pkg/"):]
+            pkg_file = VENDORED_PKG_DIR / f"{rel}.ail"
+            if not pkg_file.exists():
+                fail(
+                    f"{vendored_module.relative_to(ROOT)} imports {pkg_path} but "
+                    f"{pkg_file.relative_to(ROOT)} is not vendored"
+                )
+                pkg_failures += 1
+                continue
+            pkg_exports = extract_ailang_exports(pkg_file.read_text())
+            # Type names also count as exports — they're declared via
+            # `export type Foo = ...`. Pull those in too.
+            type_pattern = re.compile(
+                r"^\s*export\s+type\s+([A-Za-z_][A-Za-z0-9_]*)",
+                re.MULTILINE,
+            )
+            pkg_exports |= set(type_pattern.findall(pkg_file.read_text()))
+            missing = [n for n in imported if n not in pkg_exports]
+            if missing:
+                fail(
+                    f"{vendored_module.relative_to(ROOT)} imports {missing} from "
+                    f"{pkg_path} but vendored {pkg_file.relative_to(ROOT)} does not "
+                    f"export them — re-run docs/scripts/vendor-wasm-packages.sh "
+                    f"(version drift between ailang.lock and vendored bundle)"
+                )
+                pkg_failures += len(missing)
+            pkg_checked += 1
+    if pkg_checked == 0:
+        ok("No pkg/ imports in vendored modules to check")
+    elif pkg_failures == 0:
+        ok(f"All pkg/ imports across {pkg_checked} vendored module(s) resolve to vendored exports")
+    failures += pkg_failures
 
     # ── Invariant 4: HTML pages load docparse-blocks.js before wasm-demo.js ──
     if not BLOCKS_JS.exists():

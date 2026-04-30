@@ -117,16 +117,34 @@ done
 echo "→ Copied ${#MODULES[@]} parser modules from source"
 
 # ── 3. Vendor sunholo/a2ui from registry cache (if available) ────────────
-# If the registry cache is missing (CI without `ailang lock`), keep the
-# already-vendored copy in $DEST/sunholo/a2ui/components.ail.
+# Resolve the version from ailang.lock (source of truth). Hardcoding the
+# version here caused a silent WASM regression when the project bumped to
+# 0.2.0 but the bundle kept shipping 0.1.0 (missing a2uiHeadingField etc.).
 mkdir -p "$DEST/sunholo/a2ui"
-if [ -f "$CACHE/sunholo/a2ui/0.1.0/components.ail" ]; then
-  cp "$CACHE/sunholo/a2ui/0.1.0/components.ail" "$DEST/sunholo/a2ui/components.ail"
-  echo "→ Refreshed sunholo/a2ui package from registry cache"
+A2UI_VERSION=$(python3 -c "
+import json, sys
+try:
+    lock = json.load(open('$ROOT/ailang.lock'))
+    for pkg in lock.get('packages', []):
+        if pkg.get('name') == 'sunholo/a2ui':
+            print(pkg['version']); sys.exit(0)
+except Exception as e:
+    print('', file=sys.stderr)
+" 2>/dev/null)
+
+if [ -z "$A2UI_VERSION" ]; then
+  echo "✗ Could not resolve sunholo/a2ui version from ailang.lock — run 'ailang lock' first"
+  exit 1
+fi
+
+if [ -f "$CACHE/sunholo/a2ui/$A2UI_VERSION/components.ail" ]; then
+  cp "$CACHE/sunholo/a2ui/$A2UI_VERSION/components.ail" "$DEST/sunholo/a2ui/components.ail"
+  echo "→ Refreshed sunholo/a2ui@$A2UI_VERSION from registry cache"
 elif [ -f "$DEST/sunholo/a2ui/components.ail" ]; then
-  echo "→ Keeping in-tree sunholo/a2ui (registry cache not present)"
+  echo "⚠ sunholo/a2ui@$A2UI_VERSION not in cache — keeping in-tree copy (may be stale)"
+  echo "  Run 'ailang lock' to populate the registry cache, then re-vendor"
 else
-  echo "✗ sunholo/a2ui not found in cache or vendor dir — run 'ailang lock' first"
+  echo "✗ sunholo/a2ui@$A2UI_VERSION not found in cache or vendor dir — run 'ailang lock' first"
   exit 1
 fi
 
