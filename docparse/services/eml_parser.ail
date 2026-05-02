@@ -12,7 +12,7 @@ module docparse/services/eml_parser
 
 import std/string (length, substring, find, split, join, trim, toLower, startsWith, endsWith, contains, chars, foldChars, charAt, intToStr, replace, decodeQuotedPrintable as builtinDecodeQP)
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
-import std/option (Some, None)
+import std/option (Option, Some, None)
 import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
 import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata)
 import docparse/services/html_parser (parseHtml)
@@ -280,7 +280,7 @@ pure func emlFilterMultipartParts(parts: [string], pastFirst: bool) -> [string] 
   }
 
 -- Find first MIME part whose Content-Type exactly matches a mime type string
-pure func emlFindPartByMime(parts: [string], mimeType: string) -> option<string> =
+pure func emlFindPartByMime(parts: [string], mimeType: string) -> Option[string] =
   match parts {
     [] => None,
     part :: rest => {
