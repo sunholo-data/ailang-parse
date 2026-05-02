@@ -54,7 +54,8 @@ pure func htmlSanitize(content: string) -> string
   let noStyles = htmlStripStyleBlocks(noDoctype);
   let noZeroWidth = htmlStripZeroWidthChars(noStyles);
   let entitiesFixed = htmlReplaceEntities(noZeroWidth);
-  htmlCloseVoidElements(entitiesFixed)
+  let entitiesCleaned = htmlStripUnknownEntities(entitiesFixed);
+  htmlCloseVoidElements(entitiesCleaned)
 }
 
 -- Strip <style>...</style> blocks (CSS content often breaks XML parsing)
@@ -141,6 +142,38 @@ pure func htmlReplaceEntities(content: string) -> string
     ("&iexcl;", bytesToStr(fromInts([194, 161]))),
     ("&iquest;", bytesToStr(fromInts([194, 191])))
   ])
+}
+
+-- Strip any remaining HTML entity references unknown to XML.
+-- After htmlReplaceEntities converts known entities, this removes any remaining
+-- &xxx; patterns (malformed or exotic entities like &b; &enid; common in 2012-2013
+-- marketing emails) that would cause the strict XML parser to fail with
+-- "invalid character entity" and lose the entire message body.
+-- Valid XML entities (&amp; &lt; &gt; &apos; &quot;) and numeric refs (&#N; &#xN;) are preserved.
+pure func htmlStripUnknownEntities(content: string) -> string
+  ensures { length(result) >= 0 }
+{
+  let parts = split(content, "&");
+  match parts {
+    [] => content,
+    first :: rest => "${first}${join("", map(htmlFixEntityFragment, rest))}"
+  }
+}
+
+-- Given text starting right after a "&", preserve valid XML entity refs and
+-- numeric character refs; strip unknown named entities up to their closing ";".
+-- A bare "&" with no ";" within 32 chars is escaped as "&amp;" to avoid
+-- breaking surrounding XML structure.
+pure func htmlFixEntityFragment(fragment: string) -> string {
+  if startsWith(fragment, "amp;") || startsWith(fragment, "lt;") ||
+     startsWith(fragment, "gt;") || startsWith(fragment, "apos;") ||
+     startsWith(fragment, "quot;") then "&${fragment}"
+  else if startsWith(fragment, "#") then "&${fragment}"
+  else {
+    let semi = find(fragment, ";");
+    if semi < 0 || semi > 31 then "&amp;${fragment}"
+    else substring(fragment, semi + 1, length(fragment))
+  }
 }
 
 -- Close HTML5 void elements so XML parser accepts them.
