@@ -421,23 +421,31 @@ cd "$PROJECT_DIR"
 OUTPUT_BASE="docparse/data"
 
 if $USE_BATCH; then
-  echo "Batch mode: parsing ${#RESOLVED_FILES[@]} files (compile once)..."
+  TOTAL=${#RESOLVED_FILES[@]}
+  echo "Batch mode: parsing ${TOTAL} files (compile once)..."
   echo ""
   START=$(date +%s)
-  # Batch: pass all files after the main.ail entry
-  FULL_CMD=("${CMD[@]}")
-  for f in "${RESOLVED_FILES[@]}"; do
-    FULL_CMD+=("$f" "${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
+
+  # Chunk large file lists to avoid OS ARG_MAX (~2MB on macOS).
+  # 500 files per chunk keeps args well under the limit for any path length.
+  BATCH_CHUNK_SIZE=500
+  for (( i=0; i<TOTAL; i+=BATCH_CHUNK_SIZE )); do
+    CHUNK=("${RESOLVED_FILES[@]:$i:$BATCH_CHUNK_SIZE}")
+    FULL_CMD=("${CMD[@]}")
+    for f in "${CHUNK[@]}"; do
+      FULL_CMD+=("$f" "${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
+    done
+    if $USE_AI; then
+      env GOOGLE_API_KEY="" "${FULL_CMD[@]}"
+    else
+      "${FULL_CMD[@]}"
+    fi
   done
-  if $USE_AI; then
-    env GOOGLE_API_KEY="" "${FULL_CMD[@]}"
-  else
-    "${FULL_CMD[@]}"
-  fi
+
   END=$(date +%s)
   ELAPSED=$((END - START))
   echo ""
-  echo "Batch complete: ${#RESOLVED_FILES[@]} files in ${ELAPSED}s"
+  echo "Batch complete: ${TOTAL} files in ${ELAPSED}s"
 
   # Copy output files if --output-dir
   if [ -n "$OUTPUT_DIR" ]; then
