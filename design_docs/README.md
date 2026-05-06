@@ -163,6 +163,19 @@ Designs that were superseded or abandoned (never delete — move here).
 - Embedding generation via AI API keys
 - [Chunking](planned/v0_13_0/v0_13_0_chunking.md) | [Hierarchy](planned/v0_13_0/v0_13_0_hierarchy_metadata.md) | [Embeddings](planned/v0_13_0/v0_13_0_embeddings.md)
 
+### v0.18.0 — Legal-Grade DOCX Write-Back
+- Read-side redline renderer (`{++ins++}` / `{--del--}` / `{>>comment<<}` markers for LLM context)
+- Structured DOCX writer (`docparse/docx/`) — paragraphs, headings, tables, signature blocks
+- Tracked-changes write-back (`<w:ins>`/`<w:del>`) so reviewers see Accept/Reject in Word
+- Reference `docparse legal` CLI workflow (gated on `std/ai.step` upstream)
+- [Design Doc](planned/v0_18_0/v0_18_0_legal_docx_writeback.md)
+
+### v0.19.0 — DOCX Parsing Accuracy: Comment Threading & Style Inheritance
+- **Comment threading**: reply chains, resolution status, UTC timestamps, positional anchors — all from `commentsExtensible.xml`. `--threads` and `--unresolved-only` CLI flags for legal review workflows.
+- **Style inheritance**: parse `word/styles.xml`, resolve `basedOn` chains field-by-field (fixing Stella-class shallow-spread bug), detect list items from style-level `w:numPr`, resolve table styles. Closes the most impactful gap for legal contracts with 4-level Article/Section/Clause numbering.
+- Source: gap analysis vs [stella/stella](https://github.com/stella/stella) — potential integration target for legal-AI workflows built on AILANG Parse.
+- [Comment Threading](planned/v0_19_0/v0_19_0_comment_threading.md) | [Style Inheritance](planned/v0_19_0/v0_19_0_style_inheritance.md)
+
 ### Go Binary — Blocked on AILANG Compiler
 - All 19 modules compile to Go (406 declarations, 16K lines)
 - `go build` fails on 3 codegen bugs (function collisions, constant redeclaration, markdown syntax)
