@@ -68,7 +68,7 @@ import docparse/services/samples (samples, sampleResolvePath)
 --   ailang run --entry main --caps IO,FS,Env docparse/main.ail myfile.docx
 --
 -- Run (with AI image descriptions):
---   GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3-flash-preview docparse/main.ail myfile.docx describe
+--   GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail myfile.docx describe
 --
 -- Run (with contracts enforced):
 --   ailang run --entry main --caps IO,FS,Env --verify-contracts docparse/main.ail myfile.docx
@@ -80,9 +80,9 @@ import docparse/services/samples (samples, sampleResolvePath)
 -- CAPABILITY BUDGETS:
 --   IO @limit=1000  - Console output for results (increased for page-by-page PDF parsing)
 --   FS @limit=100   - File reads (ZIP entries) + output write (increased from 20 for complex DOCX with headers/footers)
---   AI @limit=30   - PDF page-by-page parsing + image descriptions + layout inference
+--   AI @limit=200  - PDF page-by-page parsing + image descriptions + layout inference (2 per page × up to ~100 pages)
 
-export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=30, Env} {
+export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env} {
   println("=== AILANG Parse: Universal Document Parsing ===");
   println("");
 
@@ -113,8 +113,8 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=30, Env} 
     println("Error: File not found: ${filepath}");
     println("");
     println("Usage: ailang run --entry main --caps IO,FS,Env docparse/main.ail <file>");
-    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3-flash-preview docparse/main.ail <file> describe");
-    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3-flash-preview docparse/main.ail <file> summarize");
+    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail <file> describe");
+    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail <file> summarize");
     println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail --generate output.docx --prompt \"...\"")
   }
   else {

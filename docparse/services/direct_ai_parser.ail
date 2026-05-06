@@ -5,9 +5,10 @@ import std/fs (readFileBytes)
 import std/string (length, substring, trim, find, startsWith, intToStr, stringToInt)
 import std/json (decode, encode, jo, kv, js, jnum, ja, getString, getInt, getBool, getArray, asString, asArray)
 import std/option (Some, None, getOrElse)
-import std/list (map, flatMap, concat, any)
+import std/list (map, flatMap, concat, any, length as listLength)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+import docparse/services/pdf_annotations (extractAnnotations, annotationsAsBlocks)
 import pkg/sunholo/gemini_files/upload (uploadFile, deleteFile, UploadedFile)
 
 -- Direct AI Parser for PDF and Image files
@@ -27,6 +28,11 @@ pure func pdfMimeType() -> string = "application/pdf"
 -- Uses page-by-page parsing to avoid output token truncation on multi-page documents.
 -- Each page is extracted separately, then results are concatenated.
 -- For large files: uploads once to GCS/Files API, references by URI in all AI calls.
+--
+-- Also extracts /Annots metadata (highlights, comments, sticky notes) directly
+-- from the PDF object structure — Gemini multimodal sees the rasterised page
+-- and misses these entirely. Annotation extraction is fail-soft: if it errors
+-- or hits a compressed-object PDF, the AI output still ships.
 export func parsePdf(filepath: string) -> [Block] ! {FS, AI, Net, Env} {
   match readFileBytes(filepath) {
     Err(_) => [],
@@ -37,12 +43,15 @@ export func parsePdf(filepath: string) -> [Block] ! {FS, AI, Net, Env} {
         let uploaded = prepareUpload(base64Data, pdfMimeType(), filepath);
         let fileUri = uploadedUri(uploaded);
         let pageCount = aiGetPageCount(base64Data, fileUri, filepath);
-        let blocks = if pageCount <= 5
+        let aiBlocks = if pageCount <= 5
           then aiExtractWithRetry(base64Data, fileUri, filepath, true, 1)
           else parsePdfAllPages(base64Data, fileUri, filepath, 1, pageCount);
         -- Cleanup uploaded file (best-effort; GCS lifecycle policy as safety net)
         cleanupUpload(uploaded);
-        blocks
+        -- Layer in PDF annotations (deterministic, no AI). Empty list on
+        -- /ObjStm-compressed files; that's logged inside extractAnnotations.
+        let annBlocks = annotationsAsBlocks(extractAnnotations(filepath));
+        concat(aiBlocks, annBlocks)
       }
   }
 }

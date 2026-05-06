@@ -46,7 +46,7 @@ docparse photo.png
 # Options
 docparse report.docx describe        # AI image descriptions
 docparse report.docx summarize       # AI document summary
-docparse scan.pdf --ai gemini-3-flash-preview  # Choose AI backend
+docparse scan.pdf --ai gemini-2.5-flash  # Choose AI backend
 
 # Format conversion
 docparse report.docx --convert output.html
@@ -111,7 +111,8 @@ docparse/
 AILANG Parse uses AILANG's AI effect — any model AILANG supports works:
 
 ```bash
-docparse scan.pdf --ai gemini-3-flash-preview   # Google Cloud (ADC)
+docparse scan.pdf --ai gemini-2.5-flash          # Google (default; fast)
+docparse scan.pdf --ai gemini-3-flash-preview    # Google (slower; thinking model)
 docparse scan.pdf --ai granite-docling           # Local Ollama (free)
 docparse scan.pdf --ai claude-haiku-4-5          # Anthropic
 ```

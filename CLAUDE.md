@@ -59,5 +59,5 @@ ailang run --entry main --caps IO,FS,Env docparse/main.ail data/test_files/sampl
 
 # With AI (PDF/images)
 GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI \
-  --ai gemini-3-flash-preview docparse/main.ail document.pdf
+  --ai gemini-2.5-flash docparse/main.ail document.pdf
 ```

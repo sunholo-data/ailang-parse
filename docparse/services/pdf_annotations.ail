@@ -1,0 +1,718 @@
+module docparse/services/pdf_annotations
+
+-- PDF annotation extractor.
+--
+-- The AI multimodal path (direct_ai_parser) sees a rasterised PDF, which means
+-- highlights, sticky notes, and free-text comments — stored in the /Annots
+-- object layer — are invisible to it. This module recovers them by string-
+-- scanning the PDF object structure.
+--
+-- Scope (v1): inline annotation objects only. PDFs that pack objects into
+-- compressed /ObjStm streams need raw zlib inflate (ailang#223); for those we
+-- bail out cleanly instead of returning partial data.
+
+import std/string (length, substring, find, contains, startsWith, intToStr, charAt, charCode, trim, replace, split)
+import std/list (map, filter, foldl, reverse, length as listLength, concat as listConcat)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/bytes (fromInts, toString as bytesToString)
+import std/fs (readFile)
+import docparse/types/document (Block, TextBlock, SectionBlock)
+
+-- ============================================================
+-- Public API
+-- ============================================================
+
+export type Annotation = {
+  subtype: string,    -- "Highlight" | "Text" | "FreeText" | "Underline" | "StrikeOut" | "Squiggly"
+  contents: string,   -- decoded comment text ("" if no /Contents)
+  author: string,     -- /T value ("" if absent)
+  modified: string,   -- /M value, raw PDF date string
+  page: int,          -- 1-based page number, 0 if unmappable
+  objNum: int         -- annotation object number (for page mapping)
+}
+
+-- Read a PDF and extract all recognised annotations.
+-- Empty list on read error or on PDFs that compress objects into /ObjStm.
+export func extractAnnotations(filepath: string) -> [Annotation] ! {FS} {
+  let content = readFile(filepath);
+  if length(content) == 0 then []
+  else if pdfannHasCompressedObjects(content) then []
+  else pdfannScanAndMap(content)
+}
+
+-- Convert annotations to Comment-style SectionBlocks for merging into a
+-- parsed Document. Pure; effect-free.
+export pure func annotationsAsBlocks(anns: [Annotation]) -> [Block] =
+  map(pdfannToBlock, anns)
+
+-- ============================================================
+-- ObjStm bail-out
+-- ============================================================
+
+-- Detect whether the PDF uses compressed object streams. If so, we won't see
+-- annotations packed inside them and would return misleading partial counts.
+pure func pdfannHasCompressedObjects(content: string) -> bool =
+  contains(content, "/ObjStm") || contains(content, "/Type/ObjStm")
+
+-- ============================================================
+-- Top-level scan + page mapping
+-- ============================================================
+
+pure func pdfannScanAndMap(content: string) -> [Annotation] {
+  let segments = pdfannSplitOnEndobj(content);
+  let rawAnns = pdfannCollectAnnotations(segments, []);
+  let pageMap = pdfannBuildPageMap(content);
+  pdfannApplyPageMap(rawAnns, pageMap)
+}
+
+-- Split content on "endobj". Each segment ends just before "endobj" and
+-- contains at least one preceding "N M obj << ... >>" block.
+pure func pdfannSplitOnEndobj(content: string) -> [string] =
+  split(content, "endobj")
+
+-- Walk segments; for each, isolate the last obj-block and collect if it's an
+-- annotation. Tail-recursive accumulation with reverse on flush.
+pure func pdfannCollectAnnotations(segments: [string], acc: [Annotation]) -> [Annotation] =
+  match segments {
+    [] => reverse(acc),
+    seg :: rest => {
+      let block = pdfannExtractLastObjBlock(seg);
+      if length(block) == 0 then pdfannCollectAnnotations(rest, acc)
+      else if not pdfannIsAnnot(block) then pdfannCollectAnnotations(rest, acc)
+      else {
+        let ann = pdfannParseAnnotation(block);
+        if length(ann.subtype) == 0 then pdfannCollectAnnotations(rest, acc)
+        else pdfannCollectAnnotations(rest, ann :: acc)
+      }
+    }
+  }
+
+-- Find the last "N M obj" marker in a segment and return the substring from
+-- there to the end. Returns "" if no obj marker present.
+pure func pdfannExtractLastObjBlock(seg: string) -> string {
+  let i = pdfannFindLastObjStart(seg);
+  if i < 0 then "" else substring(seg, i, length(seg))
+}
+
+-- Find the byte position of the last "obj" keyword preceded by a digit and a
+-- space (avoids matching "endobj" or random "obj" substrings).
+-- We scan for " obj" occurrences; the last is our target.
+pure func pdfannFindLastObjStart(s: string) -> int {
+  let last = pdfannFindLastObjStartHelper(s, 0, -1);
+  -- Back up to start of "N M obj" by walking back over the digits/space pair.
+  if last < 0 then -1
+  else pdfannBackUpToObjNum(s, last)
+}
+
+pure func pdfannFindLastObjStartHelper(s: string, fromIdx: int, lastFound: int) -> int {
+  let rest = if fromIdx >= length(s) then "" else substring(s, fromIdx, length(s));
+  let i = find(rest, " obj");
+  if i < 0 then lastFound
+  else pdfannFindLastObjStartHelper(s, fromIdx + i + 4, fromIdx + i)
+}
+
+-- Given the index of the space before "obj", back up over the digits of the
+-- generation number, the space, and the digits of the object number.
+pure func pdfannBackUpToObjNum(s: string, spaceIdx: int) -> int {
+  let beforeSpace = pdfannBackUpDigits(s, spaceIdx - 1);
+  if beforeSpace < 0 then 0
+  else if charAt(s, beforeSpace) != " " then 0
+  else {
+    let beforeNum = pdfannBackUpDigits(s, beforeSpace - 1);
+    if beforeNum < 0 then 0 else beforeNum + 1
+  }
+}
+
+-- Walk left while characters are ASCII digits; return last digit's index, or
+-- the input index if not on a digit.
+pure func pdfannBackUpDigits(s: string, i: int) -> int =
+  if i < 0 then -1
+  else if pdfannIsDigit(charAt(s, i)) then pdfannBackUpDigits(s, i - 1)
+  else i
+
+pure func pdfannIsDigit(c: string) -> bool {
+  let n = charCode(c);
+  n >= 48 && n <= 57
+}
+
+-- Heuristic: this block is an annotation if it advertises /Type /Annot and
+-- a recognised /Subtype.
+pure func pdfannIsAnnot(block: string) -> bool =
+  contains(block, "/Type /Annot") || contains(block, "/Type/Annot")
+
+-- ============================================================
+-- Field extraction
+-- ============================================================
+
+pure func pdfannParseAnnotation(block: string) -> Annotation {
+  let subtype = pdfannExtractSubtype(block);
+  if not pdfannIsRecognisedSubtype(subtype) then {
+    {subtype: "", contents: "", author: "", modified: "", page: 0, objNum: 0}
+  }
+  else {
+    let objNum = pdfannExtractObjNum(block);
+    let contentsRaw = pdfannExtractStringField(block, "/Contents");
+    let contents = pdfannDecodePdfString(contentsRaw);
+    let author = pdfannDecodePdfString(pdfannExtractStringField(block, "/T"));
+    let modified = pdfannExtractDate(block);
+    {
+      subtype: subtype,
+      contents: contents,
+      author: author,
+      modified: modified,
+      page: 0,
+      objNum: objNum
+    }
+  }
+}
+
+pure func pdfannIsRecognisedSubtype(s: string) -> bool =
+  s == "Highlight" || s == "Text" || s == "FreeText" ||
+  s == "Underline" || s == "StrikeOut" || s == "Squiggly" ||
+  s == "Note" || s == "Caret"
+
+-- /Subtype /Highlight  (or /Subtype/Highlight without a space)
+pure func pdfannExtractSubtype(block: string) -> string {
+  let key = "/Subtype";
+  let i = find(block, key);
+  if i < 0 then ""
+  else {
+    let after = substring(block, i + length(key), length(block));
+    let trimmed = pdfannLstripSpaceOrSlash(after);
+    pdfannReadKeyword(trimmed, 0)
+  }
+}
+
+-- After "/Subtype", skip any spaces and the leading slash of the value.
+pure func pdfannLstripSpaceOrSlash(s: string) -> string =
+  if length(s) == 0 then s
+  else {
+    let c = charAt(s, 0);
+    if c == " " || c == "\n" || c == "\r" || c == "\t"
+    then pdfannLstripSpaceOrSlash(substring(s, 1, length(s)))
+    else if c == "/" then substring(s, 1, length(s))
+    else s
+  }
+
+-- Read a PDF Name keyword: ASCII letters, digits, plus a few safe chars.
+pure func pdfannReadKeyword(s: string, i: int) -> string =
+  if i >= length(s) then s
+  else {
+    let c = charAt(s, i);
+    if pdfannIsKeywordChar(c) then pdfannReadKeyword(s, i + 1)
+    else substring(s, 0, i)
+  }
+
+pure func pdfannIsKeywordChar(c: string) -> bool {
+  let n = charCode(c);
+  (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) ||
+  c == "_" || c == "-" || c == "."
+}
+
+-- Extract the leading "N M obj" number from the block.
+pure func pdfannExtractObjNum(block: string) -> int {
+  let s = trim(block);
+  let parts = split(s, " ");
+  match parts {
+    [] => 0,
+    first :: _ => pdfannParseIntOrZero(first)
+  }
+}
+
+pure func pdfannParseIntOrZero(s: string) -> int {
+  let chars = pdfannCharCodes(s, 0, []);
+  pdfannCharsToInt(chars, 0)
+}
+
+pure func pdfannCharCodes(s: string, i: int, acc: [int]) -> [int] =
+  if i >= length(s) then reverse(acc)
+  else pdfannCharCodes(s, i + 1, charCode(charAt(s, i)) :: acc)
+
+pure func pdfannCharsToInt(codes: [int], acc: int) -> int =
+  match codes {
+    [] => acc,
+    c :: rest =>
+      if c >= 48 && c <= 57
+      then pdfannCharsToInt(rest, acc * 10 + (c - 48))
+      else acc
+  }
+
+-- Extract a PDF string-valued field: /Key (value)
+-- Returns the inner contents (paren-balanced, escapes preserved).
+-- Returns "" if not present or not a literal string.
+--
+-- Naïve `find(block, "/T")` would match "/Type" first; we walk forward to find
+-- an occurrence where the char after the key is a PDF delimiter (space, "(",
+-- "<", ...) — i.e. the key is a complete name, not a prefix.
+pure func pdfannExtractStringField(block: string, key: string) -> string {
+  let i = pdfannFindCompleteKey(block, key, 0);
+  if i < 0 then ""
+  else {
+    let after = substring(block, i + length(key), length(block));
+    let lstripped = pdfannLstripSpace(after);
+    if length(lstripped) == 0 then ""
+    else if charAt(lstripped, 0) == "(" then pdfannReadParenBalanced(lstripped, 1, 1, "")
+    else if charAt(lstripped, 0) == "<" then pdfannReadHexString(lstripped)
+    else ""
+  }
+}
+
+-- Find an occurrence of `key` where the character immediately after is a PDF
+-- name terminator (whitespace, "(", "<", "[", "/"). Returns -1 if no such
+-- occurrence exists.
+pure func pdfannFindCompleteKey(block: string, key: string, fromIdx: int) -> int =
+  if fromIdx >= length(block) then -1
+  else {
+    let rest = substring(block, fromIdx, length(block));
+    let i = find(rest, key);
+    if i < 0 then -1
+    else {
+      let absIdx = fromIdx + i;
+      let after = absIdx + length(key);
+      if after >= length(block) then absIdx
+      else if pdfannIsNameTerminator(charAt(block, after)) then absIdx
+      else pdfannFindCompleteKey(block, key, after)
+    }
+  }
+
+pure func pdfannIsNameTerminator(c: string) -> bool =
+  c == " " || c == "\n" || c == "\r" || c == "\t" ||
+  c == "(" || c == "<" || c == "[" || c == "/" || c == ">"
+
+pure func pdfannLstripSpace(s: string) -> string =
+  if length(s) == 0 then s
+  else {
+    let c = charAt(s, 0);
+    if c == " " || c == "\n" || c == "\r" || c == "\t"
+    then pdfannLstripSpace(substring(s, 1, length(s)))
+    else s
+  }
+
+-- Read a paren-balanced PDF string. `s` starts at the open paren; `i` is the
+-- current scan index; `depth` is paren nesting; `acc` is the result so far.
+-- Returns the inner contents (without the outermost parens).
+pure func pdfannReadParenBalanced(s: string, i: int, depth: int, acc: string) -> string =
+  if i >= length(s) || depth == 0 then acc
+  else {
+    let c = charAt(s, i);
+    if c == "\\" && i + 1 < length(s) then {
+      -- Preserve escape sequence verbatim; decoder handles it later.
+      let nextC = charAt(s, i + 1);
+      pdfannReadParenBalanced(s, i + 2, depth, "${acc}\\${nextC}")
+    }
+    else if c == "(" then pdfannReadParenBalanced(s, i + 1, depth + 1, "${acc}${c}")
+    else if c == ")" then {
+      if depth == 1 then acc
+      else pdfannReadParenBalanced(s, i + 1, depth - 1, "${acc}${c}")
+    }
+    else pdfannReadParenBalanced(s, i + 1, depth, "${acc}${c}")
+  }
+
+-- Hex string: <FEFF005400680069...>
+-- Returns a marker prefix "<HEX>" + decoded text so the decoder can dispatch.
+pure func pdfannReadHexString(s: string) -> string {
+  let close = find(s, ">");
+  if close < 0 then ""
+  else {
+    let inner = substring(s, 1, close);
+    -- Strip whitespace
+    let clean = pdfannStripWhitespace(inner);
+    "<HEX>${clean}"
+  }
+}
+
+pure func pdfannStripWhitespace(s: string) -> string {
+  let cleaned = replace(s, " ", "");
+  let cleaned2 = replace(cleaned, "\n", "");
+  let cleaned3 = replace(cleaned2, "\r", "");
+  replace(cleaned3, "\t", "")
+}
+
+-- Extract the /M (modified date) field as a raw PDF date string D:YYYYMMDD...
+pure func pdfannExtractDate(block: string) -> string {
+  let raw = pdfannExtractStringField(block, "/M");
+  -- /M is an ASCII PDF date, no UTF-16 nonsense; just decode escapes.
+  pdfannDecodePdfEscapes(raw)
+}
+
+-- ============================================================
+-- PDF string decoder
+--
+-- Three flavours, dispatched by prefix:
+--   "<HEX>...":  hex string from <...> form
+--   default:     literal-string contents with PDF escapes
+--                if first decoded bytes are 0xFE 0xFF (BOM),
+--                treat the rest as UTF-16BE
+-- ============================================================
+
+pure func pdfannDecodePdfString(raw: string) -> string {
+  if length(raw) == 0 then ""
+  else if startsWith(raw, "<HEX>") then pdfannDecodeHexString(substring(raw, 5, length(raw)))
+  else pdfannDecodeLiteralString(raw)
+}
+
+-- Decode hex string. Each pair of hex digits is one byte.
+-- If the first two bytes are 0xFE 0xFF, treat as UTF-16BE.
+pure func pdfannDecodeHexString(hex: string) -> string {
+  let bytes = pdfannHexToBytes(hex, []);
+  pdfannBytesToText(bytes)
+}
+
+pure func pdfannHexToBytes(s: string, acc: [int]) -> [int] =
+  if length(s) < 2 then reverse(acc)
+  else {
+    let hi = pdfannHexNybble(charAt(s, 0));
+    let lo = pdfannHexNybble(charAt(s, 1));
+    if hi < 0 || lo < 0 then reverse(acc)
+    else pdfannHexToBytes(substring(s, 2, length(s)), (hi * 16 + lo) :: acc)
+  }
+
+pure func pdfannHexNybble(c: string) -> int {
+  let n = charCode(c);
+  if n >= 48 && n <= 57 then n - 48
+  else if n >= 65 && n <= 70 then n - 55
+  else if n >= 97 && n <= 102 then n - 87
+  else -1
+}
+
+-- Decode literal string: process PDF escapes, then check for BOM.
+-- The raw string here contains:
+--   * ASCII characters from the PDF source (including literal U+FFFD for any
+--     0xFE/0xFF bytes that lost UTF-8 validity at file-read time)
+--   * Backslash escape sequences as 4-char sequences ("\000", "\030", etc.)
+pure func pdfannDecodeLiteralString(raw: string) -> string {
+  let bytes = pdfannLiteralToBytes(raw, 0, []);
+  pdfannBytesToText(bytes)
+}
+
+-- Walk the literal-string body and produce a list of byte values.
+-- Tricky bit: when the source had raw 0xFE 0xFF bytes (the BOM), AILANG's
+-- UTF-8-normalised string contains a U+FFFD replacement char in their place.
+-- We detect U+FFFD (codepoint 0xFFFD) and emit *something* — see below.
+pure func pdfannLiteralToBytes(s: string, i: int, acc: [int]) -> [int] =
+  if i >= length(s) then reverse(acc)
+  else {
+    let c = charAt(s, i);
+    if c == "\\" && i + 1 < length(s) then {
+      let next = charAt(s, i + 1);
+      if pdfannIsDigit(next) then {
+        -- Octal escape: 1-3 digits
+        let r = pdfannReadOctal(s, i + 1, 0, 0);
+        pdfannLiteralToBytes(s, r.next, r.value :: acc)
+      }
+      else {
+        let b = pdfannEscapeToByte(next);
+        pdfannLiteralToBytes(s, i + 2, b :: acc)
+      }
+    }
+    else {
+      -- Regular character. If it's the U+FFFD replacement, emit two BOM bytes
+      -- on first sight so the BOM path triggers; otherwise just take the
+      -- codepoint's low byte (good enough for ASCII; pathological non-ASCII
+      -- live characters are rare in author names and we accept the lossy
+      -- pass).
+      let cp = charCode(c);
+      if cp == 65533 then {
+        -- U+FFFD replacement char: came from a non-UTF-8 byte. Emit 0xFE
+        -- (254) for the first one, 0xFF (255) for subsequent ones — this
+        -- matches the only realistic source: the leading BOM byte pair.
+        match acc {
+          [] => pdfannLiteralToBytes(s, i + 1, [254]),
+          last :: _ =>
+            if last == 254
+            then pdfannLiteralToBytes(s, i + 1, 255 :: acc)
+            else pdfannLiteralToBytes(s, i + 1, 254 :: acc)
+        }
+      }
+      else pdfannLiteralToBytes(s, i + 1, cp :: acc)
+    }
+  }
+
+-- Read 1-3 octal digits starting at index `i`. Returns next-index and value.
+pure func pdfannReadOctal(s: string, i: int, count: int, value: int) -> {next: int, value: int} =
+  if count >= 3 || i >= length(s) then {next: i, value: value}
+  else {
+    let c = charAt(s, i);
+    if pdfannIsOctalDigit(c)
+    then pdfannReadOctal(s, i + 1, count + 1, value * 8 + (charCode(c) - 48))
+    else {next: i, value: value}
+  }
+
+pure func pdfannIsOctalDigit(c: string) -> bool {
+  let n = charCode(c);
+  n >= 48 && n <= 55
+}
+
+-- Map a non-octal escape character to a byte value.
+pure func pdfannEscapeToByte(c: string) -> int =
+  if c == "n" then 10
+  else if c == "r" then 13
+  else if c == "t" then 9
+  else if c == "b" then 8
+  else if c == "f" then 12
+  else if c == "\\" then 92
+  else if c == "(" then 40
+  else if c == ")" then 41
+  else charCode(c)
+
+-- Best-effort decoder used for ASCII-only fields (/M dates).
+pure func pdfannDecodePdfEscapes(raw: string) -> string {
+  let bytes = pdfannLiteralToBytes(raw, 0, []);
+  pdfannBytesToAscii(bytes, "")
+}
+
+pure func pdfannBytesToAscii(bytes: [int], acc: string) -> string =
+  match bytes {
+    [] => acc,
+    b :: rest =>
+      if b >= 32 && b <= 126 then {
+        let r = pdfannCodepointToString(b);
+        pdfannBytesToAscii(rest, "${acc}${r}")
+      }
+      else pdfannBytesToAscii(rest, acc)
+  }
+
+-- ============================================================
+-- Bytes -> text dispatcher
+-- ============================================================
+
+-- If the byte sequence starts with the UTF-16BE BOM (0xFE 0xFF), strip and
+-- decode as UTF-16BE. Otherwise treat as PDFDocEncoding ≈ Latin-1.
+pure func pdfannBytesToText(bytes: [int]) -> string =
+  match bytes {
+    a :: b :: rest =>
+      if a == 254 && b == 255
+      then pdfannDecodeUtf16Be(rest, "")
+      else pdfannDecodeLatin1(bytes, ""),
+    _ => pdfannDecodeLatin1(bytes, "")
+  }
+
+-- UTF-16BE decoder: pair (hi, lo) -> codepoint. Surrogate pairs not handled
+-- (PDF comment text is overwhelmingly BMP). On surrogate detection, emit the
+-- replacement char.
+pure func pdfannDecodeUtf16Be(bytes: [int], acc: string) -> string =
+  match bytes {
+    [] => acc,
+    [_] => acc,
+    hi :: lo :: rest => {
+      let cp = hi * 256 + lo;
+      let isSurrogate = cp >= 55296 && cp <= 57343;
+      let safe = if isSurrogate then 65533 else cp;
+      let s = pdfannCodepointToString(safe);
+      pdfannDecodeUtf16Be(rest, "${acc}${s}")
+    }
+  }
+
+-- Latin-1 byte -> string. Codepoints 0-255 map directly.
+pure func pdfannDecodeLatin1(bytes: [int], acc: string) -> string =
+  match bytes {
+    [] => acc,
+    b :: rest => {
+      let s = pdfannCodepointToString(b);
+      pdfannDecodeLatin1(rest, "${acc}${s}")
+    }
+  }
+
+-- Convert a Unicode codepoint (0..0xFFFF) to a 1-char AILANG string by
+-- constructing its UTF-8 encoding and reading it back via std/bytes.
+pure func pdfannCodepointToString(cp: int) -> string {
+  -- Drop ASCII control characters (other than tab/newline/CR) so comment
+  -- text stays clean even if the source had stray nulls / form feeds.
+  if cp < 32 && cp != 9 && cp != 10 && cp != 13 then ""
+  else if cp == 127 then ""
+  else if cp < 128 then bytesToString(fromInts([cp]))
+  else if cp < 2048 then {
+    let b1 = 192 + (cp / 64);
+    let b2 = 128 + (cp % 64);
+    bytesToString(fromInts([b1, b2]))
+  }
+  else {
+    let b1 = 224 + (cp / 4096);
+    let b2 = 128 + ((cp / 64) % 64);
+    let b3 = 128 + (cp % 64);
+    bytesToString(fromInts([b1, b2, b3]))
+  }
+}
+
+-- ============================================================
+-- Page mapping
+-- ============================================================
+
+type PageMap = { entries: [{annotObj: int, page: int}] }
+
+-- Walk the file once, finding /Type /Page objects in order, and for each
+-- recording the annotation refs from its /Annots field. Indirect refs
+-- (`/Annots N 0 R` pointing to an array object) are resolved by re-scanning
+-- the file for that object's body — O(pages × file) but pages are typically
+-- in the dozens and this only runs once.
+pure func pdfannBuildPageMap(content: string) -> PageMap {
+  let segments = split(content, "endobj");
+  let pages = pdfannCollectPages(segments, content, 1, []);
+  let inverted = pdfannInvertPages(pages, []);
+  {entries: inverted}
+}
+
+type PageEntry = {pageIndex: int, annotRefs: [int]}
+
+-- Collect /Type /Page objects with their annot refs, numbering pages 1..N
+-- in occurrence order.
+pure func pdfannCollectPages(segments: [string], fullContent: string, pageIdx: int, acc: [PageEntry]) -> [PageEntry] =
+  match segments {
+    [] => reverse(acc),
+    seg :: rest => {
+      let block = pdfannExtractLastObjBlock(seg);
+      if length(block) == 0 then pdfannCollectPages(rest, fullContent, pageIdx, acc)
+      else if not pdfannIsPage(block) then pdfannCollectPages(rest, fullContent, pageIdx, acc)
+      else {
+        let refs = pdfannExtractAnnotRefs(block, fullContent);
+        let entry = {pageIndex: pageIdx, annotRefs: refs};
+        pdfannCollectPages(rest, fullContent, pageIdx + 1, entry :: acc)
+      }
+    }
+  }
+
+pure func pdfannIsPage(block: string) -> bool =
+  contains(block, "/Type /Page") || contains(block, "/Type/Page")
+
+-- Extract annotation object numbers from a page's /Annots field. Two shapes:
+--   /Annots [ N1 0 R N2 0 R ... ]     -- inline array
+--   /Annots N 0 R                      -- indirect reference (resolve through
+--                                         the file's object body)
+pure func pdfannExtractAnnotRefs(block: string, fullContent: string) -> [int] {
+  let i = pdfannFindCompleteKey(block, "/Annots", 0);
+  if i < 0 then []
+  else {
+    let after = substring(block, i + 7, length(block));
+    let lstripped = pdfannLstripSpace(after);
+    if length(lstripped) == 0 then []
+    else if charAt(lstripped, 0) == "[" then {
+      let close = find(lstripped, "]");
+      if close < 0 then []
+      else pdfannParseRefArray(substring(lstripped, 1, close))
+    }
+    else {
+      -- Indirect form: read "N M R" then look up object N's body and parse
+      -- its array.
+      let refNum = pdfannReadIndirectRef(lstripped);
+      if refNum <= 0 then []
+      else pdfannResolveAnnotsArray(fullContent, refNum)
+    }
+  }
+}
+
+-- Read "N M R" from the start of `s`. Returns N or 0 on parse failure.
+pure func pdfannReadIndirectRef(s: string) -> int {
+  let trimmed = pdfannLstripSpace(s);
+  let parts = split(trimmed, " ");
+  match parts {
+    a :: _ :: rest =>
+      match rest {
+        c :: _ =>
+          if startsWith(c, "R") then pdfannParseIntOrZero(a) else 0,
+        _ => 0
+      },
+    _ => 0
+  }
+}
+
+-- Find object N's body in the file and parse its [ ... ] array contents
+-- into a list of annotation object numbers.
+pure func pdfannResolveAnnotsArray(content: string, objNum: int) -> [int] {
+  let needle = "${intToStr(objNum)} 0 obj";
+  let i = find(content, needle);
+  if i < 0 then []
+  else {
+    let from = i + length(needle);
+    let rest = substring(content, from, length(content));
+    let endIdx = find(rest, "endobj");
+    if endIdx < 0 then []
+    else {
+      let body = substring(rest, 0, endIdx);
+      let lbracket = find(body, "[");
+      let rbracket = find(body, "]");
+      if lbracket < 0 || rbracket <= lbracket then []
+      else pdfannParseRefArray(substring(body, lbracket + 1, rbracket))
+    }
+  }
+}
+
+-- Parse "1 0 R 2 0 R 3 0 R" into [1, 2, 3].
+pure func pdfannParseRefArray(s: string) -> [int] {
+  let tokens = split(trim(s), " ");
+  pdfannCollectRefs(tokens, [])
+}
+
+pure func pdfannCollectRefs(tokens: [string], acc: [int]) -> [int] =
+  match tokens {
+    [] => reverse(acc),
+    [_] => reverse(acc),
+    [_, _] => reverse(acc),
+    a :: b :: c :: rest => {
+      if c == "R" || c == "R\n" || c == "R\r"
+      then {
+        let n = pdfannParseIntOrZero(trim(a));
+        if n > 0 then pdfannCollectRefs(rest, n :: acc)
+        else pdfannCollectRefs(rest, acc)
+      }
+      else pdfannCollectRefs(b :: c :: rest, acc)
+    }
+  }
+
+-- Invert page -> [annotRef] into [(annotObj, pageIndex)] entries.
+pure func pdfannInvertPages(pages: [PageEntry], acc: [{annotObj: int, page: int}]) -> [{annotObj: int, page: int}] =
+  match pages {
+    [] => reverse(acc),
+    p :: rest => pdfannInvertPages(rest, pdfannInvertOne(p.annotRefs, p.pageIndex, acc))
+  }
+
+pure func pdfannInvertOne(refs: [int], pageIdx: int, acc: [{annotObj: int, page: int}]) -> [{annotObj: int, page: int}] =
+  match refs {
+    [] => acc,
+    r :: rest => pdfannInvertOne(rest, pageIdx, {annotObj: r, page: pageIdx} :: acc)
+  }
+
+pure func pdfannLookupPage(objNum: int, entries: [{annotObj: int, page: int}]) -> int =
+  match entries {
+    [] => 0,
+    e :: rest =>
+      if e.annotObj == objNum then e.page
+      else pdfannLookupPage(objNum, rest)
+  }
+
+-- Look up each annotation's page by its object number. Walks both lists in
+-- parallel; the per-element page lookup is a top-level call (lambdas can't
+-- close over other top-level helpers in this AILANG version).
+pure func pdfannApplyPageMap(anns: [Annotation], pm: PageMap) -> [Annotation] =
+  pdfannApplyPageMapHelper(anns, pm.entries, [])
+
+pure func pdfannApplyPageMapHelper(
+  anns: [Annotation],
+  entries: [{annotObj: int, page: int}],
+  acc: [Annotation]
+) -> [Annotation] =
+  match anns {
+    [] => reverse(acc),
+    a :: rest => {
+      let p = pdfannLookupPage(a.objNum, entries);
+      let updated = {a | page: p};
+      pdfannApplyPageMapHelper(rest, entries, updated :: acc)
+    }
+  }
+
+-- ============================================================
+-- Block conversion
+-- ============================================================
+
+-- Render an annotation as a SectionBlock(kind: "annotation") matching the
+-- existing DOCX comment shape — author and page surfaced in the text prefix.
+pure func pdfannToBlock(a: Annotation) -> Block {
+  let pageStr = if a.page > 0 then ", page ${intToStr(a.page)}" else "";
+  let prefix = "[${a.author}${pageStr}, ${a.subtype}]";
+  let body = if length(a.contents) == 0 then prefix
+             else "${prefix} ${a.contents}";
+  SectionBlock({
+    kind: "annotation",
+    blocks: [TextBlock({text: body, style: "Annotation", level: 0})]
+  })
+}
