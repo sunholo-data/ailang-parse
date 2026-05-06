@@ -111,8 +111,11 @@ Supported formats:
   AI:      .pdf .png .jpg .gif .bmp .webp .tiff .mp3 .wav .mp4  (multimodal AI)
 
 Output:
-  docparse/data/output.json     Structured JSON with typed blocks
-  docparse/data/output.md       LLM-ready markdown
+  <out>/<filename>.json   Structured JSON with typed blocks
+  <out>/<filename>.md     LLM-ready markdown
+  Default <out> is docparse/data; --output-dir DIR overrides it. In batch
+  mode each file's outputs are written as soon as that file finishes — you
+  can inspect completed files mid-batch and nothing is lost on Ctrl+C.
 EOF
 }
 
@@ -420,11 +423,33 @@ fi
 
 cd "$PROJECT_DIR"
 
-OUTPUT_BASE="docparse/data"
+# When --output-dir is set, AILANG writes outputs there directly (per file,
+# eagerly as each file finishes) via the DOCPARSE_OUTPUT_DIR env var.
+# This means: completed files are visible mid-batch, nothing is lost on
+# Ctrl+C, and there's no bulk post-copy step.
+ENV_PREFIX=()
+if [ -n "$OUTPUT_DIR" ]; then
+  mkdir -p "$OUTPUT_DIR"
+  ENV_PREFIX+=(DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR")
+fi
+if $USE_AI; then
+  ENV_PREFIX+=(GOOGLE_API_KEY="")
+fi
+
+run_cmd() {
+  if [ ${#ENV_PREFIX[@]} -gt 0 ]; then
+    env "${ENV_PREFIX[@]}" "$@"
+  else
+    "$@"
+  fi
+}
 
 if $USE_BATCH; then
   TOTAL=${#RESOLVED_FILES[@]}
   echo "Batch mode: parsing ${TOTAL} files (compile once)..."
+  if [ -n "$OUTPUT_DIR" ]; then
+    echo "Outputs streaming to $OUTPUT_DIR/ as each file completes."
+  fi
   echo ""
   START=$(date +%s)
 
@@ -437,52 +462,16 @@ if $USE_BATCH; then
     for f in "${CHUNK[@]}"; do
       FULL_CMD+=("$f" "${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
     done
-    if $USE_AI; then
-      env GOOGLE_API_KEY="" "${FULL_CMD[@]}"
-    else
-      "${FULL_CMD[@]}"
-    fi
+    run_cmd "${FULL_CMD[@]}"
   done
 
   END=$(date +%s)
   ELAPSED=$((END - START))
   echo ""
   echo "Batch complete: ${TOTAL} files in ${ELAPSED}s"
-
-  # Copy output files if --output-dir
-  if [ -n "$OUTPUT_DIR" ]; then
-    mkdir -p "$OUTPUT_DIR"
-    for f in "${RESOLVED_FILES[@]}"; do
-      input_basename="$(basename "$f")"
-      for out in "$OUTPUT_BASE/${input_basename}.json" "$OUTPUT_BASE/${input_basename}.md" "$OUTPUT_BASE/${input_basename}_summary.txt"; do
-        [ -f "$out" ] && cp "$out" "$OUTPUT_DIR/"
-      done
-    done
-    echo "Output copied to $OUTPUT_DIR/"
-  fi
 else
   # Single file
   FILE="${RESOLVED_FILES[0]}"
   CMD+=("$FILE" "${AILANG_ARGS[@]+"${AILANG_ARGS[@]}"}")
-
-  if [ -n "$OUTPUT_DIR" ]; then
-    if $USE_AI; then
-      env GOOGLE_API_KEY="" "${CMD[@]}"
-    else
-      "${CMD[@]}"
-    fi
-    input_basename="$(basename "$FILE")"
-    mkdir -p "$OUTPUT_DIR"
-    for f in "$OUTPUT_BASE/${input_basename}.json" "$OUTPUT_BASE/${input_basename}.md" "$OUTPUT_BASE/${input_basename}_summary.txt"; do
-      [ -f "$f" ] && cp "$f" "$OUTPUT_DIR/"
-    done
-    echo ""
-    echo "Output copied to $OUTPUT_DIR/"
-  else
-    if $USE_AI; then
-      exec env GOOGLE_API_KEY="" "${CMD[@]}"
-    else
-      exec "${CMD[@]}"
-    fi
-  fi
+  run_cmd "${CMD[@]}"
 fi

@@ -1,6 +1,6 @@
 module docparse/main
 
-import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile)
+import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile, mkdirAll)
 import std/json (encode)
 import std/string (length, intToStr, floatToStr, toLower, split, contains)
 import std/list (last, concat, any, map, flatMap as listFlatMap, filter)
@@ -1187,6 +1187,11 @@ func parseTextDocument(filepath: string) -> () ! {IO, FS} {
 func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bool, filepath: string, convertTarget: string) -> () ! {IO, FS, AI, Env} {
   let outDir = getEnvOr("DOCPARSE_OUTPUT_DIR", "docparse/data");
   let basename = mainBasename(filepath);
+
+  -- Ensure the output directory exists (defensive — bin/docparse already
+  -- mkdirs when --output-dir is used, but direct ailang invocations setting
+  -- DOCPARSE_OUTPUT_DIR to a non-existent path need this).
+  mkdirAll(outDir);
 
   -- Write JSON
   let jsonOutput = formatResult(result);
