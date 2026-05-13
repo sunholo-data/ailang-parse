@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>v0.13.0 Tolerant HTML5 Parsing Demo</title>
+
+    <!--
+      This file intentionally exercises every breakage class that
+      caused strict-XML HTML parsing to fail before v0.13.0. Each
+      construct here is legal HTML5 that real browsers accept without
+      complaint and that real CMSes / email templates emit routinely.
+    -->
+
+    <!-- Boolean attribute on link (this alone broke www.sunholo.com pre-v0.13.0) -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!-- Script with raw `<`, `&`, and JSX-style markup that XML rejects -->
+    <script type="text/babel">
+        if (count < 10 && flag === true) {
+            return <Component prop="x" />;
+        }
+    </script>
+
+    <!-- IE conditional comment (HTML email template idiom) -->
+    <!--[if IE]>
+        <link rel="stylesheet" href="ie-only.css">
+        <p>This block should be entirely stripped, including its inner tags.</p>
+    <![endif]-->
+
+    <!-- HTML comment with `--` inside (XML rejects, browsers ignore) -->
+    <!-- old code -- replaced with React hooks in 2024 -->
+</head>
+<body>
+    <header>
+        <!-- Multiple boolean attributes on the same tag -->
+        <input type="checkbox" disabled checked readonly>
+
+        <!-- Boolean attribute with no value, followed by another attribute -->
+        <video controls autoplay muted playsinline src="intro.mp4"></video>
+    </header>
+
+    <main>
+        <h1>v0.13.0 Tolerant HTML5 Demo</h1>
+
+        <!-- Overlapping tag: <p> inside <a>, then </a> appears before </p>.
+             Browsers auto-close <p> when </a> is hit. Strict XML rejects. -->
+        <a class="card" href="/feature/html-tolerant-parsing">
+            <p>Click this card to read about tolerant HTML5 parsing.
+        </a>
+
+        <!-- Another overlap: <span> opens inside <strong>, both close in
+             wrong order. The auto-closer should emit the implicit close. -->
+        <strong>Important: <span>read this</strong> carefully</span>.
+
+        <!-- Stray close tag with no matching opener. The auto-closer
+             drops it rather than letting the XML parser error out. -->
+        <p>This paragraph is fine.</p>
+        </div>
+
+        <!-- Standard well-formed content sanity check — must still parse
+             identically to a clean HTML file. -->
+        <table>
+            <thead>
+                <tr><th>Format</th><th>Before v0.13.0</th><th>After v0.13.0</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Boolean attrs</td><td>Parse error</td><td>Parsed</td></tr>
+                <tr><td>Overlap nesting</td><td>Parse error</td><td>Parsed</td></tr>
+                <tr><td>Inline JSX in script</td><td>Parse error</td><td>Parsed</td></tr>
+                <tr><td>IE conditionals</td><td>Parse error</td><td>Parsed</td></tr>
+            </tbody>
+        </table>
+
+        <ul>
+            <!-- Unclosed <li> tags: browsers auto-close when the next <li>
+                 opens. The auto-closer handles this at end-of-input. -->
+            <li>First item
+            <li>Second item
+            <li>Third item
+        </ul>
+
+        <!-- Details element with boolean `open` attribute -->
+        <details open>
+            <summary>Click to expand</summary>
+            <p>The <code>open</code> attribute is a boolean. Pre-v0.13.0 the
+            parser failed here because XML demands <code>open="open"</code>.</p>
+        </details>
+
+        <!-- Image with boolean-style attributes and unclosed void tag -->
+        <img src="hero.png" alt="Hero image" loading="lazy">
+    </main>
+
+    <footer>
+        <p>If you can read this footer in the parsed output, v0.13.0 is working.</p>
+    </footer>
+</body>
+</html>
