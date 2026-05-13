@@ -24,6 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Required by peter-evans/create-pull-request — otherwise the
+          # persisted Authorization extraheader collides with the action's
+          # own token and git push fails with HTTP 400 "Duplicate header".
+          persist-credentials: false
 
       - name: Compare pinned vs latest AILANG release
         id: compare
