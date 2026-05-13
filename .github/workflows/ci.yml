@@ -21,6 +21,12 @@ jobs:
       # TODO: switch back to release binary once @route and std/xml.escapeXml ship in a release
       # curl -sL https://github.com/sunholo-data/ailang/releases/latest/download/linux.x64.ailang.tar.gz | tar -xz
       - name: Install ailang (dev branch — needs @route support)
+        env:
+          # AILANG's go.mod may pin a Go toolchain newer than what setup-go
+          # provisions. setup-go@v6 defaults GOTOOLCHAIN=local, which blocks
+          # the auto-toolchain fallback. Switch to `auto` so Go downloads
+          # whatever go.mod requires.
+          GOTOOLCHAIN: auto
         run: |
           git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /tmp/ailang
           cd /tmp/ailang && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
@@ -69,6 +75,11 @@ jobs:
 
       - name: Install ailang (dev branch — needs @route support)
         shell: pwsh
+        env:
+          # See ci.yml::check::Install ailang — setup-go@v6 sets
+          # GOTOOLCHAIN=local; switch to auto so AILANG's go.mod toolchain
+          # pin can fetch the required Go version.
+          GOTOOLCHAIN: auto
         run: |
           git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git $env:RUNNER_TEMP\ailang-src
           cd $env:RUNNER_TEMP\ailang-src
