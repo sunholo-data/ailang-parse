@@ -310,6 +310,10 @@ jobs:
 
       # TODO: switch back to release binary once @route and std/xml.escapeXml ship in a release
       - name: Install ailang (dev branch — needs @route support)
+        env:
+          # See ci.yml::check — setup-go@v6 defaults GOTOOLCHAIN=local
+          # which blocks the auto-toolchain fallback AILANG's go.mod needs.
+          GOTOOLCHAIN: auto
         run: |
           git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /tmp/ailang
           cd /tmp/ailang && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
