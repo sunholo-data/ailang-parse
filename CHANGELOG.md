@@ -9,11 +9,60 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.12.4...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.13.0...HEAD)
 
-(SDKs unchanged this release — they consume the API server, which gains
-new `X-AilangParse-Subtype` / `X-AilangParse-FormatSource` headers via a
-separate downstream release once the api_server picks up `resolveFormat`.)
+---
+
+## [0.13.0](https://github.com/sunholo-data/ailang-parse/compare/v0.12.9...v0.13.0) — 2026-05-13
+
+### Added
+- **Tolerant HTML5 parsing** in [docparse/services/html_parser.ail](docparse/services/html_parser.ail).
+  Production HTML pages — sourced from CMSes, scraped websites, HTML email
+  templates, and saved browser pages — previously failed deterministic
+  parsing because the underlying XML parser is strict and HTML5 is not XML.
+  The sanitizer now closes three real-world gaps without an AI fallback:
+  - **Boolean attributes** (`<link ... crossorigin>`, `<input disabled>`,
+    `<details open>`) are rewritten to `name=""` form for 23 known
+    HTML5 booleans (`disabled`, `checked`, `selected`, `readonly`,
+    `multiple`, `required`, `autofocus`, `hidden`, `novalidate`,
+    `formnovalidate`, `defer`, `async`, `open`, `reversed`, `controls`,
+    `autoplay`, `loop`, `muted`, `default`, `ismap`, `nomodule`,
+    `crossorigin`, `itemscope`, `playsinline`). Fixed-point iteration
+    handles adjacent booleans on the same tag.
+  - **Tag-stack auto-closing** walks the token stream maintaining a
+    stack of open elements. Stray close tags are dropped; overlapping
+    closes (`<p>` closed by `</a>`) trigger implicit closes for
+    everything above the target; elements still open at end-of-input
+    are closed.
+  - **Inline script + conditional-comment stripping** removes
+    `<script>...</script>` (JSX, template literals, raw `<`/`&` in JS
+    routinely broke the parser) and `<!--[if IE]>...<![endif]-->`
+    (HTML email IE-conditionals). HTML comments are now stripped
+    rather than left to fail on inner `--`.
+
+  Canonical regression: `curl https://www.sunholo.com` saved at
+  [data/test_files/sunholo_homepage.html](data/test_files/sunholo_homepage.html)
+  previously produced a single `TextBlock(style: "error")` (XML parse
+  failed on the `crossorigin` boolean attribute on line 10). Now
+  extracts 13 structured blocks including header, nav, sections,
+  h1–h4 headings, lists, and the full footer.
+
+  Well-formed HTML (existing test files: `test.html`, `test_complex.html`,
+  `ailang_guide.html`, `pandoc_nordics.html`, `pandoc_planets.html`)
+  continues to produce byte-identical output — the tolerant passes are
+  no-ops on already-valid input.
+
+  See [v0_13_0_html_tolerant_parsing](design_docs/implemented/v0_13_0/v0_13_0_html_tolerant_parsing.md).
+
+### Known limitations
+- Tag-name case-folding (`<P>` → `<p>`) and Word/Office namespace
+  stripping (`<o:p>` → `<p>`) are deferred. Real-world impact is
+  limited (Word's HTML export is the primary remaining offender;
+  `<script>` stripping already handles JSX-style custom-cased React
+  components).
+- A `std/html` stdlib module wrapping `golang.org/x/net/html` would
+  let this whole sanitizer pipeline collapse to a single call. Filed
+  as an upstream proposal to the AILANG core.
 
 ---
 

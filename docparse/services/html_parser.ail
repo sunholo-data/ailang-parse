@@ -46,16 +46,21 @@ export pure func parseHtml(content: string) -> [Block]
 -- ============================================================
 
 -- Sanitize HTML so it can be parsed by a strict XML parser.
--- Handles: void elements, HTML entities, DOCTYPE, style blocks, zero-width chars.
-pure func htmlSanitize(content: string) -> string
-  ensures { length(result) >= 0 }
-{
+-- Handles: DOCTYPE, scripts, styles, conditional comments, HTML comments,
+-- zero-width chars, named entities, void elements, boolean attributes,
+-- and tag-stack auto-closing for overlapping/unclosed tags.
+pure func htmlSanitize(content: string) -> string {
   let noDoctype = htmlStripDoctype(content);
   let noStyles = htmlStripStyleBlocks(noDoctype);
-  let noZeroWidth = htmlStripZeroWidthChars(noStyles);
+  let noScripts = htmlStripScriptBlocks(noStyles);
+  let noConditional = htmlStripConditionalComments(noScripts);
+  let noComments = htmlStripComments(noConditional);
+  let noZeroWidth = htmlStripZeroWidthChars(noComments);
   let entitiesFixed = htmlReplaceEntities(noZeroWidth);
   let entitiesCleaned = htmlStripUnknownEntities(entitiesFixed);
-  htmlCloseVoidElements(entitiesCleaned)
+  let voidFixed = htmlCloseVoidElements(entitiesCleaned);
+  let attrsFixed = htmlNormalizeAttrs(voidFixed);
+  htmlAutoClose(attrsFixed)
 }
 
 -- Strip <style>...</style> blocks (CSS content often breaks XML parsing)
@@ -245,6 +250,271 @@ pure func htmlIsVoidTagAt(fragment: string, tagName: string) -> bool {
     }
   }
   else false
+}
+
+-- Strip <script>...</script> blocks (JavaScript content breaks strict XML
+-- parsing — script bodies routinely contain raw `<`, `&`, JSX, template
+-- literals, etc.). Mirrors htmlStripStyleBlocks structure.
+pure func htmlStripScriptBlocks(content: string) -> string
+  ensures { length(result) <= length(content) }
+{
+  let lower = toLower(content);
+  let scriptPos = find(lower, "<script");
+  if scriptPos < 0 then content
+  else {
+    let before = substring(content, 0, scriptPos);
+    let afterScript = substring(content, scriptPos, length(content));
+    let lowerAfter = toLower(afterScript);
+    let closePos = find(lowerAfter, "</script>");
+    if closePos < 0 then content
+    else {
+      let rest = substring(afterScript, closePos + 9, length(afterScript));
+      htmlStripScriptBlocks("${before}${rest}")
+    }
+  }
+}
+
+-- Strip IE-style conditional comments: <!--[if IE]>...<![endif]-->.
+-- Common in HTML email templates. Content is IE-specific and irrelevant
+-- for AI extraction. Strips the entire block including its inner content.
+pure func htmlStripConditionalComments(content: string) -> string
+  ensures { length(result) <= length(content) }
+{
+  let startPos = find(content, "<!--[if");
+  if startPos < 0 then content
+  else {
+    let after = substring(content, startPos, length(content));
+    let endPos = find(after, "<![endif]-->");
+    if endPos < 0 then content
+    else {
+      let before = substring(content, 0, startPos);
+      let rest = substring(after, endPos + 12, length(after));
+      htmlStripConditionalComments("${before}${rest}")
+    }
+  }
+}
+
+-- Strip HTML comments (`<!-- ... -->`). XML rejects comments containing
+-- `--` (e.g. `<!-- foo -- bar -->`). Stripping rather than normalizing is
+-- equivalent for our purposes: comments are not text content.
+pure func htmlStripComments(content: string) -> string
+  ensures { length(result) <= length(content) }
+{
+  let startPos = find(content, "<!--");
+  if startPos < 0 then content
+  else {
+    let after = substring(content, startPos, length(content));
+    let endPos = find(after, "-->");
+    if endPos < 0 then content
+    else {
+      let before = substring(content, 0, startPos);
+      let rest = substring(after, endPos + 3, length(after));
+      htmlStripComments("${before}${rest}")
+    }
+  }
+}
+
+-- Normalize boolean and unquoted HTML5 attributes for XML compatibility.
+-- HTML5 permits attributes like `<input disabled>`, `<link ... crossorigin>`,
+-- and `<a href=foo>`. XML requires `name="value"` for every attribute.
+-- We split on "<", inspect each tag's header (chars between `<` and `>`),
+-- and rewrite ` boolName ` → ` boolName="" ` for 23 known boolean attrs.
+pure func htmlNormalizeAttrs(content: string) -> string
+  ensures { length(result) >= length(content) }
+{
+  let parts = split(content, "<");
+  match parts {
+    [] => content,
+    first :: rest => {
+      let fixed = map(htmlFixAttrsFragment, rest);
+      "${first}${join("", fixed)}"
+    }
+  }
+}
+
+-- Process one fragment that was preceded by "<" in the original content.
+-- Skips closing tags, declarations, and processing instructions; normalizes
+-- attributes inside opening tag headers. Always prepends "<" back.
+pure func htmlFixAttrsFragment(fragment: string) -> string {
+  if startsWith(fragment, "/") then "<${fragment}"
+  else if startsWith(fragment, "!") then "<${fragment}"
+  else if startsWith(fragment, "?") then "<${fragment}"
+  else {
+    let closeAngle = find(fragment, ">");
+    if closeAngle < 0 then "<${fragment}"
+    else {
+      let tagHeader = substring(fragment, 0, closeAngle);
+      let afterTag = substring(fragment, closeAngle, length(fragment));
+      let normalized = htmlFixBooleanAttrs(tagHeader);
+      "<${normalized}${afterTag}"
+    }
+  }
+}
+
+-- Replace bare boolean attributes with `name=""`. Pads the tag header with
+-- a leading and trailing space, normalizes whitespace, then runs the AC
+-- replacer to fixed point (a single pass would miss adjacent booleans
+-- because the trailing space delimiter is consumed by each match).
+pure func htmlFixBooleanAttrs(tagHeader: string) -> string {
+  let normalized = replaceMany(tagHeader, [("\t", " "), ("\n", " "), ("\r", " ")]);
+  let fixed = htmlFixBooleanAttrsLoop(" ${normalized} ");
+  let flen = length(fixed);
+  if flen < 2 then trim(fixed)
+  else substring(fixed, 1, flen - 1)
+}
+
+-- Iterate htmlFixBooleanAttrsOnce to a fixed point. Adjacent boolean
+-- attributes need multiple passes because each match consumes the
+-- shared whitespace delimiter between them.
+pure func htmlFixBooleanAttrsLoop(s: string) -> string {
+  let next = htmlFixBooleanAttrsOnce(s);
+  if next == s then s
+  else htmlFixBooleanAttrsLoop(next)
+}
+
+-- One pass of boolean-attribute replacement. Patterns are pairs:
+-- ` attr ` (followed by whitespace) and ` attr/` (immediately before
+-- a self-close slash inserted by htmlCloseVoidElements).
+pure func htmlFixBooleanAttrsOnce(s: string) -> string {
+  replaceMany(s, [
+    (" disabled ", " disabled=\"\" "),  (" disabled/", " disabled=\"\"/"),
+    (" checked ", " checked=\"\" "),    (" checked/", " checked=\"\"/"),
+    (" selected ", " selected=\"\" "),  (" selected/", " selected=\"\"/"),
+    (" readonly ", " readonly=\"\" "),  (" readonly/", " readonly=\"\"/"),
+    (" multiple ", " multiple=\"\" "),  (" multiple/", " multiple=\"\"/"),
+    (" required ", " required=\"\" "),  (" required/", " required=\"\"/"),
+    (" autofocus ", " autofocus=\"\" "),(" autofocus/", " autofocus=\"\"/"),
+    (" hidden ", " hidden=\"\" "),      (" hidden/", " hidden=\"\"/"),
+    (" novalidate ", " novalidate=\"\" "),    (" novalidate/", " novalidate=\"\"/"),
+    (" formnovalidate ", " formnovalidate=\"\" "), (" formnovalidate/", " formnovalidate=\"\"/"),
+    (" defer ", " defer=\"\" "),        (" defer/", " defer=\"\"/"),
+    (" async ", " async=\"\" "),        (" async/", " async=\"\"/"),
+    (" open ", " open=\"\" "),          (" open/", " open=\"\"/"),
+    (" reversed ", " reversed=\"\" "),  (" reversed/", " reversed=\"\"/"),
+    (" controls ", " controls=\"\" "),  (" controls/", " controls=\"\"/"),
+    (" autoplay ", " autoplay=\"\" "),  (" autoplay/", " autoplay=\"\"/"),
+    (" loop ", " loop=\"\" "),          (" loop/", " loop=\"\"/"),
+    (" muted ", " muted=\"\" "),        (" muted/", " muted=\"\"/"),
+    (" default ", " default=\"\" "),    (" default/", " default=\"\"/"),
+    (" ismap ", " ismap=\"\" "),        (" ismap/", " ismap=\"\"/"),
+    (" nomodule ", " nomodule=\"\" "),  (" nomodule/", " nomodule=\"\"/"),
+    (" crossorigin ", " crossorigin=\"\" "),  (" crossorigin/", " crossorigin=\"\"/"),
+    (" itemscope ", " itemscope=\"\" "),(" itemscope/", " itemscope=\"\"/"),
+    (" playsinline ", " playsinline=\"\" "), (" playsinline/", " playsinline=\"\"/")
+  ])
+}
+
+-- Tag-stack auto-closer. Walks the (already attribute-fixed) HTML and
+-- emits a well-nested version: stray close tags are dropped, overlapping
+-- close tags trigger implicit closes for everything above them, and any
+-- elements left open at end-of-input are closed.
+--
+-- This fixes the canonical real-world breakage where an `<a>` wraps a
+-- block element: `<a class="card"><p>foo</a>` → `<a class="card"><p>foo</p></a>`.
+pure func htmlAutoClose(content: string) -> string {
+  let parts = split(content, "<");
+  match parts {
+    [] => content,
+    leading :: rest => "${leading}${htmlAutoCloseWalk(rest, [])}"
+  }
+}
+
+-- Recursive walker. `stack` is the list of currently-open tag names with
+-- the most-recently-opened tag at the head. Dispatch is inlined so the
+-- function is single-recursive (Z3 cannot encode mutual recursion).
+pure func htmlAutoCloseWalk(fragments: [string], stack: [string]) -> string {
+  match fragments {
+    [] => htmlEmitStackCloses(stack),
+    frag :: rest => {
+      let closeAngle = find(frag, ">");
+      if closeAngle < 0 then
+        "<${frag}${htmlAutoCloseWalk(rest, stack)}"
+      else {
+        let tagText = substring(frag, 0, closeAngle);
+        let afterTag = substring(frag, closeAngle + 1, length(frag));
+        if startsWith(tagText, "!") || startsWith(tagText, "?") then
+          "<${tagText}>${afterTag}${htmlAutoCloseWalk(rest, stack)}"
+        else if startsWith(tagText, "/") then {
+          let name = htmlGetTagName(substring(tagText, 1, length(tagText)));
+          let pop = htmlPopUntil(stack, name);
+          if pop.matched
+          then "${pop.closes}${afterTag}${htmlAutoCloseWalk(rest, pop.stack)}"
+          else "${afterTag}${htmlAutoCloseWalk(rest, stack)}"
+        }
+        else {
+          let name = htmlGetTagName(tagText);
+          if htmlIsTagSelfClosing(tagText) || htmlIsVoidName(name) then
+            "<${tagText}>${afterTag}${htmlAutoCloseWalk(rest, stack)}"
+          else
+            "<${tagText}>${afterTag}${htmlAutoCloseWalk(rest, name :: stack)}"
+        }
+      }
+    }
+  }
+}
+
+-- Extract tag name: chars up to first whitespace, `/`, or `>`.
+pure func htmlGetTagName(tagText: string) -> string =
+  htmlGetTagNameAt(tagText, 0)
+
+pure func htmlGetTagNameAt(s: string, i: int) -> string {
+  if i >= length(s) then s
+  else {
+    let c = charAt(s, i);
+    if c == " " || c == "\t" || c == "\n" || c == "/" || c == ">"
+    then substring(s, 0, i)
+    else htmlGetTagNameAt(s, i + 1)
+  }
+}
+
+-- Tag is self-closing if its header text (without trailing `>`) ends in `/`.
+pure func htmlIsTagSelfClosing(tagText: string) -> bool =
+  endsWith(trim(tagText), "/")
+
+-- Name-based void check (separate from htmlIsVoidTagAt which works on
+-- raw fragments). Used by the auto-closer to avoid pushing void elements
+-- to the stack even when the void-closer didn't reach them.
+pure func htmlIsVoidName(name: string) -> bool =
+  name == "br" || name == "hr" || name == "img" || name == "input" ||
+  name == "meta" || name == "link" || name == "col" || name == "area" ||
+  name == "base" || name == "embed" || name == "source" || name == "track" ||
+  name == "wbr"
+
+-- Stack pop result: (closes to emit, new stack, whether target was found).
+type StackPop = {closes: string, stack: [string], matched: bool}
+
+-- Pop the stack down to `target`, emitting closing tags for everything
+-- above (and including) target. If target is not in the stack, leave
+-- the stack untouched and emit nothing (caller drops the stray close).
+pure func htmlPopUntil(stack: [string], target: string) -> StackPop {
+  if htmlStackContains(stack, target)
+  then htmlPopUntilFound(stack, target, "")
+  else {closes: "", stack: stack, matched: false}
+}
+
+pure func htmlStackContains(stack: [string], target: string) -> bool {
+  match stack {
+    [] => false,
+    top :: rest => if top == target then true else htmlStackContains(rest, target)
+  }
+}
+
+pure func htmlPopUntilFound(stack: [string], target: string, acc: string) -> StackPop {
+  match stack {
+    [] => {closes: acc, stack: [], matched: true},
+    top :: rest =>
+      if top == target
+      then {closes: "${acc}</${target}>", stack: rest, matched: true}
+      else htmlPopUntilFound(rest, target, "${acc}</${top}>")
+  }
+}
+
+-- Emit closing tags for everything still on the stack at end-of-input.
+pure func htmlEmitStackCloses(stack: [string]) -> string {
+  match stack {
+    [] => "",
+    top :: rest => "</${top}>${htmlEmitStackCloses(rest)}"
+  }
 }
 
 -- Extract blocks from an HTML root element
