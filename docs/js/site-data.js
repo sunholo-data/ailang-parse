@@ -8,7 +8,7 @@
  * To update pricing, change values here — they propagate via data-dp attributes.
  */
 var DP_DATA = {
-  version: "0.13.0",
+  version: "0.14.0",
   ailangVersion: "v0.14.2",
   pricing: {
     tiers: {

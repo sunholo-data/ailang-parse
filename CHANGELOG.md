@@ -9,7 +9,41 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.13.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.14.0...HEAD)
+
+---
+
+## [0.14.0](https://github.com/sunholo-data/ailang-parse/compare/v0.13.0...v0.14.0) — 2026-05-13
+
+### Changed
+- **HTML parser now uses `std/html`** (WHATWG HTML5 spec via Go's
+  `golang.org/x/net/html`, shipped in AILANG v0.19.1). The in-repo
+  sanitizer pipeline introduced in v0.13.0 — ~475 lines of boolean-
+  attribute normalization, tag-stack auto-closing, script stripping,
+  conditional-comment stripping, HTML-comment stripping, void-element
+  closing, and entity normalization — is **deleted entirely**. Every
+  block extractor (`htmlExtractBlocks`, `htmlProcessNode`, `htmlParseTable`,
+  `htmlDeepText`, etc.) is unchanged because `std/html` returns the
+  same `XmlNode` ADT as `std/xml`.
+
+  Side-effects of switching to a real HTML5 parser:
+  - Unicode characters in inline anchors (e.g. `→` in "See how →") are
+    now preserved rather than stripped by the entity pipeline.
+  - Adjacent inline elements (e.g. "Connect With Us" + `<a>LinkedIn</a>`)
+    parse as separate text blocks instead of being concatenated.
+  - Document tree shape is the canonical HTML5 tree (always wrapped in
+    `<html><head><body>…</body></html>`), which matters only if you
+    walked the tree manually — `parseHtml`'s block-list output is
+    unaffected.
+
+  Sunholo homepage golden refreshed to reflect the better text
+  extraction. All other goldens (test.html, test_complex.html,
+  ailang_guide.html, pandoc_nordics.html, pandoc_planets.html,
+  messy_html5_demo.html) produce 100%-identical output.
+
+### Requires
+- **AILANG ≥ 0.19.1** (was `>=0.12.0`). `std/html` was added upstream
+  on 2026-05-13. End-users on AILANG 0.12.x – 0.19.0 must upgrade.
 
 ---
 
