@@ -9,7 +9,78 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.16.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.17.0...HEAD)
+
+---
+
+## [0.17.0](https://github.com/sunholo-data/ailang-parse/compare/v0.16.0...v0.17.0) — 2026-05-14
+
+Three HTML-parser themes shipped together: page metadata extraction,
+inline formatting preservation, and semantic block recognition.
+
+### Added — Page metadata extraction
+- **`parseHtmlMetadata(content)`** in [html_parser.ail](docparse/services/html_parser.ail)
+  walks the parsed HTML tree to extract:
+  - `<title>` → `DocMetadata.title` (falls back to `og:title` if absent)
+  - `<meta name="author">` → `DocMetadata.author`
+  - `<meta name="date">` → `DocMetadata.created` (falls back to
+    `<meta property="article:published_time">`)
+- **Wired into [docparse/main.ail](docparse/main.ail)** so every HTML
+  parse now produces a populated `DocMetadata` instead of an empty one.
+  www.sunholo.com now reports its title; the AILANG guide reports
+  "Getting Started with AILANG Parse"; previously both were empty.
+
+### Added — Inline formatting markers
+- **`<strong>` / `<b>` → `**bold**`** (CommonMark-compatible)
+- **`<em>` / `<i>` → `*italic*`**
+- **`<code>` / `<kbd>` / `<samp>` → `` `code` ``**
+- **`<del>` / `<s>` → `~~strikethrough~~`**
+- **`<mark>` → `==highlighted==`**
+- **`<a href="X">text</a>` inline → `[text](X)`** — even inside `<p>`
+  paragraphs. Anchor-only hrefs (e.g. `href="#section"`) and href-less
+  anchors collapse to plain text so output isn't polluted with
+  placeholders.
+- **`<time datetime="2026-05-14">yesterday</time>` → `yesterday (2026-05-14)`**
+  so machine-readable timestamps survive alongside the human label.
+- **`<abbr title="Application">App</abbr>` → `App (Application)`**
+- **`<cite>` / `<q>` → `"quoted"`**
+
+  Implemented in `htmlInlineWrap` — the inline children of paragraphs,
+  headings, list items, table cells, etc. now retain semantic emphasis
+  in the extracted text. Real-world impact: 15 `<strong>` and 31
+  inline anchors on www.sunholo.com are now preserved instead of being
+  flattened to plain text.
+
+### Added — Semantic blocks
+- **`<pre><code class="language-X">…</code></pre>`** captures the
+  language hint: `TextBlock.style` is set to `"code-X"` (e.g. `"code-python"`,
+  `"code-typescript"`) instead of the plain `"code"`. Bare `<pre>`
+  without a `<code class="language-*">` child stays `"code"`.
+- **`<details>`/`<summary>`** now emit a `SectionBlock(kind: "details")`
+  containing a level-3 `HeadingBlock` for the summary plus the
+  recursively-extracted body. Previously both fell through to text-only.
+
+### Changed
+- `htmlChildTextWithSpacing` and the new `htmlInlineWrap` dispatch
+  inline children by tag. Block-level children still get a `\n`
+  prefix; inline children get wrapped with the appropriate markdown
+  marker; text nodes pass through unchanged.
+
+### Goldens refreshed
+- `test_complex.html`, `ailang_guide.html`, `sunholo_homepage.html`,
+  `messy_html5_demo.html` — all 4 had structural changes because their
+  paragraphs now carry inline formatting markers and their pages have
+  extracted titles. `test.html`, `pandoc_nordics.html`,
+  `pandoc_planets.html`, and the EML goldens were byte-identical
+  (no inline emphasis in the source files).
+
+### Real-world numbers (sunholo.com)
+| Metric | v0.16.0 | v0.17.0 |
+|---|---|---|
+| `DocMetadata.title` | `""` | `"AI Engineering, AI Platforms and AI Solution Architecture - Sunholo"` |
+| `<strong>` preserved in JSON | 0 | 15 (as `**...**` markers) |
+| Inline anchor URLs in JSON | 0 | 31 (as `[text](href)`) |
+| `<a href>` LinkBlocks (top-level) | 31 | 31 (unchanged) |
 
 ---
 

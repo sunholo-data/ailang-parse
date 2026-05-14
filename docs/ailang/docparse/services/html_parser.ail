@@ -4,9 +4,9 @@ import std/html (parse)
 import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
-import std/string (length, trim, find, replace, join, stringToInt)
+import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell, mkImageFull)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImageFull)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -41,6 +41,74 @@ export pure func parseHtml(content: string) -> [Block]
     Ok(root) => htmlExtractBlocks(root),
     Err(e) => [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})]
   }
+}
+
+-- Parse HTML document metadata from <head> children.
+-- Extracts:
+--   <title>             → DocMetadata.title
+--   <meta name="author">                → DocMetadata.author
+--   <meta name="description">           → DocMetadata.author fallback for description-as-byline
+--   <meta property="og:title">          → DocMetadata.title fallback if <title> empty
+--   <meta name="date">                  → DocMetadata.created
+--   <meta property="article:published_time"> → DocMetadata.created fallback
+--
+-- Returns emptyMetadata() if no <head> or no <title> and no <meta> tags
+-- are present. Pure: requires no FS / IO effects.
+export pure func parseHtmlMetadata(content: string) -> DocMetadata {
+  match parse(content) {
+    Ok(root) => htmlExtractMetadata(root),
+    Err(_) => emptyMetadata()
+  }
+}
+
+-- Walk the parsed HTML tree to find <head> and extract title + metas.
+pure func htmlExtractMetadata(root: XmlNode) -> DocMetadata {
+  let title = htmlExtractTitle(root);
+  let author = htmlExtractMeta(root, "author");
+  let created = htmlExtractCreatedDate(root);
+  {title: title, author: author, created: created, modified: "", pageCount: 0}
+}
+
+-- Find the <title> element anywhere in the tree (typically inside <head>).
+-- Falls back to og:title if <title> is missing or empty.
+pure func htmlExtractTitle(root: XmlNode) -> string {
+  let direct = match findFirst(root, "title") {
+    Some(t) => trim(getText(t)),
+    None => ""
+  };
+  if length(direct) > 0 then direct
+  else htmlExtractProperty(root, "og:title")
+}
+
+-- Look up <meta name="X" content="Y"> and return Y.
+pure func htmlExtractMeta(root: XmlNode, name: string) -> string {
+  htmlFindMetaContent(findAll(root, "meta"), "name", name)
+}
+
+-- Look up <meta property="X" content="Y"> and return Y (for OG tags).
+pure func htmlExtractProperty(root: XmlNode, property: string) -> string {
+  htmlFindMetaContent(findAll(root, "meta"), "property", property)
+}
+
+-- Walk a list of <meta> nodes, return the `content` attribute of the
+-- first one whose attribute `attrName` equals `attrValue`.
+pure func htmlFindMetaContent(metas: [XmlNode], attrName: string, attrValue: string) -> string {
+  match metas {
+    [] => "",
+    m :: rest => {
+      let actual = getOrElse(getAttr(m, attrName), "");
+      if actual == attrValue
+      then getOrElse(getAttr(m, "content"), "")
+      else htmlFindMetaContent(rest, attrName, attrValue)
+    }
+  }
+}
+
+-- Prefer <meta name="date"> ISO date, fall back to article:published_time.
+pure func htmlExtractCreatedDate(root: XmlNode) -> string {
+  let direct = htmlExtractMeta(root, "date");
+  if length(direct) > 0 then direct
+  else htmlExtractProperty(root, "article:published_time")
 }
 
 
@@ -154,10 +222,25 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
     else []
 
-  -- Block-level containers (div, blockquote, figure, details) — recurse
+  -- Block-level containers (div, blockquote, figure) — recurse and flatten
   else if tag == "div" || tag == "blockquote" || tag == "figure" ||
-          tag == "details" || tag == "fieldset" || tag == "form" then
+          tag == "fieldset" || tag == "form" then
     htmlProcessChildren(getChildren(node))
+
+  -- <details>/<summary>: collapsible disclosure widget. Treat as a
+  -- SectionBlock(kind: "details") so the structure is preserved; the
+  -- <summary> child (if present) renders as a level-3 heading inside.
+  else if tag == "details" then
+    let blocks = htmlProcessChildren(getChildren(node)) in
+    if listLength(blocks) > 0 then [SectionBlock({kind: "details", blocks: blocks})]
+    else []
+
+  -- <summary>: the disclosure caption inside a <details>. Promote to a
+  -- heading so it stands out from the details body.
+  else if tag == "summary" then
+    let text = trim(htmlDeepText(node)) in
+    if length(text) > 0 then [HeadingBlock({text: text, level: 3})]
+    else []
 
   -- <picture> for responsive images: HTML5 picks one <source srcset>
   -- candidate at runtime and falls back to the <img> child. We collect
@@ -167,10 +250,14 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
   else if tag == "picture" then
     htmlParsePicture(node)
 
-  -- Pre/code blocks → TextBlock with "code" style
+  -- Pre/code blocks → TextBlock with code style. If the <pre> wraps a
+  -- single <code class="language-X"> child, the language tag is
+  -- captured as `code-X` in the style field; otherwise the style is
+  -- just `code`.
   else if tag == "pre" then
     let text = htmlDeepText(node) in
-    if length(text) > 0 then [TextBlock({text: text, style: "code", level: 0})]
+    if length(text) > 0
+    then [TextBlock({text: text, style: htmlPreCodeStyle(node), level: 0})]
     else []
 
   -- Definition lists
@@ -272,15 +359,113 @@ pure func htmlDeepText(node: XmlNode) -> string {
   }
 }
 
--- Render a child node's text, adding a newline before block-level tags.
+-- Render a child node's text, adding a newline before block-level tags
+-- and wrapping inline elements with markdown-style markers so semantic
+-- emphasis survives the parse → text → JSON → consumer pipeline.
 -- Text nodes (tag == "") pass through as-is to preserve inline spacing.
 pure func htmlChildTextWithSpacing(node: XmlNode) -> string {
   let tag = getTag(node);
   let text = htmlDeepText(node);
-  if length(trim(text)) == 0 then ""
+  if length(trim(text)) == 0 then
+    -- Empty inline content. Even so, <br>/<wbr> produce structural
+    -- whitespace; everything else collapses to nothing.
+    if tag == "br" then "\n"
+    else ""
   else if tag == "br" then "\n"
   else if htmlIsBlockTag(tag) then "\n${text}"
+  else htmlInlineWrap(node, tag, text)
+}
+
+-- Wrap a non-empty inline child with the appropriate markdown marker.
+-- Falls through to the plain text when the tag has no special inline
+-- semantics. Markers chosen for compatibility with CommonMark / Pandoc /
+-- typical LLM consumption.
+pure func htmlInlineWrap(node: XmlNode, tag: string, text: string) -> string {
+  if tag == "strong" || tag == "b" then "**${text}**"
+  else if tag == "em" || tag == "i" then "*${text}*"
+  else if tag == "code" || tag == "kbd" || tag == "samp" then "`${text}`"
+  else if tag == "del" || tag == "s" then "~~${text}~~"
+  else if tag == "mark" then "==${text}=="
+  else if tag == "a" then htmlInlineAnchor(node, text)
+  else if tag == "time" then htmlInlineTime(node, text)
+  else if tag == "abbr" then htmlInlineAbbr(node, text)
+  else if tag == "cite" || tag == "q" then "\"${text}\""
   else text
+}
+
+-- Inline anchor: emit `[text](href)` markdown link. If href is missing
+-- or starts with "#" (anchor-only), drop the href and return text alone
+-- so we don't pollute output with `[text](#)` for placeholder anchors.
+pure func htmlInlineAnchor(node: XmlNode, text: string) -> string {
+  let href = getOrElse(getAttr(node, "href"), "");
+  if length(href) == 0 then text
+  else if length(href) > 0 && htmlIsAnchorOnly(href) then text
+  else "[${text}](${href})"
+}
+
+pure func htmlIsAnchorOnly(href: string) -> bool {
+  length(href) > 0 && (find(href, "#") == 0)
+}
+
+-- Inline <time datetime="...">label</time>: include the datetime in
+-- parens after the human label so the machine-readable timestamp
+-- survives. If datetime is missing, just emit the label.
+pure func htmlInlineTime(node: XmlNode, text: string) -> string {
+  let dt = getOrElse(getAttr(node, "datetime"), "");
+  if length(dt) > 0 && dt != text then "${text} (${dt})"
+  else text
+}
+
+-- Inline <abbr title="...">label</abbr>: append the expansion in parens.
+pure func htmlInlineAbbr(node: XmlNode, text: string) -> string {
+  let title = getOrElse(getAttr(node, "title"), "");
+  if length(title) > 0 then "${text} (${title})"
+  else text
+}
+
+-- Style string for a <pre> block. If the <pre> wraps exactly one
+-- <code class="language-X"> child, capture the language as `code-X`;
+-- otherwise return `code`.
+pure func htmlPreCodeStyle(pre: XmlNode) -> string {
+  let children = getChildren(pre);
+  match children {
+    [singleChild] =>
+      if getTag(singleChild) == "code" then htmlCodeLanguageStyle(singleChild)
+      else "code",
+    _ => "code"
+  }
+}
+
+-- Pull `language-X` from a <code class="..."> attribute.
+pure func htmlCodeLanguageStyle(code: XmlNode) -> string {
+  let cls = getOrElse(getAttr(code, "class"), "");
+  let prefix = "language-";
+  let idx = find(cls, prefix);
+  if idx < 0 then "code"
+  else {
+    -- Extract substring from end-of-prefix up to next space or end.
+    let prefixLen = length(prefix);
+    let start = idx + prefixLen;
+    htmlCodeLangAt(cls, start, start)
+  }
+}
+
+-- Scan from `start` forward, returning "code-<lang>" once we hit a
+-- space, end of string, or non-language character. Lang chars are
+-- alphanumeric and `-` (e.g. "objective-c", "csharp", "html5").
+pure func htmlCodeLangAt(cls: string, start: int, i: int) -> string {
+  if i >= length(cls) then "code-${trim(htmlCodeLangSubstring(cls, start, i))}"
+  else {
+    let c = charAt(cls, i);
+    if c == " " || c == "\t" || c == "\n"
+    then "code-${trim(htmlCodeLangSubstring(cls, start, i))}"
+    else htmlCodeLangAt(cls, start, i + 1)
+  }
+}
+
+pure func htmlCodeLangSubstring(s: string, start: int, end: int) -> string {
+  if start >= end then ""
+  else substring(s, start, end)
 }
 
 -- Collapse runs of 3+ newlines down to 2 (one blank line max).
