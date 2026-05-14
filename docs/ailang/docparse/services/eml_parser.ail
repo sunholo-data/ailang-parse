@@ -12,7 +12,7 @@ module docparse/services/eml_parser
 
 import std/string (length, substring, find, split, join, trim, toLower, startsWith, endsWith, contains, chars, foldChars, charAt, intToStr, replace, decodeQuotedPrintable as builtinDecodeQP)
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
-import std/option (Some, None)
+import std/option (Option, Some, None)
 import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
 import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata)
 import docparse/services/html_parser (parseHtml)
@@ -39,8 +39,8 @@ export pure func parseEml(content: string) -> [Block]
   let contentType = emlGetHeader(headers, "content-type");
   let encoding = emlGetHeader(headers, "content-transfer-encoding");
 
-  -- Header section as a block
-  let headerBlocks = emlHeadersToBlocks(headers);
+  -- Header section as a block (key headers only — strips transport noise)
+  let headerBlocks = emlKeyHeadersToBlocks(headers);
   let headerSection = SectionBlock({kind: "email-headers", blocks: headerBlocks});
 
   -- Body parsing depends on Content-Type
@@ -169,6 +169,20 @@ pure func emlFindHeader(headers: [EmlHeader], lowerName: string) -> string =
 pure func emlHeadersToBlocks(headers: [EmlHeader]) -> [Block] =
   map(\h. TextBlock({text: "${h.name}: ${emlDecodeHeaderValue(h.value)}", style: "email-header", level: 0}), headers)
 
+-- Headers that carry semantic meaning for email intelligence
+-- (strips transport noise: Received, ARC-*, DKIM-*, X-*, etc.)
+pure func emlIsKeyHeader(name: string) -> bool {
+  let n = toLower(name);
+  n == "from" || n == "to" || n == "cc" || n == "bcc" || n == "reply-to" ||
+  n == "subject" || n == "date" || n == "message-id" ||
+  n == "in-reply-to" || n == "references" || n == "content-type"
+}
+
+-- Like emlHeadersToBlocks but only emits key headers
+pure func emlKeyHeadersToBlocks(headers: [EmlHeader]) -> [Block] =
+  map(\h. TextBlock({text: "${h.name}: ${emlDecodeHeaderValue(h.value)}", style: "email-header", level: 0}),
+      filter(\h. emlIsKeyHeader(h.name), headers))
+
 -- Extract display name from From header
 -- "Alice Smith <alice@example.com>" → "Alice Smith"
 -- "alice@example.com" → "alice@example.com"
@@ -196,7 +210,10 @@ pure func emlParseBody(body: string, contentType: string, encoding: string) -> [
     if length(boundary) == 0 then [TextBlock({text: body, style: "Normal", level: 0})]
     else {
       let parts = emlSplitMultipart(body, boundary);
-      flatMap(emlParseMimePart, parts)
+      if contains(lowerCt, "multipart/alternative") then
+        emlSelectAlternativePart(parts)
+      else
+        flatMap(emlParseMimePart, parts)
     }
   }
   else {
@@ -261,6 +278,57 @@ pure func emlFilterMultipartParts(parts: [string], pastFirst: bool) -> [string] 
       }
     }
   }
+
+-- Find first MIME part whose Content-Type exactly matches a mime type string
+pure func emlFindPartByMime(parts: [string], mimeType: string) -> Option[string] =
+  match parts {
+    [] => None,
+    part :: rest => {
+      let sp = emlSplitHeaderBody(part);
+      let headers = emlParseHeaders(sp.headers);
+      let ct = emlExtractMimeType(emlGetHeader(headers, "content-type"));
+      if ct == mimeType then Some(part)
+      else emlFindPartByMime(rest, mimeType)
+    }
+  }
+
+-- For multipart/alternative: pick text/plain, fall back to text/html, then first part.
+-- RFC 2046 §5.1.4 — the last part a reader can display is "most faithful", but
+-- for programmatic/AI use plain text is almost always the right choice.
+pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
+  let plainPart = emlFindPartByMime(parts, "text/plain");
+  match plainPart {
+    Some(part) => {
+      let sp = emlSplitHeaderBody(part);
+      let headers = emlParseHeaders(sp.headers);
+      let enc = emlGetHeader(headers, "content-transfer-encoding");
+      let decoded = emlDecodeBody(sp.body, enc);
+      [TextBlock({text: decoded, style: "Normal", level: 0})]
+    },
+    None => {
+      let htmlPart = emlFindPartByMime(parts, "text/html");
+      match htmlPart {
+        Some(part) => {
+          let sp = emlSplitHeaderBody(part);
+          let headers = emlParseHeaders(sp.headers);
+          let enc = emlGetHeader(headers, "content-transfer-encoding");
+          let decoded = emlDecodeBody(sp.body, enc);
+          parseHtml(decoded)
+        },
+        None => match parts {
+          [] => [],
+          first :: _ => {
+            let sp = emlSplitHeaderBody(first);
+            let headers = emlParseHeaders(sp.headers);
+            let enc = emlGetHeader(headers, "content-transfer-encoding");
+            let decoded = emlDecodeBody(sp.body, enc);
+            [TextBlock({text: decoded, style: "Normal", level: 0})]
+          }
+        }
+      }
+    }
+  }
+}
 
 -- Check if a MIME type is an Office ZIP format (DOCX/PPTX/XLSX)
 pure func emlIsOfficeMime(mimeType: string) -> bool {
@@ -350,7 +418,10 @@ pure func emlParseMimePart(part: string) -> [Block] {
     if length(boundary) == 0 then [TextBlock({text: splitResult.body, style: "Normal", level: 0})]
     else {
       let subParts = emlSplitMultipart(splitResult.body, boundary);
-      flatMap(emlParseMimePart, subParts)
+      if contains(lowerCt, "multipart/alternative") then
+        emlSelectAlternativePart(subParts)
+      else
+        flatMap(emlParseMimePart, subParts)
     }
   }
   else if contains(lowerCt, "text/html") then {

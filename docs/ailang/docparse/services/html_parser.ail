@@ -1,18 +1,19 @@
 module docparse/services/html_parser
 
-import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/html (parse)
+import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
-import std/string (length, trim, contains, startsWith, find, substring, replace, toLower, split, join, charAt, endsWith, replaceMany, startsWithIgnoreCase)
+import std/string (length, trim, find, replace, join, stringToInt)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import std/bytes (fromInts, toString as bytesToStr)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell, mkImageFull)
 
--- HTML Parser — converts well-formed HTML/XHTML to Block ADT.
--- Pure AILANG implementation using std/xml.
+-- HTML Parser — converts HTML5 to Block ADT.
+-- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
+-- golang.org/x/net/html), which returns the same XmlNode ADT as std/xml.
 --
--- Reuses the same XML tree-walking pattern as DOCX/PPTX parsers but
--- with HTML tag names instead of Office XML namespaces.
+-- Reuses the same tree-walking pattern as DOCX/PPTX parsers but with
+-- HTML tag names instead of Office XML namespaces.
 --
 -- Supports:
 --   - Headings (h1 through h6)
@@ -23,8 +24,10 @@ import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, List
 --   - Sections (article, section, main, aside, nav, header, footer)
 --   - Inline text extraction (span, a, em, strong, b, i, code, etc.)
 --
--- Requires well-formed XML (XHTML). Malformed HTML with unclosed tags
--- (e.g., <br>, <img> without />) will fail to parse.
+-- Lenient: handles real-world HTML5 (unclosed tags, boolean attributes,
+-- overlapping nesting, mixed case, Word/Office namespaces, raw `<` in
+-- text content, etc.) — std/html is a spec-compliant parser, not a
+-- strict XML parser with a sanitizer pipeline in front.
 --
 -- Usage:
 --   let blocks = parseHtml(content)
@@ -34,185 +37,12 @@ import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, List
 export pure func parseHtml(content: string) -> [Block]
   ensures { listLength(result) >= 0 }
 {
-  let sanitized = htmlSanitize(content);
-  match parse(sanitized) {
+  match parse(content) {
     Ok(root) => htmlExtractBlocks(root),
     Err(e) => [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})]
   }
 }
 
--- ============================================================
--- HTML Sanitizer — pre-process HTML for XML parser compatibility
--- ============================================================
-
--- Sanitize HTML so it can be parsed by a strict XML parser.
--- Handles: void elements, HTML entities, DOCTYPE, style blocks, zero-width chars.
-pure func htmlSanitize(content: string) -> string
-  ensures { length(result) >= 0 }
-{
-  let noDoctype = htmlStripDoctype(content);
-  let noStyles = htmlStripStyleBlocks(noDoctype);
-  let noZeroWidth = htmlStripZeroWidthChars(noStyles);
-  let entitiesFixed = htmlReplaceEntities(noZeroWidth);
-  htmlCloseVoidElements(entitiesFixed)
-}
-
--- Strip <style>...</style> blocks (CSS content often breaks XML parsing)
--- Uses split on "<style" then finds matching </style> to remove each block
-pure func htmlStripStyleBlocks(content: string) -> string
-  ensures { length(result) <= length(content) }
-{
-  let lower = toLower(content);
-  let stylePos = find(lower, "<style");
-  if stylePos < 0 then content
-  else {
-    let before = substring(content, 0, stylePos);
-    let afterStyle = substring(content, stylePos, length(content));
-    let lowerAfter = toLower(afterStyle);
-    let closePos = find(lowerAfter, "</style>");
-    if closePos < 0 then content
-    else {
-      let rest = substring(afterStyle, closePos + 8, length(afterStyle));
-      htmlStripStyleBlocks("${before}${rest}")
-    }
-  }
-}
-
--- Strip zero-width Unicode characters that waste tokens in AI pipelines.
--- Common in HTML email preheaders: ZWSP, ZWNJ, ZWJ, LRM, RLM, BOM.
-pure func htmlStripZeroWidthChars(content: string) -> string {
-  replaceMany(content, [
-    (bytesToStr(fromInts([226, 128, 139])), ""),
-    (bytesToStr(fromInts([226, 128, 140])), ""),
-    (bytesToStr(fromInts([226, 128, 141])), ""),
-    (bytesToStr(fromInts([226, 128, 142])), ""),
-    (bytesToStr(fromInts([226, 128, 143])), ""),
-    (bytesToStr(fromInts([239, 187, 191])), ""),
-    (bytesToStr(fromInts([194, 173])), "")
-  ])
-}
-
--- Strip <!DOCTYPE ...> declarations
-pure func htmlStripDoctype(content: string) -> string
-  ensures { length(result) <= length(content) }
-{
-  let lower = toLower(content);
-  let pos = find(lower, "<!doctype");
-  if pos < 0 then content
-  else {
-    let closePos = find(substring(content, pos, length(content)), ">");
-    if closePos < 0 then content
-    else {
-      let before = substring(content, 0, pos);
-      let after = substring(content, pos + closePos + 1, length(content));
-      htmlStripDoctype("${before}${after}")
-    }
-  }
-}
-
--- Replace common HTML entities with Unicode equivalents via Aho-Corasick multi-pattern replace.
--- XML only supports &amp; &lt; &gt; &apos; &quot; — everything else must be replaced.
--- Uses native replaceMany for single-pass O(n) performance.
-pure func htmlReplaceEntities(content: string) -> string
-  ensures { length(result) >= 0 }
-{
-  replaceMany(content, [
-    ("&nbsp;", bytesToStr(fromInts([194, 160]))),
-    ("&mdash;", bytesToStr(fromInts([226, 128, 148]))),
-    ("&ndash;", bytesToStr(fromInts([226, 128, 147]))),
-    ("&lsquo;", bytesToStr(fromInts([226, 128, 152]))),
-    ("&rsquo;", bytesToStr(fromInts([226, 128, 153]))),
-    ("&ldquo;", bytesToStr(fromInts([226, 128, 156]))),
-    ("&rdquo;", bytesToStr(fromInts([226, 128, 157]))),
-    ("&bull;", bytesToStr(fromInts([226, 128, 162]))),
-    ("&hellip;", bytesToStr(fromInts([226, 128, 166]))),
-    ("&copy;", bytesToStr(fromInts([194, 169]))),
-    ("&reg;", bytesToStr(fromInts([194, 174]))),
-    ("&trade;", bytesToStr(fromInts([226, 132, 162]))),
-    ("&euro;", bytesToStr(fromInts([226, 130, 172]))),
-    ("&pound;", bytesToStr(fromInts([194, 163]))),
-    ("&yen;", bytesToStr(fromInts([194, 165]))),
-    ("&cent;", bytesToStr(fromInts([194, 162]))),
-    ("&deg;", bytesToStr(fromInts([194, 176]))),
-    ("&times;", bytesToStr(fromInts([195, 151]))),
-    ("&divide;", bytesToStr(fromInts([195, 183]))),
-    ("&laquo;", bytesToStr(fromInts([194, 171]))),
-    ("&raquo;", bytesToStr(fromInts([194, 187]))),
-    ("&iexcl;", bytesToStr(fromInts([194, 161]))),
-    ("&iquest;", bytesToStr(fromInts([194, 191])))
-  ])
-}
-
--- Close HTML5 void elements so XML parser accepts them.
--- Optimized: single pass via split on "<", check each fragment against all void tags.
--- Converts <tag ...> to <tag .../> and <tag> to <tag/>
-pure func htmlCloseVoidElements(content: string) -> string
-  ensures { length(result) >= length(content) }
-{
-  -- Split on "<" — first fragment is before any tag, rest start with tag content
-  let parts = split(content, "<");
-  match parts {
-    [] => content,
-    first :: rest => {
-      let fixed = map(htmlFixVoidFragment, rest);
-      "${first}${join("", fixed)}"
-    }
-  }
-}
-
--- Process one fragment that was preceded by "<" in the original content.
--- If it starts with a void tag name, ensure the tag is self-closed.
--- Always prepends "<" back since we split on it.
-pure func htmlFixVoidFragment(fragment: string) -> string {
-  let voidTag = htmlMatchVoidTag(fragment);
-  if length(voidTag) == 0 then "<${fragment}"
-  else {
-    -- Found a void tag — check if it needs closing
-    let closeAngle = find(fragment, ">");
-    if closeAngle < 0 then "<${fragment}"
-    else {
-      let beforeClose = substring(fragment, 0, closeAngle);
-      if endsWith(trim(beforeClose), "/") then "<${fragment}"
-      else {
-        -- Insert / before >
-        "<${beforeClose}/${substring(fragment, closeAngle, length(fragment))}"
-      }
-    }
-  }
-}
-
--- Check if a fragment starts with a void tag name (case-insensitive).
--- Returns the tag name if matched, empty string if not.
--- Uses startsWithIgnoreCase to avoid toLower on the entire fragment.
-pure func htmlMatchVoidTag(fragment: string) -> string {
-  if htmlIsVoidTagAt(fragment, "br") then "br"
-  else if htmlIsVoidTagAt(fragment, "hr") then "hr"
-  else if htmlIsVoidTagAt(fragment, "meta") then "meta"
-  else if htmlIsVoidTagAt(fragment, "img") then "img"
-  else if htmlIsVoidTagAt(fragment, "input") then "input"
-  else if htmlIsVoidTagAt(fragment, "link") then "link"
-  else if htmlIsVoidTagAt(fragment, "col") then "col"
-  else if htmlIsVoidTagAt(fragment, "area") then "area"
-  else if htmlIsVoidTagAt(fragment, "base") then "base"
-  else if htmlIsVoidTagAt(fragment, "embed") then "embed"
-  else if htmlIsVoidTagAt(fragment, "source") then "source"
-  else if htmlIsVoidTagAt(fragment, "track") then "track"
-  else if htmlIsVoidTagAt(fragment, "wbr") then "wbr"
-  else ""
-}
-
--- Check if fragment starts with tagName (case-insensitive) followed by a word boundary
-pure func htmlIsVoidTagAt(fragment: string, tagName: string) -> bool {
-  if startsWithIgnoreCase(fragment, tagName) then {
-    let tagLen = length(tagName);
-    if tagLen >= length(fragment) then true
-    else {
-      let next = charAt(fragment, tagLen);
-      next == " " || next == ">" || next == "/" || next == "\t" || next == "\n"
-    }
-  }
-  else false
-}
 
 -- Extract blocks from an HTML root element
 -- Looks for <body> first; falls back to processing root children directly
@@ -270,11 +100,46 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
   else if tag == "ul" then htmlParseList(node, false)
   else if tag == "ol" then htmlParseList(node, true)
 
-  -- Images
+  -- Images. Captures the full HTML5 attribute set: src, alt, width,
+  -- height, srcset (responsive candidates), title (tooltip/caption),
+  -- and loading (lazy/eager). Missing attributes default to 0 / empty
+  -- string. Width and height parse the raw attribute value as an
+  -- integer; non-numeric values (e.g. "100%") fall back to 0 because
+  -- we don't model fractional/percentage sizes.
   else if tag == "img" then
-    let src = getOrElse(getAttr(node, "src"), "") in
-    let alt = getOrElse(getAttr(node, "alt"), "") in
-    [ImageBlock({data: src, description: alt, mime: "image/unknown"})]
+    [htmlParseImg(node, "")]
+
+  -- Anchors (<a href>) — HTML5 treats <a> as a "transparent" element
+  -- that may wrap block-level content (e.g. `<a class="card"><img><h3>title</h3></a>`).
+  -- Strategy: recurse into children to surface any block content (images,
+  -- headings, nested structure), and ALSO emit a LinkBlock if href is
+  -- present so the URL is captured. Anchors without href (named anchors,
+  -- placeholders) collapse to text/blocks via children-recursion alone.
+  else if tag == "a" then
+    let href = getOrElse(getAttr(node, "href"), "") in
+    let title = getOrElse(getAttr(node, "title"), "") in
+    let inner = htmlProcessChildren(getChildren(node)) in
+    let linkText = trim(htmlDeepText(node)) in
+    let textOnly = htmlBlocksAreTextOnly(inner) in
+    if length(href) > 0 then
+      -- Has href: anchor is a real link.
+      -- If the inner content is just text, emit a single LinkBlock
+      -- carrying both the visible text and the URL.
+      -- If the inner content has structure (img, heading, nested blocks),
+      -- emit the structured blocks first, then a LinkBlock describing
+      -- the link itself (with the visible text or a "(link)" placeholder
+      -- if the text is empty).
+      if textOnly then
+        if length(linkText) > 0
+        then [LinkBlock({text: linkText, href: href, title: title})]
+        else []
+      else
+        concat(inner, [LinkBlock({text: if length(linkText) > 0 then linkText else "(link)", href: href, title: title})])
+    else
+      -- No href: not really a link. Just produce inner content or text.
+      if listLength(inner) > 0 then inner
+      else if length(linkText) > 0 then [TextBlock({text: linkText, style: "normal", level: 0})]
+      else []
 
   -- Semantic sections — recurse into children wrapped in SectionBlock
   else if tag == "article" || tag == "section" || tag == "main" ||
@@ -293,6 +158,14 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
   else if tag == "div" || tag == "blockquote" || tag == "figure" ||
           tag == "details" || tag == "fieldset" || tag == "form" then
     htmlProcessChildren(getChildren(node))
+
+  -- <picture> for responsive images: HTML5 picks one <source srcset>
+  -- candidate at runtime and falls back to the <img> child. We collect
+  -- all <source srcset> values (comma-joined) and attach them to the
+  -- fallback <img>'s srcset attribute, then emit the <img> as a single
+  -- ImageBlock. Any <img>'s own srcset takes priority and is preserved.
+  else if tag == "picture" then
+    htmlParsePicture(node)
 
   -- Pre/code blocks → TextBlock with "code" style
   else if tag == "pre" then
@@ -320,6 +193,70 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
     else []
 }
+
+-- Parse an <img> node into a Block. `inheritedSrcset` is non-empty
+-- only when the <img> is the fallback inside a <picture> element —
+-- in that case sibling <source> srcsets are concatenated and passed
+-- in here so the resulting ImageBlock carries all candidates. If the
+-- <img> itself has a srcset attribute, it takes priority (preserves
+-- author intent).
+pure func htmlParseImg(node: XmlNode, inheritedSrcset: string) -> Block {
+  let src = getOrElse(getAttr(node, "src"), "");
+  let alt = getOrElse(getAttr(node, "alt"), "");
+  let title = getOrElse(getAttr(node, "title"), "");
+  let loading = getOrElse(getAttr(node, "loading"), "");
+  let widthStr = getOrElse(getAttr(node, "width"), "");
+  let heightStr = getOrElse(getAttr(node, "height"), "");
+  let ownSrcset = getOrElse(getAttr(node, "srcset"), "");
+  let width = htmlParseDimension(widthStr);
+  let height = htmlParseDimension(heightStr);
+  let srcset = if length(ownSrcset) > 0 then ownSrcset else inheritedSrcset;
+  mkImageFull(src, alt, "image/unknown", width, height, srcset, title, loading)
+}
+
+-- Parse an HTML width/height attribute as a non-negative pixel int.
+-- HTML allows "100", "100px", "100%", or absent; we model only integer
+-- pixel values, returning 0 for anything else (including percentages
+-- and unitless floats).
+pure func htmlParseDimension(s: string) -> int {
+  if length(s) == 0 then 0
+  else match stringToInt(s) {
+    Some(n) => if n >= 0 then n else 0,
+    None => 0
+  }
+}
+
+-- Parse a <picture> element. Collect all <source srcset> values
+-- (joined with ", ") and pass them as the inherited srcset for the
+-- inner <img> fallback. <source> elements without srcset, and
+-- non-<source>/<img> children, are ignored.
+pure func htmlParsePicture(node: XmlNode) -> [Block] {
+  let children = getChildren(node);
+  let sourceSrcsets = filter(\s. length(s) > 0,
+                             map(\c. if getTag(c) == "source"
+                                     then getOrElse(getAttr(c, "srcset"), "")
+                                     else "",
+                                 children));
+  let inheritedSrcset = join(", ", sourceSrcsets);
+  flatMap(\c. if getTag(c) == "img"
+              then [htmlParseImg(c, inheritedSrcset)]
+              else [],
+          children)
+}
+
+-- True if every block in the list is a plain text block (no images,
+-- headings, tables, sections, etc.). Used by anchor handling to decide
+-- whether to flatten an <a> to a single LinkBlock or to emit the inner
+-- structured blocks alongside a LinkBlock.
+pure func htmlBlocksAreTextOnly(blocks: [Block]) -> bool =
+  match blocks {
+    [] => true,
+    block :: rest =>
+      match block {
+        TextBlock(_) => htmlBlocksAreTextOnly(rest),
+        _ => false
+      }
+  }
 
 -- Extract all text from a node and its children (deep text).
 -- Inserts newlines around block-level child elements so that

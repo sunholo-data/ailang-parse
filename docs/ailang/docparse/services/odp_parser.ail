@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage)
 
 -- ODP Parser — converts OpenDocument Presentation to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -103,7 +103,7 @@ pure func odpProcessFrameChild(node: XmlNode) -> [Block] {
   else if tag == "draw:image" then {
     let href = getOrElse(getAttr(node, "xlink:href"), "");
     if length(href) > 0
-    then [ImageBlock({data: href, description: "", mime: odpGuessMime(href)})]
+    then [mkImage(href, "", odpGuessMime(href))]
     else []
   }
   else []

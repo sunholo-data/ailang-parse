@@ -4,8 +4,8 @@ import std/io (println)
 import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
 import std/string (length)
 import std/math (intToFloat)
-import std/list (map, foldl, filter, length as listLength, forEachE)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
+import std/list (map, foldl, filter, length as listLength, forEachE, concat)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
 
 -- Output Formatter
 -- Converts ParsedDocument to structured JSON output with validation.
@@ -100,24 +100,9 @@ export pure func blockToJson(block: Block) -> Json =
       kv("items", ja(stringsToJson(b.items))),
       kv("ordered", jb(b.ordered))
     ]),
-    ImageBlock(b) => jo([
-      kv("type", js("image")),
-      kv("description", js(b.description)),
-      kv("mime", js(b.mime)),
-      kv("dataLength", jnum(intToFloat(length(b.data))))
-    ]),
-    AudioBlock(b) => jo([
-      kv("type", js("audio")),
-      kv("transcription", js(b.transcription)),
-      kv("mime", js(b.mime)),
-      kv("dataLength", jnum(intToFloat(length(b.data))))
-    ]),
-    VideoBlock(b) => jo([
-      kv("type", js("video")),
-      kv("description", js(b.description)),
-      kv("mime", js(b.mime)),
-      kv("dataLength", jnum(intToFloat(length(b.data))))
-    ]),
+    ImageBlock(b) => jo(imageJsonFields(b)),
+    AudioBlock(b) => jo(mediaJsonFields("audio", b.data, b.transcription, "transcription", b.mime)),
+    VideoBlock(b) => jo(mediaJsonFields("video", b.data, b.description, "description", b.mime)),
     SectionBlock(b) => jo([
       kv("type", js("section")),
       kv("kind", js(b.kind)),
@@ -129,8 +114,56 @@ export pure func blockToJson(block: Block) -> Json =
       kv("author", js(b.author)),
       kv("date", js(b.date)),
       kv("text", js(b.text))
+    ]),
+    LinkBlock(b) => jo([
+      kv("type", js("link")),
+      kv("text", js(b.text)),
+      kv("href", js(b.href)),
+      kv("title", js(b.title))
     ])
   }
+
+-- Shared JSON shape for image/audio/video blocks. Surfaces `data` as
+-- `src` only when it looks like a URL/path (length <= 2048) — large
+-- embedded payloads (base64 from DOCX/PPTX, often megabytes) stay
+-- represented by `dataLength` alone to keep JSON output tractable.
+pure func mediaJsonFields(kind: string, data: string, descText: string, descKey: string, mime: string) -> [{key: string, value: Json}] {
+  let dataLen = length(data);
+  let base = [
+    kv("type", js(kind)),
+    kv(descKey, js(descText)),
+    kv("mime", js(mime)),
+    kv("dataLength", jnum(intToFloat(dataLen)))
+  ];
+  if dataLen > 0 && dataLen <= 2048
+  then concat(base, [kv("src", js(data))])
+  else base
+}
+
+-- JSON serialization for ImageBlock. Extends mediaJsonFields with the
+-- HTML5 image attributes (width, height, srcset, title, loading). To
+-- keep JSON output stable and compact, each extended field is only
+-- emitted when it carries information (non-zero int, non-empty string).
+-- Consumers that don't read these fields are unaffected.
+pure func imageJsonFields(b: {data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string}) -> [{key: string, value: Json}] {
+  let baseFields = mediaJsonFields("image", b.data, b.description, "description", b.mime);
+  let withWidth = if b.width > 0
+                  then concat(baseFields, [kv("width", jnum(intToFloat(b.width)))])
+                  else baseFields;
+  let withHeight = if b.height > 0
+                   then concat(withWidth, [kv("height", jnum(intToFloat(b.height)))])
+                   else withWidth;
+  let withSrcset = if length(b.srcset) > 0
+                   then concat(withHeight, [kv("srcset", js(b.srcset))])
+                   else withHeight;
+  let withTitle = if length(b.title) > 0
+                  then concat(withSrcset, [kv("title", js(b.title))])
+                  else withSrcset;
+  let withLoading = if length(b.loading) > 0
+                    then concat(withTitle, [kv("loading", js(b.loading))])
+                    else withTitle;
+  withLoading
+}
 
 -- Convert rows of TableCells to JSON
 export pure func cellRowsToJson(rows: [[TableCell]]) -> [Json]
@@ -208,7 +241,9 @@ func printBlock(block: Block) -> () ! {IO} =
       printBlocks(b.blocks)
     },
     ChangeBlock(b) =>
-      println("[${b.changeType}:${b.author}] ${b.text}")
+      println("[${b.changeType}:${b.author}] ${b.text}"),
+    LinkBlock(b) =>
+      println("[link] ${b.text} → ${b.href}")
   }
 
 pure func countCellRows(rows: [[TableCell]]) -> int = listLength(rows)
@@ -346,7 +381,9 @@ pure func renderBlockMd(block: Block) -> string =
     SectionBlock(s) =>
       renderSectionMd(s.kind, s.blocks),
     ChangeBlock(b) =>
-      renderChangeMd(b.changeType, b.author, b.date, b.text)
+      renderChangeMd(b.changeType, b.author, b.date, b.text),
+    LinkBlock(b) =>
+      "[${b.text}](${b.href})\n\n"
   }
 
 pure func headingPrefix(level: int) -> string

@@ -3,7 +3,7 @@ module docparse/services/tex_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, replace, toLower, replaceMany)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell)
+import docparse/types/document (Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage)
 
 -- LaTeX Parser — converts arXiv-style LaTeX source to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -598,7 +598,7 @@ pure func texAbsorbTabularSegs(state: TexState, segs: [string]) -> TexState =
 pure func texHandleFigureLine(state: TexState, line: string, t: string) -> TexState {
   if startsWith(t, "\\end{${state.envName}}") then
     {
-      blocks: ImageBlock({data: state.figPath, description: texCleanInline(state.figCaption), mime: "image/*"}) :: state.blocks,
+      blocks: mkImage(state.figPath, texCleanInline(state.figCaption), "image/*") :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],
