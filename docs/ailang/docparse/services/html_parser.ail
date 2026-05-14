@@ -1,7 +1,7 @@
 module docparse/services/html_parser
 
 import std/html (parse)
-import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag, getAttrMap, nodeKind, NodeKind, KindElement, KindText, KindComment)
+import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag, getAttrMap, nodeKind, NodeKind, KindElement, KindText, KindComment, flatMapChildren)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
@@ -131,7 +131,7 @@ pure func htmlExtractCreatedDate(root: XmlNode) -> string {
 -- Looks for <body> first; falls back to processing root children directly
 pure func htmlExtractBlocks(root: XmlNode) -> [Block] {
   match findFirst(root, "body") {
-    Some(body) => htmlProcessChildren(getChildren(body)),
+    Some(body) => htmlProcessChildrenOf(body),
     None => {
       -- No <body> — might be a fragment or the root IS the content
       let tag = getTag(root);
@@ -150,18 +150,27 @@ pure func htmlExtractBlocks(root: XmlNode) -> [Block] {
 -- Helper to find body inside html children
 pure func htmlFindBody(node: XmlNode) -> [Block] {
   let tag = getTag(node);
-  if tag == "body" then htmlProcessChildren(getChildren(node))
+  if tag == "body" then htmlProcessChildrenOf(node)
   else []
 }
 
 -- Process a list of child nodes into blocks. Uses flatMap which is
--- backed by an iterative Go-native builtin (M-ITERATIVE-LIST). A
--- foldChildren-based variant was prototyped in v0.18.3-dev but lost
--- to flatMap on real workloads because the per-child AILANG accumulator
--- update (cons + final reverse) overshoots flatMap's amortised-O(1)
--- Go append. Re-evaluate once foldChildren grows a Go-iterative form.
+-- backed by an iterative Go-native builtin (M-ITERATIVE-LIST).
+-- Kept for the few callsites that already have a [XmlNode] (e.g. the
+-- <picture> <source> filter). Most callsites use htmlProcessChildrenOf
+-- instead, which avoids materialising the [XmlNode] list at all.
 pure func htmlProcessChildren(nodes: [XmlNode]) -> [Block] =
   flatMap(htmlProcessNode, nodes)
+
+-- Process a node's direct children into blocks via std/xml.flatMapChildren.
+-- This is the v0.18.3 / M-STDLIB-XML-WALK-PERF M4 path: a Go-iterative
+-- builtin reads children directly from the node and appends per-child
+-- block lists into a single native slice. No [XmlNode] materialisation
+-- (vs the old `flatMap(htmlProcessNode, getChildren(node))`), and no
+-- AILANG-level accumulator cons + final reverse (which is what made
+-- the earlier foldChildren attempt regress 229 MB → 395 MB on Mollie).
+pure func htmlProcessChildrenOf(node: XmlNode) -> [Block] =
+  flatMapChildren(node, htmlProcessNode)
 
 -- Process a single HTML node into zero or more blocks
 pure func htmlProcessNode(node: XmlNode) -> [Block] {
@@ -224,7 +233,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   else if tag == "a" then
     let href = getOrElse(getAttr(node, "href"), "") in
     let title = getOrElse(getAttr(node, "title"), "") in
-    let inner = htmlProcessChildren(getChildren(node)) in
+    let inner = htmlProcessChildrenOf(node) in
     let linkText = trim(htmlDeepText(node)) in
     let textOnly = htmlBlocksAreTextOnly(inner) in
     if length(href) > 0 then
@@ -250,26 +259,26 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- Semantic sections — recurse into children wrapped in SectionBlock
   else if tag == "article" || tag == "section" || tag == "main" ||
           tag == "aside" || tag == "nav" then
-    let blocks = htmlProcessChildren(getChildren(node)) in
+    let blocks = htmlProcessChildrenOf(node) in
     if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
     else []
 
   -- Header/footer sections
   else if tag == "header" || tag == "footer" then
-    let blocks = htmlProcessChildren(getChildren(node)) in
+    let blocks = htmlProcessChildrenOf(node) in
     if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
     else []
 
   -- Block-level containers that flatten into the parent stream.
   else if tag == "div" || tag == "blockquote" ||
           tag == "fieldset" || tag == "form" then
-    htmlProcessChildren(getChildren(node))
+    htmlProcessChildrenOf(node)
 
   -- <figure>/<figcaption>: a figure is an image (or other media) with
   -- an attached caption. Emit a SectionBlock(kind: "figure") so the
   -- caption stays paired with the image instead of floating away.
   else if tag == "figure" then
-    let blocks = htmlProcessChildren(getChildren(node)) in
+    let blocks = htmlProcessChildrenOf(node) in
     if listLength(blocks) > 0 then [SectionBlock({kind: "figure", blocks: blocks})]
     else []
 
@@ -283,7 +292,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- <address>: contact info / authorship block. Treated as its own
   -- semantic section so it can be surfaced separately from body text.
   else if tag == "address" then
-    let blocks = htmlProcessChildren(getChildren(node)) in
+    let blocks = htmlProcessChildrenOf(node) in
     if listLength(blocks) > 0 then [SectionBlock({kind: "address", blocks: blocks})]
     else {
       let text = trim(htmlDeepText(node)) in
@@ -295,7 +304,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- SectionBlock(kind: "details") so the structure is preserved; the
   -- <summary> child (if present) renders as a level-3 heading inside.
   else if tag == "details" then
-    let blocks = htmlProcessChildren(getChildren(node)) in
+    let blocks = htmlProcessChildrenOf(node) in
     if listLength(blocks) > 0 then [SectionBlock({kind: "details", blocks: blocks})]
     else []
 

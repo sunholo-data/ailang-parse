@@ -44,19 +44,44 @@ to the corpus. Pure perf patch — goldens byte-identical.
   getChildren(node))` with an AILANG-side `foldChildren` accumulator
   + final `reverse` overshoots flatMap's Go-iterative builtin which
   amortises append in O(1). Reverted. Sent feedback upstream
-  (msg_20260514_104913_f639ad74) suggesting `foldChildren` itself
-  needs a Go-iterative implementation, or a new `flatMapChildren`
-  primitive that mirrors `flatMap`'s pattern.
+  (msg_20260514_104913_f639ad74).
+
+### M4 hotfix from AILANG: `flatMapChildren` lands
+
+In response to the regression report, the AILANG team shipped
+`std/xml.flatMapChildren` (M-STDLIB-XML-WALK-PERF M4, AILANG commit
+`c77094fd`) — a Go-iterative primitive that mirrors `flatMap`'s
+pattern but reads children directly from the parsed node, skipping
+the `[XmlNode]` materialisation that `getChildren` would pay. We
+adopted it on the 11 tree-walking callsites:
+
+```ailang
+-- Before:
+htmlProcessChildren(getChildren(node))
+
+-- After:
+htmlProcessChildrenOf(node)  -- backed by flatMapChildren
+```
+
+(Two callsites kept on the old path because they already have a
+filtered `[XmlNode]` to consume — the `<picture>` source-filter
+and `htmlFindBody`.)
 
 ### Measured (Mollie 1.7 MB, AILANG_NO_TRACE=1)
 
-| Metric | v0.18.2 | v0.18.3 |
+| Pipeline | alloc_space | Wall (warm) |
 |---|---|---|
-| alloc_space | 229 MB | **215 MB** (−6%) |
-| Wall time (warm) | ~0.77s | ~0.71s |
+| v0.18.2 baseline | 229 MB | ~0.77s |
+| v0.18.3 with `foldChildren` (reverted) | 395 MB | ~0.77s |
+| v0.18.3 with `nodeKind` + `getAttrMap` only | 215 MB | ~0.71s |
+| **v0.18.3 with M4 `flatMapChildren`** | **193 MB** | **~0.64s** |
 
-Modest but real wins. Bigger gains await a `flatMapChildren`-style
-primitive or `foldChildren` getting a Go-iterative form.
+Versus the v0.18.2 baseline: **−36 MB (−16%), −0.13s (−17%)**. The
+synthetic 39× / 180× numbers from the AILANG bench don't fully
+reproduce on Mollie because real cost is also paid in
+`htmlDeepText`/`htmlInlineWrap` string interpolation and per-block
+JSON serialisation — both unaffected by this primitive. So the
+ceiling for this single API change is what we got.
 
 ### Upstream proposals sent
 - `msg_20260514_100821_cd45490b` — original 6-feature perf proposal
