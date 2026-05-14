@@ -20,7 +20,7 @@ import docparse/services/markdown_parser (parseMarkdown)
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/tex_archive_extract (extractArxivBundle, isTarGz)
-import docparse/services/html_parser (parseHtml, parseHtmlMetadata)
+import docparse/services/html_parser (parseHtml, parseHtmlMetadata, parseHtmlDoc)
 import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
 import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeadersFooters)
@@ -981,8 +981,12 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   let content = readFile(filepath);
   println("Parsing ${show(length(content))} chars of HTML...");
 
-  -- Step 1: Try deterministic XML parsing
-  let blocks = parseHtml(content);
+  -- Step 1: Try deterministic XML parsing. Use the combined entry
+  -- point so the std/html parse runs once and both blocks + metadata
+  -- come out of the same walk.
+  let parsed = parseHtmlDoc(content);
+  let blocks = parsed.blocks;
+  let docMetadata = parsed.metadata;
   let hasError = htmlHasParseError(blocks);
 
   -- Step 2: If parse failed and AI is enabled, extract text via AI
@@ -1006,7 +1010,7 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   let doc = {
     format: "html",
     filename: filepath,
-    metadata: parseHtmlMetadata(content),
+    metadata: docMetadata,
     blocks: allBlocks
   };
 

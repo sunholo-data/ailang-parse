@@ -156,24 +156,26 @@ pure func mediaJsonFields(kind: string, data: string, descText: string, descKey:
 -- keep JSON output stable and compact, each extended field is only
 -- emitted when it carries information (non-zero int, non-empty string).
 -- Consumers that don't read these fields are unaffected.
+--
+-- Perf: builds the optional-field list once and concats once, instead
+-- of chaining five concat calls (which allocated five intermediate
+-- lists per image). Hot path on image-heavy pages.
 pure func imageJsonFields(b: {data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string}) -> [{key: string, value: Json}] {
   let baseFields = mediaJsonFields("image", b.data, b.description, "description", b.mime);
-  let withWidth = if b.width > 0
-                  then concat(baseFields, [kv("width", jnum(intToFloat(b.width)))])
-                  else baseFields;
-  let withHeight = if b.height > 0
-                   then concat(withWidth, [kv("height", jnum(intToFloat(b.height)))])
-                   else withWidth;
-  let withSrcset = if length(b.srcset) > 0
-                   then concat(withHeight, [kv("srcset", js(b.srcset))])
-                   else withHeight;
-  let withTitle = if length(b.title) > 0
-                  then concat(withSrcset, [kv("title", js(b.title))])
-                  else withSrcset;
-  let withLoading = if length(b.loading) > 0
-                    then concat(withTitle, [kv("loading", js(b.loading))])
-                    else withTitle;
-  withLoading
+  let optionals = imageOptionalFields(b);
+  if listLength(optionals) == 0 then baseFields
+  else concat(baseFields, optionals)
+}
+
+-- Collect ImageBlock's optional HTML5 attribute fields into one list.
+-- Only fields with information (non-zero int, non-empty string) appear.
+pure func imageOptionalFields(b: {data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string}) -> [{key: string, value: Json}] {
+  let widthF = if b.width > 0 then [kv("width", jnum(intToFloat(b.width)))] else [];
+  let heightF = if b.height > 0 then [kv("height", jnum(intToFloat(b.height)))] else [];
+  let srcsetF = if length(b.srcset) > 0 then [kv("srcset", js(b.srcset))] else [];
+  let titleF = if length(b.title) > 0 then [kv("title", js(b.title))] else [];
+  let loadingF = if length(b.loading) > 0 then [kv("loading", js(b.loading))] else [];
+  concat(concat(concat(concat(widthF, heightF), srcsetF), titleF), loadingF)
 }
 
 -- Convert rows of TableCells to JSON

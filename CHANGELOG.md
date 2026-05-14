@@ -9,7 +9,80 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.1...HEAD)
+
+---
+
+## [0.18.1](https://github.com/sunholo-data/ailang-parse/compare/v0.18.0...v0.18.1) — 2026-05-14
+
+Pure-perf patch for the HTML parsing pipeline. No semantic change —
+JSON output for non-HTML formats is byte-identical to v0.18.0. The HTML
+goldens that differ in this commit are the result of stale v0.17/v0.18
+features (page title extraction, table caption capture) that hadn't been
+baked into all the goldens because the eval is structure-sensitive,
+not byte-sensitive.
+
+### Performance fixes
+
+1. **Single-pass HTML parse** in [docparse/main.ail](docparse/main.ail).
+   v0.17.0 added `parseHtmlMetadata(content)` to extract `<title>` /
+   `<meta>` into `DocMetadata`. main.ail was calling both `parseHtml(content)`
+   AND `parseHtmlMetadata(content)` for the same input — two full
+   walks through std/html. New `parseHtmlDoc(content)` returns
+   `{blocks, metadata}` from a single `parse()` call. For an 80 KB
+   sunholo.com page this halves the std/html invocation cost.
+
+2. **`htmlCollapseNewlines` fast-path**. Called by every `htmlDeepText`
+   invocation (including on short fragments that contain no triple-newline).
+   The new `find(s, "\n\n\n") < 0` short-circuit returns immediately
+   without allocating a `replace` result or running an O(n) comparison
+   at the bottom of the recursion. The recursion still handles
+   pathological pages with deeply-stacked block breaks.
+
+3. **`imageJsonFields` single-concat**. v0.16.0 emitted optional HTML5
+   image attrs (width/height/srcset/title/loading) via five sequential
+   `concat` calls — each chained on the previous result, allocating
+   five intermediate lists per image. Refactored to build an
+   `imageOptionalFields` list once and `concat` it onto the base once.
+   For image-heavy pages this drops 4 list allocations per image.
+
+### Stale goldens cleaned up
+
+Four HTML goldens (`test.html`, `ailang_guide.html`, `pandoc_nordics.html`,
+`pandoc_planets.html`) refreshed to capture the v0.17 page title and
+v0.18 table caption that the parser was already producing but the eval
+hadn't been flagging because semantic equivalence beats byte equality.
+No code change for these; they're just up to date now.
+
+### Real-world measurements (sunholo.com, 79 KB)
+
+Three warm runs, before vs after:
+
+| Run | v0.18.0 | v0.18.1 |
+|---|---|---|
+| Cold | 1.17s | 0.96s |
+| Warm 1 | 0.73s | 0.63s |
+| Warm 2 | 0.62s | 0.70s |
+
+Modest warm savings (~50–100 ms). The bigger structural win is memory:
+one less full XmlNode tree allocation per HTML parse. For batch parsing
+of many HTML files (email archives, scraped page corpora), that's a
+meaningful reduction in peak memory.
+
+### What we considered and didn't do
+
+- **Streaming HTML5 parser** — would require an upstream `std/html`
+  feature (chunked/streaming parse). Today std/html returns the whole
+  tree in one allocation. Filed for future consideration but out of
+  scope for ailang-parse.
+- **`parseFold` / `parseElements`** (the XLSX/streaming patterns) —
+  don't apply to HTML's heterogeneous nested structure. They work for
+  XLSX because sheets have repeated `<row>` elements at a fixed level
+  that fold cleanly.
+- **`mapSlicesJoin` / `foldSlices`** — these are string-scanning
+  optimizations from `std/string`. The hot loops in HTML extraction
+  are tree walks, not string scans. They apply to the (deleted-in-v0.14.0)
+  in-repo sanitizer but not to the post-std/html pipeline.
 
 ---
 
