@@ -9,7 +9,35 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.15.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.15.1...HEAD)
+
+---
+
+## [0.15.1](https://github.com/sunholo-data/ailang-parse/compare/v0.15.0...v0.15.1) — 2026-05-14
+
+### Added
+- **`<picture>` element handling** in [html_parser.ail](docparse/services/html_parser.ail).
+  HTML5 responsive-image markup wraps an `<img>` fallback in a `<picture>`
+  parent with one or more `<source srcset>` siblings. The browser picks
+  one candidate at runtime; for deterministic parsing we recurse into
+  `<picture>` and surface the inner `<img>` fallback as a normal
+  `ImageBlock`. `<source>` elements have no `src` attribute (only
+  `srcset`, which we don't model) so they emit nothing.
+
+  Example: `<picture><source srcset="big.png"><img src="small.png" alt="x"></picture>`
+  now produces `ImageBlock(src="small.png", description="x")` instead of
+  dropping silently.
+
+  `data/test_files/messy_html5_demo.html` extended with a `<picture>`
+  example covering the art-direction pattern; golden refreshed.
+
+### Deferred
+- Extending `ImageBlock` with `width`/`height`/`srcset`/`title`/`loading`
+  attributes was attempted and reverted: the schema change cascades
+  through 13+ files (every parser that constructs `ImageBlock` —
+  DOCX/PPTX/ODT/EPUB/Markdown/TeX/AI/a2ui/zip_extract, plus the JSON
+  serializer). The blast radius is disproportionate to the value;
+  parking until there's a real consumer asking for these fields.
 
 ---
 

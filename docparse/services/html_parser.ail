@@ -156,6 +156,14 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
           tag == "details" || tag == "fieldset" || tag == "form" then
     htmlProcessChildren(getChildren(node))
 
+  -- <picture> for responsive images: HTML5 picks one <source srcset>
+  -- candidate at runtime and falls back to the <img> child. For
+  -- deterministic parsing we just recurse — the fallback <img> produces
+  -- an ImageBlock with its src/alt, and <source> elements are ignored
+  -- (no src attribute, only srcset which we don't currently model).
+  else if tag == "picture" then
+    htmlProcessChildren(getChildren(node))
+
   -- Pre/code blocks → TextBlock with "code" style
   else if tag == "pre" then
     let text = htmlDeepText(node) in
