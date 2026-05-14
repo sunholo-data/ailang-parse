@@ -100,7 +100,7 @@ export pure func blockToJson(block: Block) -> Json =
       kv("items", ja(stringsToJson(b.items))),
       kv("ordered", jb(b.ordered))
     ]),
-    ImageBlock(b) => jo(mediaJsonFields("image", b.data, b.description, "description", b.mime)),
+    ImageBlock(b) => jo(imageJsonFields(b)),
     AudioBlock(b) => jo(mediaJsonFields("audio", b.data, b.transcription, "transcription", b.mime)),
     VideoBlock(b) => jo(mediaJsonFields("video", b.data, b.description, "description", b.mime)),
     SectionBlock(b) => jo([
@@ -138,6 +138,31 @@ pure func mediaJsonFields(kind: string, data: string, descText: string, descKey:
   if dataLen > 0 && dataLen <= 2048
   then concat(base, [kv("src", js(data))])
   else base
+}
+
+-- JSON serialization for ImageBlock. Extends mediaJsonFields with the
+-- HTML5 image attributes (width, height, srcset, title, loading). To
+-- keep JSON output stable and compact, each extended field is only
+-- emitted when it carries information (non-zero int, non-empty string).
+-- Consumers that don't read these fields are unaffected.
+pure func imageJsonFields(b: {data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string}) -> [{key: string, value: Json}] {
+  let baseFields = mediaJsonFields("image", b.data, b.description, "description", b.mime);
+  let withWidth = if b.width > 0
+                  then concat(baseFields, [kv("width", jnum(intToFloat(b.width)))])
+                  else baseFields;
+  let withHeight = if b.height > 0
+                   then concat(withWidth, [kv("height", jnum(intToFloat(b.height)))])
+                   else withWidth;
+  let withSrcset = if length(b.srcset) > 0
+                   then concat(withHeight, [kv("srcset", js(b.srcset))])
+                   else withHeight;
+  let withTitle = if length(b.title) > 0
+                  then concat(withSrcset, [kv("title", js(b.title))])
+                  else withSrcset;
+  let withLoading = if length(b.loading) > 0
+                    then concat(withTitle, [kv("loading", js(b.loading))])
+                    else withTitle;
+  withLoading
 }
 
 -- Convert rows of TableCells to JSON

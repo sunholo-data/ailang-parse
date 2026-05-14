@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, contains, startsWith, substring, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage)
 
 -- ODT Parser — converts OpenDocument Text to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -244,7 +244,7 @@ pure func odtProcessFrame(frame: XmlNode) -> [Block] {
           let href = getOrElse(getAttr(img, "xlink:href"), "") in
           let desc = getOrElse(getAttr(frame, "draw:name"), "") in
           if length(href) > 0
-          then [ImageBlock({data: href, description: desc, mime: odtGuessMime(href)})]
+          then [mkImage(href, desc, odtGuessMime(href))]
           else [],
         None => []
       }

@@ -9,7 +9,82 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.15.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.16.0...HEAD)
+
+---
+
+## [0.16.0](https://github.com/sunholo-data/ailang-parse/compare/v0.15.1...v0.16.0) — 2026-05-14
+
+### Changed
+- **`ImageBlock` extended with five HTML5 image attributes**:
+  ```ailang
+  ImageBlock({
+    data, description, mime,
+    width: int, height: int,
+    srcset: string, title: string, loading: string
+  })
+  ```
+  - **`width` / `height`** — pixel dimensions from `<img width=400 height=200>`.
+    Parsed as non-negative ints; values like `"100%"` fall back to `0`
+    because percentage/fractional sizes aren't modeled.
+  - **`srcset`** — responsive-image candidate list from `<img srcset>`.
+    For `<picture>` elements, srcsets from sibling `<source>` children
+    are concatenated (comma-joined) and inherited by the inner `<img>`
+    fallback. The `<img>`'s own `srcset` takes priority if both are
+    present (preserves author intent).
+  - **`title`** — tooltip / image-credit attribute.
+  - **`loading`** — `"lazy"` / `"eager"` from `<img loading=…>`.
+
+### Added
+- **`mkImage(data, description, mime)` helper** in
+  [docparse/types/document.ail](docparse/types/document.ail) constructs
+  an `ImageBlock` with zero/empty defaults for the new fields. Used by
+  all parsers that don't have access to the extended HTML5 attributes
+  (DOCX, PPTX, ODT, EPUB, Markdown, TeX, AI vision parser, ZIP image
+  resolver, a2ui formatter). Net effect on those parsers: 1-line swap
+  per constructor site, no schema knowledge required.
+- **`mkImageFull(data, description, mime, width, height, srcset, title, loading)`**
+  is the long form used by `html_parser.ail` when extracting `<img>` and
+  `<picture>` elements.
+- **`htmlParsePicture`** in [docparse/services/html_parser.ail](docparse/services/html_parser.ail)
+  walks a `<picture>` element's children, collects all `<source srcset>`
+  values, and emits a single ImageBlock from the fallback `<img>` with
+  the concatenated srcset list inherited.
+- **`htmlParseImg`** centralises `<img>` attribute extraction so the
+  inline `<img>` branch and the `<picture>` fallback branch use the
+  same code path.
+
+### JSON output
+- New fields are emitted **only when non-zero / non-empty**:
+  ```json
+  {
+    "type": "image",
+    "description": "Responsive hero",
+    "mime": "image/unknown",
+    "dataLength": 14,
+    "src": "hero-small.png",
+    "width": 800,
+    "height": 400,
+    "srcset": "hero-large.png 2x, hero-medium.png 1.5x",
+    "title": "Hero illustration"
+  }
+  ```
+  Consumers that don't read the new fields are unaffected — empty
+  `width=0`, `srcset=""`, etc. don't appear in the JSON at all. Existing
+  goldens for non-HTML formats produce byte-identical JSON.
+
+### Migration notes
+- **Type signature is a breaking ADT change** but every in-repo
+  constructor was migrated to `mkImage` / `mkImageFull`. Downstream
+  consumers that explicitly pattern-match on `ImageBlock(b)` and read
+  `b.data`, `b.description`, `b.mime` are unaffected — those three
+  fields stay in the same position with the same types. Reads of
+  `b.width` / `b.height` / `b.srcset` / `b.title` / `b.loading` are
+  new and safe to add.
+- **Goldens**: only `messy_html5_demo.html.json` actually changed —
+  all other HTML/DOCX/PPTX/ODT goldens produce byte-identical output
+  because their image-emitting paths use `mkImage` which fills empty
+  defaults that get omitted from JSON.
 
 ---
 

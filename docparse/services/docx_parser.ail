@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments)
 
 -- DOCX Parser
@@ -485,7 +485,7 @@ func extractImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
     entry :: rest => {
       let imageData = readEmbeddedImage(filepath, entry);
       let mime = mediaMimeType(entry);
-      let block = ImageBlock({data: imageData, description: "", mime: mime});
+      let block = mkImage(imageData, "", mime);
       let moreBlocks = extractImages(filepath, rest);
       block :: moreBlocks
     }

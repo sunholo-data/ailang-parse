@@ -25,7 +25,7 @@ export type TableCell = {
 -- renderers) treat it as a TextBlock with the anchor's visible text.
 export type Block = TextBlock({text: string, style: string, level: int})
                   | TableBlock({rows: [[TableCell]], headers: [TableCell]})
-                  | ImageBlock({data: string, description: string, mime: string})
+                  | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
                   | VideoBlock({data: string, description: string, mime: string})
                   | ListBlock({items: [string], ordered: bool})
@@ -163,6 +163,40 @@ export pure func spanCell(text: string, cs: int) -> TableCell
 
 -- Get text from a table cell
 export pure func cellText(cell: TableCell) -> string = cell.text
+
+-- Construct an ImageBlock with default values for the extended HTML
+-- attributes (width, height, srcset, title, loading). Most parsers
+-- (DOCX/PPTX/ODT/EPUB/Markdown/TeX/AI) don't have these attributes to
+-- extract, so this helper avoids forcing every constructor site to
+-- pass empty strings / zeros.
+export pure func mkImage(data: string, description: string, mime: string) -> Block =
+  ImageBlock({
+    data: data,
+    description: description,
+    mime: mime,
+    width: 0,
+    height: 0,
+    srcset: "",
+    title: "",
+    loading: ""
+  })
+
+-- Construct an ImageBlock with all HTML5 image attributes populated.
+-- Used by html_parser when extracting <img> tags and <picture>/<source>
+-- elements. Pass 0 / empty string for any attribute that wasn't present.
+export pure func mkImageFull(data: string, description: string, mime: string,
+                              width: int, height: int, srcset: string,
+                              title: string, loading: string) -> Block =
+  ImageBlock({
+    data: data,
+    description: description,
+    mime: mime,
+    width: width,
+    height: height,
+    srcset: srcset,
+    title: title,
+    loading: loading
+  })
 
 -- Create an empty metadata record
 export pure func emptyMetadata() -> DocMetadata

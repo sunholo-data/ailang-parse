@@ -7,7 +7,7 @@ import std/json (decode, encode, jo, kv, js, jnum, ja, getString, getInt, getBoo
 import std/option (Some, None, getOrElse)
 import std/list (map, flatMap, concat, any, length as listLength)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImage)
 import docparse/services/pdf_annotations (extractAnnotations, annotationsAsBlocks)
 import pkg/sunholo/gemini_files/upload (uploadFile, deleteFile, UploadedFile)
 
@@ -218,7 +218,7 @@ export func parseImage(filepath: string, mime: string) -> [Block] ! {FS, AI} {
           ))
         ]));
         let description = call(request);
-        [ImageBlock({data: base64Data, description: description, mime: mime})]
+        [mkImage(base64Data, description, mime)]
       }
   }
 }
@@ -367,7 +367,7 @@ pure func parseOneBlock(json: Json) -> Option[Block] {
       Some(ListBlock({items: aiExtractStrings(items), ordered: ordered}))
     },
     Some("image") => match getString(json, "description") {
-      Some(desc) => Some(ImageBlock({data: "", description: desc, mime: "image/unknown"})),
+      Some(desc) => Some(mkImage("", desc, "image/unknown")),
       None => None
     },
     _ => None

@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, length as listLength, take)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage)
 import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
 
 -- PPTX Parser
@@ -264,7 +264,7 @@ pure func getPptxVMerge(tc: XmlNode) -> bool =
 -- Parse a picture element
 pure func parsePicture(pic: XmlNode) -> [Block] {
   let descr = getPictureDescription(pic);
-  [ImageBlock({data: "", description: descr, mime: "image/unknown"})]
+  [mkImage("", descr, "image/unknown")]
 }
 
 pure func getPictureDescription(pic: XmlNode) -> string =
@@ -301,7 +301,7 @@ func extractPptxImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
     entry :: rest => {
       let imageData = readImageEntry(filepath, entry);
       let mime = mediaMimeType(entry);
-      let block = ImageBlock({data: imageData, description: "", mime: mime});
+      let block = mkImage(imageData, "", mime);
       let moreBlocks = extractPptxImages(filepath, rest);
       block :: moreBlocks
     }

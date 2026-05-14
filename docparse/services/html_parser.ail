@@ -4,9 +4,9 @@ import std/html (parse)
 import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
-import std/string (length, trim, find, replace, join)
+import std/string (length, trim, find, replace, join, stringToInt)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, simpleCell, mkImageFull)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -100,11 +100,14 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
   else if tag == "ul" then htmlParseList(node, false)
   else if tag == "ol" then htmlParseList(node, true)
 
-  -- Images
+  -- Images. Captures the full HTML5 attribute set: src, alt, width,
+  -- height, srcset (responsive candidates), title (tooltip/caption),
+  -- and loading (lazy/eager). Missing attributes default to 0 / empty
+  -- string. Width and height parse the raw attribute value as an
+  -- integer; non-numeric values (e.g. "100%") fall back to 0 because
+  -- we don't model fractional/percentage sizes.
   else if tag == "img" then
-    let src = getOrElse(getAttr(node, "src"), "") in
-    let alt = getOrElse(getAttr(node, "alt"), "") in
-    [ImageBlock({data: src, description: alt, mime: "image/unknown"})]
+    [htmlParseImg(node, "")]
 
   -- Anchors (<a href>) — HTML5 treats <a> as a "transparent" element
   -- that may wrap block-level content (e.g. `<a class="card"><img><h3>title</h3></a>`).
@@ -157,12 +160,12 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     htmlProcessChildren(getChildren(node))
 
   -- <picture> for responsive images: HTML5 picks one <source srcset>
-  -- candidate at runtime and falls back to the <img> child. For
-  -- deterministic parsing we just recurse — the fallback <img> produces
-  -- an ImageBlock with its src/alt, and <source> elements are ignored
-  -- (no src attribute, only srcset which we don't currently model).
+  -- candidate at runtime and falls back to the <img> child. We collect
+  -- all <source srcset> values (comma-joined) and attach them to the
+  -- fallback <img>'s srcset attribute, then emit the <img> as a single
+  -- ImageBlock. Any <img>'s own srcset takes priority and is preserved.
   else if tag == "picture" then
-    htmlProcessChildren(getChildren(node))
+    htmlParsePicture(node)
 
   -- Pre/code blocks → TextBlock with "code" style
   else if tag == "pre" then
@@ -189,6 +192,56 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     let text = trim(htmlDeepText(node)) in
     if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
     else []
+}
+
+-- Parse an <img> node into a Block. `inheritedSrcset` is non-empty
+-- only when the <img> is the fallback inside a <picture> element —
+-- in that case sibling <source> srcsets are concatenated and passed
+-- in here so the resulting ImageBlock carries all candidates. If the
+-- <img> itself has a srcset attribute, it takes priority (preserves
+-- author intent).
+pure func htmlParseImg(node: XmlNode, inheritedSrcset: string) -> Block {
+  let src = getOrElse(getAttr(node, "src"), "");
+  let alt = getOrElse(getAttr(node, "alt"), "");
+  let title = getOrElse(getAttr(node, "title"), "");
+  let loading = getOrElse(getAttr(node, "loading"), "");
+  let widthStr = getOrElse(getAttr(node, "width"), "");
+  let heightStr = getOrElse(getAttr(node, "height"), "");
+  let ownSrcset = getOrElse(getAttr(node, "srcset"), "");
+  let width = htmlParseDimension(widthStr);
+  let height = htmlParseDimension(heightStr);
+  let srcset = if length(ownSrcset) > 0 then ownSrcset else inheritedSrcset;
+  mkImageFull(src, alt, "image/unknown", width, height, srcset, title, loading)
+}
+
+-- Parse an HTML width/height attribute as a non-negative pixel int.
+-- HTML allows "100", "100px", "100%", or absent; we model only integer
+-- pixel values, returning 0 for anything else (including percentages
+-- and unitless floats).
+pure func htmlParseDimension(s: string) -> int {
+  if length(s) == 0 then 0
+  else match stringToInt(s) {
+    Some(n) => if n >= 0 then n else 0,
+    None => 0
+  }
+}
+
+-- Parse a <picture> element. Collect all <source srcset> values
+-- (joined with ", ") and pass them as the inherited srcset for the
+-- inner <img> fallback. <source> elements without srcset, and
+-- non-<source>/<img> children, are ignored.
+pure func htmlParsePicture(node: XmlNode) -> [Block] {
+  let children = getChildren(node);
+  let sourceSrcsets = filter(\s. length(s) > 0,
+                             map(\c. if getTag(c) == "source"
+                                     then getOrElse(getAttr(c, "srcset"), "")
+                                     else "",
+                                 children));
+  let inheritedSrcset = join(", ", sourceSrcsets);
+  flatMap(\c. if getTag(c) == "img"
+              then [htmlParseImg(c, inheritedSrcset)]
+              else [],
+          children)
 }
 
 -- True if every block in the list is a plain text block (no images,

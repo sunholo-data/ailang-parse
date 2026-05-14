@@ -3,7 +3,7 @@ module docparse/services/zip_extract
 import std/zip (listEntries, readEntry, readEntryBytes)
 import std/string (contains, length, endsWith, startsWith)
 import std/result (Ok, Err)
-import docparse/types/document (Block, ImageBlock, SectionBlock)
+import docparse/types/document (Block, ImageBlock, SectionBlock, mkImage)
 
 -- ZIP extraction layer for Office documents
 -- DOCX, PPTX, XLSX are all ZIP archives containing XML parts.
@@ -258,7 +258,7 @@ func zipResolveOneBlock(zipPath: string, b: Block) -> Block ! {FS} =
       if zipIsZipPath(img.data) then {
         let imageData = readImageEntry(zipPath, img.data);
         let mime = if length(imageData) > 0 then mediaMimeType(img.data) else img.mime;
-        ImageBlock({data: imageData, description: img.description, mime: mime})
+        mkImage(imageData, img.description, mime)
       } else b,
     SectionBlock(s) => {
       let resolvedInner = resolveBlockImages(zipPath, s.blocks);
