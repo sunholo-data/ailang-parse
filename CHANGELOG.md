@@ -9,7 +9,72 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.2...HEAD)
+
+---
+
+## [0.18.2](https://github.com/sunholo-data/ailang-parse/compare/v0.18.1...v0.18.2) — 2026-05-14
+
+Second pure-perf patch. Profile-driven dispatch reordering and a
+text-node fast path. Goldens byte-identical (no semantic change).
+
+### Profile findings (sunholo.com, 79 KB, 1,900-node tree)
+
+Captured via `ailang run --emit-trace jsonl` and analysed with `jq`.
+Top function-call counts:
+
+| Function | Calls | Cost source |
+|---|---|---|
+| `std/string.length` | 2,056 | length checks in fast paths |
+| `std/xml.getChildren` | 1,918 | FFI per node |
+| `std/xml.getTag` | 1,869 | FFI per node |
+| `std/list.length` | 1,803 | child-count checks |
+| `concat` | 1,735 | list ops |
+| `std/string.trim` | 1,715 | text cleaning |
+| `htmlDeepText` | 1,714 | recursion |
+| `std/xml.getText` | 1,404 | FFI |
+| closures (`f`) | 1,037 | lambda overhead |
+
+### Fixes
+
+1. **Text-node fast path in `htmlProcessNode`**. Text nodes have empty
+   tag (`""`) and account for ~half of all flatMap invocations during
+   a parse. Pre-v0.18.2 they walked the full 30+ branch dispatch and
+   fell through to the bottom default. Now they're handled at the top
+   of the function via a `length(tag) == 0` check that goes straight
+   to `getText → TextBlock`.
+
+2. **`htmlIsBlockTag` reordered by observed frequency** (sample from
+   sunholo.com: 132 `<div>`, 40 `<p>`, 37 `<li>`, 24 `<h3>`, …).
+   Chained `||` short-circuits on first match, so high-frequency tags
+   now match earlier.
+
+### Measured impact
+
+Function-call profile (sunholo.com, same input):
+
+| Metric | v0.18.1 | v0.18.2 | Δ |
+|---|---|---|---|
+| `htmlDeepText` calls | 1,714 | 1,180 | **−31%** |
+| `std/xml.getChildren` calls | 1,918 | 1,384 | **−28%** |
+| `std/list.length` calls | 1,803 | 1,269 | **−30%** |
+| Total function calls | 21,651 | 20,910 | **−3.4%** |
+
+Wall-clock:
+
+| Phase | v0.18.1 | v0.18.2 |
+|---|---|---|
+| Cold | 1.07s | **0.81s** (−24%) |
+| Warm (median of 4) | 0.62s | **0.59s** (−5%) |
+
+### Upstream proposal
+
+Profile data + 6 ranked AILANG/stdlib feature proposals sent to ailang-core (msg_20260514_100821_cd45490b). Top requests: `std/xml.foldChildren` (eliminates per-node `getChildren` FFI), `std/xml.getAttrMap` (batched attribute access), tail-call optimization, `@inline` hints for small pure functions. Local fixes here are bounded by what's possible without those language/stdlib additions.
+
+### Goldens
+
+Byte-identical to v0.18.1 for all 7 HTML and 2 EML goldens. This is a
+pure dispatch-order optimization with no semantic change.
 
 ---
 
