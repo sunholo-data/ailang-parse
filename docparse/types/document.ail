@@ -11,11 +11,14 @@ import std/list (filter, length as listLength)
 -- colSpan: number of columns this cell spans (1 = normal)
 -- rowSpan: number of rows this cell spans (1 = normal)
 -- merged: true if this is a continuation cell (content lives in the span origin)
+-- scope: "row" | "col" | "rowgroup" | "colgroup" | "" — populated by HTML
+--        parser for <th scope=…>. Empty for normal data cells.
 export type TableCell = {
   text: string,
   colSpan: int,
   rowSpan: int,
-  merged: bool
+  merged: bool,
+  scope: string
 }
 
 -- A content block extracted from a document
@@ -24,7 +27,7 @@ export type TableCell = {
 -- preserve link semantics (DOCX/PPTX paragraph writers, plain-text
 -- renderers) treat it as a TextBlock with the anchor's visible text.
 export type Block = TextBlock({text: string, style: string, level: int})
-                  | TableBlock({rows: [[TableCell]], headers: [TableCell]})
+                  | TableBlock({rows: [[TableCell]], headers: [TableCell], caption: string})
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
                   | VideoBlock({data: string, description: string, mime: string})
@@ -144,22 +147,40 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: ""}
+}
+
+-- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
+-- Used by html_parser when extracting <th scope=…>. Other parsers can
+-- continue using simpleCell.
+export pure func scopedCell(text: string, scope: string) -> TableCell
+  ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
+{
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: ""}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: ""}
 }
+
+-- Construct a TableBlock with no caption (most non-HTML parsers).
+-- HTML parser uses mkTableFull when <caption> is present.
+export pure func mkTable(rows: [[TableCell]], headers: [TableCell]) -> Block =
+  TableBlock({rows: rows, headers: headers, caption: ""})
+
+-- Construct a TableBlock with a caption (HTML <caption> element).
+export pure func mkTableFull(rows: [[TableCell]], headers: [TableCell], caption: string) -> Block =
+  TableBlock({rows: rows, headers: headers, caption: caption})
 
 -- Get text from a table cell
 export pure func cellText(cell: TableCell) -> string = cell.text

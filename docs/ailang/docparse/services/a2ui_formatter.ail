@@ -19,7 +19,7 @@ import std/list (map, foldl, concat, length as listLength, flatMap)
 import std/math (intToFloat)
 import std/option (getOrElse)
 import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable)
 
 -- Convert a full ParsedDocument to A2UI JSON string.
 -- When editable=true, content nodes use editable component variants
@@ -223,10 +223,10 @@ pure func a2ui_jsonToBlock(j: Json) -> Block {
       level: getOrElse(getInt(j, "level"), 1)
     })
   else if t == "table" then
-    TableBlock({
-      headers: a2ui_jsonToCells(getOrElse(getArray(j, "headers"), [])),
-      rows: a2ui_jsonToCellRows(getOrElse(getArray(j, "rows"), []))
-    })
+    mkTable(
+      a2ui_jsonToCellRows(getOrElse(getArray(j, "rows"), [])),
+      a2ui_jsonToCells(getOrElse(getArray(j, "headers"), []))
+    )
   else if t == "list" then
     ListBlock({
       items: getStringArrayOrEmpty(j, "items"),
@@ -272,12 +272,13 @@ pure func a2ui_jsonToCells(arr: [Json]) -> [TableCell] =
 
 pure func a2ui_jsonToCell(j: Json) -> TableCell {
   match asString(j) {
-    Some(s) => {text: s, colSpan: 1, rowSpan: 1, merged: false},
+    Some(s) => {text: s, colSpan: 1, rowSpan: 1, merged: false, scope: ""},
     None => {
       text: getOrElse(getString(j, "text"), ""),
       colSpan: getOrElse(getInt(j, "colSpan"), 1),
       rowSpan: getOrElse(getInt(j, "rowSpan"), 1),
-      merged: getOrElse(getBool(j, "merged"), false)
+      merged: getOrElse(getBool(j, "merged"), false),
+      scope: getOrElse(getString(j, "scope"), "")
     }
   }
 }

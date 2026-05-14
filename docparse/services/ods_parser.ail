@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim)
 import std/list (map, flatMap, filter, length as listLength)
-import docparse/types/document (Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata)
+import docparse/types/document (Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkTable)
 
 -- ODS Parser — converts OpenDocument Spreadsheet to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -78,9 +78,9 @@ pure func odsParseSheet(table: XmlNode) -> [Block] {
   if listLength(nonEmptyRows) == 0 then []
   else {
     let tableBlock = match nonEmptyRows {
-      [] => TableBlock({rows: [], headers: []}),
+      [] => mkTable([], []),
       firstRow :: dataRows =>
-        TableBlock({rows: dataRows, headers: firstRow})
+        mkTable(dataRows, firstRow)
     };
     [SectionBlock({kind: "sheet:${sheetName}", blocks: [tableBlock]})]
   }
@@ -98,7 +98,7 @@ pure func odsParseCell(cell: XmlNode) -> TableCell {
   let text = trim(getText(cell));
   let colSpanStr = getOrElse(getAttr(cell, "table:number-columns-spanned"), "1");
   let colSpan = odsParseSpan(colSpanStr);
-  {text: text, colSpan: colSpan, rowSpan: 1, merged: false}
+  {text: text, colSpan: colSpan, rowSpan: 1, merged: false, scope: ""}
 }
 
 -- Parse span value

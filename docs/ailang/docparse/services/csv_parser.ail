@@ -3,7 +3,7 @@ module docparse/services/csv_parser
 import std/string (split, trim, length, find, substring, chars, join)
 import std/list (map, head, tail, filter, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (Block, TableBlock, TableCell, simpleCell)
+import docparse/types/document (Block, TableBlock, TableCell, simpleCell, mkTable)
 
 -- CSV/TSV Parser — converts delimited text files to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -34,10 +34,7 @@ export pure func parseCsv(content: string, delimiter: string) -> [Block]
       match allRows {
         [] => [],
         headerCells :: dataRows =>
-          [TableBlock({
-            headers: map(simpleCell, headerCells),
-            rows: map(\row. map(simpleCell, row), dataRows)
-          })]
+          [mkTable(map(\row. map(simpleCell, row), dataRows), map(simpleCell, headerCells))]
       }
     }
   }

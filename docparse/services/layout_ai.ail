@@ -7,7 +7,7 @@ import std/math (floatToInt)
 import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
 import std/list (map, foldl, length as listLength, flatMap, mapE, nth)
-import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage)
+import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
 
 -- AI-powered layout understanding
 -- Uses LLM to handle complex document structure that pure XML parsing misses:
@@ -212,7 +212,7 @@ pure func parseTableResponse(response: string) -> Option[Block] {
         let headers = aiStringsToSimpleCells2(aiExtractStrings2(headerJsons)) in
         optFlatMap(\rowJsons.
           let rows = stringRowsToSimpleCells(extractStringArrays(rowJsons)) in
-          Some(TableBlock({rows: rows, headers: headers})),
+          Some(mkTable(rows, headers)),
           getArray(json, "rows")),
         getArray(json, "headers")),
     Err(_) => None

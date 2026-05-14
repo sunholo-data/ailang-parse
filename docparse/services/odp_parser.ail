@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODP Parser — converts OpenDocument Presentation to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -174,9 +174,9 @@ pure func odpParseTable(table: XmlNode) -> Block {
   let rows = findAll(table, "table:table-row");
   let parsedRows = map(odpParseTableRow, rows);
   match parsedRows {
-    [] => TableBlock({rows: [], headers: []}),
+    [] => mkTable([], []),
     firstRow :: dataRows =>
-      TableBlock({rows: dataRows, headers: firstRow})
+      mkTable(dataRows, firstRow)
   }
 }
 
@@ -189,7 +189,7 @@ pure func odpParseTableRow(tr: XmlNode) -> [TableCell] {
 -- Parse a table cell
 pure func odpParseTableCell(cell: XmlNode) -> TableCell {
   let text = trim(getText(cell));
-  {text: text, colSpan: 1, rowSpan: 1, merged: false}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: ""}
 }
 
 -- Parse a text:list

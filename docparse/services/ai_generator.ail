@@ -5,7 +5,7 @@ import std/json (encode, jo, kv, js, decode, asArray, asString as jsonAsString, 
 import std/string (length, trim)
 import std/list (flatMap, length as listLength)
 import std/option (Some, None, getOrElse)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, simpleCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, simpleCell, mkTable)
 
 -- AI Document Generator — prompt → Block ADT via LLM.
 --
@@ -81,7 +81,7 @@ pure func aiParseOneBlock(json: Json) -> Option[Block] {
     Some("table") => {
       let headers = getOrElse(getArray(json, "headers"), []);
       let rows = getOrElse(getArray(json, "rows"), []);
-      Some(TableBlock({headers: aiJsonToSimpleCells(headers), rows: aiJsonToRows(rows)}))
+      Some(mkTable(aiJsonToRows(rows), aiJsonToSimpleCells(headers)))
     },
     Some("list") => {
       let items = getOrElse(getArray(json, "items"), []);

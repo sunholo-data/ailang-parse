@@ -7,7 +7,7 @@ import std/json (decode, encode, jo, kv, js, jnum, ja, getString, getInt, getBoo
 import std/option (Some, None, getOrElse)
 import std/list (map, flatMap, concat, any, length as listLength)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImage)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImage, mkTable)
 import docparse/services/pdf_annotations (extractAnnotations, annotationsAsBlocks)
 import pkg/sunholo/gemini_files/upload (uploadFile, deleteFile, UploadedFile)
 
@@ -359,7 +359,7 @@ pure func parseOneBlock(json: Json) -> Option[Block] {
       let headers = getOrElse(getArray(json, "headers"), []);
       let rows = getOrElse(getArray(json, "rows"), []);
       let flatHeaders = aiFlattenHeaders(headers);
-      Some(TableBlock({headers: aiStringsToSimpleCells(flatHeaders), rows: parseAiTableRows(rows)}))
+      Some(mkTable(parseAiTableRows(rows), aiStringsToSimpleCells(flatHeaders)))
     },
     Some("list") => {
       let items = getOrElse(getArray(json, "items"), []);

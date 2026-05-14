@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments)
 
 -- DOCX Parser
@@ -391,9 +391,9 @@ pure func parseTable(tbl: XmlNode) -> Block {
   let rows = findAll(tbl, "w:tr");
   let parsedRows = parseTableRows(rows);
   match parsedRows {
-    [] => TableBlock({rows: [], headers: []}),
+    [] => mkTable([], []),
     firstRow :: dataRows =>
-      TableBlock({rows: dataRows, headers: firstRow})
+      mkTable(dataRows, firstRow)
   }
 }
 
@@ -424,8 +424,8 @@ pure func parseCell(tc: XmlNode) -> TableCell {
   let cs = getCellGridSpan(tc);
   let vm = getCellVMerge(tc);
   if vm == "continue"
-  then { text: "", colSpan: cs, rowSpan: 1, merged: true }
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false }
+  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" }
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" }
 }
 
 -- Get gridSpan value from w:tcPr/w:gridSpan[@w:val]

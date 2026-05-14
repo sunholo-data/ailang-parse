@@ -9,7 +9,75 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.17.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.0...HEAD)
+
+---
+
+## [0.18.0](https://github.com/sunholo-data/ailang-parse/compare/v0.17.0...v0.18.0) — 2026-05-14
+
+Tables now carry their captions, header cells carry their accessibility
+scope, and a couple of long-tail semantic blocks (`<figure>`/`<figcaption>`,
+`<address>`) get proper paired output.
+
+### Changed
+- **`TableBlock` extended** with an optional `caption: string` field.
+  Populated by the HTML parser from `<caption>` elements (any depth
+  under `<table>`); empty for tables emitted by other parsers
+  (DOCX/PPTX/ODT/ODS/CSV/Markdown/TeX/XLSX/AI).
+- **`TableCell` extended** with an optional `scope: string` field
+  matching HTML5's accessibility model (`"row"` | `"col"` | `"rowgroup"` |
+  `"colgroup"`). Populated by HTML parser from `<th scope=…>`; empty
+  for `<td>` and for cells emitted by other parsers.
+
+### Added
+- **`mkTable(rows, headers)`** in [docparse/types/document.ail](docparse/types/document.ail)
+  constructs a TableBlock with an empty caption — one-line swap for
+  every non-HTML parser. 17 constructor sites migrated.
+- **`mkTableFull(rows, headers, caption)`** for HTML parser when
+  `<caption>` is present.
+- **`scopedCell(text, scope)`** for explicit scoped header cells
+  (HTML parser uses it via direct record literal because cell scope
+  is per-cell, not per-table).
+- **HTML parser captures `<caption>`** — `htmlParseTable` extracts the
+  first `<caption>` descendant and passes its trimmed deep text into
+  `mkTableFull`. pandoc_planets.html test file now exposes its
+  `"Data about the planets of our solar system."` caption that was
+  previously dropped entirely.
+- **HTML parser captures `<th scope=…>`** — `htmlParseTableCell` reads
+  the scope attribute only when the cell tag is `<th>`, so `<td>`
+  cells stay scope-less.
+- **`<figure>`/`<figcaption>` pairing** — `<figure>` now emits a
+  `SectionBlock(kind: "figure")` containing the inner image plus a
+  `TextBlock(style: "caption")` for the figcaption text. Previously
+  the figure was flattened and the caption floated free.
+- **`<address>` block** — emits its own `SectionBlock(kind: "address")`
+  for contact info / authorship blocks. Falls back to a
+  `TextBlock(style: "address")` when the content is plain text only.
+
+### JSON output
+- `TableBlock`'s `caption` is **emitted only when non-empty**, so
+  non-HTML tables produce byte-identical JSON to v0.17.0.
+- `TableCell`'s `scope` is **emitted only when non-empty**. The
+  compact "string-only" cell shortcut (used when colSpan=1 and merged=false)
+  upgrades to the verbose `{text, colSpan, merged, scope}` shape
+  whenever scope is set.
+
+### Real-world numbers
+- **pandoc_planets.html**: `"Data about the planets of our solar system."`
+  caption now in JSON. Previously empty.
+- **messy_html5_demo.html** (updated to exercise these features):
+  table with caption + 3 scoped col-headers + 2 scoped row-headers;
+  figure/figcaption pair; address section.
+
+### Goldens
+- `messy_html5_demo.html.json` refreshed.
+- All other 6 HTML + 2 EML goldens byte-identical (no `<caption>`,
+  `<th scope>`, `<figure>`, or `<address>` in those source files).
+
+### Cascade
+- 17 in-repo `TableBlock` constructor sites updated to use `mkTable`.
+- 9 sites with direct `TableCell` record literals updated to include
+  `scope: ""`. All paid in one commit.
 
 ---
 

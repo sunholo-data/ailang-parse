@@ -90,11 +90,7 @@ export pure func blockToJson(block: Block) -> Json =
       kv("text", js(b.text)),
       kv("level", jnum(intToFloat(b.level)))
     ]),
-    TableBlock(b) => jo([
-      kv("type", js("table")),
-      kv("headers", ja(cellsToJson(b.headers))),
-      kv("rows", ja(cellRowsToJson(b.rows)))
-    ]),
+    TableBlock(b) => jo(tableJsonFields(b)),
     ListBlock(b) => jo([
       kv("type", js("list")),
       kv("items", ja(stringsToJson(b.items))),
@@ -122,6 +118,21 @@ export pure func blockToJson(block: Block) -> Json =
       kv("title", js(b.title))
     ])
   }
+
+-- JSON serialization for TableBlock. Adds the optional `caption`
+-- string (populated by HTML parser from <caption> elements; empty
+-- for tables emitted by other parsers). Omitted from output when
+-- empty so non-HTML parsers' JSON stays byte-identical.
+pure func tableJsonFields(b: {rows: [[TableCell]], headers: [TableCell], caption: string}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("table")),
+    kv("headers", ja(cellsToJson(b.headers))),
+    kv("rows", ja(cellRowsToJson(b.rows)))
+  ];
+  if length(b.caption) > 0
+  then concat(base, [kv("caption", js(b.caption))])
+  else base
+}
 
 -- Shared JSON shape for image/audio/video blocks. Surfaces `data` as
 -- `src` only when it looks like a URL/path (length <= 2048) — large
@@ -184,13 +195,19 @@ export pure func cellsToJson(cells: [TableCell]) -> [Json]
 -- Simple cells (no merges) output as just the text string for compact JSON
 -- Merged/spanned cells include full metadata
 export pure func cellToJson(cell: TableCell) -> Json {
-  if cell.colSpan == 1 && not cell.merged
+  if cell.colSpan == 1 && not cell.merged && length(cell.scope) == 0
   then js(cell.text)
-  else jo([
-    kv("text", js(cell.text)),
-    kv("colSpan", jnum(intToFloat(cell.colSpan))),
-    kv("merged", jb(cell.merged))
-  ])
+  else {
+    let base = [
+      kv("text", js(cell.text)),
+      kv("colSpan", jnum(intToFloat(cell.colSpan))),
+      kv("merged", jb(cell.merged))
+    ];
+    let withScope = if length(cell.scope) > 0
+                    then concat(base, [kv("scope", js(cell.scope))])
+                    else base;
+    jo(withScope)
+  }
 }
 
 -- Convert a list of strings to JSON values

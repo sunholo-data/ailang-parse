@@ -3,7 +3,7 @@ module docparse/services/tex_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, replace, toLower, replaceMany)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage)
+import docparse/types/document (Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable)
 
 -- LaTeX Parser — converts arXiv-style LaTeX source to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -537,7 +537,7 @@ pure func texHandleTabularLine(state: TexState, line: string, t: string) -> TexS
         let header = map(\s. simpleCell(texCleanInline(s)), headerRow) in
         let body = map(\r. map(\s. simpleCell(texCleanInline(s)), r), bodyRows) in
         {
-          blocks: TableBlock({headers: header, rows: body}) :: state.blocks,
+          blocks: mkTable(body, header) :: state.blocks,
           mode: "none",
           envName: "",
           buf: [],

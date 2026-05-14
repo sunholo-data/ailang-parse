@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry)
 
 -- XLSX Parser
@@ -170,7 +170,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
     match parsedRows {
       [] => [heading],
       firstRow :: dataRows => {
-        let tableBlock = TableBlock({rows: dataRows, headers: firstRow});
+        let tableBlock = mkTable(dataRows, firstRow);
         let section = SectionBlock({kind: "sheet", blocks: [heading, tableBlock]});
         [section]
       }

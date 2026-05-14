@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, contains, startsWith, substring, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODT Parser — converts OpenDocument Text to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -176,9 +176,9 @@ pure func odtParseTable(table: XmlNode) -> Block {
   let rows = findAll(table, "table:table-row");
   let parsedRows = map(odtParseTableRow, rows);
   match parsedRows {
-    [] => TableBlock({rows: [], headers: []}),
+    [] => mkTable([], []),
     firstRow :: dataRows =>
-      TableBlock({rows: dataRows, headers: firstRow})
+      mkTable(dataRows, firstRow)
   }
 }
 
@@ -194,7 +194,7 @@ pure func odtParseTableCell(cell: XmlNode) -> TableCell {
   let text = trim(getText(cell));
   let colSpanStr = getOrElse(getAttr(cell, "table:number-columns-spanned"), "1");
   let colSpan = odtParseSpan(colSpanStr);
-  {text: text, colSpan: colSpan, rowSpan: 1, merged: false}
+  {text: text, colSpan: colSpan, rowSpan: 1, merged: false, scope: ""}
 }
 
 -- Parse colspan/rowspan value

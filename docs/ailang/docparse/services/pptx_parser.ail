@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, length as listLength, take)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable)
 import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
 
 -- PPTX Parser
@@ -201,9 +201,9 @@ pure func parsePptxTable(tbl: XmlNode) -> Block {
   let rows = findAll(tbl, "a:tr");
   let parsedRows = parsePptxRows(rows);
   match parsedRows {
-    [] => TableBlock({rows: [], headers: []}),
+    [] => mkTable([], []),
     firstRow :: dataRows =>
-      TableBlock({rows: dataRows, headers: firstRow})
+      mkTable(dataRows, firstRow)
   }
 }
 
@@ -232,8 +232,8 @@ pure func parsePptxCell(tc: XmlNode) -> TableCell {
   let hm = getPptxHMerge(tc);
   let vm = getPptxVMerge(tc);
   if hm || vm
-  then { text: "", colSpan: cs, rowSpan: 1, merged: true }
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false }
+  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" }
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" }
 }
 
 pure func extractPptxCellText(tc: XmlNode) -> string {
