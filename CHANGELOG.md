@@ -9,7 +9,65 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.14.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.15.0...HEAD)
+
+---
+
+## [0.15.0](https://github.com/sunholo-data/ailang-parse/compare/v0.14.1...v0.15.0) — 2026-05-14
+
+### Added
+- **`LinkBlock` ADT variant** for HTML anchors. `LinkBlock({text, href, title})`
+  captures the visible text and target URL of an `<a href>`. JSON output:
+  ```json
+  {"type":"link","text":"Try it free","href":"/ailang-parse/","title":""}
+  ```
+  Every match site that pattern-matches on `Block` gained a sensible
+  `LinkBlock` arm:
+  - `output_formatter.ail`: JSON serialization + console pretty-print
+    (`[link] text → href`) + markdown rendering (`[text](href)`).
+  - `html_generator.ail`: round-trips back to `<a href="...">text</a>`,
+    preserving `title` if present.
+  - `qmd_generator.ail`: markdown link syntax.
+  - `odt_generator.ail`: `<text:a xlink:href="...">` proper ODF link.
+  - `docx_generator.ail`/`pptx_generator.ail`/`odp_generator.ail`/
+    `xlsx_generator.ail`: text downgrade with URL in parens (full
+    `<w:hyperlink>` / shape-link round-tripping deferred).
+  - `a2ui_formatter.ail`: callout with `href` + `title` metadata.
+  - `unstructured_compat.ail`: NarrativeText with `link_urls`
+    metadata field (matches unstructured.io's hyperlink schema).
+  - `layout_ai.ail`: compact `[link] text → href` representation
+    suitable for LLM context.
+
+### Changed
+- **HTML parser anchor handling rewritten.** The `<a>` branch now
+  treats anchors as HTML5 "transparent" elements: recurses into
+  children to surface any block content (images, headings, nested
+  structure), and additionally emits a `LinkBlock` when `href` is
+  present so the URL is captured.
+
+  Three concrete improvements measured on www.sunholo.com:
+
+  | Metric | v0.14.1 | v0.15.0 | Source |
+  |---|---|---|---|
+  | Images captured | 4 | **10** | 12 `<img>` in source |
+  | Anchor URLs captured | 0 | **31** | 62 `<a href>` in source |
+  | LinkBlock support | none | full ADT | — |
+
+  The remaining 2 images / 31 anchors are inside constructs we don't
+  yet handle (`<picture>`, anchors with no visible text, etc.).
+
+### Known limitations (not addressed in this release)
+- `<img>` attributes beyond `src` + `alt` — `width`, `height`,
+  `srcset`, `loading`, `title` — are still ignored. Adding them
+  requires extending the `ImageBlock` record, which cascades through
+  every parser that constructs `ImageBlock` (DOCX/PPTX/ODT/EPUB/Markdown/TeX).
+  Deferred.
+- `<picture>` and `<source>` (responsive image art-direction) — not
+  yet parsed.
+- DOCX/PPTX hyperlink round-trip — the writers currently downgrade
+  `LinkBlock` to plain text with the URL in parens. Full
+  `<w:hyperlink>` / `<a:hlinkClick>` round-tripping is deferred to a
+  future write-back release.
 
 ---
 

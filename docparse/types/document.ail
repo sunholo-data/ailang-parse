@@ -19,6 +19,10 @@ export type TableCell = {
 }
 
 -- A content block extracted from a document
+--
+-- LinkBlock represents an HTML anchor with href. Generators that don't
+-- preserve link semantics (DOCX/PPTX paragraph writers, plain-text
+-- renderers) treat it as a TextBlock with the anchor's visible text.
 export type Block = TextBlock({text: string, style: string, level: int})
                   | TableBlock({rows: [[TableCell]], headers: [TableCell]})
                   | ImageBlock({data: string, description: string, mime: string})
@@ -28,6 +32,7 @@ export type Block = TextBlock({text: string, style: string, level: int})
                   | HeadingBlock({text: string, level: int})
                   | SectionBlock({kind: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
+                  | LinkBlock({text: string, href: string, title: string})
 
 -- Document metadata from core.xml / app.xml
 export type DocMetadata = {
@@ -65,7 +70,8 @@ export pure func blockText(block: Block) -> string =
     ListBlock(b) => join(", ", b.items),
     HeadingBlock(b) => b.text,
     SectionBlock(b) => "[${b.kind}]",
-    ChangeBlock(b) => "[${b.changeType} by ${b.author}] ${b.text}"
+    ChangeBlock(b) => "[${b.changeType} by ${b.author}] ${b.text}",
+    LinkBlock(b) => "${b.text} <${b.href}>"
   }
 
 export pure func isHeading(block: Block) -> bool =

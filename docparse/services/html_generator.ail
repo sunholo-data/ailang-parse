@@ -2,7 +2,7 @@ module docparse/services/html_generator
 
 import std/string (length, join, intToStr)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
@@ -84,7 +84,12 @@ pure func htmlBlockToStr(block: Block) -> string =
       htmlSectionToStr(s.kind, s.blocks),
 
     ChangeBlock(c) =>
-      htmlChangeToStr(c.changeType, c.author, c.date, c.text)
+      htmlChangeToStr(c.changeType, c.author, c.date, c.text),
+
+    LinkBlock(l) =>
+      if length(l.title) > 0
+      then "<p><a href=\"${xmlEscape(l.href)}\" title=\"${xmlEscape(l.title)}\">${xmlEscape(l.text)}</a></p>\n"
+      else "<p><a href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</a></p>\n"
   }
 
 -- Heading tag from level

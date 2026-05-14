@@ -4,7 +4,7 @@ import std/string (length, intToStr, join, split, substring)
 import std/list (map, foldl, length as listLength, flatMap, concat)
 import std/math (intToFloat)
 import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
 import docparse/services/xml_helpers (xmlEscape)
 
 -- Unstructured API Compatibility Layer
@@ -84,7 +84,15 @@ pure func unstBlockToElements(block: Block, filename: string, filetype: string, 
 
     ChangeBlock(c) =>
       let text = "[${c.changeType}] ${c.text} (by ${c.author}, ${c.date})" in
-      [unstElement("NarrativeText", text, filename, filetype, idx, 0, jn())]
+      [unstElement("NarrativeText", text, filename, filetype, idx, 0, jn())],
+
+    -- Unstructured.io uses "NarrativeText" with link_urls metadata for
+    -- hyperlinks. We emit the visible text with a {link_urls:[href]}
+    -- metadata payload so consumers familiar with the unstructured.io
+    -- schema get something they can route.
+    LinkBlock(l) =>
+      [unstElement("NarrativeText", l.text, filename, filetype, idx, 0,
+        jo([kv("link_urls", ja([js(l.href)]))]))]
   }
 
 -- Build a single Unstructured element as JSON

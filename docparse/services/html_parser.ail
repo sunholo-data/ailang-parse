@@ -106,6 +106,38 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     let alt = getOrElse(getAttr(node, "alt"), "") in
     [ImageBlock({data: src, description: alt, mime: "image/unknown"})]
 
+  -- Anchors (<a href>) — HTML5 treats <a> as a "transparent" element
+  -- that may wrap block-level content (e.g. `<a class="card"><img><h3>title</h3></a>`).
+  -- Strategy: recurse into children to surface any block content (images,
+  -- headings, nested structure), and ALSO emit a LinkBlock if href is
+  -- present so the URL is captured. Anchors without href (named anchors,
+  -- placeholders) collapse to text/blocks via children-recursion alone.
+  else if tag == "a" then
+    let href = getOrElse(getAttr(node, "href"), "") in
+    let title = getOrElse(getAttr(node, "title"), "") in
+    let inner = htmlProcessChildren(getChildren(node)) in
+    let linkText = trim(htmlDeepText(node)) in
+    let textOnly = htmlBlocksAreTextOnly(inner) in
+    if length(href) > 0 then
+      -- Has href: anchor is a real link.
+      -- If the inner content is just text, emit a single LinkBlock
+      -- carrying both the visible text and the URL.
+      -- If the inner content has structure (img, heading, nested blocks),
+      -- emit the structured blocks first, then a LinkBlock describing
+      -- the link itself (with the visible text or a "(link)" placeholder
+      -- if the text is empty).
+      if textOnly then
+        if length(linkText) > 0
+        then [LinkBlock({text: linkText, href: href, title: title})]
+        else []
+      else
+        concat(inner, [LinkBlock({text: if length(linkText) > 0 then linkText else "(link)", href: href, title: title})])
+    else
+      -- No href: not really a link. Just produce inner content or text.
+      if listLength(inner) > 0 then inner
+      else if length(linkText) > 0 then [TextBlock({text: linkText, style: "normal", level: 0})]
+      else []
+
   -- Semantic sections — recurse into children wrapped in SectionBlock
   else if tag == "article" || tag == "section" || tag == "main" ||
           tag == "aside" || tag == "nav" then
@@ -150,6 +182,20 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
     if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
     else []
 }
+
+-- True if every block in the list is a plain text block (no images,
+-- headings, tables, sections, etc.). Used by anchor handling to decide
+-- whether to flatten an <a> to a single LinkBlock or to emit the inner
+-- structured blocks alongside a LinkBlock.
+pure func htmlBlocksAreTextOnly(blocks: [Block]) -> bool =
+  match blocks {
+    [] => true,
+    block :: rest =>
+      match block {
+        TextBlock(_) => htmlBlocksAreTextOnly(rest),
+        _ => false
+      }
+  }
 
 -- Extract all text from a node and its children (deep text).
 -- Inserts newlines around block-level child elements so that

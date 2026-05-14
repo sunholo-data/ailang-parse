@@ -4,7 +4,7 @@ import std/string (length, intToStr)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
 -- ODT Generator — converts Block ADT to a valid .odt file.
@@ -90,7 +90,10 @@ pure func odtBlockToXml(block: Block) -> string =
       "<text:section text:name=\"${xmlEscape(s.kind)}\">${foldl(\acc b. "${acc}${odtBlockToXml(b)}", "", s.blocks)}</text:section>",
 
     ChangeBlock(c) =>
-      "<text:p text:style-name=\"Standard\">${xmlEscape(c.text)} (${xmlEscape(c.changeType)} by ${xmlEscape(c.author)}, ${xmlEscape(c.date)})</text:p>"
+      "<text:p text:style-name=\"Standard\">${xmlEscape(c.text)} (${xmlEscape(c.changeType)} by ${xmlEscape(c.author)}, ${xmlEscape(c.date)})</text:p>",
+
+    LinkBlock(l) =>
+      "<text:p text:style-name=\"Standard\"><text:a xlink:type=\"simple\" xlink:href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</text:a></text:p>"
   }
 
 -- Build an ODF table

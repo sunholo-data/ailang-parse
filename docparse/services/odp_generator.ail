@@ -4,7 +4,7 @@ import std/string (length, intToStr)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
 -- ODP Generator — converts Block ADT to a valid .odp file.
@@ -121,7 +121,11 @@ pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
 
     ChangeBlock(c) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>${xmlEscape(c.text)} (${xmlEscape(c.changeType)})</text:p>")
+        "<text:p>${xmlEscape(c.text)} (${xmlEscape(c.changeType)})</text:p>"),
+
+    LinkBlock(l) =>
+      odpTextFrame("2cm", yPos, "22cm", "2cm",
+        "<text:p>${xmlEscape(l.text)} (${xmlEscape(l.href)})</text:p>")
   }
 }
 

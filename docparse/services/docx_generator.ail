@@ -5,7 +5,7 @@ import std/list (map, foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl, docxContentTypes, docxRootRels, docxRun, docxParagraph, docxStyledParagraph)
 
 -- DOCX Generator — converts Block ADT to a valid .docx file.
@@ -123,7 +123,13 @@ pure func docxBlockToXml(block: Block) -> string =
       docxSectionToXml(s.kind, s.blocks),
 
     ChangeBlock(c) =>
-      docxChangeToXml(c.changeType, c.author, c.date, c.text)
+      docxChangeToXml(c.changeType, c.author, c.date, c.text),
+
+    -- Hyperlink XML in DOCX requires a relationship rId. For now we
+    -- downgrade to a paragraph with "text (url)" — proper <w:hyperlink>
+    -- wrapping is left for a future write-back release.
+    LinkBlock(l) =>
+      docxParagraph(docxRun("${l.text} (${l.href})"))
   }
 
 -- Image-aware block conversion: tracks image index for rId references

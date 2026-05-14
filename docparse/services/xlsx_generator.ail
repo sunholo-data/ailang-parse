@@ -6,7 +6,7 @@ import std/zip (createArchive)
 import std/result (Ok, Err)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
 import std/option (getOrElse)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
 -- XLSX Generator — converts Block ADT to a valid .xlsx file.
@@ -106,6 +106,7 @@ pure func xlsxBlockToText(block: Block) -> string =
     AudioBlock(a) => "[Audio: ${a.transcription}]",
     VideoBlock(v) => "[Video: ${v.description}]",
     ChangeBlock(c) => "${c.text} (${c.changeType} by ${c.author})",
+    LinkBlock(l) => "${l.text} (${l.href})",
     _ => ""
   }
 
