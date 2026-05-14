@@ -1,11 +1,12 @@
 module docparse/services/html_parser
 
 import std/html (parse)
-import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag, getAttrMap, nodeKind, NodeKind, KindElement, KindText, KindComment)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, length as listLength)
+import std/map (lookup)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
 
 -- HTML Parser — converts HTML5 to Block ADT.
@@ -153,27 +154,39 @@ pure func htmlFindBody(node: XmlNode) -> [Block] {
   else []
 }
 
--- Process a list of child nodes into blocks
+-- Process a list of child nodes into blocks. Uses flatMap which is
+-- backed by an iterative Go-native builtin (M-ITERATIVE-LIST). A
+-- foldChildren-based variant was prototyped in v0.18.3-dev but lost
+-- to flatMap on real workloads because the per-child AILANG accumulator
+-- update (cons + final reverse) overshoots flatMap's amortised-O(1)
+-- Go append. Re-evaluate once foldChildren grows a Go-iterative form.
 pure func htmlProcessChildren(nodes: [XmlNode]) -> [Block] =
   flatMap(htmlProcessNode, nodes)
 
 -- Process a single HTML node into zero or more blocks
 pure func htmlProcessNode(node: XmlNode) -> [Block] {
-  let tag = getTag(node);
-
-  -- Fast path: text nodes (tag == "") account for ~half of all flatMap
-  -- invocations during a parse and have no tag-specific handling — they
-  -- just need their text content extracted. Without this fast path each
-  -- text node walks the full 30+ branch dispatch below before falling
+  -- Fast path: text nodes account for ~half of all flatMap invocations
+  -- during a parse and have no tag-specific handling — they just need
+  -- their text content extracted. Without this fast path each text
+  -- node walks the full 30+ branch dispatch below before falling
   -- through to the default text handler. Measured on www.sunholo.com:
   -- ~500 text nodes × 30 string compares = 15,000 wasted comparisons.
-  if length(tag) == 0 then
-    let text = trim(getText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
-    else []
+  match nodeKind(node) {
+    KindText =>
+      let text = trim(getText(node)) in
+      if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+      else [],
+    KindComment => [],
+    KindElement => htmlProcessElement(node)
+  }
+}
+
+-- Element-only dispatch (text + comment cases handled by the caller).
+pure func htmlProcessElement(node: XmlNode) -> [Block] {
+  let tag = getTag(node);
 
   -- Headings (rare per node but block-level elements).
-  else if tag == "h1" then [HeadingBlock({text: htmlDeepText(node), level: 1})]
+  if tag == "h1" then [HeadingBlock({text: htmlDeepText(node), level: 1})]
   else if tag == "h2" then [HeadingBlock({text: htmlDeepText(node), level: 2})]
   else if tag == "h3" then [HeadingBlock({text: htmlDeepText(node), level: 3})]
   else if tag == "h4" then [HeadingBlock({text: htmlDeepText(node), level: 4})]
@@ -339,13 +352,17 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
 -- <img> itself has a srcset attribute, it takes priority (preserves
 -- author intent).
 pure func htmlParseImg(node: XmlNode, inheritedSrcset: string) -> Block {
-  let src = getOrElse(getAttr(node, "src"), "");
-  let alt = getOrElse(getAttr(node, "alt"), "");
-  let title = getOrElse(getAttr(node, "title"), "");
-  let loading = getOrElse(getAttr(node, "loading"), "");
-  let widthStr = getOrElse(getAttr(node, "width"), "");
-  let heightStr = getOrElse(getAttr(node, "height"), "");
-  let ownSrcset = getOrElse(getAttr(node, "srcset"), "");
+  -- Pull the full attribute map in ONE FFI call rather than 7 separate
+  -- getAttr calls. For an image-heavy page (100+ <img>) this trades 700
+  -- FFI crossings for 100 + 100×7 hash lookups (which stay Go-side).
+  let attrs = getAttrMap(node);
+  let src = getOrElse(lookup(attrs, "src"), "");
+  let alt = getOrElse(lookup(attrs, "alt"), "");
+  let title = getOrElse(lookup(attrs, "title"), "");
+  let loading = getOrElse(lookup(attrs, "loading"), "");
+  let widthStr = getOrElse(lookup(attrs, "width"), "");
+  let heightStr = getOrElse(lookup(attrs, "height"), "");
+  let ownSrcset = getOrElse(lookup(attrs, "srcset"), "");
   let width = htmlParseDimension(widthStr);
   let height = htmlParseDimension(heightStr);
   let srcset = if length(ownSrcset) > 0 then ownSrcset else inheritedSrcset;

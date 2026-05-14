@@ -9,7 +9,59 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.2...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.3...HEAD)
+
+---
+
+## [0.18.3](https://github.com/sunholo-data/ailang-parse/compare/v0.18.2...v0.18.3) — 2026-05-14
+
+Adopt new `std/xml` APIs shipped in AILANG v0.19.2-dev
+(`nodeKind`, `getAttrMap`) and add a 1.7 MB real-world stress fixture
+to the corpus. Pure perf patch — goldens byte-identical.
+
+### Changed
+- **`htmlProcessNode` text-node branch uses `nodeKind`** instead of
+  `length(tag) == 0`. Same semantics, cleaner code, exhaustive pattern
+  match against `KindText | KindElement | KindComment`.
+- **`htmlParseImg` uses `getAttrMap`** to extract all 7 image
+  attributes (src, alt, width, height, srcset, title, loading) in
+  one FFI call + 7 in-memory hash lookups, instead of 7 separate
+  `getAttr` FFI crossings. For image-heavy pages this trades 7N
+  FFI calls for N + 7N hash lookups.
+
+### Added
+- **Stress fixture**: `data/test_files/stress/mollie-create-payment.html`
+  — 1.7 MB Mollie API documentation page with 143 `<code>` blocks of
+  embedded JSON. Exposes memory-pressure paths that the day-to-day
+  sample doesn't (large text inside deeply-nested `<code>`/`<pre>`).
+  Golden output checked in at `benchmarks/office/stress/`.
+- **Bumped `ailang = ">=0.19.2"`** in ailang.toml — `nodeKind` and
+  `getAttrMap` are v0.19.2 APIs.
+
+### Tried and reverted
+- **`foldChildren` for `htmlProcessChildren`** regressed Mollie alloc
+  from 229 MB → 395 MB. Root cause: replacing `flatMap(htmlProcessNode,
+  getChildren(node))` with an AILANG-side `foldChildren` accumulator
+  + final `reverse` overshoots flatMap's Go-iterative builtin which
+  amortises append in O(1). Reverted. Sent feedback upstream
+  (msg_20260514_104913_f639ad74) suggesting `foldChildren` itself
+  needs a Go-iterative implementation, or a new `flatMapChildren`
+  primitive that mirrors `flatMap`'s pattern.
+
+### Measured (Mollie 1.7 MB, AILANG_NO_TRACE=1)
+
+| Metric | v0.18.2 | v0.18.3 |
+|---|---|---|
+| alloc_space | 229 MB | **215 MB** (−6%) |
+| Wall time (warm) | ~0.77s | ~0.71s |
+
+Modest but real wins. Bigger gains await a `flatMapChildren`-style
+primitive or `foldChildren` getting a Go-iterative form.
+
+### Upstream proposals sent
+- `msg_20260514_100821_cd45490b` — original 6-feature perf proposal
+- `msg_20260514_102155_4aab028e` — pprof follow-up (trace = 5× memory)
+- `msg_20260514_104913_f639ad74` — `foldChildren` regression analysis
 
 ---
 
