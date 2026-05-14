@@ -9,7 +9,51 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.14.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.14.1...HEAD)
+
+---
+
+## [0.14.1](https://github.com/sunholo-data/ailang-parse/compare/v0.14.0...v0.14.1) — 2026-05-14
+
+### Added
+- **Image/audio/video `src` URLs surfaced in JSON output.** Previously,
+  the URL was captured into `ImageBlock.data` by HTML/ODT/Markdown/EPUB
+  parsers but `output_formatter.ail` only serialized its character
+  count (`dataLength`) — the actual URL was thrown away. Inspecting
+  parsed output of www.sunholo.com showed image alt text + mime + a
+  numeric length, but zero way to recover "where did this image come
+  from?" without re-parsing the source. The JSON now emits:
+  ```json
+  {"type":"image","description":"AILANG Logo","mime":"image/unknown",
+   "dataLength":15,"src":"ailang-logo.svg"}
+  ```
+  The `src` field is **length-gated to 2048 chars**: short URLs/paths
+  from HTML, Markdown, ODT, and EPUB surface in the output, while
+  DOCX/PPTX inline base64 binary payloads (often megabytes) stay
+  represented by `dataLength` alone — emitting them as `src` would
+  bloat JSON outputs by orders of magnitude.
+
+  Same change applies to `AudioBlock` and `VideoBlock` for symmetry.
+
+  This is a purely **additive** schema change: existing consumers that
+  read `description`/`mime`/`dataLength` continue to work; new
+  consumers can opt into the `src` field. Refresh affected goldens
+  (`ailang_guide.html`, `test.html`, `messy_html5_demo.html`,
+  `sunholo_homepage.html`, `lo_image_mimetype.odt`, `image_vml.docx`,
+  `pandoc_inline_images.docx`, `pandoc_basic.pptx`, `officeparser.odt`,
+  `officeparser.odp`, `challenge_html_multipart.eml`) — all eval at
+  100% against the new shape.
+
+### Known limitations (not addressed in this patch)
+- Images nested inside `<a>` tags are still dropped (the anchor branch
+  falls through to text-only mode). On www.sunholo.com this loses 8 of
+  12 images — they live in `<a class="card"><img></a>` patterns.
+- `<a href>` URLs themselves are not captured (62 hrefs on sunholo.com
+  → 0 in output). A future `LinkBlock` type or extended `TextBlock`
+  with optional `href` would close this.
+- `<img>` attributes beyond `src` and `alt` (`width`, `height`,
+  `srcset`, `loading`, `title`) and `<picture>`/`<source>` elements
+  are not captured. Schema change, deferred.
 
 ---
 
