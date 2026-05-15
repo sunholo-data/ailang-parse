@@ -11,6 +11,47 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.19.0...HEAD)
 
+### SDKs — v0.7.0 (Python)
+
+Implements [design_docs/planned/v0_20_0/v0_20_0_sdk_v07_extras_images_comments_tablecells.md](design_docs/planned/v0_20_0/v0_20_0_sdk_v07_extras_images_comments_tablecells.md).
+Source: multivac end-to-end field-test feedback (msg `msg_20260516_012720_2ed63396`)
+and migration ack (msg `msg_20260515_183500_d9476a0d`). Python-only;
+JS+Go versions bumped to 0.7.0 for sync but ship no new features.
+
+#### Added
+- **`ChunkMetadata.extras: Dict[str, Any]`** — consumer-defined fields
+  for `flatten()` chunks (per-tenant tags, confidence scores, etc.).
+  Omitted from `to_dict()` when empty.
+- **`FlattenPolicy(embed_comments=True)`** — emit a chunk for each
+  `CommentBlock` with `change_author`, `extras["resolved"]`,
+  `extras["date"]`. Forward-compatible: the parser-side `CommentBlock`
+  variant lands separately (see [v0.19.0 comment-threading doc](design_docs/planned/v0_19_0/v0_19_0_comment_threading.md));
+  the SDK knob is a no-op until then.
+- **`FlattenPolicy(on_table_cell_newlines=..., on_table_cell_pipes=...)`** —
+  `"preserve"` (default) | `"escape"` (`\n` → `\\n`, `|` → `\\|`,
+  round-trippable) | `"space"` (collapse to ` `, retrieval-friendly).
+  Invalid values raise `ValueError` at construction.
+- **`Block.resolved: bool`** — new field on the dataclass, populated
+  from JSON `resolved` when present. Forward-compat for comment
+  threading.
+
+#### Changed (behaviour change)
+- **`FlattenPolicy(embed_images=True)` now always emits an `ImageBlock` chunk**,
+  even when `description` and `transcription` are empty. The chunk
+  text falls back to a machine-readable placeholder
+  (`"[image: <mime>, <bytes> bytes]"`). New `extras["image_has_description"]`
+  boolean lets consumers distinguish AI-captioned from placeholder
+  chunks. v0.6.0 silently dropped empty-description images on free-tier
+  parses; this change makes images visible to consumers regardless of
+  AI availability. Filter recipe for v0.6.0 behaviour is in the README.
+
+#### Cross-SDK parity
+Python ships everything. JS + Go bump to 0.7.0 for version sync; they
+will pick up the v0.6.0 `flatten`/`parse_gs_uri`/`RetryPolicy` features
+and the v0.7.0 additions together in a future sprint.
+
+---
+
 ### SDKs — v0.6.0 (Python, JS), Go (unreleased tag)
 
 Implements [design_docs/planned/v0_20_0/v0_20_0_sdk_ergonomics.md](design_docs/planned/v0_20_0/v0_20_0_sdk_ergonomics.md).

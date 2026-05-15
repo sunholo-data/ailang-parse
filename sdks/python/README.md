@@ -167,14 +167,50 @@ from ailang_parse import FlattenPolicy
 
 chunks = result.flatten(FlattenPolicy(
     max_chunk_chars=4000,
-    embed_images=True,        # ImageBlock.description -> chunk
-    embed_changes=True,       # ChangeBlock + author metadata -> chunk
-    on_table="row",           # one chunk per row; or "whole", or a callable
-    section_path=True,        # tag each chunk with heading ancestry
+    embed_images=True,             # always emits ImageBlock chunks (placeholder if no caption)
+    embed_changes=True,            # ChangeBlock + author metadata -> chunk
+    embed_comments=True,           # CommentBlock + author + resolved -> chunk
+    on_table="row",                # "row" (default), "whole", or callable(block, meta) -> [Chunk]
+    on_table_cell_newlines="space",  # "preserve" (default) | "escape" | "space"
+    on_table_cell_pipes="escape",  # same modes — round-trippable structured retrieval
+    section_path=True,
 ))
 
 for c in chunks:
     embed(c.text, metadata=c.metadata.to_dict())
+```
+
+### Custom chunk metadata
+
+Use `metadata.extras` to carry consumer-defined fields. The `on_table`
+callable receives a mutable `ChunkMetadata` and can populate it:
+
+```python
+def my_table(block, md):
+    md.extras["tenant_id"] = "acme"
+    md.extras["confidence"] = 0.93
+    return [Chunk(text=..., metadata=md)]
+
+chunks = result.flatten(FlattenPolicy(on_table=my_table))
+```
+
+`extras` values should be JSON-serializable — they pass through to
+Pinecone/Vertex/Chroma metadata unchanged.
+
+### Image visibility
+
+`embed_images=True` always emits an `ImageBlock` chunk. When the image
+has no AI caption, the chunk text is a placeholder
+(`"[image: image/png, 12345 bytes]"`) and
+`metadata.extras["image_has_description"]` is `False`. To match the
+v0.6.0 "skip empty" behaviour:
+
+```python
+chunks = [
+    c for c in result.flatten(FlattenPolicy(embed_images=True))
+    if c.metadata.block_type != "image"
+    or c.metadata.extras.get("image_has_description")
+]
 ```
 
 ## Supported Formats

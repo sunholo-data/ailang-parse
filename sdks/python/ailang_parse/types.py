@@ -137,6 +137,9 @@ class Block:
     # SectionBlock
     kind: str = ""
     children: List["Block"] = field(default_factory=list)
+    # CommentBlock — parser-side support gated on docparse v0.19.0+
+    # comment-threading work; this field ships forward-compat.
+    resolved: bool = False
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Block":
@@ -156,6 +159,7 @@ class Block:
         b.kind = d.get("kind", "")
         b.ordered = d.get("ordered", False)
         b.items = d.get("items", [])
+        b.resolved = d.get("resolved", False)
 
         # Table
         b.headers = [Cell.from_raw(c) for c in d.get("headers", [])]
@@ -324,7 +328,14 @@ class ParseResult:
 
 @dataclass
 class ChunkMetadata:
-    """JSON-friendly metadata attached to each :class:`Chunk`."""
+    """JSON-friendly metadata attached to each :class:`Chunk`.
+
+    The fixed fields cover the common RAG-ingestion case. Consumers who
+    need to attach custom tags (per-tenant IDs, confidence scores,
+    domain-specific fields) populate :attr:`extras` — preferably with
+    JSON-serializable values, since they typically end up in
+    Pinecone / Vertex / Chroma metadata unchanged.
+    """
     block_type: str = ""
     section_path: List[str] = field(default_factory=list)
     block_index: int = 0
@@ -334,6 +345,7 @@ class ChunkMetadata:
     change_type: Optional[str] = None
     image_mime: Optional[str] = None
     heading_level: Optional[int] = None
+    extras: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -346,6 +358,8 @@ class ChunkMetadata:
             v = getattr(self, key)
             if v is not None:
                 out[key] = v
+        if self.extras:
+            out["extras"] = dict(self.extras)
         return out
 
 
@@ -358,6 +372,9 @@ class Chunk:
         return {"text": self.text, "metadata": self.metadata.to_dict()}
 
 
+_CELL_ESCAPE_MODES = ("preserve", "escape", "space")
+
+
 @dataclass
 class FlattenPolicy:
     """Policy governing :meth:`ParseResult.flatten`.
@@ -365,26 +382,66 @@ class FlattenPolicy:
     Attributes:
         max_chunk_chars: Soft upper bound on chunk size in characters.
             Text blocks longer than this are split on whitespace boundaries.
-        embed_images: Emit a chunk for each ``ImageBlock`` (using its
-            ``description``).  Most RAG pipelines disable this until
-            the upstream model produces useful image captions.
+        embed_images: Emit a chunk for each ``ImageBlock``. When the image
+            has no AI caption, the chunk text is a machine-readable
+            placeholder (``"[image: <mime>, <bytes> bytes]"``) and
+            ``metadata.extras["image_has_description"]`` is ``False``.
+            Most RAG pipelines disable this.
         embed_changes: Emit a chunk for each ``ChangeBlock`` with author
             metadata.  Most pipelines disable this; threaded review tools
             enable it.
+        embed_comments: Emit a chunk for each ``CommentBlock`` (parser-side
+            support gated on the docparse v0.19.0+ comment work — this
+            knob ships forward-compat).
         on_table: ``"row"`` (default — one chunk per row with header
             context), ``"whole"`` (one chunk for the entire table), or
             a callable ``(Block, ChunkMetadata) -> List[Chunk]`` that
             takes full control.
+        on_table_cell_newlines: How to handle ``\\n`` inside a table cell
+            when joining with ``" | "``. ``"preserve"`` (default) keeps
+            them as-is, ``"escape"`` replaces them with a literal
+            ``"\\\\n"`` (round-trippable), ``"space"`` collapses to
+            ``" "`` (lossy, retrieval-friendly).
+        on_table_cell_pipes: Same three modes for literal ``|`` inside a
+            cell. ``"escape"`` produces ``"\\\\|"``.
         section_path: Track heading ancestry on each emitted chunk.
     """
     max_chunk_chars: int = 2000
     embed_images: bool = False
     embed_changes: bool = False
+    embed_comments: bool = False
     on_table: Union[str, Callable[["Block", "ChunkMetadata"], List["Chunk"]]] = "row"
+    on_table_cell_newlines: str = "preserve"
+    on_table_cell_pipes: str = "preserve"
     section_path: bool = True
+
+    def __post_init__(self) -> None:
+        if self.on_table_cell_newlines not in _CELL_ESCAPE_MODES:
+            raise ValueError(
+                f"on_table_cell_newlines must be one of {_CELL_ESCAPE_MODES}, "
+                f"got {self.on_table_cell_newlines!r}"
+            )
+        if self.on_table_cell_pipes not in _CELL_ESCAPE_MODES:
+            raise ValueError(
+                f"on_table_cell_pipes must be one of {_CELL_ESCAPE_MODES}, "
+                f"got {self.on_table_cell_pipes!r}"
+            )
 
 
 DEFAULT_FLATTEN_POLICY = FlattenPolicy()
+
+
+def _escape_cell(text: str, newlines: str, pipes: str) -> str:
+    """Apply the policy's cell-escape modes to a single cell's text."""
+    if newlines == "escape":
+        text = text.replace("\n", "\\n")
+    elif newlines == "space":
+        text = text.replace("\n", " ")
+    if pipes == "escape":
+        text = text.replace("|", "\\|")
+    elif pipes == "space":
+        text = text.replace("|", " ")
+    return text
 
 
 def _split_long_text(text: str, max_chars: int) -> List[str]:
@@ -448,31 +505,37 @@ def _flatten_blocks(blocks: List["Block"], policy: FlattenPolicy,
             )
             if callable(policy.on_table):
                 out.extend(policy.on_table(b, md))
-            elif policy.on_table == "whole":
-                rows_text = [
-                    " | ".join(c.text for c in (b.headers or [])),
-                    *[" | ".join(c.text for c in row) for row in b.rows],
-                ]
-                out.append(Chunk(text="\n".join(rows_text), metadata=md))
-            else:  # "row"
-                headers = [c.text for c in (b.headers or [])]
-                header_line = " | ".join(headers) if headers else ""
-                for ri, row in enumerate(b.rows):
-                    cells = [c.text for c in row]
-                    if header_line:
-                        text = header_line + "\n" + " | ".join(cells)
-                    else:
-                        text = " | ".join(cells)
-                    out.append(Chunk(
-                        text=text,
-                        metadata=ChunkMetadata(
-                            block_type="table_row",
-                            section_path=list(section_path) if policy.section_path else [],
-                            block_index=idx,
-                            table_id=md.table_id,
-                            row_index=ri,
-                        ),
-                    ))
+            else:
+                nl = policy.on_table_cell_newlines
+                pi = policy.on_table_cell_pipes
+                if policy.on_table == "whole":
+                    rows_text = [
+                        " | ".join(_escape_cell(c.text, nl, pi)
+                                   for c in (b.headers or [])),
+                        *[" | ".join(_escape_cell(c.text, nl, pi) for c in row)
+                          for row in b.rows],
+                    ]
+                    out.append(Chunk(text="\n".join(rows_text), metadata=md))
+                else:  # "row"
+                    headers = [_escape_cell(c.text, nl, pi)
+                               for c in (b.headers or [])]
+                    header_line = " | ".join(headers) if headers else ""
+                    for ri, row in enumerate(b.rows):
+                        cells = [_escape_cell(c.text, nl, pi) for c in row]
+                        if header_line:
+                            text = header_line + "\n" + " | ".join(cells)
+                        else:
+                            text = " | ".join(cells)
+                        out.append(Chunk(
+                            text=text,
+                            metadata=ChunkMetadata(
+                                block_type="table_row",
+                                section_path=list(section_path) if policy.section_path else [],
+                                block_index=idx,
+                                table_id=md.table_id,
+                                row_index=ri,
+                            ),
+                        ))
         elif bt == "list" or bt == "ListBlock":
             text = "\n".join(f"- {item}" for item in b.items)
             for piece in _split_long_text(text, policy.max_chunk_chars):
@@ -487,16 +550,19 @@ def _flatten_blocks(blocks: List["Block"], policy: FlattenPolicy,
                     ),
                 ))
         elif bt == "image" or bt == "ImageBlock":
-            if policy.embed_images and (b.description or b.transcription):
-                out.append(Chunk(
-                    text=b.description or b.transcription,
-                    metadata=ChunkMetadata(
-                        block_type="image",
-                        section_path=list(section_path) if policy.section_path else [],
-                        block_index=idx,
-                        image_mime=b.mime or None,
-                    ),
-                ))
+            if policy.embed_images:
+                has_desc = bool(b.description)
+                text = (b.description or b.transcription
+                        or f"[image: {b.mime or 'unknown'}, {b.data_length} bytes]")
+                md_img = ChunkMetadata(
+                    block_type="image",
+                    section_path=list(section_path) if policy.section_path else [],
+                    block_index=idx,
+                    image_mime=b.mime or None,
+                )
+                md_img.extras["image_data_length"] = b.data_length
+                md_img.extras["image_has_description"] = has_desc
+                out.append(Chunk(text=text, metadata=md_img))
         elif bt == "change" or bt == "ChangeBlock":
             if policy.embed_changes and b.text:
                 out.append(Chunk(
@@ -509,6 +575,18 @@ def _flatten_blocks(blocks: List["Block"], policy: FlattenPolicy,
                         change_type=b.change_type or None,
                     ),
                 ))
+        elif bt == "comment" or bt == "CommentBlock":
+            if policy.embed_comments and b.text:
+                md_c = ChunkMetadata(
+                    block_type="comment",
+                    section_path=list(section_path) if policy.section_path else [],
+                    block_index=idx,
+                    change_author=b.author or None,
+                )
+                md_c.extras["resolved"] = b.resolved
+                if b.date:
+                    md_c.extras["date"] = b.date
+                out.append(Chunk(text=b.text, metadata=md_c))
         elif bt == "section" or bt == "SectionBlock":
             # Recurse with section_path extended by the section's "kind"
             # or by an inferred heading from children.
