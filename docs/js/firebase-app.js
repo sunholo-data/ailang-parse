@@ -19,7 +19,7 @@
   var ENV_CONFIG = {
     dev: {
       firebase: {
-        apiKey: "AIzaSyCkvFxVilpZkqao1ntOPQbhwMy2GJI0FIE",
+        apiKey: "AIzaSyDfYyF0UR5OaUGe9DWIx2nzcy625_txN1o",
         authDomain: "ailang-multivac-dev.firebaseapp.com",
         projectId: "ailang-multivac-dev",
         storageBucket: "ailang-multivac-dev.appspot.com",
@@ -30,7 +30,7 @@
     },
     test: {
       firebase: {
-        apiKey: "AIzaSyBoYNEqZi5eGVzFGhdIyRKXlM4JRgIuso4",
+        apiKey: "AIzaSyDlP3j55f0tKp36ootL32ZVKyuO_a3tOag",
         authDomain: "ailang-multivac-test.firebaseapp.com",
         projectId: "ailang-multivac-test",
         storageBucket: "ailang-multivac-test.firebasestorage.app",
@@ -41,7 +41,7 @@
     },
     prod: {
       firebase: {
-        apiKey: "AIzaSyBwWZIwSFe59kcYvdcEHKw1gTf07xytKgM",
+        apiKey: "AIzaSyBqHyoveqcGyL7LLnlvQ2FtHxdy6evXbHo",
         authDomain: "ailang-multivac.firebaseapp.com",
         projectId: "ailang-multivac",
         storageBucket: "ailang-multivac.appspot.com",
