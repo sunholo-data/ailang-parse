@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PDF Parsing API — AI-Powered PDF to Structured JSON — AILANG Parse</title>
+<title>PDF Parsing API — AI or Local Deterministic Backends — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Parse PDF files to structured JSON using any AI provider. Gemini, Claude, OpenAI, or Ollama for fully local. Tables, images, and text extracted into typed blocks.">
+<meta name="description" content="Parse PDFs to structured JSON via AI (Gemini, Claude, OpenAI, Ollama) or local deterministic backends (Docling, LiteParse) — up to 40× faster than AI on born-digital papers. Same Block ADT as Office formats.">
 <meta property="og:title" content="PDF Parsing API — AILANG Parse">
-<meta property="og:description" content="Parse PDFs to structured JSON with any AI provider. Gemini, Claude, OpenAI, or Ollama. No vendor lock-in, same Block ADT output as Office formats.">
+<meta property="og:description" content="Parse PDFs with AI or local deterministic backends (Docling, LiteParse). Pick per call — same Block ADT, no vendor lock-in. Self-hostable v0.19+.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/docparse/pdf-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -134,6 +134,49 @@
 .dp-provider-card code {
   font-size: 12px;
 }
+.dp-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--bg-soft, #f0f0f0);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.dp-pill-new {
+  background: var(--accent, #16a34a);
+  color: #fff;
+  border-color: transparent;
+}
+.dp-comparison-table {
+  margin: 20px 0;
+  overflow-x: auto;
+}
+.dp-comparison-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.dp-comparison-table th,
+.dp-comparison-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.dp-comparison-table th {
+  font-weight: 600;
+  background: var(--bg-soft, #f7f7f7);
+  font-size: 13px;
+}
+.dp-comparison-table td code {
+  font-size: 12px;
+  white-space: nowrap;
+}
 @media (max-width: 900px) {
   .dp-compare-grid,
   .dp-feature-grid,
@@ -148,10 +191,10 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the PDF to the AILANG Parse API with an AI provider specified (Gemini, Claude, OpenAI, or Ollama). The AI extracts content into the same structured JSON Block ADT used for Office formats."}},
-    {"@type": "Question", "name": "Which AI providers are supported for PDF parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Gemini (gemini-2.5-flash, gemini-2.5-pro), Claude (claude-sonnet-4-5-20250514), OpenAI (gpt-4o), and Ollama for fully local processing. Switch providers with a single flag — no code changes."}},
-    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use Ollama as the AI backend for fully local PDF processing. No data leaves your machine. Set --ai ollama/llama3.2-vision or any vision-capable Ollama model."}},
-    {"@type": "Question", "name": "Why does PDF parsing require AI?", "acceptedAnswer": {"@type": "Answer", "text": "PDFs are a visual format — they encode where to draw glyphs on a page, not document structure. Extracting semantic structure (headings, tables, reading order) requires visual understanding that rule-based parsers can't reliably provide."}},
+    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "From v0.19.0 the CLI offers three backends via --pdf-backend: ai (Gemini, Claude, OpenAI, or Ollama, default), docling (IBM Docling, local deterministic, ~5× faster than AI), or liteparse (run-llama LiteParse, fastest, ~40× faster). All produce the same structured JSON Block ADT."}},
+    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "AI backends: Gemini (gemini-2.5-flash, gemini-2.5-pro), Claude, OpenAI, Ollama. Local deterministic backends (v0.19+): Docling for structural extraction, LiteParse for fast text extraction. Switch with --pdf-backend ai|docling|liteparse — no code changes."}},
+    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — three options. Use --pdf-backend docling for local deterministic layout analysis, --pdf-backend liteparse for fast local text extraction (both v0.19+, no API key needed), or --ai ollama/llama3.2-vision for AI-quality local processing."}},
+    {"@type": "Question", "name": "Do all PDFs require AI?", "acceptedAnswer": {"@type": "Answer", "text": "No. Born-digital PDFs (papers, reports, invoices) parse cleanly with Docling or LiteParse — no AI needed. AI is required for scanned PDFs, handwriting, and complex multimodal layouts that text-extraction can't handle."}},
     {"@type": "Question", "name": "Is the output format the same as Office parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. PDF parsing produces the same Block ADT (headings, text, tables, images) as DOCX, XLSX, and PPTX parsing. Your downstream code handles all formats identically."}},
     {"@type": "Question", "name": "How much does PDF parsing cost?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse charges per API request. The AI provider costs are separate — you use your own API key. Gemini Flash is the most cost-effective option for high-volume PDF processing."}}
   ]
@@ -166,7 +209,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">PDF Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Parse PDFs to structured JSON using any AI provider. Gemini, Claude, OpenAI, or Ollama for fully local. Same typed blocks as Office formats &mdash; no vendor lock-in.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse PDFs to structured JSON via AI (Gemini, Claude, OpenAI, Ollama) or local deterministic backends (Docling, LiteParse) &mdash; up to 40&times; faster than AI on born-digital papers. Same typed blocks as Office formats, no vendor lock-in.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own file in the Workbench &rarr;</a></div>
   </section>
 
@@ -233,6 +276,65 @@ ailang run --entry main --caps IO,FS,Env,AI --ai ollama/llama3.2-vision \
           <h4>Ollama (Local)</h4>
           <p>Fully local processing &mdash; no data leaves your machine. Use any vision-capable model: <code>llama3.2-vision</code>, <code>llava</code>, etc. Ideal for sensitive documents, air-gapped environments, or cost-zero development.</p>
         </div>
+      </div>
+
+      <h2 id="local-backends">Local Deterministic Backends <span class="dp-pill dp-pill-new">v0.19+</span></h2>
+      <p>As of <strong>v0.19.0</strong>, the CLI can dispatch PDF parsing to local backends instead of an AI provider. Two options ship today:</p>
+
+      <div class="dp-provider-grid">
+        <div class="dp-provider-card">
+          <h4>Docling <span class="dp-pill">structural</span></h4>
+          <p>IBM Docling — local layout analysis with table detection and reading order. Matches AI structural quality on real arxiv papers, runs in ~28&nbsp;s on a 100&nbsp;KB paper (vs ~127&nbsp;s for Gemini Flash). Free, MIT, no API key. Best when you want the headings/tables structure without an AI round-trip.</p>
+        </div>
+        <div class="dp-provider-card">
+          <h4>LiteParse <span class="dp-pill">fastest</span></h4>
+          <p>run-llama LiteParse — text extraction with bounding boxes, no layout model. End-to-end ~3&nbsp;s on a 100&nbsp;KB PDF via the CLI (the raw parse is under a second, the rest is AILANG startup + Python import). Heading detection via a font-size heuristic. Best for RAG ingest, search indexing, or anywhere raw text is what you need.</p>
+        </div>
+      </div>
+
+      <p>Both run as Python subprocesses dispatched from inside AILANG via the <a href="https://github.com/sunholo-data/ailang-packages/tree/main/packages/external-backend"><code>sunholo/external_backend</code></a> package, with typed error handling and stderr capture. Selection is per call — there's no global config to drift.</p>
+
+      <h3 id="local-install">Install</h3>
+      <p>The <code>ai</code> backend works out of the box. The local backends need their Python package installed in the same Python environment your CLI uses:</p>
+
+<pre><code class="language-bash"># Docling (see <a href="https://github.com/docling-project/docling">docling-project/docling</a> for the full install matrix)
+uv pip install docling
+
+# LiteParse (see <a href="https://github.com/run-llama/liteparse">run-llama/liteparse</a>)
+uv pip install liteparse
+
+# Or both
+uv pip install docling liteparse</code></pre>
+
+      <p>No service to run, no daemon to start — both adapters launch on demand when you pass <code>--pdf-backend docling</code> or <code>--pdf-backend liteparse</code>. If the package isn't installed, the adapter exits non-zero and AILANG surfaces a typed <code>NonZeroExit</code> error with the underlying <code>ImportError</code> captured from stderr.</p>
+
+      <h3 id="local-usage">Usage</h3>
+
+<pre><code class="language-bash"># AI (default — unchanged behavior)
+./bin/docparse paper.pdf --pdf-backend ai --ai gemini-2.5-flash
+
+# Docling — local, structural, ~5× faster than Gemini
+./bin/docparse paper.pdf --pdf-backend docling
+
+# LiteParse — local, fastest text extraction (~40× faster than AI end-to-end)
+./bin/docparse paper.pdf --pdf-backend liteparse</code></pre>
+
+      <p>Output is the same <code>Block</code> ADT — your pipeline code doesn't change when you switch backend. When <code>--pdf-backend</code> is anything other than <code>ai</code>, AILANG drops the <code>AI</code> capability and swaps in <code>Process</code> — no API key required, no network calls.</p>
+
+      <h3 id="backend-choice">Which Backend to Pick</h3>
+
+      <div class="dp-comparison-table">
+        <table>
+          <thead>
+            <tr><th>Need</th><th>Recommended Backend</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Scanned PDFs, handwriting, complex multimodal</td><td><code>ai</code> (Gemini / Claude / Ollama)</td><td>Only AI handles non-text content; deterministic backends can't read scans.</td></tr>
+            <tr><td>Born-digital PDF, want structure (headings, tables)</td><td><code>docling</code></td><td>Structural quality on par with AI; ~5× faster; free; offline.</td></tr>
+            <tr><td>Large batch / RAG ingest where you just need text</td><td><code>liteparse</code></td><td>Sub-second per PDF; highest character recall; trivial cost.</td></tr>
+            <tr><td>Cost-sensitive production with mixed PDFs</td><td>Tier: try <code>liteparse</code> first, fall back to <code>ai</code> if confidence low</td><td>Most born-digital PDFs parse cleanly without AI; reserve AI budget for the hard ones.</td></tr>
+          </tbody>
+        </table>
       </div>
 
       <h2 id="what-gets-extracted">What Gets Extracted</h2>
