@@ -35,7 +35,8 @@ export class DocParse {
    */
   constructor(opts?: DocParseOptions) {
     this.baseUrl = ((opts?.baseUrl || DEFAULT_BASE_URL) as string).replace(/\/$/, "");
-    this.timeout = opts?.timeout || 60000;
+    // Default 120s — AI-backed formats (PDF, images) routinely exceed 60s.
+    this.timeout = opts?.timeout || 120000;
 
     // Resolve API key: explicit > env var > saved credentials
     let key = opts?.apiKey || "";
@@ -54,6 +55,48 @@ export class DocParse {
     this.apiKey = key;
     this.keyId = keyId;
     this.keys = new KeyManager(this);
+  }
+
+  /**
+   * Raise the right exception type from a non-2xx response, populating
+   * requestId / replayable / details / suggestedFix from headers + body.
+   * Returns silently on 2xx.
+   */
+  private static async _raiseForResponse(resp: Response): Promise<void> {
+    if (resp.ok) return;
+    const meta = DocParse._extractMeta(resp.headers);
+    let body: any = null;
+    let text = "";
+    try {
+      text = await resp.text();
+      try { body = JSON.parse(text); } catch { body = null; }
+    } catch {
+      /* network read failed — fall back to status-only */
+    }
+    let msg: string | undefined;
+    if (body && typeof body === "object") {
+      msg = body.error || body.message;
+      if (msg && typeof msg === "object") msg = (msg as any).message || JSON.stringify(msg);
+    }
+    if (!msg) msg = text || `HTTP ${resp.status}`;
+    const suggestedFix: string =
+      (body && (body.suggested_fix || body.suggestedFix)) || "";
+    const common = {
+      requestId: meta.requestId,
+      suggestedFix,
+      details: body,
+      replayable: meta.replayable,
+    };
+    if (resp.status === 401) {
+      throw new AuthError(msg || "Invalid or missing API key", common);
+    }
+    if (resp.status === 429) {
+      throw new QuotaError(msg || "Quota exceeded", { ...common, tier: meta.tier });
+    }
+    throw new DocParseError(`API error: ${resp.status} ${msg}`, {
+      statusCode: resp.status,
+      ...common,
+    });
   }
 
   /** Extract response metadata from API response headers. */
@@ -90,9 +133,7 @@ export class DocParse {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      if (resp.status === 401) throw new AuthError();
-      if (resp.status === 429) throw new QuotaError("Quota exceeded");
-      if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
+      await DocParse._raiseForResponse(resp);
       const meta = DocParse._extractMeta(resp.headers);
       const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
       result.responseMeta = meta;
@@ -159,9 +200,7 @@ export class DocParse {
         signal: controller.signal,
       });
 
-      if (resp.status === 401) throw new AuthError();
-      if (resp.status === 429) throw new QuotaError("Quota exceeded");
-      if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
+      await DocParse._raiseForResponse(resp);
 
       const meta = DocParse._extractMeta(resp.headers);
       const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
@@ -447,9 +486,7 @@ export class DocParse {
         signal: controller.signal,
       });
 
-      if (resp.status === 401) throw new AuthError();
-      if (resp.status === 429) throw new QuotaError("Quota exceeded");
-      if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
+      await DocParse._raiseForResponse(resp);
 
       const outer = await resp.json();
 

@@ -66,14 +66,8 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	if resp.StatusCode == 401 {
-		return nil, newAuthError("")
-	}
-	if resp.StatusCode == 429 {
-		return nil, newQuotaError("")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data)), resp.StatusCode)
+	if err := raiseForResponse(resp, data); err != nil {
+		return nil, err
 	}
 
 	inner, err := c.unwrap(data)
@@ -181,14 +175,8 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	if resp.StatusCode == 401 {
-		return nil, newAuthError("")
-	}
-	if resp.StatusCode == 429 {
-		return nil, newQuotaError("")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data)), resp.StatusCode)
+	if err := raiseForResponse(resp, data); err != nil {
+		return nil, err
 	}
 
 	inner, err := c.unwrap(data)

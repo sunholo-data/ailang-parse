@@ -28,9 +28,11 @@ from .types import (
     KeyInfo, Quota, Usage, UsageInfo,
     Element, ElementMetadata,
     DocParseError, AuthError, QuotaError,
+    RetryPolicy,
+    Chunk, ChunkMetadata, FlattenPolicy, DEFAULT_FLATTEN_POLICY,
 )
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"
 __all__ = [
     "DocParse",
     "UnstructuredClient",
@@ -40,4 +42,6 @@ __all__ = [
     "KeyInfo", "Quota", "Usage", "UsageInfo",
     "Element", "ElementMetadata",
     "DocParseError", "AuthError", "QuotaError",
+    "RetryPolicy",
+    "Chunk", "ChunkMetadata", "FlattenPolicy", "DEFAULT_FLATTEN_POLICY",
 ]

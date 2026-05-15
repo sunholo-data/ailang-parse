@@ -2,44 +2,84 @@
 
 // ── Errors ──
 
+export interface DocParseErrorOpts {
+  statusCode?: number;
+  suggestedFix?: string;
+  details?: Record<string, unknown> | null;
+  requestId?: string;
+  replayable?: boolean;
+}
+
 export class DocParseError extends Error {
   statusCode: number;
   suggestedFix: string;
-  details: Record<string, unknown>;
+  details: Record<string, unknown> | null;
   requestId: string;
-  constructor(
-    message: string,
-    statusCode: number = 0,
-    suggestedFix: string = "",
-    details: Record<string, unknown> = {},
-    requestId: string = "",
-  ) {
+  replayable: boolean;
+  /**
+   * Backwards-compatible: `new DocParseError("msg")`,
+   * `new DocParseError("msg", 500)`, or
+   * `new DocParseError("msg", { statusCode: 500, requestId: "r" })`.
+   */
+  constructor(message: string, statusOrOpts: number | DocParseErrorOpts = 0,
+              suggestedFix: string = "",
+              details: Record<string, unknown> | null = null,
+              requestId: string = "") {
     super(message);
     this.name = "DocParseError";
-    this.statusCode = statusCode;
-    this.suggestedFix = suggestedFix;
-    this.details = details;
-    this.requestId = requestId;
+    if (typeof statusOrOpts === "object" && statusOrOpts !== null) {
+      this.statusCode = statusOrOpts.statusCode ?? 0;
+      this.suggestedFix = statusOrOpts.suggestedFix ?? "";
+      this.details = statusOrOpts.details ?? null;
+      this.requestId = statusOrOpts.requestId ?? "";
+      this.replayable = statusOrOpts.replayable ?? false;
+    } else {
+      this.statusCode = statusOrOpts;
+      this.suggestedFix = suggestedFix;
+      this.details = details;
+      this.requestId = requestId;
+      this.replayable = false;
+    }
   }
 }
 
 export class AuthError extends DocParseError {
-  constructor(message: string = "Invalid or missing API key") {
-    super(message, 401);
+  constructor(message: string = "Invalid or missing API key",
+              opts: DocParseErrorOpts = {}) {
+    super(message, { statusCode: 401, ...opts });
     this.name = "AuthError";
   }
+}
+
+export interface QuotaErrorOpts extends DocParseErrorOpts {
+  tier?: string;
+  used?: number;
+  limit?: number;
 }
 
 export class QuotaError extends DocParseError {
   tier: string;
   used: number;
   limit: number;
-  constructor(message: string, tier = "", used = 0, limit = 0) {
-    super(message, 429);
+  /**
+   * Backwards-compatible: legacy positional form
+   * `new QuotaError("msg", "free", 100, 50)` and the new opts-bag form
+   * `new QuotaError("msg", { tier: "free", requestId: "r" })` both work.
+   */
+  constructor(message: string = "Quota exceeded",
+              tierOrOpts: string | QuotaErrorOpts = {},
+              used: number = 0, limit: number = 0) {
+    let opts: QuotaErrorOpts;
+    if (typeof tierOrOpts === "string") {
+      opts = { tier: tierOrOpts, used, limit };
+    } else {
+      opts = tierOrOpts;
+    }
+    super(message, { statusCode: 429, ...opts });
     this.name = "QuotaError";
-    this.tier = tier;
-    this.used = used;
-    this.limit = limit;
+    this.tier = opts.tier ?? "";
+    this.used = opts.used ?? 0;
+    this.limit = opts.limit ?? 0;
   }
 }
 

@@ -8,6 +8,12 @@ from typing import Any, Dict, Optional
 
 import requests
 
+
+def _replayable_header(resp: "requests.Response") -> bool:
+    return (resp.headers.get("X-AilangParse-Replayable", "") or
+            resp.headers.get("x-ailangparse-replayable", "")).lower() == "true"
+
+
 from . import _credentials
 from ._credentials import (
     DEFAULT_BASE_URL,
@@ -17,6 +23,7 @@ from ._credentials import (
 from .types import (
     DocParseError, AuthError, QuotaError,
     ParseResult, ResponseMeta, HealthResult, FormatsResult,
+    RetryPolicy,
 )
 
 
@@ -40,16 +47,25 @@ class DocParse:
         client = DocParse()
         result = client.parse("report.docx")
         print(result.blocks)
+
+    The default ``timeout`` is 120 seconds.  AI-backed formats (PDF, images)
+    routinely exceed that on large documents — set ``timeout=300`` (or higher)
+    when parsing PDFs through a remote model.
+
+    Pass ``retry=RetryPolicy(max_retries=3)`` to enable automatic retry on
+    5xx responses; the default policy does not retry.
     """
 
     def __init__(
         self,
         api_key: str = "",
         base_url: str = DEFAULT_BASE_URL,
-        timeout: int = 60,
+        timeout: int = 120,
+        retry: Optional["RetryPolicy"] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.retry = retry or RetryPolicy()
         self._session = requests.Session()
 
         # Resolve API key: explicit > env var > saved credentials
@@ -68,6 +84,80 @@ class DocParse:
 
         from .keys import KeyManager
         self.keys = KeyManager(self)
+
+    # ── Error handling ──
+
+    @staticmethod
+    def _raise_for_response(resp: "requests.Response") -> None:
+        """Raise the right exception type from a non-2xx response.
+
+        Populates ``request_id``, ``replayable``, ``details``, and
+        ``suggested_fix`` on the exception by reading the response
+        headers (via :class:`ResponseMeta`) and the JSON body when
+        present.  No-op for 2xx responses.
+        """
+        if resp.status_code < 400:
+            return
+        meta = ResponseMeta.from_headers(dict(resp.headers))
+        try:
+            body = resp.json()
+            if not isinstance(body, dict):
+                body = None
+        except (ValueError, json.JSONDecodeError):
+            body = None
+        msg = (body or {}).get("error") or (body or {}).get("message") or resp.text
+        if isinstance(msg, dict):
+            msg = msg.get("message", str(msg))
+        suggested = (body or {}).get("suggested_fix", "") or \
+                    (body or {}).get("suggestedFix", "")
+
+        common = dict(
+            request_id=meta.request_id,
+            suggested_fix=suggested,
+            details=body,
+            replayable=meta.replayable,
+        )
+        if resp.status_code == 401:
+            raise AuthError(msg or "Invalid or missing API key", **common)
+        if resp.status_code == 429:
+            raise QuotaError(
+                msg or "Quota exceeded",
+                tier=meta.tier,
+                **common,
+            )
+        raise DocParseError(
+            f"API error: {resp.status_code} {msg}",
+            status_code=resp.status_code,
+            **common,
+        )
+
+    def _post(self, url: str, **kwargs) -> "requests.Response":
+        """POST with retry policy applied. Use for endpoints that the
+        retry policy should govern (parse, parse_file). Other endpoints
+        (auth, health, formats) call ``self._session`` directly."""
+        return self._send("POST", url, **kwargs)
+
+    def _send(self, method: str, url: str, **kwargs) -> "requests.Response":
+        attempt = 0
+        last_exc: Optional[Exception] = None
+        while True:
+            try:
+                resp = self._session.request(method, url, **kwargs)
+            except requests.RequestException as e:
+                # Network-layer errors. Retry on the same statuses we'd
+                # retry for HTTP-layer 5xx, capped by max_retries.
+                last_exc = e
+                if attempt >= self.retry.max_retries:
+                    raise
+                time.sleep(self.retry.delay_for(attempt))
+                attempt += 1
+                continue
+            if not self.retry.should_retry(resp.status_code,
+                                           _replayable_header(resp)) \
+                    or attempt >= self.retry.max_retries:
+                return resp
+            time.sleep(self.retry.delay_for(attempt))
+            attempt += 1
 
     # ── Core API methods ──
 
@@ -92,13 +182,8 @@ class DocParse:
             body["apiKey"] = self.api_key
         if source_url:
             body["sourceUrl"] = source_url
-        resp = self._session.post(url, json=body, timeout=self.timeout)
-        if resp.status_code == 401:
-            raise AuthError("Invalid or missing API key", 401)
-        if resp.status_code == 429:
-            raise QuotaError("Quota exceeded")
-        if resp.status_code >= 400:
-            raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
+        resp = self._post(url, json=body, timeout=self.timeout)
+        self._raise_for_response(resp)
         meta = ResponseMeta.from_headers(dict(resp.headers))
         result = self._build_parse_result(self._unwrap(resp.json()), output_format)
         result.response_meta = meta
@@ -121,6 +206,74 @@ class DocParse:
         """
         return self.parse(filepath="", output_format=output_format, source_url=url)
 
+    def parse_gs_uri(self, gs_uri: str, *, ttl: int = 900,
+                     output_format: str = "blocks",
+                     credentials: Optional[Any] = None) -> ParseResult:
+        """Sign a ``gs://`` URI and parse the referenced document.
+
+        Convenience wrapper around :meth:`parse_url` that signs a Google
+        Cloud Storage URI as a v4 GET URL before sending it to the API.
+        Useful when consumer code already holds a ``gs://bucket/key``
+        reference and would otherwise rewrite the same signing boilerplate.
+
+        Requires the optional ``[gcs]`` extra::
+
+            pip install 'ailang-parse[gcs]'
+
+        Auth resolution defaults to Application Default Credentials.  Pass
+        an explicit ``credentials`` object (any ``google.auth.credentials``
+        instance) to override.
+
+        Args:
+            gs_uri: ``gs://bucket/key`` reference to a document.
+            ttl: Signed URL lifetime in seconds (default 900 = 15 min).
+            output_format: Same as :meth:`parse`.
+            credentials: Optional ``google.auth.credentials.Credentials``.
+
+        Raises:
+            ImportError: ``google-cloud-storage`` is not installed.
+            ValueError: ``gs_uri`` is not a well-formed ``gs://`` URI.
+
+        Usage::
+
+            result = client.parse_gs_uri(
+                "gs://my-bucket/path/to/doc.pdf",
+                ttl=900,
+                output_format="markdown+metadata",
+            )
+        """
+        try:
+            from google.cloud import storage  # type: ignore
+        except ImportError as e:
+            raise ImportError(
+                "parse_gs_uri requires the 'gcs' extra. "
+                "Install with: pip install 'ailang-parse[gcs]'"
+            ) from e
+        from datetime import timedelta
+
+        if not gs_uri.startswith("gs://"):
+            raise ValueError(
+                f"parse_gs_uri requires a gs:// URI, got {gs_uri!r}"
+            )
+        rest = gs_uri[len("gs://"):]
+        if "/" not in rest:
+            raise ValueError(
+                f"gs:// URI missing object key: {gs_uri!r}"
+            )
+        bucket_name, blob_name = rest.split("/", 1)
+        if not bucket_name or not blob_name:
+            raise ValueError(f"gs:// URI has empty bucket or key: {gs_uri!r}")
+
+        sc = storage.Client(credentials=credentials) if credentials \
+            else storage.Client()
+        blob = sc.bucket(bucket_name).blob(blob_name)
+        signed = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=ttl),
+            method="GET",
+        )
+        return self.parse_url(signed, output_format=output_format)
+
     def parse_file(self, filepath: str, output_format: str = "blocks") -> ParseResult:
         """Upload a local file and parse it. Returns structured blocks.
 
@@ -134,18 +287,13 @@ class DocParse:
         """
         url = self.base_url + "/api/v1/parse"
         with open(filepath, "rb") as f:
-            resp = self._session.post(
+            resp = self._post(
                 url,
                 files={"filepath": (Path(filepath).name, f)},
                 data={"outputFormat": output_format, "apiKey": self.api_key},
                 timeout=self.timeout,
             )
-        if resp.status_code == 401:
-            raise AuthError("Invalid or missing API key", 401)
-        if resp.status_code == 429:
-            raise QuotaError("Quota exceeded")
-        if resp.status_code >= 400:
-            raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
+        self._raise_for_response(resp)
         meta = ResponseMeta.from_headers(dict(resp.headers))
         result = self._build_parse_result(self._unwrap(resp.json()), output_format)
         result.response_meta = meta
@@ -405,11 +553,6 @@ class DocParse:
                 url, json=body, timeout=self.timeout
             )
 
-        if resp.status_code == 401:
-            raise AuthError("Invalid or missing API key", 401)
-        if resp.status_code == 429:
-            raise QuotaError("Quota exceeded")
-        if resp.status_code >= 400:
-            raise DocParseError(f"API error: {resp.status_code} {resp.text}", resp.status_code)
+        self._raise_for_response(resp)
 
         return self._unwrap(resp.json())

@@ -36,5 +36,6 @@ export type {
   KeyInfo, Quota, Usage, UsageInfo,
   Element, ElementMetadata,
   DocParseOptions,
+  DocParseErrorOpts, QuotaErrorOpts,
 } from "./types.js";
 export { DocParseError, AuthError, QuotaError } from "./types.js";

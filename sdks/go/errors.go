@@ -1,8 +1,10 @@
 package docparse
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -26,6 +28,10 @@ type DocParseError struct {
 	SuggestedFix string
 	Details      map[string]interface{}
 	RequestID    string
+	// Replayable carries the X-AilangParse-Replayable header value, set
+	// by the server on 5xx responses that are safe to retry. Consumers
+	// implementing custom retry policies can read this directly.
+	Replayable bool
 }
 
 func (e *DocParseError) Error() string {
@@ -132,4 +138,68 @@ func envelopeErrorFull(msg, suggestedFix, requestID string, details map[string]i
 	e.Details = details
 	e.RequestID = requestID
 	return e
+}
+
+// raiseForResponse converts a non-2xx HTTP response into the appropriate
+// docparse error type, populating RequestID, Replayable, Details, and
+// SuggestedFix from the response headers + JSON body. Returns nil for
+// 2xx responses. The body is already-read bytes from the response.
+func raiseForResponse(resp *http.Response, body []byte) error {
+	if resp.StatusCode < 400 {
+		return nil
+	}
+	requestID := resp.Header.Get("X-Request-Id")
+	tier := resp.Header.Get("X-DocParse-Tier")
+	replayable := strings.EqualFold(resp.Header.Get("X-AilangParse-Replayable"), "true")
+
+	var parsed map[string]interface{}
+	var msg, suggestedFix string
+	if len(body) > 0 {
+		if jsonErr := json.Unmarshal(body, &parsed); jsonErr == nil && parsed != nil {
+			if v, ok := parsed["error"].(string); ok {
+				msg = v
+			} else if v, ok := parsed["message"].(string); ok {
+				msg = v
+			}
+			if v, ok := parsed["suggested_fix"].(string); ok {
+				suggestedFix = v
+			} else if v, ok := parsed["suggestedFix"].(string); ok {
+				suggestedFix = v
+			}
+		}
+	}
+	if msg == "" {
+		if len(body) > 0 {
+			msg = string(body)
+		} else {
+			msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+	}
+
+	switch resp.StatusCode {
+	case 401:
+		e := newAuthError(msg)
+		e.RequestID = requestID
+		e.Replayable = replayable
+		e.Details = parsed
+		e.SuggestedFix = suggestedFix
+		return e
+	case 429:
+		e := newQuotaError(msg)
+		e.RequestID = requestID
+		e.Replayable = replayable
+		e.Details = parsed
+		e.SuggestedFix = suggestedFix
+		e.Tier = tier
+		return e
+	default:
+		return &DocParseError{
+			Message:      fmt.Sprintf("API error %d: %s", resp.StatusCode, msg),
+			StatusCode:   resp.StatusCode,
+			SuggestedFix: suggestedFix,
+			Details:      parsed,
+			RequestID:    requestID,
+			Replayable:   replayable,
+		}
+	}
 }

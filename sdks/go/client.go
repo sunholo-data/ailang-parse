@@ -159,7 +159,10 @@ func New(apiKey string, opts ...Option) *Client {
 		APIKey:  apiKey,
 		BaseURL: DefaultBaseURL,
 		HTTP: &http.Client{
-			Timeout: 60 * time.Second,
+			// AI-backed formats (PDF, images) routinely exceed 60s on
+			// large documents. 120s is the default; callers parsing
+			// large PDFs should set a higher timeout via WithTimeout.
+			Timeout: 120 * time.Second,
 		},
 	}
 	for _, opt := range opts {
@@ -412,14 +415,8 @@ func (c *Client) call(ctx context.Context, method, path string, args []string) (
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	if resp.StatusCode == 401 {
-		return nil, newAuthError("")
-	}
-	if resp.StatusCode == 429 {
-		return nil, newQuotaError("")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, newDocParseError(fmt.Sprintf("API error %d: %s", resp.StatusCode, string(data)), resp.StatusCode)
+	if err := raiseForResponse(resp, data); err != nil {
+		return nil, err
 	}
 
 	return c.unwrap(data)

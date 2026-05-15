@@ -99,6 +99,84 @@ print(meta.format)                # Detected input format ("docx", etc.)
 print(meta.replayable)            # Whether this request can be replayed
 ```
 
+## Error Handling
+
+Every error type carries the response headers — `request_id` for log
+correlation, `replayable` for retry decisions, plus `details` and
+`suggested_fix` from the response body:
+
+```python
+from ailang_parse import DocParse, DocParseError, AuthError, QuotaError
+
+client = DocParse()
+try:
+    result = client.parse_file("report.docx")
+except AuthError as e:
+    log.error("auth: %s request_id=%s", e, e.request_id)
+except QuotaError as e:
+    log.error("quota tier=%s request_id=%s", e.tier, e.request_id)
+except DocParseError as e:
+    log.error("error: %s status=%d replayable=%s request_id=%s",
+              e, e.status_code, e.replayable, e.request_id)
+```
+
+## Retries
+
+Opt in to retries with `RetryPolicy`. `respect_replayable` honours the
+server-provided `X-AilangParse-Replayable` header so 5xx responses the
+server explicitly marks safe-to-retry are attempted again:
+
+```python
+from ailang_parse import DocParse, RetryPolicy
+
+client = DocParse(retry=RetryPolicy(
+    max_retries=3,
+    retryable_statuses={502, 503, 504},
+    respect_replayable=True,
+))
+```
+
+## Parse from GCS
+
+The `parse_gs_uri` convenience signs a `gs://` URI and parses it in one
+call. Requires the `gcs` extra:
+
+```bash
+pip install 'ailang-parse[gcs]'
+```
+
+```python
+result = client.parse_gs_uri(
+    "gs://my-bucket/path/to/doc.pdf",
+    ttl=900,
+    output_format="markdown+metadata",
+)
+```
+
+Auth defaults to Application Default Credentials; pass an explicit
+`credentials=` to override.
+
+## RAG Chunking
+
+`result.flatten(policy)` turns the Block ADT into JSON-friendly chunks
+ready for an embedder. The default policy emits text, headings, table
+rows (with header context), and lists — and tracks section ancestry:
+
+```python
+from ailang_parse import FlattenPolicy
+
+chunks = result.flatten(FlattenPolicy(
+    max_chunk_chars=4000,
+    embed_images=True,        # ImageBlock.description -> chunk
+    embed_changes=True,       # ChangeBlock + author metadata -> chunk
+    on_table="row",           # one chunk per row; or "whole", or a callable
+    section_path=True,        # tag each chunk with heading ancestry
+))
+
+for c in chunks:
+    embed(c.text, metadata=c.metadata.to_dict())
+```
+
 ## Supported Formats
 
 ```python

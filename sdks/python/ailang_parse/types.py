@@ -1,34 +1,92 @@
 """AILANG Parse types — Block ADT, ParseResult, metadata, errors."""
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 
 # ── Errors ──
 
 class DocParseError(Exception):
-    """Base error for all AILANG Parse API errors."""
+    """Base error for all AILANG Parse API errors.
+
+    All attributes default to falsy values so callers can read them
+    unconditionally (``err.request_id``, ``err.replayable``) without
+    type-narrowing first.
+    """
     def __init__(self, message: str, status_code: int = 0, suggested_fix: str = "",
-                 details: Optional[Dict[str, Any]] = None, request_id: str = ""):
+                 details: Optional[Dict[str, Any]] = None, request_id: str = "",
+                 replayable: bool = False):
         super().__init__(message)
         self.status_code = status_code
         self.suggested_fix = suggested_fix
         self.details = details
         self.request_id = request_id
+        self.replayable = replayable
 
 
 class AuthError(DocParseError):
     """Invalid or missing API key."""
-    pass
+    def __init__(self, message: str = "Invalid or missing API key", *args, **kwargs):
+        # Support legacy positional `AuthError(msg, 401)` while letting kwargs
+        # like request_id= flow through.
+        if args:
+            kwargs.setdefault("status_code", args[0])
+        kwargs.setdefault("status_code", 401)
+        super().__init__(message, **kwargs)
 
 
 class QuotaError(DocParseError):
     """Quota exceeded (daily or monthly requests)."""
-    def __init__(self, message: str, tier: str = "", used: int = 0, limit: int = 0):
-        super().__init__(message, 429)
+    def __init__(self, message: str = "Quota exceeded", *,
+                 tier: str = "", used: int = 0, limit: int = 0, **kwargs):
+        kwargs.setdefault("status_code", 429)
+        super().__init__(message, **kwargs)
         self.tier = tier
         self.used = used
         self.limit = limit
+
+
+# ── Retry policy ──
+
+@dataclass
+class RetryPolicy:
+    """Retry configuration for transient failures.
+
+    The default policy does not retry — opt in by setting ``max_retries``.
+    Pass to :class:`DocParse` as the ``retry=`` argument::
+
+        client = DocParse(retry=RetryPolicy(max_retries=3,
+                                            respect_replayable=True))
+
+    Attributes:
+        max_retries: Maximum number of retries (0 = no retry).
+        retryable_statuses: HTTP statuses that always trigger a retry.
+        respect_replayable: When True, also retry any 5xx response that
+            carries ``X-AilangParse-Replayable: true``. Useful for 500s
+            the server explicitly marks as safe to re-attempt.
+        backoff_base: Exponential backoff base in seconds. Delay before
+            retry N is ``min(backoff_base * 2**N, backoff_max)``.
+        backoff_max: Upper bound on the per-retry delay, in seconds.
+    """
+    max_retries: int = 0
+    retryable_statuses: "frozenset[int]" = field(
+        default_factory=lambda: frozenset({502, 503, 504})
+    )
+    respect_replayable: bool = True
+    backoff_base: float = 1.0
+    backoff_max: float = 30.0
+
+    def should_retry(self, status_code: int, replayable: bool) -> bool:
+        if self.max_retries <= 0:
+            return False
+        if status_code in self.retryable_statuses:
+            return True
+        if self.respect_replayable and 500 <= status_code < 600 and replayable:
+            return True
+        return False
+
+    def delay_for(self, attempt: int) -> float:
+        return min(self.backoff_base * (2 ** attempt), self.backoff_max)
 
 
 # ── Cell (for tables) ──
@@ -248,6 +306,236 @@ class ParseResult:
             markdown=d.get("markdown", ""),
             sections=[Section.from_dict(s) for s in d.get("sections", [])],
         )
+
+    def flatten(self, policy: Optional["FlattenPolicy"] = None) -> List["Chunk"]:
+        """Flatten the block tree into RAG-ready chunks.
+
+        See :class:`FlattenPolicy` for the available knobs.  With no
+        argument the default policy (``DEFAULT_FLATTEN_POLICY``) is used.
+
+        Returns a list of :class:`Chunk` objects whose ``metadata`` is
+        JSON-friendly — feed straight into Vertex/Pinecone/Chroma without
+        re-mapping.
+        """
+        return _flatten_blocks(self.blocks, policy or DEFAULT_FLATTEN_POLICY)
+
+
+# ── Flatten: Block ADT → RAG chunks ──
+
+@dataclass
+class ChunkMetadata:
+    """JSON-friendly metadata attached to each :class:`Chunk`."""
+    block_type: str = ""
+    section_path: List[str] = field(default_factory=list)
+    block_index: int = 0
+    table_id: Optional[str] = None
+    row_index: Optional[int] = None
+    change_author: Optional[str] = None
+    change_type: Optional[str] = None
+    image_mime: Optional[str] = None
+    heading_level: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "block_type": self.block_type,
+            "section_path": list(self.section_path),
+            "block_index": self.block_index,
+        }
+        for key in ("table_id", "row_index", "change_author", "change_type",
+                    "image_mime", "heading_level"):
+            v = getattr(self, key)
+            if v is not None:
+                out[key] = v
+        return out
+
+
+@dataclass
+class Chunk:
+    text: str = ""
+    metadata: ChunkMetadata = field(default_factory=ChunkMetadata)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"text": self.text, "metadata": self.metadata.to_dict()}
+
+
+@dataclass
+class FlattenPolicy:
+    """Policy governing :meth:`ParseResult.flatten`.
+
+    Attributes:
+        max_chunk_chars: Soft upper bound on chunk size in characters.
+            Text blocks longer than this are split on whitespace boundaries.
+        embed_images: Emit a chunk for each ``ImageBlock`` (using its
+            ``description``).  Most RAG pipelines disable this until
+            the upstream model produces useful image captions.
+        embed_changes: Emit a chunk for each ``ChangeBlock`` with author
+            metadata.  Most pipelines disable this; threaded review tools
+            enable it.
+        on_table: ``"row"`` (default — one chunk per row with header
+            context), ``"whole"`` (one chunk for the entire table), or
+            a callable ``(Block, ChunkMetadata) -> List[Chunk]`` that
+            takes full control.
+        section_path: Track heading ancestry on each emitted chunk.
+    """
+    max_chunk_chars: int = 2000
+    embed_images: bool = False
+    embed_changes: bool = False
+    on_table: Union[str, Callable[["Block", "ChunkMetadata"], List["Chunk"]]] = "row"
+    section_path: bool = True
+
+
+DEFAULT_FLATTEN_POLICY = FlattenPolicy()
+
+
+def _split_long_text(text: str, max_chars: int) -> List[str]:
+    """Split on whitespace boundaries when text exceeds max_chars."""
+    if len(text) <= max_chars or max_chars <= 0:
+        return [text]
+    out: List[str] = []
+    remaining = text
+    while len(remaining) > max_chars:
+        cut = remaining.rfind(" ", 0, max_chars)
+        if cut <= 0:
+            cut = max_chars
+        out.append(remaining[:cut].strip())
+        remaining = remaining[cut:].strip()
+    if remaining:
+        out.append(remaining)
+    return [s for s in out if s]
+
+
+def _flatten_blocks(blocks: List["Block"], policy: FlattenPolicy,
+                    section_path: Optional[List[str]] = None,
+                    counter: Optional[List[int]] = None) -> List[Chunk]:
+    """Internal: recursive flatten over a list of blocks."""
+    section_path = section_path or []
+    counter = counter if counter is not None else [0]
+    out: List[Chunk] = []
+
+    for b in blocks:
+        idx = counter[0]
+        counter[0] += 1
+        bt = b.type or ""
+
+        if bt == "text" or bt == "TextBlock":
+            for piece in _split_long_text(b.text, policy.max_chunk_chars):
+                if not piece:
+                    continue
+                out.append(Chunk(
+                    text=piece,
+                    metadata=ChunkMetadata(
+                        block_type="text",
+                        section_path=list(section_path) if policy.section_path else [],
+                        block_index=idx,
+                    ),
+                ))
+        elif bt == "heading" or bt == "HeadingBlock":
+            out.append(Chunk(
+                text=b.text,
+                metadata=ChunkMetadata(
+                    block_type="heading",
+                    section_path=list(section_path) if policy.section_path else [],
+                    block_index=idx,
+                    heading_level=b.level or None,
+                ),
+            ))
+        elif bt == "table" or bt == "TableBlock":
+            md = ChunkMetadata(
+                block_type="table",
+                section_path=list(section_path) if policy.section_path else [],
+                block_index=idx,
+                table_id=f"table-{idx}",
+            )
+            if callable(policy.on_table):
+                out.extend(policy.on_table(b, md))
+            elif policy.on_table == "whole":
+                rows_text = [
+                    " | ".join(c.text for c in (b.headers or [])),
+                    *[" | ".join(c.text for c in row) for row in b.rows],
+                ]
+                out.append(Chunk(text="\n".join(rows_text), metadata=md))
+            else:  # "row"
+                headers = [c.text for c in (b.headers or [])]
+                header_line = " | ".join(headers) if headers else ""
+                for ri, row in enumerate(b.rows):
+                    cells = [c.text for c in row]
+                    if header_line:
+                        text = header_line + "\n" + " | ".join(cells)
+                    else:
+                        text = " | ".join(cells)
+                    out.append(Chunk(
+                        text=text,
+                        metadata=ChunkMetadata(
+                            block_type="table_row",
+                            section_path=list(section_path) if policy.section_path else [],
+                            block_index=idx,
+                            table_id=md.table_id,
+                            row_index=ri,
+                        ),
+                    ))
+        elif bt == "list" or bt == "ListBlock":
+            text = "\n".join(f"- {item}" for item in b.items)
+            for piece in _split_long_text(text, policy.max_chunk_chars):
+                if not piece:
+                    continue
+                out.append(Chunk(
+                    text=piece,
+                    metadata=ChunkMetadata(
+                        block_type="list",
+                        section_path=list(section_path) if policy.section_path else [],
+                        block_index=idx,
+                    ),
+                ))
+        elif bt == "image" or bt == "ImageBlock":
+            if policy.embed_images and (b.description or b.transcription):
+                out.append(Chunk(
+                    text=b.description or b.transcription,
+                    metadata=ChunkMetadata(
+                        block_type="image",
+                        section_path=list(section_path) if policy.section_path else [],
+                        block_index=idx,
+                        image_mime=b.mime or None,
+                    ),
+                ))
+        elif bt == "change" or bt == "ChangeBlock":
+            if policy.embed_changes and b.text:
+                out.append(Chunk(
+                    text=b.text,
+                    metadata=ChunkMetadata(
+                        block_type="change",
+                        section_path=list(section_path) if policy.section_path else [],
+                        block_index=idx,
+                        change_author=b.author or None,
+                        change_type=b.change_type or None,
+                    ),
+                ))
+        elif bt == "section" or bt == "SectionBlock":
+            # Recurse with section_path extended by the section's "kind"
+            # or by an inferred heading from children.
+            label = b.kind or _section_label(b)
+            new_path = section_path + [label] if (policy.section_path and label) \
+                else section_path
+            out.extend(_flatten_blocks(b.children, policy, new_path, counter))
+        else:
+            # Unknown block — emit its text if present, drop otherwise.
+            if b.text:
+                out.append(Chunk(
+                    text=b.text,
+                    metadata=ChunkMetadata(
+                        block_type=bt or "unknown",
+                        section_path=list(section_path) if policy.section_path else [],
+                        block_index=idx,
+                    ),
+                ))
+    return out
+
+
+def _section_label(b: "Block") -> str:
+    """Best-effort label for a SectionBlock: the first heading child's text."""
+    for child in b.children:
+        if (child.type in ("heading", "HeadingBlock")) and child.text:
+            return child.text
+    return ""
 
 
 # ── Health / Formats ──

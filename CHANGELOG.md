@@ -11,6 +11,45 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.19.0...HEAD)
 
+### SDKs — v0.6.0 (Python, JS), Go (unreleased tag)
+
+Implements [design_docs/planned/v0_20_0/v0_20_0_sdk_ergonomics.md](design_docs/planned/v0_20_0/v0_20_0_sdk_ergonomics.md).
+Source: SDK feedback from `multivac-system-services` after refactoring its
+chunker onto the Python SDK (msg `msg_20260515_173649_4dbe12bd`).
+
+#### Added
+- **`request_id`, `replayable`, `details`, `suggested_fix` on all errors** —
+  Python `DocParseError`/`AuthError`/`QuotaError`, JS equivalents, Go
+  `*DocParseError`. Populated automatically from response headers + body
+  on every non-2xx response (no more dropping `X-Request-Id` on errors).
+- **Python `RetryPolicy`** — opt-in retry on the `DocParse` constructor.
+  `respect_replayable=True` retries 5xx responses tagged with
+  `X-AilangParse-Replayable: true`. Default policy does not retry.
+- **Python `parse_gs_uri(gs_uri, *, ttl=900)`** — sign a `gs://` URI and
+  parse in one call. Behind the new optional `[gcs]` extra
+  (`pip install 'ailang-parse[gcs]'`).
+- **Python `ParseResult.flatten(policy)`** — Block ADT → RAG-ready
+  `List[Chunk]`. Composable `FlattenPolicy` (`max_chunk_chars`,
+  `embed_images`, `embed_changes`, `on_table` row|whole|callable,
+  `section_path`).
+- **Python `[s3]` extra placeholder** in `pyproject.toml` — `parse_s3_uri`
+  ships in a later release.
+
+#### Changed (breaking — minor)
+- **Default HTTP timeout bumped 60s → 120s** in Python, JS, Go SDKs.
+  Rationale: AI-backed formats (PDF, images) routinely exceed 60s on
+  large documents. Code that relied on a 60s upper bound needs to set
+  `timeout=60` explicitly.
+- **Python `AuthError`/`QuotaError` accept the same kwargs as
+  `DocParseError`** (`request_id=`, `suggested_fix=`, `details=`,
+  `replayable=`). The legacy positional `AuthError(msg, 401)` form
+  still works.
+
+#### Cross-SDK parity
+Python v0.6.0 ships all of the above. JS v0.6.0 ships error metadata +
+120s default. Go ships the same on the next tag. JS + Go `parse_gs_uri`,
+`flatten`, `RetryPolicy` track in a follow-up release.
+
 ---
 
 ## [0.19.0](https://github.com/sunholo-data/ailang-parse/compare/v0.18.3...v0.19.0) — 2026-05-15
