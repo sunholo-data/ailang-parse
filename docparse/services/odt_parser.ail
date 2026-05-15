@@ -26,9 +26,10 @@ import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, Imag
 --
 -- This is the strategic gap: nobody does native ODT parsing.
 
--- Parse an ODT file into content blocks
+-- Parse an ODT file into content blocks.
+-- Contract: result is a possibly-empty list. `ensures` form is omitted —
+-- see ailang-core issue #236 (v0.19.2 property-test generator bug).
 export func parseOdt(filepath: string) -> [Block] ! {FS}
-  ensures { listLength(result) >= 0 }
 {
   let xml = match readEntry(filepath, "content.xml") {
     Ok(c) => c,
@@ -156,10 +157,10 @@ pure func odtProcessNode(node: XmlNode) -> [Block] {
   else []
 }
 
--- Get heading level from text:outline-level attribute
--- Contract: returns 1-6, defaulting to 1
+-- Get heading level from text:outline-level attribute.
+-- Contract: result is in 1..6 (defaulting to 1). `ensures` omitted —
+-- see ailang-core issue #236.
 pure func odtHeadingLevel(node: XmlNode) -> int
-  ensures { result >= 1 && result <= 6 }
 {
   let levelStr = getOrElse(getAttr(node, "text:outline-level"), "1");
   if levelStr == "1" then 1
@@ -197,10 +198,9 @@ pure func odtParseTableCell(cell: XmlNode) -> TableCell {
   {text: text, colSpan: colSpan, rowSpan: 1, merged: false, scope: ""}
 }
 
--- Parse colspan/rowspan value
--- Contract: always returns at least 1
+-- Parse colspan/rowspan value.
+-- Contract: result >= 1. `ensures` omitted — see ailang-core issue #236.
 pure func odtParseSpan(s: string) -> int
-  ensures { result >= 1 }
 {
   if s == "1" then 1
   else if s == "2" then 2
@@ -302,9 +302,9 @@ pure func odtFindPageCount(root: XmlNode) -> int {
   }
 }
 
--- Parse page count string
+-- Parse page count string.
+-- Contract: result >= 0. `ensures` omitted — see ailang-core issue #236.
 pure func odtParsePageCount(s: string) -> int
-  ensures { result >= 0 }
 {
   if s == "0" then 0
   else if s == "1" then 1

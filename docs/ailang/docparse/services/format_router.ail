@@ -28,14 +28,11 @@ import std/zip (listEntries, readEntry)
 -- "text"       = Plain text, XML, etc
 -- "unknown"    = Unrecognized format
 
+-- Contract: result is one of the 14 known format tags below or "unknown".
+-- The `ensures` form is omitted because AILANG v0.19.2 generates an invalid
+-- property test for (pure + string -> string + ensures) — see ailang-core
+-- issue #236. Restore the ensures block once that bug is fixed.
 export pure func detectFormat(ext: string) -> string
-  ensures {
-    result == "zip-office" || result == "pdf" || result == "image" ||
-    result == "audio" || result == "video" || result == "csv" ||
-    result == "markdown" || result == "html" || result == "epub" ||
-    result == "zip-odf" || result == "email" || result == "latex" ||
-    result == "text" || result == "unknown"
-  }
   tests [
     ("docx", "zip-office"),
     ("pptx", "zip-office"),
@@ -92,10 +89,10 @@ export pure func detectFormat(ext: string) -> string
 }
 
 -- Determine the specific Office format type
+-- Contract: result is "word" | "powerpoint" | "excel" | "unknown".
+-- See ailang-core issue #236 for why ensures is omitted (v0.19.2 property-
+-- test generator bug for pure + string -> string + ensures).
 export pure func officeType(ext: string) -> string
-  ensures {
-    result == "word" || result == "powerpoint" || result == "excel" || result == "unknown"
-  }
   tests [
     ("docx", "word"),
     ("pptx", "powerpoint"),
@@ -152,8 +149,10 @@ export pure func needsAI(format: string) -> bool
 }
 
 -- Describe what parsing strategy will be used
+-- Contract: result is a non-empty string. The `ensures { length(result) > 0 }`
+-- form is omitted; see ailang-core issue #236 (property-test generator bug
+-- for pure + string -> string + ensures in v0.19.2).
 export pure func strategyDescription(format: string) -> string
-  ensures { length(result) > 0 }
   tests [
     ("zip-office", "ZIP extraction + XML parsing + optional AI for layout"),
     ("pdf", "AI multimodal extraction"),

@@ -212,9 +212,11 @@ pure func isMediaEntry(entry: string) -> bool {
   contains(entry, "xl/media/")
 }
 
--- Determine the MIME type from a media filename
+-- Determine the MIME type from a media filename.
+-- Contract: result is a non-empty MIME string. The `ensures` form is omitted
+-- because of ailang-core issue #236 (v0.19.2 property-test generator bug for
+-- pure + string -> string + ensures).
 export pure func mediaMimeType(filename: string) -> string
-  ensures { length(result) > 0 }
   tests [
     ("image1.png", "image/png"),
     ("image2.jpg", "image/jpeg"),

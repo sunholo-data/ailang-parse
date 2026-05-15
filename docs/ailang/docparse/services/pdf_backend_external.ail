@@ -1,0 +1,117 @@
+module docparse/services/pdf_backend_external
+
+-- External PDF backend bridge.
+--
+-- Invokes the Python adapter (docparse/services/pdf_backends/adapter.py) for
+-- the chosen backend, decodes the resulting JSON, and returns the same
+-- [Block] + DocMetadata that direct_ai_parser produces. This keeps AILANG in
+-- control of output formatting while delegating PDF extraction to a chosen
+-- third-party engine (docling, liteparse, …).
+--
+-- Architecture: pure core (decode logic + contracts) + thin effectful outer
+-- (`parsePdfViaBackend`) that only owns exec and error reporting.
+
+import std/io (println)
+import std/json (getArray, getString, getInt, asString, asArray, getOr)
+import std/option (Some, None, getOrElse)
+import std/list (map, length as listLength)
+import std/result (Result, Ok, Err)
+import std/string (length as strLength)
+import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+
+-- Output bundle from an external backend run.
+export type ExternalDocResult = {
+  metadata: DocMetadata,
+  blocks: [Block]
+}
+
+-- =====================================================================
+-- Pure core
+-- =====================================================================
+
+-- Resolve the absolute path to the Python adapter relative to a project root.
+pure func adapterPath(projectRoot: string) -> string
+  ensures { strLength(result) > 0 }
+=
+  if strLength(projectRoot) == 0
+    then "docparse/services/pdf_backends/adapter.py"
+    else "${projectRoot}/docparse/services/pdf_backends/adapter.py"
+
+-- Empty result used as the failure sentinel.
+pure func emptyResult() -> ExternalDocResult =
+  {metadata: emptyMetadata(), blocks: []}
+
+-- Decode a single JSON block. Unknown "kind" values fall back to TextBlock.
+pure func decodeBlock(j: Json) -> Block = {
+  let kind = getOrElse(getString(j, "kind"), "text");
+  let text = getOrElse(getString(j, "text"), "");
+  if kind == "heading" then {
+    let lvl = getOrElse(getInt(j, "level"), 2);
+    HeadingBlock({text: text, level: lvl})
+  }
+  else if kind == "table" then {
+    let caption = getOrElse(getString(j, "caption"), "");
+    let hdrJson = getOrElse(getArray(j, "headers"), []);
+    let headers = map(\h. simpleCell(getOrElse(asString(h), "")), hdrJson);
+    let rowsJson = getOrElse(getArray(j, "rows"), []);
+    let rows = map(\rowJ.
+      map(\cellJ. simpleCell(getOrElse(asString(cellJ), "")),
+          getOrElse(asArray(rowJ), [])),
+      rowsJson);
+    TableBlock({rows: rows, headers: headers, caption: caption})
+  }
+  else {
+    let style = getOrElse(getString(j, "style"), "Normal");
+    let level = getOrElse(getInt(j, "level"), 0);
+    TextBlock({text: text, style: style, level: level})
+  }
+}
+
+-- Decode a list of JSON blocks. Always preserves count (one Block per input).
+pure func decodeBlocks(arr: [Json]) -> [Block]
+  ensures { listLength(result) == listLength(arr) }
+=
+  map(decodeBlock, arr)
+
+-- Decode metadata. Currently only pageCount is populated by adapters; title
+-- and author remain empty until backends expose richer metadata.
+pure func decodeMetadata(j: Json) -> DocMetadata = {
+  let title = getOrElse(getString(j, "title"), "");
+  let author = getOrElse(getString(j, "author"), "");
+  let pages = getOrElse(getInt(j, "pageCount"), 0);
+  {
+    title: title,
+    author: author,
+    created: "",
+    modified: "",
+    pageCount: pages
+  }
+}
+
+-- Decode the adapter's JSON document object into an ExternalDocResult.
+-- Pure: takes an already-decoded Json, no exec, no IO.
+export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult = {
+  let blocksArr = getOrElse(getArray(doc, "blocks"), []);
+  let blocks = decodeBlocks(blocksArr);
+  let metaJson = getOr(doc, "metadata", doc);
+  let meta = decodeMetadata(metaJson);
+  {metadata: meta, blocks: blocks}
+}
+
+-- =====================================================================
+-- Effectful outer
+-- =====================================================================
+
+-- Run the external backend and return parsed result.
+-- Backend names: "docling", "liteparse" (must match adapter.py BACKENDS).
+-- On any failure (exec error, non-zero exit, JSON parse error) prints a
+-- diagnostic and returns an empty result so the caller can continue.
+export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> ExternalDocResult ! {IO, Process} =
+  match runJson("python3", [adapterPath(projectRoot), backend, filepath]) {
+    Err(e) => {
+      println("[pdf_backend_external] ${formatError(e)}");
+      emptyResult()
+    },
+    Ok(doc) => decodeAdapterDoc(doc)
+  }

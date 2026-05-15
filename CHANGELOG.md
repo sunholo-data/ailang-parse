@@ -9,7 +9,80 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.18.3...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.19.0...HEAD)
+
+---
+
+## [0.19.0](https://github.com/sunholo-data/ailang-parse/compare/v0.18.3...v0.19.0) — 2026-05-15
+
+Pluggable PDF parsing backends. The PDF path now dispatches to one of three
+engines selected by `--pdf-backend`: the existing AI multimodal pipeline
+(default), IBM Docling (deterministic local layout analysis), or run-llama
+LiteParse (fastest plain-text extraction). Both new backends are 4–130× faster
+than the AI path on real arxiv papers while matching structural quality.
+
+Internally, the dispatch lives in a new AILANG module that delegates to a
+Python subprocess via `std/process.exec`, with the subprocess protocol
+extracted into a new reusable package `sunholo/external_backend@0.1.0`.
+
+### Added
+- **`--pdf-backend ai|docling|liteparse` flag** on the CLI. Default `ai`
+  (no behavior change for existing callers). `docling` and `liteparse` are
+  opt-in alternatives; selecting either swaps the `AI` capability for
+  `Process` so no API key or network round-trip is needed.
+- **`docparse/services/pdf_backend_external.ail`** — AILANG module owning
+  the external-backend dispatch path. Pure core (`decodeBlock`,
+  `decodeBlocks` with a count-preservation contract, `decodeMetadata`,
+  `decodeAdapterDoc`) plus a thin effectful outer (`parsePdfViaBackend`
+  with `! {IO, Process}`).
+- **`docparse/services/pdf_backends/adapter.py`** — Python adapter that
+  speaks the JSON protocol expected by the AILANG side. Currently supports
+  Docling and LiteParse; new backends are a small addition.
+- **`pkg/sunholo/external_backend` dependency** at 0.1.0 — extracted from
+  the local implementation. Generic enough to wrap any subprocess-emits-JSON
+  helper (OCR engines, embedders, classifiers, …) with typed `BackendError`
+  variants (`ExecFailed`, `NonZeroExit`, `InvalidJson`) carrying exit codes
+  and stderr.
+- **`benchmarks/pdf/compare_backends.py`** — head-to-head harness for PDF
+  backends scored against the existing golden files.
+- **`benchmarks/pdf/test_pdf_backends.sh`** — integration test that
+  exercises all three backends end-to-end through the CLI.
+
+### Changed
+- **`parsePdfDocument` in `docparse/main.ail`** routes on the
+  `DOCPARSE_PDF_BACKEND` env var. Two helper functions (`extractPdfAI`,
+  `extractPdfExternal`) keep both branches as one-line dispatches and
+  preserve the existing output pipeline (printing, JSON/MD writeout).
+- **`bin/docparse`** parses `--pdf-backend`, conditionally adds `Process`
+  to caps (and skips `AI` for the non-AI backends), and threads
+  `DOCPARSE_PDF_BACKEND` + `DOCPARSE_PROJECT_ROOT` into the AILANG
+  invocation. `--help` documents the new flag.
+- **`ailang.toml`** declares `sunholo/external_backend = 0.1.0` and adds
+  `Process` to `[effects].max`.
+
+### Removed
+- **`ensures` clauses on 13 functions** across `format_router`,
+  `zip_extract`, `docx_parser`, `odt_parser`, `odp_parser`. The v0.19.2
+  AILANG property-test generator emits invalid `_test.ail` scaffolding for
+  most signature shapes that use `ensures` (see
+  [ailang-core #236](https://github.com/sunholo-data/ailang/issues/236)).
+  Each stripped contract is replaced with a comment documenting the
+  invariant, and the inline `tests [...]` blocks still verify the cases
+  end-to-end. Restore in a single sweep once #236 is fixed upstream.
+
+### Performance (Hinton distillation arxiv PDF, 108 KB)
+
+| Backend | Time | Headings detected | Notes |
+|---|---|---|---|
+| `ai` (Gemini 2.5 Flash, default) | 127s | 21 | unchanged |
+| `docling` | 28s | 20 | 4.5× faster, local, structural quality on par with AI |
+| `liteparse` | 1.0s | n/a (font-size heuristic) | 130× faster, highest char count of any backend |
+
+### SDKs
+
+No SDK changes in this release. The `--pdf-backend` flag is CLI-only;
+the hosted API (`/api/v1/parse`) does not currently expose backend
+selection. Python and JS SDKs remain at 0.5.4.
 
 ---
 

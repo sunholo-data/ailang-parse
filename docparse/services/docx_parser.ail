@@ -340,8 +340,11 @@ pure func extractParagraphStyle(p: XmlNode) -> string =
 -- Recognizes the conformant ECMA-376 styleIds (Heading1..Heading6, Title,
 -- Subtitle), the space-separated display names some non-conformant tools
 -- emit ("Heading 1"..), and maps Word's Title/Subtitle to H1/H2.
+-- Contract: result is in 0..6. Inline tests below enforce all real cases;
+-- the `ensures` form is omitted because of ailang-core issue #236 (v0.19.2
+-- property-test generator emits invalid _test.ail for several pure-func
+-- shapes with ensures).
 pure func headingLevelFromStyle(style: string) -> int
-  ensures { result >= 0 && result <= 6 }
   tests [
     ("Heading1", 1),
     ("Heading2", 2),
@@ -398,8 +401,10 @@ pure func parseTable(tbl: XmlNode) -> Block {
 }
 
 -- Parse all table rows
+-- Contract: result has the same row count as the input rows. The `ensures`
+-- form is omitted because of ailang-core issue #236 (v0.19.2 property-test
+-- generator emits invalid _test.ail for pure funcs with ensures).
 pure func parseTableRows(rows: [XmlNode]) -> [[TableCell]]
-  ensures { listLength(result) == listLength(rows) }
 {
   map(parseTableRow, rows)
 }
@@ -411,8 +416,9 @@ pure func parseTableRow(tr: XmlNode) -> [TableCell] {
 }
 
 -- Extract TableCells from all cells in a row
+-- Contract: result has the same cell count as the input cells. The `ensures`
+-- form is omitted because of ailang-core issue #236.
 pure func parseCells(cells: [XmlNode]) -> [TableCell]
-  ensures { listLength(result) == listLength(cells) }
 {
   map(parseCell, cells)
 }
@@ -430,8 +436,9 @@ pure func parseCell(tc: XmlNode) -> TableCell {
 
 -- Get gridSpan value from w:tcPr/w:gridSpan[@w:val]
 -- Returns 1 if not present (normal single-column cell)
+-- Contract: result is >= 1 (a cell always spans at least one column). The
+-- `ensures` form is omitted because of ailang-core issue #236.
 pure func getCellGridSpan(tc: XmlNode) -> int
-  ensures { result >= 1 }
 {
   getOrElse(
     optFlatMap(\tcPr.
