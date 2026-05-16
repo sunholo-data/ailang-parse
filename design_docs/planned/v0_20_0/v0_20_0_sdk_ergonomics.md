@@ -297,7 +297,7 @@ Lands *after* Part 1. `respect_replayable=True` reads `err.replayable` on the ra
 | 1. Errors carry headers | v0.20.0 | v0.20.0 | v0.20.0 |
 | 1a. Constructor parity  | v0.20.0 | n/a (TS shape already aligned) | v0.20.0 |
 | 2. Timeout default 120s | v0.20.0 | v0.20.0 | v0.20.0 |
-| 3. `parse_gs_uri` extra | v0.20.0 | v0.21.0 | v0.21.0 |
+| 3. `parse_gs_uri` extra | v0.20.0 (Cloud Run fix in v0.7.1 — adopt IAM SignBlob detection from day one when porting) | v0.21.0 | v0.21.0 |
 | 4. `flatten(policy)`    | v0.20.0 | v0.21.0 | v0.21.0 |
 | 5. `RetryPolicy`        | v0.20.0 | v0.21.0 | v0.21.0 |
 

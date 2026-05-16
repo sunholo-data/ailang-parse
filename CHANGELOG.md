@@ -11,6 +11,33 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.19.0...HEAD)
 
+### SDKs — v0.7.1 (Python only)
+
+Patch release. Source: multivac field finding (`msg_20260516_013726_3d7763f3`)
+after wiring `/pubsub_to_store` on Cloud Run.
+
+#### Fixed
+- **`parse_gs_uri` now works on Cloud Run / GCE / GKE.** v0.6.0 always
+  attempted local v4 signing, which fails on the metadata-server default
+  service account (token-only credentials, no private key) and on
+  end-user `gcloud auth application-default login` credentials. v0.7.1
+  detects token-only credentials and routes them through Google's IAM
+  `SignBlob` API instead — the "just works" path on any GCP runtime
+  without an SA JSON file.
+
+  **Runtime requirement (one-time IAM grant):** the runtime service
+  account needs `roles/iam.serviceAccountTokenCreator` on **itself**.
+  Documented in the Python README.
+
+  **New optional argument**: `parse_gs_uri(..., service_account_email=...)`
+  overrides the auto-detected SA email (useful for impersonation).
+
+  **Cross-SDK note:** `parse_gs_uri` is Python-only; JS/Go/R never had
+  this method. When they pick it up in a future release, they will
+  adopt the same auto-detection strategy.
+
+---
+
 ### SDKs — v0.7.0 (Python)
 
 Implements [design_docs/planned/v0_20_0/v0_20_0_sdk_v07_extras_images_comments_tablecells.md](design_docs/planned/v0_20_0/v0_20_0_sdk_v07_extras_images_comments_tablecells.md).

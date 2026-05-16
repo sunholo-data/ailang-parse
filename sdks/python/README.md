@@ -154,7 +154,32 @@ result = client.parse_gs_uri(
 ```
 
 Auth defaults to Application Default Credentials; pass an explicit
-`credentials=` to override.
+`credentials=` (or `service_account_email=`) to override.
+
+### Signing strategy (auto-detected)
+
+- **JSON-key credentials** (`GOOGLE_APPLICATION_CREDENTIALS` pointing at
+  an SA key file) → URL is signed locally with the private key. Fast,
+  no extra API call.
+- **Token-only credentials** (Cloud Run, GCE, GKE metadata server, or
+  `gcloud auth application-default login`) → URL is signed via Google's
+  IAM `SignBlob` API. No private key needed.
+
+**Cloud Run setup (one-time):** the runtime service account needs
+`roles/iam.serviceAccountTokenCreator` on **itself**:
+
+```bash
+SA="my-service@my-project.iam.gserviceaccount.com"
+gcloud iam service-accounts add-iam-policy-binding "$SA" \
+  --member="serviceAccount:$SA" \
+  --role="roles/iam.serviceAccountTokenCreator"
+```
+
+After the grant, `client.parse_gs_uri("gs://...")` works from any
+Cloud Run service running as that SA with no further config.
+
+For impersonation flows, pass an explicit
+`service_account_email="signer@project.iam.gserviceaccount.com"`.
 
 ## RAG Chunking
 

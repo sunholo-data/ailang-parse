@@ -14,6 +14,37 @@ def _replayable_header(resp: "requests.Response") -> bool:
             resp.headers.get("x-ailangparse-replayable", "")).lower() == "true"
 
 
+def _can_sign_locally(creds: Any) -> bool:
+    """True iff ``creds`` carries a usable private key for v4 URL signing.
+
+    Service-account JSON credentials have a ``Signer`` exposing a ``key``
+    attribute (the private key); compute_engine / token-only credentials
+    do not. The presence of ``key`` is the cheapest, most reliable signal
+    available without invoking the signer.
+    """
+    signer = getattr(creds, "signer", None)
+    if signer is None:
+        return False
+    return hasattr(signer, "key")
+
+
+def _refresh_credentials_if_needed(creds: Any) -> None:
+    """Refresh ``creds`` so ``token`` is fresh enough for IAM SignBlob.
+
+    Cloud Run / GCE metadata-server credentials are lazily loaded; the
+    first access usually requires a refresh before ``token`` is set.
+    """
+    if getattr(creds, "valid", False) and getattr(creds, "token", None):
+        return
+    try:
+        from google.auth.transport import requests as gauth_requests  # type: ignore
+        creds.refresh(gauth_requests.Request())
+    except Exception:
+        # Let the downstream signing call surface a precise error rather
+        # than masking it here.
+        pass
+
+
 from . import _credentials
 from ._credentials import (
     DEFAULT_BASE_URL,
@@ -208,7 +239,8 @@ class DocParse:
 
     def parse_gs_uri(self, gs_uri: str, *, ttl: int = 900,
                      output_format: str = "blocks",
-                     credentials: Optional[Any] = None) -> ParseResult:
+                     credentials: Optional[Any] = None,
+                     service_account_email: Optional[str] = None) -> ParseResult:
         """Sign a ``gs://`` URI and parse the referenced document.
 
         Convenience wrapper around :meth:`parse_url` that signs a Google
@@ -220,26 +252,50 @@ class DocParse:
 
             pip install 'ailang-parse[gcs]'
 
-        Auth resolution defaults to Application Default Credentials.  Pass
-        an explicit ``credentials`` object (any ``google.auth.credentials``
-        instance) to override.
+        **Signing strategy (auto-detected):**
+
+        - If the resolved credentials carry a usable private key (typically
+          a service-account JSON key loaded via
+          ``GOOGLE_APPLICATION_CREDENTIALS``), the URL is signed locally.
+        - If the credentials are token-only (the Cloud Run / GCE / GKE
+          metadata-server default, or ``gcloud auth application-default
+          login``), the SDK uses the IAM ``SignBlob`` API instead. This is
+          the path that "just works" without an SA JSON key.
+
+        For the IAM path, the runtime service account needs
+        ``roles/iam.serviceAccountTokenCreator`` on **itself** — one IAM
+        binding per service, equivalent to the
+        ``serviceAccount:<sa>@<proj>.iam.gserviceaccount.com`` self-grant.
+
+        Auth resolution defaults to Application Default Credentials.
 
         Args:
             gs_uri: ``gs://bucket/key`` reference to a document.
             ttl: Signed URL lifetime in seconds (default 900 = 15 min).
             output_format: Same as :meth:`parse`.
             credentials: Optional ``google.auth.credentials.Credentials``.
+                When ``None`` (default), ADC is used via
+                ``google.auth.default()``.
+            service_account_email: Optional override of the SA email used
+                for the IAM ``SignBlob`` path. When ``None``, falls back
+                to ``credentials.service_account_email``. Only consulted
+                when local signing is unavailable.
 
         Raises:
-            ImportError: ``google-cloud-storage`` is not installed.
+            ImportError: ``google-cloud-storage`` (or ``google-auth``) is
+                not installed.
             ValueError: ``gs_uri`` is not a well-formed ``gs://`` URI.
 
         Usage::
 
+            # Cloud Run / GCE / GKE — works out of the box once the SA has
+            # the iam.serviceAccountTokenCreator role on itself.
+            result = client.parse_gs_uri("gs://my-bucket/doc.pdf")
+
+            # Explicit SA email override (e.g., impersonation flows):
             result = client.parse_gs_uri(
-                "gs://my-bucket/path/to/doc.pdf",
-                ttl=900,
-                output_format="markdown+metadata",
+                "gs://my-bucket/doc.pdf",
+                service_account_email="signer@project.iam.gserviceaccount.com",
             )
         """
         try:
@@ -264,6 +320,35 @@ class DocParse:
         if not bucket_name or not blob_name:
             raise ValueError(f"gs:// URI has empty bucket or key: {gs_uri!r}")
 
+        # Resolve credentials via ADC when not provided so we can inspect
+        # them and decide whether to sign locally or via IAM SignBlob.
+        if credentials is None:
+            try:
+                import google.auth  # type: ignore
+                credentials, _proj = google.auth.default()
+            except ImportError as e:
+                raise ImportError(
+                    "parse_gs_uri requires 'google-auth' (bundled with the "
+                    "'gcs' extra). Install with: pip install 'ailang-parse[gcs]'"
+                ) from e
+            except Exception:
+                # No ADC configured — let storage.Client surface the error.
+                credentials = None
+
+        # Choose signing strategy. Token-only creds (Cloud Run default,
+        # gcloud user creds) cannot sign locally; the IAM SignBlob path
+        # delegates signing to Google's API.
+        sign_kwargs: Dict[str, Any] = {}
+        if credentials is not None and not _can_sign_locally(credentials):
+            sa_email = service_account_email or getattr(
+                credentials, "service_account_email", None)
+            if sa_email:
+                _refresh_credentials_if_needed(credentials)
+                sign_kwargs = {
+                    "service_account_email": sa_email,
+                    "access_token": getattr(credentials, "token", None),
+                }
+
         sc = storage.Client(credentials=credentials) if credentials \
             else storage.Client()
         blob = sc.bucket(bucket_name).blob(blob_name)
@@ -271,6 +356,7 @@ class DocParse:
             version="v4",
             expiration=timedelta(seconds=ttl),
             method="GET",
+            **sign_kwargs,
         )
         return self.parse_url(signed, output_format=output_format)
 
