@@ -112,10 +112,18 @@ jobs:
         env:
           AILANG_REGISTRY_API_KEY: ${{ secrets.AILANG_REGISTRY_API_KEY }}
           AILANG_REGISTRY_VALIDATOR: ${{ secrets.AILANG_REGISTRY_VALIDATOR }}
-        run: ailang publish --dry-run
+        # --allow-dotted-tool-names: migration grace for the v0.20.x registry
+        # validator change that flags string literals containing '.', '/', '[',
+        # '$' as non-provider-safe "tool names". Our DOCX/PPTX/XLSX/ODF parsers
+        # advertise ZIP entry path constants (e.g. "[Content_Types].xml",
+        # "word/document.xml", "ppt/slides/slide${idx}.xml") that look like
+        # tool names to the scanner. Proper migration (rename advertised names
+        # or stop emitting them) is tracked separately; this flag keeps shipping
+        # until that lands.
+        run: ailang publish --dry-run --allow-dotted-tool-names
 
       - name: Publish to AILANG registry
         env:
           AILANG_REGISTRY_API_KEY: ${{ secrets.AILANG_REGISTRY_API_KEY }}
           AILANG_REGISTRY_VALIDATOR: ${{ secrets.AILANG_REGISTRY_VALIDATOR }}
-        run: ailang publish
+        run: ailang publish --allow-dotted-tool-names
