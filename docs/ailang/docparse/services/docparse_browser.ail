@@ -30,6 +30,7 @@ import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
+import docparse/services/rtf_parser (parseRtf)
 import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
 import docparse/services/odt_parser (odtExtractBody, odtParseMetadata, odtExtractHeadersFooters)
 import docparse/services/odp_parser (odpExtractSlides, odpParseMetadata)
@@ -177,6 +178,11 @@ export pure func parseMarkdownContent(content: string) -> string {
 -- Single-file only — \input/\include resolution requires FS and runs server-side.
 export pure func parseTexContent(content: string) -> string {
   encode(ja(blocksToJson(parseLatex(content))))
+}
+
+-- Parse RTF content -> JSON array of blocks
+export pure func parseRtfContent(content: string) -> string {
+  encode(ja(blocksToJson(parseRtf(content))))
 }
 
 -- Parse EML email content -> JSON array of blocks

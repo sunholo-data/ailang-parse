@@ -9,7 +9,47 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.19.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.0...HEAD)
+
+---
+
+## [v0.20.0](https://github.com/sunholo-data/ailang-parse/compare/v0.19.0...v0.20.0) — 2026-05-18
+
+### Added — RTF (Rich Text Format) parser
+
+Closes the gap for legacy document workflows. RTF was specified by
+Microsoft in 1987 and remains the default "Save As" target for forms,
+templates, government documents (Danish Købsaftale, French CERFA),
+TextEdit/Pages exports, and many ERP report exports. Until now AILANG
+Parse would reject `.rtf` files and recommend a LibreOffice subprocess.
+
+- **`docparse/services/rtf_parser.ail`** — pure AILANG, no external
+  dependencies. Char-by-char state machine via `std/string.foldChars`.
+- **Encoding support:** `\uNNNN?` Unicode escapes (UTF-8 reassembly via
+  `std/bytes.fromInts` + `toString`), `\'XX` CP1252 hex escapes with full
+  Windows-1252 translation table for 0x80–0x9F, literal `\\` / `\{` / `\}`.
+- **Destination skipping:** `\fonttbl`, `\colortbl`, `\stylesheet`,
+  `\info`, `\listtable`, `\themedata`, `\panose`, `\pict`, fields, and all
+  starred destinations (`{\*\foo …}`) — including correct handling of
+  nested skips (outer skipDepth is preserved when an inner `\*\panose`
+  group closes).
+- **Routing:** `\par` → paragraph break, `\cell` / `\tab` → tab,
+  `\row` → paragraph break.
+- **WASM:** browser demo and workbench accept `.rtf`; the same parser
+  runs in-browser via the existing AILANG WASM REPL.
+- **Sample asset:** `docs/assets/sample_rtf.rtf` exercises Danish,
+  French, German, Greek, currency symbols (£/€/¥/©), smart quotes,
+  em/en dashes, and form fields.
+
+#### Not handled in v0.20
+
+- Style-based heading detection (`\s1`, `\s2` — needs stylesheet parse)
+- Table grid topology (cells/rows currently flattened to TAB-separated
+  paragraphs; proper `TableBlock` emission is on the roadmap)
+- Embedded images (`\pict` — hex-encoded pixel data, separate decoder)
+- Field results (`\fldrslt` — currently skipped along with `\fldinst`)
+
+
 
 ### SDKs — v0.7.1 (Python only)
 

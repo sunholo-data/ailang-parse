@@ -1,0 +1,368 @@
+module docparse/services/rtf_parser
+
+import std/string (length, foldChars, trim, join, charAt, charCode, startsWith, find, substring, stringToInt)
+import std/list (reverse, length as listLength)
+import std/option (Some, None)
+import std/bytes (fromInts, toString)
+import docparse/types/document (Block, TextBlock)
+
+-- RTF Parser — extracts text from Rich Text Format (.rtf) files.
+-- Pure AILANG implementation, no external dependencies.
+--
+-- Strategy:
+--   - Char-by-char state machine via foldChars
+--   - Skip header destinations (fonttbl, colortbl, stylesheet, info, ...)
+--     and starred destinations ({\*\xxx ...})
+--   - Decode \uNNNN Unicode escapes via std/bytes UTF-8 reassembly
+--   - Decode \'HH CP1252 hex escapes via 0x80-0x9F translation table
+--   - Treat \par / \row as paragraph break, \cell / \tab as separator
+--
+-- Out of scope (v1):
+--   - Style-based heading detection (\s1, \s2 etc.)
+--   - Embedded images (\pict)
+--   - Tables emit as TAB-separated paragraphs, not TableBlock
+--   - Fields, hyperlinks (\field ... \fldrslt)
+
+type RtfState = {
+  depth: int,
+  skipDepth: int,
+  mode: string,
+  ctrlBuf: string,
+  paramBuf: string,
+  hexBuf: string,
+  pendingUSkip: int,
+  sawStar: bool,
+  paraBuf: [string],
+  paraEmpty: bool,
+  blocks: [Block]
+}
+
+pure func rtfEmptyState() -> RtfState =
+  {depth: 0, skipDepth: 0, mode: "text", ctrlBuf: "", paramBuf: "",
+   hexBuf: "", pendingUSkip: 0, sawStar: false,
+   paraBuf: [], paraEmpty: true, blocks: []}
+
+-- ============================================================================
+-- Entry point
+-- ============================================================================
+
+export pure func parseRtf(content: string) -> [Block]
+  ensures { length(content) == 0 || listLength(result) >= 0 }
+{
+  let final = foldChars(rtfProcessChar, rtfEmptyState(), content);
+  let flushed = rtfFlushPara(final);
+  reverse(flushed.blocks)
+}
+
+-- ============================================================================
+-- Character classification
+-- ============================================================================
+
+pure func rtfIsLetter(c: string) -> bool {
+  let n = charCode(c);
+  (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
+
+pure func rtfIsDigit(c: string) -> bool {
+  let n = charCode(c);
+  n >= 48 && n <= 57
+}
+
+pure func rtfHexValue(c: string) -> int {
+  let n = charCode(c);
+  if n >= 48 && n <= 57 then n - 48
+  else if n >= 97 && n <= 102 then n - 87
+  else if n >= 65 && n <= 70 then n - 55
+  else 0
+}
+
+-- ============================================================================
+-- Unicode encoding helpers
+-- ============================================================================
+
+-- Convert a Unicode code point to its UTF-8 string representation.
+-- Returns "" for invalid/out-of-range code points.
+pure func rtfCodePointToString(cp: int) -> string {
+  -- RTF \u uses signed 16-bit; negative values mean cp + 65536
+  let n = if cp < 0 then cp + 65536 else cp;
+  if n < 0 then ""
+  else if n < 128 then toString(fromInts([n]))
+  else if n < 2048 then
+    toString(fromInts([192 + n / 64, 128 + n % 64]))
+  else if n < 65536 then
+    toString(fromInts([224 + n / 4096, 128 + (n / 64) % 64, 128 + n % 64]))
+  else if n < 1114112 then
+    toString(fromInts([240 + n / 262144, 128 + (n / 4096) % 64,
+                        128 + (n / 64) % 64, 128 + n % 64]))
+  else ""
+}
+
+-- CP1252 byte → Unicode code point. 0x00-0x7F and 0xA0-0xFF map directly;
+-- 0x80-0x9F has special Windows-1252 assignments.
+pure func rtfCp1252ToUnicode(b: int) -> int {
+  if b < 128 then b
+  else if b == 128 then 8364     -- € EURO SIGN
+  else if b == 130 then 8218     -- ‚ SINGLE LOW-9 QUOTATION MARK
+  else if b == 131 then 402      -- ƒ LATIN SMALL LETTER F WITH HOOK
+  else if b == 132 then 8222     -- „ DOUBLE LOW-9 QUOTATION MARK
+  else if b == 133 then 8230     -- … HORIZONTAL ELLIPSIS
+  else if b == 134 then 8224     -- † DAGGER
+  else if b == 135 then 8225     -- ‡ DOUBLE DAGGER
+  else if b == 136 then 710      -- ˆ MODIFIER LETTER CIRCUMFLEX ACCENT
+  else if b == 137 then 8240     -- ‰ PER MILLE SIGN
+  else if b == 138 then 352      -- Š LATIN CAPITAL LETTER S WITH CARON
+  else if b == 139 then 8249     -- ‹ SINGLE LEFT-POINTING ANGLE QUOTATION
+  else if b == 140 then 338      -- Œ LATIN CAPITAL LIGATURE OE
+  else if b == 142 then 381      -- Ž LATIN CAPITAL LETTER Z WITH CARON
+  else if b == 145 then 8216     -- ' LEFT SINGLE QUOTATION MARK
+  else if b == 146 then 8217     -- ' RIGHT SINGLE QUOTATION MARK
+  else if b == 147 then 8220     -- " LEFT DOUBLE QUOTATION MARK
+  else if b == 148 then 8221     -- " RIGHT DOUBLE QUOTATION MARK
+  else if b == 149 then 8226     -- • BULLET
+  else if b == 150 then 8211     -- – EN DASH
+  else if b == 151 then 8212     -- — EM DASH
+  else if b == 152 then 732      -- ˜ SMALL TILDE
+  else if b == 153 then 8482     -- ™ TRADE MARK SIGN
+  else if b == 154 then 353      -- š LATIN SMALL LETTER S WITH CARON
+  else if b == 155 then 8250     -- › SINGLE RIGHT-POINTING ANGLE QUOTATION
+  else if b == 156 then 339      -- œ LATIN SMALL LIGATURE OE
+  else if b == 158 then 382      -- ž LATIN SMALL LETTER Z WITH CARON
+  else if b == 159 then 376      -- Ÿ LATIN CAPITAL LETTER Y WITH DIAERESIS
+  else b                          -- 0xA0-0xFF map directly
+}
+
+-- ============================================================================
+-- Destination detection
+-- ============================================================================
+
+-- Control words that mark a destination whose contents should be skipped
+-- entirely (these are RTF header tables and metadata, not body text).
+pure func rtfIsSkipDestination(ctrl: string) -> bool {
+  ctrl == "fonttbl" || ctrl == "filetbl" || ctrl == "colortbl" ||
+  ctrl == "stylesheet" || ctrl == "stylerestrictions" ||
+  ctrl == "listtable" || ctrl == "listoverridetable" || ctrl == "listpicture" ||
+  ctrl == "revtbl" || ctrl == "rsidtbl" ||
+  ctrl == "info" || ctrl == "generator" ||
+  ctrl == "themedata" || ctrl == "latentstyles" || ctrl == "datastore" ||
+  ctrl == "panose" || ctrl == "xmlnstbl" || ctrl == "schemas" ||
+  ctrl == "objalias" || ctrl == "objclass" || ctrl == "objdata" || ctrl == "result" ||
+  ctrl == "pict" || ctrl == "bkmkstart" || ctrl == "bkmkend" ||
+  ctrl == "shppict" || ctrl == "nonshppict" ||
+  ctrl == "mmath" || ctrl == "mmathPr" || ctrl == "wgrffmtfilter" ||
+  ctrl == "fldinst" || ctrl == "fldrslt" || ctrl == "field"
+}
+
+-- ============================================================================
+-- State update helpers
+-- ============================================================================
+
+pure func rtfAppendText(state: RtfState, s: string) -> RtfState {
+  if state.skipDepth > 0 then state
+  else if length(s) == 0 then state
+  else { state | paraBuf: s :: state.paraBuf, paraEmpty: false }
+}
+
+-- Flush current paragraph: emit a TextBlock if non-empty, reset paraBuf
+pure func rtfFlushPara(state: RtfState) -> RtfState {
+  if state.paraEmpty then state
+  else {
+    let text = trim(join("", reverse(state.paraBuf)));
+    if length(text) == 0 then
+      { state | paraBuf: [], paraEmpty: true }
+    else
+      { state |
+        paraBuf: [],
+        paraEmpty: true,
+        blocks: TextBlock({text: text, style: "normal", level: 0}) :: state.blocks }
+  }
+}
+
+-- ============================================================================
+-- Control word dispatch
+-- ============================================================================
+
+-- Called when a complete control word + optional param has been parsed.
+-- Handles paragraph breaks, escapes, destination markers, Unicode escapes.
+pure func rtfDispatchCtrl(state: RtfState) -> RtfState {
+  let ctrl = state.ctrlBuf;
+  let param = state.paramBuf;
+  let s2 = { state | ctrlBuf: "", paramBuf: "", sawStar: false };
+
+  -- Starred destinations: {\*\foo ...} — skip the whole enclosing group.
+  -- Don't overwrite an outer skipDepth: when a nested destination's }
+  -- arrives, we'd lose the outer skip context. Only set if not already
+  -- skipping; if we are, the nested group is already inside the skip.
+  if state.sawStar then
+    if state.skipDepth > 0 then s2
+    else { s2 | skipDepth: state.depth }
+  -- Known body-skipping destinations (regardless of \*)
+  else if rtfIsSkipDestination(ctrl) then
+    if state.skipDepth > 0 then s2
+    else { s2 | skipDepth: state.depth }
+  -- Paragraph break
+  else if ctrl == "par" then
+    rtfFlushPara(s2)
+  -- Row end (table) — flush as paragraph
+  else if ctrl == "row" || ctrl == "nestrow" then
+    rtfFlushPara(s2)
+  -- Section break
+  else if ctrl == "sect" || ctrl == "page" then
+    rtfFlushPara(s2)
+  -- Line break
+  else if ctrl == "line" then
+    rtfAppendText(s2, "\n")
+  -- Tab / cell separator
+  else if ctrl == "tab" || ctrl == "cell" then
+    rtfAppendText(s2, "\t")
+  -- Unicode escape: \uNNNN, then skip next char
+  else if ctrl == "u" then {
+    match stringToInt(param) {
+      Some(n) => {
+        let s3 = rtfAppendText(s2, rtfCodePointToString(n));
+        { s3 | pendingUSkip: 1 }
+      },
+      None => s2
+    }
+  }
+  -- Non-breaking space, optional hyphen, etc.
+  else if ctrl == "nbsp" || ctrl == "~" then
+    rtfAppendText(s2, " ")
+  -- All other formatting / structural control words are ignored
+  else s2
+}
+
+-- ============================================================================
+-- Per-character state machine
+-- ============================================================================
+
+pure func rtfProcessChar(state: RtfState, c: string) -> RtfState {
+  -- Drop carriage returns; the RTF grammar treats CRLF as whitespace.
+  if c == "\r" then state
+  else if state.mode == "text" then rtfHandleText(state, c)
+  else if state.mode == "afterBackslash" then rtfHandleAfterBackslash(state, c)
+  else if state.mode == "ctrl" then rtfHandleCtrl(state, c)
+  else if state.mode == "ctrlParam" then rtfHandleCtrlParam(state, c)
+  else if state.mode == "hex1" then { state | hexBuf: c, mode: "hex2" }
+  else if state.mode == "hex2" then rtfHandleHex2(state, c)
+  else state
+}
+
+pure func rtfHandleText(state: RtfState, c: string) -> RtfState {
+  if state.pendingUSkip > 0 then
+    { state | pendingUSkip: state.pendingUSkip - 1 }
+  else if c == "{" then
+    { state | depth: state.depth + 1 }
+  else if c == "}" then {
+    let newDepth = state.depth - 1;
+    let newSkip = if state.skipDepth > 0 && newDepth < state.skipDepth then 0
+                  else state.skipDepth;
+    { state | depth: newDepth, skipDepth: newSkip }
+  }
+  else if c == "\\" then
+    { state | mode: "afterBackslash" }
+  else if c == "\n" then
+    state                          -- raw newlines are whitespace; ignored
+  else
+    rtfAppendText(state, c)
+}
+
+pure func rtfHandleAfterBackslash(state: RtfState, c: string) -> RtfState {
+  if rtfIsLetter(c) then
+    { state | mode: "ctrl", ctrlBuf: c }
+  else if c == "\\" || c == "{" || c == "}" then {
+    let s2 = rtfAppendText(state, c);
+    { s2 | mode: "text" }
+  }
+  else if c == "*" then
+    { state | sawStar: true, mode: "text" }
+  else if c == "'" then
+    { state | mode: "hex1", hexBuf: "" }
+  else if c == "~" then {
+    let s2 = rtfAppendText(state, " ");
+    { s2 | mode: "text" }
+  }
+  else if c == "-" || c == "_" || c == ":" || c == "|" then
+    { state | mode: "text" }       -- optional hyphen / formula chars — skip
+  else if c == "\n" || c == "\r" then {
+    -- backslash before newline = paragraph break in some RTF dialects
+    let s2 = rtfFlushPara(state);
+    { s2 | mode: "text" }
+  }
+  else
+    { state | mode: "text" }       -- unknown control symbol — skip
+}
+
+pure func rtfHandleCtrl(state: RtfState, c: string) -> RtfState {
+  if rtfIsLetter(c) then
+    { state | ctrlBuf: "${state.ctrlBuf}${c}" }
+  else if rtfIsDigit(c) || c == "-" then
+    { state | mode: "ctrlParam", paramBuf: c }
+  else if c == " " then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "text" }
+  }
+  else if c == "\\" then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "afterBackslash" }
+  }
+  else if c == "{" then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "text", depth: s2.depth + 1 }
+  }
+  else if c == "}" then {
+    let s2 = rtfDispatchCtrl(state);
+    let newDepth = s2.depth - 1;
+    let newSkip = if s2.skipDepth > 0 && newDepth < s2.skipDepth then 0
+                  else s2.skipDepth;
+    { s2 | mode: "text", depth: newDepth, skipDepth: newSkip }
+  }
+  else if c == "\n" || c == "\r" then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "text" }
+  }
+  else {
+    let s2 = rtfDispatchCtrl(state);
+    let s3 = rtfAppendText(s2, c);
+    { s3 | mode: "text" }
+  }
+}
+
+pure func rtfHandleCtrlParam(state: RtfState, c: string) -> RtfState {
+  if rtfIsDigit(c) then
+    { state | paramBuf: "${state.paramBuf}${c}" }
+  else if c == " " then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "text" }
+  }
+  else if c == "\\" then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "afterBackslash" }
+  }
+  else if c == "{" then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "text", depth: s2.depth + 1 }
+  }
+  else if c == "}" then {
+    let s2 = rtfDispatchCtrl(state);
+    let newDepth = s2.depth - 1;
+    let newSkip = if s2.skipDepth > 0 && newDepth < s2.skipDepth then 0
+                  else s2.skipDepth;
+    { s2 | mode: "text", depth: newDepth, skipDepth: newSkip }
+  }
+  else if c == "\n" || c == "\r" then {
+    let s2 = rtfDispatchCtrl(state);
+    { s2 | mode: "text" }
+  }
+  else {
+    let s2 = rtfDispatchCtrl(state);
+    let s3 = rtfAppendText(s2, c);
+    { s3 | mode: "text" }
+  }
+}
+
+pure func rtfHandleHex2(state: RtfState, c: string) -> RtfState {
+  let byteVal = rtfHexValue(charAt(state.hexBuf, 0)) * 16 + rtfHexValue(c);
+  let cp = rtfCp1252ToUnicode(byteVal);
+  let s2 = rtfAppendText(state, rtfCodePointToString(cp));
+  { s2 | mode: "text", hexBuf: "" }
+}

@@ -63,6 +63,7 @@ export pure func detectFormat(ext: string) -> string
     ("tex", "latex"),
     ("latex", "latex"),
     ("ltx", "latex"),
+    ("rtf", "rtf"),
     ("txt", "text"),
     ("xml", "text"),
     ("foo", "unknown")
@@ -84,6 +85,7 @@ export pure func detectFormat(ext: string) -> string
   else if ext == "odt" || ext == "odp" || ext == "ods" then "zip-odf"
   else if ext == "eml" || ext == "mbox" then "email"
   else if ext == "tex" || ext == "latex" || ext == "ltx" then "latex"
+  else if ext == "rtf" then "rtf"
   else if ext == "txt" || ext == "xml" || ext == "json" then "text"
   else "unknown"
 }
@@ -140,11 +142,12 @@ export pure func needsAI(format: string) -> bool
     ("zip-odf", false),
     ("email", false),
     ("latex", false),
+    ("rtf", false),
     ("text", false),
     ("unknown", true)
   ]
 {
-  if format == "zip-office" || format == "text" || format == "csv" || format == "markdown" || format == "html" || format == "epub" || format == "zip-odf" || format == "email" || format == "latex" then false
+  if format == "zip-office" || format == "text" || format == "csv" || format == "markdown" || format == "html" || format == "epub" || format == "zip-odf" || format == "email" || format == "latex" || format == "rtf" then false
   else true
 }
 
@@ -166,6 +169,7 @@ export pure func strategyDescription(format: string) -> string
     ("zip-odf", "ZIP extraction + ODF XML parsing + optional AI for images/tables"),
     ("email", "RFC 5322 + MIME parsing (pure AILANG)"),
     ("latex", "LaTeX structural parsing (pure AILANG, deterministic)"),
+    ("rtf", "RTF tokenizer + CP1252/Unicode decoder (pure AILANG)"),
     ("text", "Direct text reading"),
     ("unknown", "AI multimodal extraction (best effort)")
   ]
@@ -182,6 +186,7 @@ export pure func strategyDescription(format: string) -> string
   else if format == "zip-odf" then "ZIP extraction + ODF XML parsing + optional AI for images/tables"
   else if format == "email" then "RFC 5322 + MIME parsing (pure AILANG)"
   else if format == "latex" then "LaTeX structural parsing (pure AILANG, deterministic)"
+  else if format == "rtf" then "RTF tokenizer + CP1252/Unicode decoder (pure AILANG)"
   else if format == "text" then "Direct text reading"
   else "AI multimodal extraction (best effort)"
 }

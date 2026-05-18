@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.sunholo-data/parse -->
 
-Python client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 15 formats (including LaTeX/arXiv), generate 8 — zero dependencies for Office, pluggable AI for PDFs.
+Python client and MCP server for the [AILANG Parse](https://www.sunholo.com/ailang-parse/) document parsing API. Parse 16 formats (including LaTeX/arXiv and RTF), generate 8 — zero dependencies for Office, pluggable AI for PDFs.
 
 ## Install
 

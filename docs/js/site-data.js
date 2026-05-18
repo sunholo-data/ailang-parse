@@ -8,7 +8,7 @@
  * To update pricing, change values here — they propagate via data-dp attributes.
  */
 var DP_DATA = {
-  version: "0.19.0",
+  version: "0.20.0",
   ailangVersion: "v0.19.2",
   pricing: {
     tiers: {
@@ -55,9 +55,9 @@ var DP_DATA = {
     }
   },
   formats: {
-    input: ['DOCX', 'PPTX', 'XLSX', 'ODT', 'ODP', 'ODS', 'CSV', 'MD', 'HTML', 'EPUB', 'EML', 'TEX', 'PDF', 'PNG', 'JPG'],
+    input: ['DOCX', 'PPTX', 'XLSX', 'ODT', 'ODP', 'ODS', 'CSV', 'MD', 'HTML', 'EPUB', 'EML', 'TEX', 'RTF', 'PDF', 'PNG', 'JPG'],
     output: ['JSON', 'Markdown', 'HTML', 'Text', 'Quarto', 'A2UI', 'Unstructured', 'DOCX', 'PPTX'],
-    input_count: 15,
+    input_count: 16,
     output_count: 9
   },
   page_estimates: {

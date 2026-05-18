@@ -45,6 +45,7 @@
     { name: 'docparse/services/html_parser',      path: 'docparse/services/html_parser.ail' },
     { name: 'docparse/services/csv_parser',       path: 'docparse/services/csv_parser.ail' },
     { name: 'docparse/services/markdown_parser',   path: 'docparse/services/markdown_parser.ail' },
+    { name: 'docparse/services/rtf_parser',       path: 'docparse/services/rtf_parser.ail' },
     { name: 'docparse/services/eml_parser',       path: 'docparse/services/eml_parser.ail' },
     { name: 'docparse/services/tex_parser',       path: 'docparse/services/tex_parser.ail' },
     // ODF + EPUB structural parsers (run pure XML→Blocks via AILANG WASM;
@@ -393,7 +394,7 @@
     lastFileExt = ext;
 
     // Capture buffer upfront so preview works for all file types
-    var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox', 'tex', 'latex', 'ltx'];
+    var textFormats = ['html', 'htm', 'md', 'csv', 'tsv', 'eml', 'mbox', 'tex', 'latex', 'ltx', 'rtf'];
     if (textFormats.indexOf(ext) !== -1) {
       lastFileContent = await file.text();
     } else {
@@ -474,6 +475,8 @@
       r = engine.call('parseMarkdownContent', content);
     } else if (ext === 'tex' || ext === 'latex' || ext === 'ltx') {
       r = engine.call('parseTexContent', content);
+    } else if (ext === 'rtf') {
+      r = engine.call('parseRtfContent', content);
     } else {
       // Fallback for unknown text formats
       var blocks = [{ type: 'text', text: content.substring(0, 10000), style: 'normal' }];
@@ -2160,7 +2163,7 @@
       var ext = file.name.split('.').pop().toLowerCase();
       var sizeKB = parseFloat((file.size / 1024).toFixed(1));
 
-      var textFormats = ['html', 'htm', 'md', 'txt', 'csv', 'tsv', 'eml', 'mbox', 'tex', 'latex', 'ltx'];
+      var textFormats = ['html', 'htm', 'md', 'txt', 'csv', 'tsv', 'eml', 'mbox', 'tex', 'latex', 'ltx', 'rtf'];
       var zipFormats  = ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'epub'];
       // Formats that need an AI vision/multimodal model. WASM still drives
       // the parse — it just delegates the visual extraction step to whichever

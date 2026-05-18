@@ -106,6 +106,7 @@ MODULES=(
   "services/html_parser.ail"
   "services/csv_parser.ail"
   "services/markdown_parser.ail"
+  "services/rtf_parser.ail"
   "services/eml_parser.ail"
   "services/tex_parser.ail"
   "services/odt_parser.ail"

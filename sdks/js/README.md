@@ -1,6 +1,6 @@
 # @ailang/parse
 
-JavaScript/TypeScript client and MCP server for the [AILANG Parse](https://www.sunholo.com/docparse/) document parsing API. Parse 18 formats (including LaTeX/arXiv), generate 9 — zero dependencies, native fetch.
+JavaScript/TypeScript client and MCP server for the [AILANG Parse](https://www.sunholo.com/docparse/) document parsing API. Parse 19 formats (including LaTeX/arXiv and RTF), generate 9 — zero dependencies, native fetch.
 
 ## Install
 

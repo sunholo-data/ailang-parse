@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTF (Rich Text Format) Parsing — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Parse Rich Text Format (.rtf) files deterministically with full CP1252 and Unicode escape support. No LibreOffice, no Word, no external dependencies — pure AILANG.">
+<meta property="og:title" content="RTF Parsing — AILANG Parse">
+<meta property="og:description" content="Deterministic .rtf parser for legacy templates, legal docs, and government forms. Handles \uNNNN Unicode, \'XX CP1252 hex, nested destinations, and Danish/French/German/Greek text without invoking Word.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/docparse/rtf-parsing.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Do I need LibreOffice or Word installed to parse RTF?",
+     "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse handles RTF entirely in-process — no soffice subprocess, no Word ActiveX, no antiword binary. The parser is pure AILANG and runs in the browser via WebAssembly as well as on the server."}},
+    {"@type": "Question", "name": "Does it handle non-ASCII characters like Danish or German?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. \\uNNNN Unicode escapes are decoded via std/bytes UTF-8 reassembly, and \\'XX CP1252 hex escapes go through a built-in Windows-1252 translation table that maps 0x80–0x9F to their canonical Unicode code points (euro sign, smart quotes, em dash, etc.)."}},
+    {"@type": "Question", "name": "What does the parser skip?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Header destinations (\\fonttbl, \\colortbl, \\stylesheet, \\info, \\listtable, themedata, panose, picture data, fields, etc.) are skipped as whole groups. Any starred destination ({\\*\\foo …}) is also skipped including its nested children. Formatting control words (\\b, \\i, \\fs, \\cf, …) are recognized and ignored."}},
+    {"@type": "Question", "name": "Are tables preserved?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Tables are flattened in v0.20: \\cell becomes TAB, \\row becomes a paragraph break. This preserves the data but not the grid topology. Proper TableBlock emission for RTF is on the roadmap."}},
+    {"@type": "Question", "name": "Where does RTF still show up in real workflows?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Government forms (Danish Købsaftale, French CERFA), legal templates, court filings, ERP exports, older MailMerge pipelines, and any system that needs a format Word and TextEdit both render without a converter. RTF is still a default 'Save As' option in Microsoft Word."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">RTF</span> parsing — pure AILANG, no Office required</h1>
+    <p class="subtitle reveal reveal-delay-1">Government forms, legal templates, and 30+ year-old MailMerge pipelines still hand you <code>.rtf</code> files. AILANG Parse reads them directly — no LibreOffice subprocess, no Word ActiveX, no antiword shell-out.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">The Problem</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#encoding">Encoding Support</a>
+        <a href="#destinations">Skipped Destinations</a>
+        <a href="#example-output">Example Output</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="problem">The Problem</h2>
+      <p>RTF was specified by Microsoft in 1987 and never went away. It's still a default "Save As" option in Word, it's what TextEdit produces on macOS, and it's the lingua franca of legacy government and legal pipelines. Yet most parsing libraries either skip RTF entirely or shell out to a 200 MB LibreOffice install just to read a 50 KB form.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Spawning <code>soffice --headless</code> to read an RTF is a 2 GB memory hit, ~3 seconds of cold-start, and a recurring source of file-descriptor leaks in long-running services. AILANG Parse parses the same file in &lt;50 ms with no subprocess.</div>
+      </div>
+
+      <h2 id="how-it-works">How It Works</h2>
+      <p>The RTF parser is a char-by-char state machine that walks the source via <code>std/string.foldChars</code>. It tracks <code>{ }</code> group nesting, recognizes control words and control symbols, and decodes Unicode/CP1252 escapes. The output is the same <code>Block</code> ADT as every other AILANG Parse format — <code>TextBlock</code> per paragraph, no new variants.</p>
+
+      <pre><code class="language-bash"># Parse an RTF file from the CLI
+./bin/docparse contract.rtf
+
+# Or via API
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -F "filepath=@contract.rtf" \
+  -F "outputFormat=markdown" \
+  -F "apiKey=YOUR_API_KEY"</code></pre>
+
+      <h2 id="encoding">Encoding Support</h2>
+      <p>RTF uses two parallel escape mechanisms for non-ASCII characters. AILANG Parse decodes both correctly.</p>
+
+      <table class="dp-config-table">
+        <thead><tr><th>Escape</th><th>Meaning</th><th>Example</th><th>Decoded</th></tr></thead>
+        <tbody>
+          <tr><td><code>\uNNNN?</code></td><td>Signed 16-bit Unicode code point (RTF 1.5+)</td><td><code>K\u248?bsaftale</code></td><td>Købsaftale</td></tr>
+          <tr><td><code>\'XX</code></td><td>CP1252 (Windows-1252) byte in hex</td><td><code>100\'80</code></td><td>100€</td></tr>
+          <tr><td><code>\\</code> <code>\{</code> <code>\}</code></td><td>Literal backslash/brace</td><td><code>50\% off</code></td><td>50% off</td></tr>
+          <tr><td><code>\tab</code> <code>\cell</code></td><td>Tab character / table cell separator</td><td><code>Name:\tab Jane</code></td><td>Name:[TAB]Jane</td></tr>
+          <tr><td><code>\par</code> <code>\row</code></td><td>Paragraph break</td><td><code>line 1\par line 2</code></td><td>Two TextBlocks</td></tr>
+        </tbody>
+      </table>
+
+      <p>The CP1252 decoder includes the full Windows-1252 translation table for the 0x80–0x9F range — euro sign (0x80 → €), smart quotes (0x91–0x94 → ' ' " "), em/en dashes (0x96–0x97 → – —), ellipsis (0x85 → …), trademark (0x99 → ™), and all the other punctuation Microsoft tucked into the C1 control space. Bytes 0xA0–0xFF map directly to Unicode U+00A0–U+00FF.</p>
+
+      <h2 id="destinations">Skipped Destinations</h2>
+      <p>RTF mixes content with header tables — fonts, colors, stylesheets, list definitions, generator strings, theme data. The parser skips these wholesale so they never pollute extracted text. Nested skip groups (e.g. <code>{\*\panose ...}</code> inside <code>\fonttbl</code>) are tracked correctly: the outer skip context wins, so leaving a nested group doesn't accidentally re-enable text capture.</p>
+
+      <ul class="dp-list">
+        <li><code>\fonttbl</code>, <code>\filetbl</code>, <code>\colortbl</code>, <code>\stylesheet</code>, <code>\listtable</code>, <code>\listoverridetable</code> — definition tables</li>
+        <li><code>\info</code>, <code>\generator</code>, <code>\themedata</code>, <code>\latentstyles</code>, <code>\datastore</code> — document metadata blobs</li>
+        <li><code>\pict</code>, <code>\shppict</code>, <code>\nonshppict</code> — embedded image data (not yet extracted)</li>
+        <li><code>\field</code>, <code>\fldinst</code>, <code>\fldrslt</code> — field codes and hyperlink internals</li>
+        <li><code>\bkmkstart</code>, <code>\bkmkend</code>, <code>\panose</code>, <code>\xmlnstbl</code> — minor structural markers</li>
+        <li><strong>Any <code>{\*\foo …}</code></strong> — RTF specifies that starred destinations are "optional" and consumers free to skip; we do</li>
+      </ul>
+
+      <h2 id="example-output">Example Output</h2>
+      <p>Each <code>\par</code> closes a <code>TextBlock</code>. Tab-separated form fields show up as <code>\t</code>-joined text within a single block, which preserves the row layout when re-rendered as Markdown or HTML.</p>
+
+      <pre><code class="language-json">{
+  "blocks": [
+    {"kind": "TextBlock", "style": "normal", "text": "Sample RTF Document"},
+    {"kind": "TextBlock", "style": "normal", "text": "Danish words: Købsaftale, økonomi, smørrebrød, fjærkræ, ål."},
+    {"kind": "TextBlock", "style": "normal", "text": "French phrases: café au lait, première classe, naïveté."},
+    {"kind": "TextBlock", "style": "normal", "text": "Currency: 50£ pounds sterling, 100€ euro, 250¥ yen, copyright © 1999."},
+    {"kind": "TextBlock", "style": "normal", "text": "Smart quotes: “like these” and ‘these’."},
+    {"kind": "TextBlock", "style": "normal", "text": "Name:\tJane Doe"},
+    {"kind": "TextBlock", "style": "normal", "text": "Email:\tjane@example.com"}
+  ]
+}</code></pre>
+
+      <h2 id="use-cases">Use Cases</h2>
+
+      <div class="dp-usecase-grid">
+        <div class="dp-usecase-card">
+          <h4>Government &amp; Legal Forms</h4>
+          <p>Danish Købsaftale (real-estate purchase agreements), French CERFA tax forms, UK court filings, US municipal templates. These are often shipped as <code>.rtf</code> because every operating system since the 1990s can render them without a converter. Parse them in batch without standing up Word.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Legacy ERP &amp; CRM Exports</h4>
+          <p>Older SAP, Oracle, and JD Edwards modules export reports as RTF. So do Salesforce mail merge templates and certain Dynamics flows. Hooking up a parser that doesn't require Office means batch ETL jobs stop needing a Windows host.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Email &amp; MailMerge Pipelines</h4>
+          <p>Outlook still saves drafts as RTF in <code>message/rfc822</code> attachments. Mass-mailing platforms (Constant Contact, Mailchimp legacy lists) accept RTF templates. Parsing them lets you feed historical campaigns into modern analytics without re-keying.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>Document Migration &amp; Archival</h4>
+          <p>Government and academic archives often hold decades of <code>.rtf</code> files alongside <code>.doc</code> and <code>.docx</code>. Migrating to a modern store means parsing all three. Until v0.20, AILANG Parse could only handle two of the three.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>RAG over Heterogeneous Corpora</h4>
+          <p>Your knowledge base has DOCX from 2018, PDF from 2024, EML from 2012, and RTF from 2003. A single parser API that handles all of them, deterministically and with the same Block ADT, is worth more than slight-quality wins on any individual format.</p>
+        </div>
+        <div class="dp-usecase-card">
+          <h4>TextEdit &amp; Pages Exports</h4>
+          <p>macOS users routinely save notes as RTF — that's TextEdit's default rich-text format. Pages and Numbers export to RTF for cross-platform handoff. If your product takes uploads from Mac users, you'll hit RTF eventually.</p>
+        </div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+      <p>RTF is one of <span data-dp="formats.input_count">16</span> supported input formats. The parser is pure AILANG — zero model calls, zero subprocess, fully deterministic.</p>
+
+      <pre><code class="language-bash"># CLI
+./bin/docparse contract.rtf --convert contract.md
+
+# API
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -F "filepath=@contract.rtf" \
+  -F "outputFormat=markdown" \
+  -F "apiKey=YOUR_API_KEY"</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>Do I need LibreOffice or Word installed to parse RTF?</summary>
+          <div class="dp-faq-answer"><p>No. AILANG Parse handles RTF entirely in-process — no <code>soffice</code> subprocess, no Word ActiveX, no <code>antiword</code> binary. The parser is pure AILANG and runs in the browser via WebAssembly as well as on the server.</p></div>
+        </details>
+        <details>
+          <summary>Does it handle non-ASCII characters like Danish or German?</summary>
+          <div class="dp-faq-answer"><p>Yes. <code>\uNNNN</code> Unicode escapes are decoded via <code>std/bytes</code> UTF-8 reassembly, and <code>\'XX</code> CP1252 hex escapes go through a built-in Windows-1252 translation table that maps 0x80–0x9F to their canonical Unicode code points (euro sign, smart quotes, em dash, etc.).</p></div>
+        </details>
+        <details>
+          <summary>What does the parser skip?</summary>
+          <div class="dp-faq-answer"><p>Header destinations (<code>\fonttbl</code>, <code>\colortbl</code>, <code>\stylesheet</code>, <code>\info</code>, <code>\listtable</code>, <code>\themedata</code>, <code>\panose</code>, picture data, fields, etc.) are skipped as whole groups. Any starred destination (<code>{\*\foo …}</code>) is also skipped including its nested children. Formatting control words (<code>\b</code>, <code>\i</code>, <code>\fs</code>, <code>\cf</code>, …) are recognized and ignored.</p></div>
+        </details>
+        <details>
+          <summary>Are tables preserved?</summary>
+          <div class="dp-faq-answer"><p>Tables are flattened in v0.20: <code>\cell</code> becomes TAB, <code>\row</code> becomes a paragraph break. This preserves the data but not the grid topology. Proper <code>TableBlock</code> emission for RTF is on the roadmap.</p></div>
+        </details>
+        <details>
+          <summary>What about embedded images (\pict)?</summary>
+          <div class="dp-faq-answer"><p>Image data is skipped in v0.20 (the <code>\pict</code> destination is in the skip list). The pixel data is hex-encoded inside the RTF and would require a separate decoder. If you need RTF image extraction, file a feature request.</p></div>
+        </details>
+        <details>
+          <summary>Where does RTF still show up in real workflows?</summary>
+          <div class="dp-faq-answer"><p>Government forms (Danish Købsaftale, French CERFA), legal templates, court filings, ERP exports, older MailMerge pipelines, and any system that needs a format Word and TextEdit both render without a converter. RTF is still a default "Save As" option in Microsoft Word.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
