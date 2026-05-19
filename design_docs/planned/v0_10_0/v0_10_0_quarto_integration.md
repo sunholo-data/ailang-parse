@@ -1,8 +1,19 @@
 # DocParse Quarto Integration — Parse to QMD, Render via Quarto
 
-**Status**: PLANNED (2026-03-20)
+**Status**: SUPERSEDED (2026-05-18) — see [`v0_21_0/v0_21_0_quarto_integration.md`](../v0_21_0/v0_21_0_quarto_integration.md).
+**Original status**: PLANNED (2026-03-20)
 **Theme**: Two rendering engines — AILANG for lightweight generation, Quarto for publication-quality output
 **Depends on**: v0.6.0 (document generation), v0.7.0 (API server)
+
+> **What shipped from this doc**: Phase 1 (QMD generator) landed in v0.10.0 as
+> [`docparse/services/qmd_generator.ail`](../../../docparse/services/qmd_generator.ail) and the `--convert *.qmd` CLI path. Phases 2–5 — Quarto rendering, API integration, project templates — did not ship.
+>
+> **Why superseded**: this doc routes rendering through the multivac Cloud Run
+> Quarto service (`multivac-system-services/quarto/`). That choice is correct
+> for the deployable API repo (`ailang-parse-api`) but wrong for `ailang-parse`,
+> which is the library/CLI: the CLI should call the user's local `quarto`
+> binary via `std/process.exec`, not a remote HTTP service. The re-scope is in
+> [`v0_21_0/v0_21_0_quarto_integration.md`](../v0_21_0/v0_21_0_quarto_integration.md). The Cloud Run integration sections below are kept for reference when the API repo picks this work up.
 
 ## Motivation
 

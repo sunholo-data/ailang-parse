@@ -132,7 +132,7 @@ Designs that were superseded or abandoned (never delete — move here).
 ## Roadmap (Planned)
 
 ### v0.10.0 — Quarto, Trust & Deferred v0.9.0 Items
-- Quarto Markdown generation with two rendering engines
+- Quarto Markdown generation with two rendering engines (Phase 1 only — see v0.21.0 for the re-scoped render layer)
 - API privacy & trust commitments for hosted API
 - Two-stage PDF pipeline (OCR → heuristic structuring) for Ollama models
 - Ollama model-aware prompting (target: local models >50%)
@@ -141,10 +141,17 @@ Designs that were superseded or abandoned (never delete — move here).
 - WASM image rendering (currently placeholder-only)
 - Manifest-driven API page (3 missing endpoints: formats, pricing, capabilities)
 - Valuable friction onboarding: structural insights banner, guided sample tour
-- [Quarto](planned/v0_10_0/v0_10_0_quarto_integration.md) | [Privacy & Trust](planned/v0_10_0/api_privacy_trust.md)
+- [Quarto](planned/v0_10_0/v0_10_0_quarto_integration.md) (SUPERSEDED → v0.21.0) | [Privacy & Trust](planned/v0_10_0/api_privacy_trust.md)
 - [PDF Pipeline](planned/v0_10_0/pdf_pipeline.md) | [Ollama](planned/v0_10_0/ollama_model_aware_prompting.md)
 - [Auth Providers](planned/v0_10_0/auth_providers.md) | [WASM Images](planned/v0_10_0/wasm_images.md)
 - [Manifest API](planned/v0_10_0/manifest_driven_api_page.md) | [Valuable Friction](planned/v0_10_0/valuable_friction_onboarding.md)
+
+### v0.21.0 — Quarto Local Renderer
+- `quarto_render.ail` service module shelling out to local `quarto` binary via `std/process.exec`
+- `--via quarto` CLI flag for PDF / EPUB / RevealJS / publication-quality DOCX
+- Image asset extraction (replace base64 inline with `*_files/` directories)
+- QMD golden coverage in `benchmarks/office/golden/` + optional `quarto check` in CI
+- [Design Doc](planned/v0_21_0/v0_21_0_quarto_integration.md)
 
 ### v0.11.0 — Structured Extraction `FAST-TRACK`
 - JSON Schema-driven extraction: `--extract --schema`, `--template invoice`
