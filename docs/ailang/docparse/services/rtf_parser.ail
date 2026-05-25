@@ -301,29 +301,12 @@ pure func rtfHandleCtrl(state: RtfState, c: string) -> RtfState {
     let s2 = rtfDispatchCtrl(state);
     { s2 | mode: "text" }
   }
-  else if c == "\\" then {
-    let s2 = rtfDispatchCtrl(state);
-    { s2 | mode: "afterBackslash" }
-  }
-  else if c == "{" then {
-    let s2 = rtfDispatchCtrl(state);
-    { s2 | mode: "text", depth: s2.depth + 1 }
-  }
-  else if c == "}" then {
-    let s2 = rtfDispatchCtrl(state);
-    let newDepth = s2.depth - 1;
-    let newSkip = if s2.skipDepth > 0 && newDepth < s2.skipDepth then 0
-                  else s2.skipDepth;
-    { s2 | mode: "text", depth: newDepth, skipDepth: newSkip }
-  }
-  else if c == "\n" || c == "\r" then {
-    let s2 = rtfDispatchCtrl(state);
-    { s2 | mode: "text" }
-  }
   else {
+    -- Other terminators (\\, {, }, \n, punctuation) are not consumed by
+    -- the control word — re-run them through the text-mode handler so
+    -- pendingUSkip and group-tracking stay consistent.
     let s2 = rtfDispatchCtrl(state);
-    let s3 = rtfAppendText(s2, c);
-    { s3 | mode: "text" }
+    rtfHandleText({ s2 | mode: "text" }, c)
   }
 }
 
@@ -334,29 +317,11 @@ pure func rtfHandleCtrlParam(state: RtfState, c: string) -> RtfState {
     let s2 = rtfDispatchCtrl(state);
     { s2 | mode: "text" }
   }
-  else if c == "\\" then {
-    let s2 = rtfDispatchCtrl(state);
-    { s2 | mode: "afterBackslash" }
-  }
-  else if c == "{" then {
-    let s2 = rtfDispatchCtrl(state);
-    { s2 | mode: "text", depth: s2.depth + 1 }
-  }
-  else if c == "}" then {
-    let s2 = rtfDispatchCtrl(state);
-    let newDepth = s2.depth - 1;
-    let newSkip = if s2.skipDepth > 0 && newDepth < s2.skipDepth then 0
-                  else s2.skipDepth;
-    { s2 | mode: "text", depth: newDepth, skipDepth: newSkip }
-  }
-  else if c == "\n" || c == "\r" then {
-    let s2 = rtfDispatchCtrl(state);
-    { s2 | mode: "text" }
-  }
   else {
+    -- See rtfHandleCtrl: route the terminator through text-mode so the
+    -- pendingUSkip from a just-dispatched \uNNNN swallows it correctly.
     let s2 = rtfDispatchCtrl(state);
-    let s3 = rtfAppendText(s2, c);
-    { s3 | mode: "text" }
+    rtfHandleText({ s2 | mode: "text" }, c)
   }
 }
 
