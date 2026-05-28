@@ -9,7 +9,50 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.1...HEAD)
+
+---
+
+## [v0.20.1](https://github.com/sunholo-data/ailang-parse/compare/v0.20.0...v0.20.1) — 2026-05-28
+
+### Added — AI-provider resilience for the hosted parse API
+
+The passthrough service (`/api/v1/parse`) can now absorb transient Gemini
+failures and surface typed errors instead of bare 500s — motivated by a
+2026-05-27 production incident where the PDF page-count probe failed.
+
+- **`aiCallWithRetry`** — wraps `callResult` with bounded exponential backoff
+  (2 retries, 250ms→500ms) on `AIError.retryable`; non-retryable errors return
+  immediately. Adds the `Clock` effect.
+- **`aiGetPageCountResult`** — Result-returning page-count probe (the call that
+  failed in the prod incident).
+- **`parsePdfResult`** — `Result[[Block], AIError]` twin of `parsePdf`, used by
+  the hosted API to map terminal AI failures to HTTP 502/503. `parsePdf` is
+  unchanged, so the CLI / browser / SDK keep their effect signature (no `Clock`
+  ripple). Extraction-path coverage is blocked on upstream `callJsonSimpleResult`.
+
+### Fixed
+
+- **`ailang lock`:** dropped a self-dependency (the package listed
+  `sunholo/ailang_parse` as its own dependency), which failed with a circular
+  dependency error.
+- **Claude Code install docs:** the documented command was `claude install
+  github:…`, which fails with `Invalid channel` (that command is the CLI
+  channel updater, not a plugin installer). Corrected across all pages to the
+  real `/plugin marketplace add …` + `/plugin install …@…` flow, and fixed the
+  plugin marketplace/manifest so the skill actually installs and registers its
+  MCP server ([#1](https://github.com/sunholo-data/ailang-parse/issues/1)).
+  Clarified that the skill is cloud-API only — local processing uses the
+  `docparse` CLI ([#4](https://github.com/sunholo-data/ailang-parse/issues/4)).
+
+### Added — documentation guards (CI)
+
+- **`check-install-docs.py`** — bans broken install incantations and
+  cross-checks the documented command against the live plugin marketplace.
+- **`check-doc-examples.py`** — enforces that transcluded (`data-src`) code
+  examples resolve to real files, that inline fallbacks byte-match those files,
+  and that every example file is syntax-checked (bash / python / node / gofmt /
+  json).
 
 ---
 
