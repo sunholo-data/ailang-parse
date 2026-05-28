@@ -402,8 +402,9 @@ Hosted (HTTP):
 ```
 
 ```bash
-// Claude Code — install plugin (recommended)
-claude install github:sunholo-data/docparse-skill
+// Claude Code — install plugin (recommended), run both inside Claude Code
+/plugin marketplace add sunholo-data/docparse-skill
+/plugin install ailang-parse@ailang-parse-marketplace
 
 // Or add to .mcp.json (hosted)
 {
