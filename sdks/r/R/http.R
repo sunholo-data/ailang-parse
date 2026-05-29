@@ -11,7 +11,7 @@ NULL
 .build_request <- function(base_url, path, api_key = NULL, timeout = 60) {
   req <- httr2::request(paste0(sub("/$", "", base_url), path))
   req <- httr2::req_timeout(req, timeout)
-  req <- httr2::req_user_agent(req, "ailangparse-r/0.5.3")
+  req <- httr2::req_user_agent(req, "ailangparse-r/0.8.0")
   req <- httr2::req_error(req, is_error = function(resp) FALSE)
   if (!is.null(api_key) && nzchar(api_key)) {
     req <- httr2::req_headers(req, `x-api-key` = api_key)
@@ -29,6 +29,50 @@ NULL
   .stop_for_status(status, body_text)
   headers <- tryCatch(httr2::resp_headers(resp), error = function(e) list())
   list(body = body_text, headers = headers)
+}
+
+# Resolve a user-supplied retry list against the defaults. Mirrors the Python
+# SDK's RetryPolicy: the default does NOT retry (max_retries 0); the server
+# returns 502/503/504 for transient AI failures and marks safe-to-retry 5xx
+# with X-AilangParse-Replayable.
+.resolve_retry <- function(retry = NULL) {
+  d <- list(
+    max_retries        = 0L,
+    statuses           = c(502L, 503L, 504L),
+    respect_replayable = TRUE,
+    backoff_base       = 1,
+    backoff_max        = 30
+  )
+  if (is.null(retry)) return(d)
+  for (k in names(retry)) d[[k]] <- retry[[k]]
+  d
+}
+
+# Apply the retry policy to a request via httr2::req_retry. No-op when
+# max_retries <= 0. Delay before retry N is min(backoff_base * 2^(N-1),
+# backoff_max). A 5xx carrying X-AilangParse-Replayable: true is treated as
+# transient when respect_replayable is set.
+.req_with_retry <- function(req, retry) {
+  if (is.null(retry) || isTRUE(retry$max_retries <= 0)) return(req)
+  statuses <- retry$statuses
+  respect  <- isTRUE(retry$respect_replayable)
+  base     <- retry$backoff_base
+  max_d    <- retry$backoff_max
+  httr2::req_retry(
+    req,
+    max_tries = as.integer(retry$max_retries) + 1L,
+    is_transient = function(resp) {
+      st <- httr2::resp_status(resp)
+      if (st %in% statuses) return(TRUE)
+      if (respect && st >= 500 && st < 600) {
+        h <- tryCatch(httr2::resp_header(resp, "X-AilangParse-Replayable"),
+                      error = function(e) NULL)
+        if (!is.null(h) && identical(tolower(h), "true")) return(TRUE)
+      }
+      FALSE
+    },
+    backoff = function(attempt) min(base * 2^(attempt - 1), max_d)
+  )
 }
 
 #' Unwrap a serve-API response envelope.

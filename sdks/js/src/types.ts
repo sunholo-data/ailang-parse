@@ -275,8 +275,36 @@ export interface Element {
 
 // ── Client options ──
 
+/**
+ * Retry configuration for transient parse failures. Mirrors the Python SDK's
+ * RetryPolicy. The server returns 502/503/504 for transient AI-provider
+ * failures and marks safe-to-retry 5xx with `X-AilangParse-Replayable`.
+ *
+ * The default (no `retry` option) does NOT retry — opt in with `maxRetries`:
+ *
+ * ```ts
+ * new DocParse({ retry: { maxRetries: 3 } });
+ * ```
+ *
+ * Delay before retry N is `min(backoffBaseMs * 2 ** N, backoffMaxMs)`.
+ */
+export interface RetryPolicy {
+  /** Maximum number of retries (0 = no retry). */
+  maxRetries?: number;
+  /** HTTP statuses that always trigger a retry. Default `[502, 503, 504]`. */
+  retryableStatuses?: number[];
+  /** Also retry any 5xx carrying `X-AilangParse-Replayable: true`. Default `true`. */
+  respectReplayable?: boolean;
+  /** Exponential backoff base, milliseconds. Default `1000`. */
+  backoffBaseMs?: number;
+  /** Upper bound on per-retry delay, milliseconds. Default `30000`. */
+  backoffMaxMs?: number;
+}
+
 export interface DocParseOptions {
   apiKey?: string;
   baseUrl?: string;
   timeout?: number;
+  /** Retry policy for transient parse failures. Default: no retry. */
+  retry?: RetryPolicy;
 }

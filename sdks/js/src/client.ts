@@ -3,7 +3,7 @@
  * and persistent credential storage.
  */
 
-import type { ParseResult, HealthResult, FormatsResult, DocParseOptions, ResponseMeta } from "./types.js";
+import type { ParseResult, HealthResult, FormatsResult, DocParseOptions, ResponseMeta, RetryPolicy } from "./types.js";
 import { DocParseError, AuthError, QuotaError } from "./types.js";
 import { KeyManager } from "./keys.js";
 
@@ -15,6 +15,8 @@ export class DocParse {
   private apiKey: string;
   private baseUrl: string;
   private timeout: number;
+  /** Resolved retry policy (defaults applied). */
+  private retry: Required<RetryPolicy>;
   /**
    * Stored key id, populated from saved credentials or a successful
    * `deviceAuth()` flow. Used by {@link keyInfo} when no explicit id is
@@ -55,6 +57,57 @@ export class DocParse {
     this.apiKey = key;
     this.keyId = keyId;
     this.keys = new KeyManager(this);
+
+    const r = opts?.retry ?? {};
+    this.retry = {
+      maxRetries: r.maxRetries ?? 0,
+      retryableStatuses: r.retryableStatuses ?? [502, 503, 504],
+      respectReplayable: r.respectReplayable ?? true,
+      backoffBaseMs: r.backoffBaseMs ?? 1000,
+      backoffMaxMs: r.backoffMaxMs ?? 30000,
+    };
+  }
+
+  private _shouldRetry(status: number, replayable: boolean): boolean {
+    if (this.retry.maxRetries <= 0) return false;
+    if (this.retry.retryableStatuses.includes(status)) return true;
+    return this.retry.respectReplayable && status >= 500 && status < 600 && replayable;
+  }
+
+  private _retryDelayMs(attempt: number): number {
+    return Math.min(this.retry.backoffBaseMs * 2 ** attempt, this.retry.backoffMaxMs);
+  }
+
+  private static _sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Issue `makeRequest()` and retry transient failures (502/503/504, plus
+   * replayable 5xx) per the retry policy. `makeRequest` must build a fresh
+   * Request — including its own AbortController/timeout — on each call, since
+   * fetch consumes the body. Network errors are retried on the same budget as
+   * HTTP 5xx. Returns the final Response for the caller to unwrap.
+   */
+  private async _sendWithRetry(makeRequest: () => Promise<Response>): Promise<Response> {
+    let attempt = 0;
+    for (;;) {
+      let resp: Response;
+      try {
+        resp = await makeRequest();
+      } catch (e) {
+        if (attempt >= this.retry.maxRetries) throw e;
+        await DocParse._sleep(this._retryDelayMs(attempt));
+        attempt++;
+        continue;
+      }
+      const replayable = (resp.headers.get("X-AilangParse-Replayable") || "").toLowerCase() === "true";
+      if (!this._shouldRetry(resp.status, replayable) || attempt >= this.retry.maxRetries) {
+        return resp;
+      }
+      await DocParse._sleep(this._retryDelayMs(attempt));
+      attempt++;
+    }
   }
 
   /**
@@ -122,25 +175,21 @@ export class DocParse {
     if (this.apiKey) body.apiKey = this.apiKey;
     if (opts?.sourceUrl) body.sourceUrl = opts.sourceUrl;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (this.apiKey) headers["x-api-key"] = this.apiKey;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      await DocParse._raiseForResponse(resp);
-      const meta = DocParse._extractMeta(resp.headers);
-      const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
-      result.responseMeta = meta;
-      return result;
-    } finally {
-      clearTimeout(timer);
-    }
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiKey) headers["x-api-key"] = this.apiKey;
+    const payload = JSON.stringify(body);
+
+    const resp = await this._sendWithRetry(() => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeout);
+      return fetch(url, { method: "POST", headers, body: payload, signal: controller.signal })
+        .finally(() => clearTimeout(timer));
+    });
+    await DocParse._raiseForResponse(resp);
+    const meta = DocParse._extractMeta(resp.headers);
+    const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
+    result.responseMeta = meta;
+    return result;
   }
 
   /** Parse a document from a URL. Convenience wrapper around {@link parse}. */
@@ -162,53 +211,48 @@ export class DocParse {
    */
   async parseFile(filepath: string, outputFormat = "blocks"): Promise<ParseResult> {
     const url = this.baseUrl + "/api/v1/parse";
-    let form: any;
-
     // Detect Node.js vs browser
     const isNode = typeof process !== "undefined" && process.versions?.node;
 
+    // Build a fresh FormData per attempt — fetch consumes the body, so a retry
+    // must re-create it. (Node: re-wrap the file bytes; browser: re-append the File.)
+    let makeForm: () => FormData;
     if (isNode) {
-      // Node.js: read file from disk using native FormData/Blob (Node 18+)
       const { readFileSync } = await import("fs");
       const { basename } = await import("path");
-
       const fileData = readFileSync(filepath);
-      const blob = new Blob([fileData]);
-      form = new FormData();
-      form.append("filepath", blob, basename(filepath));
-      form.append("outputFormat", outputFormat);
-      if (this.apiKey) form.append("apiKey", this.apiKey);
+      const name = basename(filepath);
+      makeForm = () => {
+        const form = new FormData();
+        form.append("filepath", new Blob([fileData]), name);
+        form.append("outputFormat", outputFormat);
+        if (this.apiKey) form.append("apiKey", this.apiKey);
+        return form;
+      };
     } else {
-      // Browser: expect a File object or use native FormData
-      form = new FormData();
-      form.append("filepath", filepath as any);
-      form.append("outputFormat", outputFormat);
-      if (this.apiKey) form.append("apiKey", this.apiKey);
+      makeForm = () => {
+        const form = new FormData();
+        form.append("filepath", filepath as any);
+        form.append("outputFormat", outputFormat);
+        if (this.apiKey) form.append("apiKey", this.apiKey);
+        return form;
+      };
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
+    const headers: Record<string, string> = {};
+    if (this.apiKey) headers["x-api-key"] = this.apiKey;
 
-    try {
-      const headers: Record<string, string> = {};
-      if (this.apiKey) headers["x-api-key"] = this.apiKey;
-
-      const resp = await fetch(url, {
-        method: "POST",
-        headers,
-        body: form,
-        signal: controller.signal,
-      });
-
-      await DocParse._raiseForResponse(resp);
-
-      const meta = DocParse._extractMeta(resp.headers);
-      const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
-      result.responseMeta = meta;
-      return result;
-    } finally {
-      clearTimeout(timer);
-    }
+    const resp = await this._sendWithRetry(() => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeout);
+      return fetch(url, { method: "POST", headers, body: makeForm() as any, signal: controller.signal })
+        .finally(() => clearTimeout(timer));
+    });
+    await DocParse._raiseForResponse(resp);
+    const meta = DocParse._extractMeta(resp.headers);
+    const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
+    result.responseMeta = meta;
+    return result;
   }
 
   /**

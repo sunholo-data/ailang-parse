@@ -36,17 +36,27 @@ DocParse <- R6::R6Class(
     key_id = NULL,
     #' @field keys A \code{KeyManager} bound to this client.
     keys = NULL,
+    #' @field retry Resolved retry policy (list) governing transient parse
+    #'   failures. See \code{$initialize}'s \code{retry} argument.
+    retry = NULL,
 
     #' @description Construct a new client.
     #' @param api_key Optional API key. If empty, the env var and saved
     #'   credentials are consulted in that order.
     #' @param base_url Hosted API endpoint.
     #' @param timeout Per-request timeout in seconds.
+    #' @param retry Optional retry policy for transient parse failures
+    #'   (502/503/504 and replayable 5xx). A list with any of
+    #'   \code{max_retries} (default 0 = no retry), \code{statuses},
+    #'   \code{respect_replayable}, \code{backoff_base}, \code{backoff_max}.
+    #'   e.g. \code{retry = list(max_retries = 3)}.
     initialize = function(api_key = NULL,
                           base_url = default_base_url(),
-                          timeout = 60) {
+                          timeout = 60,
+                          retry = NULL) {
       self$base_url <- sub("/$", "", base_url)
       self$timeout  <- timeout
+      self$retry    <- .resolve_retry(retry)
 
       key <- if (is.null(api_key)) "" else api_key
       kid <- ""
@@ -90,6 +100,7 @@ DocParse <- R6::R6Class(
       req <- .build_request(self$base_url, "/api/v1/parse",
                             self$api_key, self$timeout)
       req <- httr2::req_body_json(req, body, auto_unbox = FALSE)
+      req <- .req_with_retry(req, self$retry)
       resp <- .perform(req)
       result <- .build_parse_result(.unwrap(resp$body), output_format)
       attr(result, "response_meta") <- .response_meta_from_headers(resp$headers)
@@ -112,6 +123,7 @@ DocParse <- R6::R6Class(
         outputFormat = output_format,
         apiKey       = self$api_key
       )
+      req <- .req_with_retry(req, self$retry)
       resp <- .perform(req)
       result <- .build_parse_result(.unwrap(resp$body), output_format)
       attr(result, "response_meta") <- .response_meta_from_headers(resp$headers)

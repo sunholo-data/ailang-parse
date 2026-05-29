@@ -94,6 +94,23 @@ meta$format                # Detected input format ("docx", etc.)
 meta$replayable            # Whether this request can be replayed
 ```
 
+## Retry on transient failures
+
+`$parse()` / `$parse_file()` can retry transient AI-provider failures (the
+server returns `502`/`503`/`504`, and marks safe-to-retry `5xx` with
+`X-AilangParse-Replayable`). Retry is **off by default** — opt in via the
+`retry` argument (built on `httr2::req_retry()`):
+
+```r
+client <- DocParse$new(retry = list(
+  max_retries        = 3,                # default 0 (no retry)
+  statuses           = c(502, 503, 504),
+  respect_replayable = TRUE,             # also retry replayable 5xx
+  backoff_base       = 1,                # delay N = min(base * 2^(N-1), max), seconds
+  backoff_max        = 30
+))
+```
+
 ## Authentication
 
 API key resolution order:

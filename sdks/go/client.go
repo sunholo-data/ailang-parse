@@ -137,6 +137,10 @@ type Client struct {
 
 	// Keys provides API key management methods.
 	Keys *KeyManager
+
+	// Retry governs automatic retry of transient parse failures (502/503/504
+	// and replayable 5xx). Defaults to no retry; set via WithRetry.
+	Retry RetryPolicy
 }
 
 // Option configures the client.
@@ -164,6 +168,7 @@ func New(apiKey string, opts ...Option) *Client {
 			// large PDFs should set a higher timeout via WithTimeout.
 			Timeout: 120 * time.Second,
 		},
+		Retry: DefaultRetryPolicy(),
 	}
 	for _, opt := range opts {
 		opt(c)

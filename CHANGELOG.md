@@ -11,6 +11,23 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.2...HEAD)
 
+### SDKs — v0.8.0 (retry parity across JS, Go, R)
+
+The server now returns `502`/`503`/`504` for transient AI-provider failures
+(and marks safe-to-retry `5xx` with `X-AilangParse-Replayable`). The **Python**
+SDK already retried these via `RetryPolicy`; this brings the **JS, Go, and R**
+SDKs to parity. Retry stays **off by default** (opt in per SDK):
+
+- **JS:** `new DocParse({ retry: { maxRetries: 3 } })` — `RetryPolicy` with
+  `retryableStatuses`, `respectReplayable`, `backoffBaseMs`/`backoffMaxMs`.
+- **Go:** `docparse.New(key, docparse.WithRetry(docparse.RetryPolicy{MaxRetries: 3}))`.
+  Replayable 5xx are always honoured when retries are enabled (a Go bool field
+  could not distinguish unset from false).
+- **R:** `DocParse$new(retry = list(max_retries = 3))`, built on `httr2::req_retry()`.
+
+`parse` / `parseFile` re-issue the request (rebuilding the body) on each retry
+with exponential backoff. All four SDKs bumped to 0.8.0 (`server.json` too).
+
 ---
 
 ## [v0.20.2](https://github.com/sunholo-data/ailang-parse/compare/v0.20.1...v0.20.2) — 2026-05-29

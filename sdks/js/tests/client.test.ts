@@ -22,11 +22,22 @@ let mockStatus = 200;
 let mockBody: any = {};
 let mockHeaders: Record<string, string> = {};
 let lastRequestBody: any = null;
+// Per-call response queue (for retry tests): the i-th request gets the i-th
+// entry; the last entry repeats once exhausted. `requestCount` counts requests.
+let mockResponses: Array<{ status: number; body: any; headers?: Record<string, string> }> | null = null;
+let requestCount = 0;
 
 function setMock(status: number, body: any, headers: Record<string, string> = {}) {
   mockStatus = status;
   mockBody = body;
   mockHeaders = headers;
+  mockResponses = null;
+  requestCount = 0;
+}
+
+function setMockQueue(responses: Array<{ status: number; body: any; headers?: Record<string, string> }>) {
+  mockResponses = responses;
+  requestCount = 0;
 }
 
 before(async () => {
@@ -39,13 +50,19 @@ before(async () => {
       const raw = Buffer.concat(chunks).toString();
       try { lastRequestBody = JSON.parse(raw); } catch { lastRequestBody = raw; }
 
-      const responseBody = JSON.stringify(mockBody);
+      requestCount++;
+      let status = mockStatus, body = mockBody, extraHeaders = mockHeaders;
+      if (mockResponses && mockResponses.length) {
+        const r = mockResponses[Math.min(requestCount - 1, mockResponses.length - 1)];
+        status = r.status; body = r.body; extraHeaders = r.headers ?? {};
+      }
+      const responseBody = JSON.stringify(body);
       const hdrs: Record<string, string> = {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(responseBody).toString(),
-        ...mockHeaders,
+        ...extraHeaders,
       };
-      res.writeHead(mockStatus, hdrs);
+      res.writeHead(status, hdrs);
       res.end(responseBody);
     });
   });
@@ -131,6 +148,47 @@ describe("health", () => {
     assert.equal(h.status, "ok");
     assert.equal(h.version, "1.2.3");
     assert.equal(h.formats_parse, 12);
+  });
+});
+
+describe("retry", () => {
+  const okEnvelope = { result: JSON.stringify({ status: "ok", format: "blocks", blocks: [] }) };
+
+  it("retries a transient 503 then succeeds", async () => {
+    setMockQueue([
+      { status: 503, body: { error: "transient" } },
+      { status: 503, body: { error: "transient" } },
+      { status: 200, body: okEnvelope },
+    ]);
+    const c = new DocParse({ apiKey: "dp_x", baseUrl, retry: { maxRetries: 3, backoffBaseMs: 1, backoffMaxMs: 2 } });
+    const res = await c.parse("sample_docx_formatting");
+    assert.ok(res);
+    assert.equal(requestCount, 3);
+  });
+
+  it("does not retry by default", async () => {
+    setMockQueue([{ status: 503, body: { error: "transient" } }]);
+    const c = new DocParse({ apiKey: "dp_x", baseUrl });
+    await assert.rejects(() => c.parse("x"), (e: any) => e instanceof DocParseError && e.statusCode === 503);
+    assert.equal(requestCount, 1);
+  });
+
+  it("retries a replayable 500", async () => {
+    setMockQueue([
+      { status: 500, body: { error: "replayable" }, headers: { "X-AilangParse-Replayable": "true" } },
+      { status: 200, body: okEnvelope },
+    ]);
+    const c = new DocParse({ apiKey: "dp_x", baseUrl, retry: { maxRetries: 2, backoffBaseMs: 1 } });
+    const res = await c.parse("x");
+    assert.ok(res);
+    assert.equal(requestCount, 2);
+  });
+
+  it("does not retry a non-retryable 400", async () => {
+    setMockQueue([{ status: 400, body: { error: "bad" } }]);
+    const c = new DocParse({ apiKey: "dp_x", baseUrl, retry: { maxRetries: 3, backoffBaseMs: 1 } });
+    await assert.rejects(() => c.parse("x"));
+    assert.equal(requestCount, 1);
   });
 });
 

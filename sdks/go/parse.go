@@ -46,24 +46,21 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/parse", bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.APIKey != "" {
-		req.Header.Set("x-api-key", c.APIKey)
+	newReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/parse", bytes.NewReader(b))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.APIKey != "" {
+			req.Header.Set("x-api-key", c.APIKey)
+		}
+		return req, nil
 	}
 
-	resp, err := c.HTTP.Do(req)
+	resp, data, err := c.doWithRetry(ctx, newReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-	respHeader := resp.Header
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, err
 	}
 
 	if err := raiseForResponse(resp, data); err != nil {
@@ -78,7 +75,7 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 	if err != nil {
 		return nil, err
 	}
-	result.ResponseMeta = extractResponseMeta(respHeader)
+	result.ResponseMeta = extractResponseMeta(resp.Header)
 	return result, nil
 }
 
@@ -153,26 +150,24 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 		writer.WriteField("apiKey", c.APIKey)
 	}
 	writer.Close()
+	contentType := writer.FormDataContentType()
+	bodyBytes := body.Bytes()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/parse", &body)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if c.APIKey != "" {
-		req.Header.Set("x-api-key", c.APIKey)
+	newReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/v1/parse", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", contentType)
+		if c.APIKey != "" {
+			req.Header.Set("x-api-key", c.APIKey)
+		}
+		return req, nil
 	}
 
-	resp, err := c.HTTP.Do(req)
+	resp, data, err := c.doWithRetry(ctx, newReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-	respHeader := resp.Header
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, err
 	}
 
 	if err := raiseForResponse(resp, data); err != nil {
@@ -187,7 +182,7 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 	if err != nil {
 		return nil, err
 	}
-	result.ResponseMeta = extractResponseMeta(respHeader)
+	result.ResponseMeta = extractResponseMeta(resp.Header)
 	return result, nil
 }
 

@@ -183,6 +183,27 @@ client := docparse.New("dp_your_key",
 )
 ```
 
+### Retry on transient failures
+
+`Parse` / `ParseFile` can retry transient AI-provider failures (the server
+returns `502`/`503`/`504`, and marks safe-to-retry `5xx` with
+`X-AilangParse-Replayable`). Retry is **off by default** — opt in with
+`WithRetry`. Zero-valued fields fall back to the defaults, so
+`RetryPolicy{MaxRetries: 3}` is enough:
+
+```go
+client := docparse.New("dp_your_key",
+	docparse.WithRetry(docparse.RetryPolicy{
+		MaxRetries:  3,                 // default 0 (no retry)
+		BackoffBase: 1 * time.Second,   // delay N = min(base * 2^N, max)
+		BackoffMax:  30 * time.Second,
+	}),
+)
+```
+
+A 5xx carrying `X-AilangParse-Replayable: true` is always retried when retries
+are enabled (the server only sets it on responses safe to re-attempt).
+
 ## Error Handling
 
 ```go

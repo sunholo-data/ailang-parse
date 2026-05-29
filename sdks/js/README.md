@@ -191,6 +191,25 @@ const client = new DocParse({
 });
 ```
 
+### Retry on transient failures
+
+`parse` / `parseFile` can retry transient AI-provider failures (the server
+returns `502`/`503`/`504`, and marks safe-to-retry `5xx` with
+`X-AilangParse-Replayable`). Retry is **off by default** — opt in with `retry`:
+
+```typescript
+const client = new DocParse({
+  apiKey: 'dp_your_key',
+  retry: {
+    maxRetries: 3,            // default 0 (no retry)
+    retryableStatuses: [502, 503, 504],
+    respectReplayable: true,  // also retry replayable 5xx
+    backoffBaseMs: 1000,      // delay N = min(base * 2**N, max)
+    backoffMaxMs: 30000,
+  },
+});
+```
+
 ## Browser Usage
 
 Works in browsers with native `fetch`:
