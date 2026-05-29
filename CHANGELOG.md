@@ -9,7 +9,11 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.2...HEAD)
+
+---
+
+## [v0.20.2](https://github.com/sunholo-data/ailang-parse/compare/v0.20.1...v0.20.2) — 2026-05-29
 
 ### Added — AI extraction-path resilience (completes the v0.20.1 work)
 
