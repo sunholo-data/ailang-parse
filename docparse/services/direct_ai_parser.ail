@@ -1,6 +1,6 @@
 module docparse/services/direct_ai_parser
 
-import std/ai (call, callJson, callJsonSimple, callResult, AIError)
+import std/ai (call, callJson, callJsonSimple, callJsonSimpleResult, callResult, AIError)
 import std/clock (sleep)
 import std/fs (readFileBytes)
 import std/string (length, substring, trim, find, startsWith, intToStr, stringToInt)
@@ -62,13 +62,12 @@ export func parsePdf(filepath: string) -> [Block] ! {FS, AI, Net, Env} {
 -- provider fails. Differs from parsePdf only in the page-count step: it retries
 -- the (transient-prone) page-count call and returns Err on terminal failure.
 --
--- LIMITATION: the page-extraction calls (parsePdfOnePage) use callJsonSimple,
--- which has no Result-returning variant yet (upstream request:
--- callJsonSimpleResult). A terminal *extraction* failure therefore still raises
--- and surfaces as a 500. The page-count call is the FIRST Gemini request in the
--- pipeline (and the one that failed in the 2026-05-27 incident), so it is the
--- highest-value call to harden. Kept parallel to parsePdf rather than shared so
--- the CLI path (parsePdf) stays free of the Clock effect.
+-- Both the page-count probe AND the page-extraction calls are now hardened.
+-- Extraction uses callJsonSimpleResult (AILANG v0.23.0) via the Result twins
+-- below (aiExtractWithRetryResult / parsePdfAllPagesResult), so a terminal AI
+-- failure anywhere in the pipeline returns Err(AIError) → HTTP 502/503 instead
+-- of a bare 500. Kept parallel to parsePdf (which uses the non-Result twins),
+-- not shared, so the CLI path (parsePdf) stays free of the Clock effect.
 export func parsePdfResult(filepath: string) -> Result[[Block], AIError] ! {FS, AI, Net, Env, Clock} {
   match readFileBytes(filepath) {
     Err(_) => Ok([]),
@@ -80,12 +79,17 @@ export func parsePdfResult(filepath: string) -> Result[[Block], AIError] ! {FS, 
         match aiGetPageCountResult(base64Data, fileUri, filepath) {
           Err(e) => { let _ = cleanupUpload(uploaded); Err(e) },
           Ok(pageCount) => {
-            let aiBlocks = if pageCount <= 5
-              then aiExtractWithRetry(base64Data, fileUri, filepath, true, 1)
-              else parsePdfAllPages(base64Data, fileUri, filepath, 1, pageCount);
+            let extraction = if pageCount <= 5
+              then aiExtractWithRetryResult(base64Data, fileUri, filepath, true, 1)
+              else parsePdfAllPagesResult(base64Data, fileUri, filepath, 1, pageCount);
             let _ = cleanupUpload(uploaded);
-            let annBlocks = annotationsAsBlocks(extractAnnotations(filepath));
-            Ok(concat(aiBlocks, annBlocks))
+            match extraction {
+              Err(e) => Err(e),
+              Ok(aiBlocks) => {
+                let annBlocks = annotationsAsBlocks(extractAnnotations(filepath));
+                Ok(concat(aiBlocks, annBlocks))
+              }
+            }
           }
         }
       }
@@ -104,6 +108,21 @@ func aiCallWithRetry(request: string, retriesLeft: int, backoffMs: int) -> Resul
       if e.retryable && retriesLeft > 0 then {
         let _ = sleep(backoffMs);
         aiCallWithRetry(request, retriesLeft - 1, backoffMs * 2)
+      }
+      else Err(e)
+  }
+
+-- Same transient-retry policy as aiCallWithRetry, but over the no-schema
+-- callJsonSimpleResult (the call the page/image extraction path must use,
+-- since callJson corrupts large multimodal responses). This is what lets the
+-- extraction path surface a typed AIError instead of an uncaught effect error.
+func aiCallJsonSimpleWithRetry(request: string, retriesLeft: int, backoffMs: int) -> Result[string, AIError] ! {AI, Clock} =
+  match callJsonSimpleResult(request) {
+    Ok(text) => Ok(text),
+    Err(e) =>
+      if e.retryable && retriesLeft > 0 then {
+        let _ = sleep(backoffMs);
+        aiCallJsonSimpleWithRetry(request, retriesLeft - 1, backoffMs * 2)
       }
       else Err(e)
   }
@@ -176,6 +195,18 @@ func aiExtractWithRetry(base64Data: string, fileUri: string, filepath: string, s
   else aiExtractWithRetry(base64Data, fileUri, filepath, singlePage, retriesLeft - 1)
 }
 
+-- Result twin of aiExtractWithRetry (used by parsePdfResult): same weak-output
+-- validate-and-retry, but a typed AI failure short-circuits as Err rather than
+-- raising. Transient 5xx are already absorbed inside parsePdfOnePageResult.
+func aiExtractWithRetryResult(base64Data: string, fileUri: string, filepath: string, singlePage: bool, retriesLeft: int) -> Result[[Block], AIError] ! {AI, Clock} =
+  match parsePdfOnePageResult(base64Data, fileUri, filepath, 1, singlePage) {
+    Err(e) => Err(e),
+    Ok(blocks) =>
+      if aiIsValidExtraction(blocks) then Ok(blocks)
+      else if retriesLeft <= 0 then Ok(blocks)
+      else aiExtractWithRetryResult(base64Data, fileUri, filepath, singlePage, retriesLeft - 1)
+  }
+
 -- Validation: did the AI produce usable structured output?
 pure func aiIsValidExtraction(blocks: [Block]) -> bool =
   match blocks {
@@ -236,12 +267,25 @@ func parsePdfAllPages(base64Data: string, fileUri: string, filepath: string, pag
   }
 }
 
--- Parse a single page of a PDF
-func parsePdfOnePage(base64Data: string, fileUri: string, filepath: string, page: int, singlePage: bool) -> [Block] ! {AI} {
+-- Result twin of parsePdfAllPages (used by parsePdfResult): returns Err on the
+-- first page whose extraction terminally fails, otherwise concatenates pages.
+func parsePdfAllPagesResult(base64Data: string, fileUri: string, filepath: string, page: int, totalPages: int) -> Result[[Block], AIError] ! {AI, Clock} =
+  if page > totalPages then Ok([])
+  else match parsePdfOnePageResult(base64Data, fileUri, filepath, page, false) {
+    Err(e) => Err(e),
+    Ok(pageBlocks) => match parsePdfAllPagesResult(base64Data, fileUri, filepath, page + 1, totalPages) {
+      Err(e) => Err(e),
+      Ok(rest) => Ok(concat(pageBlocks, rest))
+    }
+  }
+
+-- Build the multimodal extraction request for one PDF page. Pure and shared by
+-- both the raising (parsePdfOnePage) and Result (parsePdfOnePageResult) twins.
+func pdfPageRequest(base64Data: string, fileUri: string, filepath: string, page: int, singlePage: bool) -> string {
   let pageInstruction = if singlePage
     then "Extract ALL content from this entire PDF"
     else "This is a multi-page PDF. Extract ALL content that appears on page ${intToStr(page)} only. You CAN see all pages — focus your extraction on page ${intToStr(page)} and skip content from other pages.";
-  let request = encode(jo([
+  encode(jo([
     kv("mode", js("multimodal")),
     kv("mimeType", js(pdfMimeType())),
     sourceKv(base64Data, fileUri),
@@ -249,10 +293,23 @@ func parsePdfOnePage(base64Data: string, fileUri: string, filepath: string, page
     kv("prompt", js(
       "${pageInstruction} Return a JSON array of blocks. Block types: {\"type\":\"heading\",\"text\":\"...\",\"level\":N}, {\"type\":\"text\",\"text\":\"...\"}, {\"type\":\"table\",\"headers\":[...],\"rows\":[[...]]}, {\"type\":\"list\",\"items\":[\"full item text here\",...],\"ordered\":bool}. CRITICAL RULES: 1. Create a SEPARATE text block for EACH paragraph or visual text section. Do NOT merge paragraphs. 2. Include the COMPLETE text of every list item and paragraph — do NOT omit or truncate. 3. Use heading blocks for titles, section headers, and any text that serves as a header (with appropriate level 1-6). 4. For tables, include ALL rows and ALL cell content. For tables with multi-row headers (e.g. 'Three Months Ended' spanning columns), use separate header rows: first row for group headers, second for sub-headers. 5. Preserve the document's reading order. Use compact JSON. Return ONLY the JSON array. If the page has no content, return []."
     ))
-  ]));
-  let response = callJsonSimple(request);
+  ]))
+}
+
+-- Parse a single page of a PDF (CLI/browser path — raises on terminal failure)
+func parsePdfOnePage(base64Data: string, fileUri: string, filepath: string, page: int, singlePage: bool) -> [Block] ! {AI} {
+  let response = callJsonSimple(pdfPageRequest(base64Data, fileUri, filepath, page, singlePage));
   parseBlocksFromJson(response)
 }
+
+-- Result twin of parsePdfOnePage (hosted-API path): retries transient AI 5xx
+-- and returns a typed AIError on terminal failure instead of raising → lets the
+-- hosted /api/v1/parse map extraction failures to HTTP 502/503, not a bare 500.
+func parsePdfOnePageResult(base64Data: string, fileUri: string, filepath: string, page: int, singlePage: bool) -> Result[[Block], AIError] ! {AI, Clock} =
+  match aiCallJsonSimpleWithRetry(pdfPageRequest(base64Data, fileUri, filepath, page, singlePage), 2, 250) {
+    Err(e) => Err(e),
+    Ok(response) => Ok(parseBlocksFromJson(response))
+  }
 
 -- Parse an image of a document page using AI — extracts structured content (text, headings, tables)
 -- Same extraction pipeline as PDF but for image inputs (JPG, PNG, etc.)

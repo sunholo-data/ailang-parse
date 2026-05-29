@@ -11,6 +11,32 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.1...HEAD)
 
+### Added — AI extraction-path resilience (completes the v0.20.1 work)
+
+Requires **AILANG ≥ 0.23.0** (`callJsonSimpleResult` landed there; `ailang.toml`
+bumped accordingly). v0.20.1 hardened only the PDF page-count probe; the
+page/image *extraction* calls still used `callJsonSimple` (no Result variant),
+so a terminal Gemini failure during extraction escaped as a bare HTTP 500.
+
+- `parsePdfOnePage` now shares its request builder (`pdfPageRequest`) with a new
+  Result twin `parsePdfOnePageResult`, which uses `std/ai.callJsonSimpleResult`
+  with bounded exponential-backoff retry (`aiCallJsonSimpleWithRetry`).
+- `parsePdfResult` now drives the extraction through Result twins
+  (`aiExtractWithRetryResult` / `parsePdfAllPagesResult`), so a terminal AI
+  failure *anywhere* in the pipeline returns `Err(AIError)` → HTTP 502/503.
+- The CLI/browser path (`parsePdf`) is unchanged and stays free of the `Clock`
+  effect (it keeps the non-Result twins).
+
+### Fixed (upstream, AILANG v0.23.0) — needs deploy + a skill tweak
+
+- The MCP omitted-param crash (`_str_len` on `Unit`) is fixed in the AILANG
+  dispatcher: omitted/null declared params are now rejected with a structured
+  "missing required parameter(s)" error. **Takes effect once the hosted docparse
+  MCP is deployed on v0.23.0.** Note: an *omitted* `apiKey` now returns that
+  generic error, not the friendly `AUTH_REQUIRED` — so the skill must pass
+  `apiKey=""` (empty string) when unauthenticated to keep the first-run auth
+  flow. (Resolves the long-standing first-run crash; see ailang#258.)
+
 ---
 
 ## [v0.20.1](https://github.com/sunholo-data/ailang-parse/compare/v0.20.0...v0.20.1) — 2026-05-28
