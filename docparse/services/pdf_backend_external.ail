@@ -11,14 +11,13 @@ module docparse/services/pdf_backend_external
 -- Architecture: pure core (decode logic + contracts) + thin effectful outer
 -- (`parsePdfViaBackend`) that only owns exec and error reporting.
 
-import std/io (println)
 import std/json (getArray, getString, getInt, asString, asArray, getOr)
 import std/option (Some, None, getOrElse)
 import std/list (map, length as listLength)
 import std/result (Result, Ok, Err)
 import std/string (length as strLength)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, emptyMetadata, simpleCell)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, simpleCell)
 
 -- Output bundle from an external backend run.
 export type ExternalDocResult = {
@@ -37,10 +36,6 @@ pure func adapterPath(projectRoot: string) -> string
   if strLength(projectRoot) == 0
     then "docparse/services/pdf_backends/adapter.py"
     else "${projectRoot}/docparse/services/pdf_backends/adapter.py"
-
--- Empty result used as the failure sentinel.
-pure func emptyResult() -> ExternalDocResult =
-  {metadata: emptyMetadata(), blocks: []}
 
 -- Decode a single JSON block. Unknown "kind" values fall back to TextBlock.
 pure func decodeBlock(j: Json) -> Block = {
@@ -104,14 +99,19 @@ export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult = {
 -- =====================================================================
 
 -- Run the external backend and return parsed result.
--- Backend names: "docling", "liteparse" (must match adapter.py BACKENDS).
--- On any failure (exec error, non-zero exit, JSON parse error) prints a
--- diagnostic and returns an empty result so the caller can continue.
-export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> ExternalDocResult ! {IO, Process} =
+-- Backend names: "pdftotext", "docling", "liteparse" (must match adapter.py
+-- BACKENDS). Failures are propagated as Err, never swallowed into an empty
+-- result: a backend that errors, exits non-zero, emits non-JSON, or extracts
+-- zero blocks is a hard failure the caller must surface (no silent 1-byte
+-- "successes"). Scanned/image-only PDFs land here too — the message points the
+-- user at --pdf-backend ai.
+export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {Process} =
   match runJson("python3", [adapterPath(projectRoot), backend, filepath]) {
-    Err(e) => {
-      println("[pdf_backend_external] ${formatError(e)}");
-      emptyResult()
-    },
-    Ok(doc) => decodeAdapterDoc(doc)
+    Err(e) => Err(formatError(e)),
+    Ok(doc) => {
+      let res = decodeAdapterDoc(doc);
+      if listLength(res.blocks) == 0
+        then Err("backend '${backend}' extracted 0 blocks from ${filepath}")
+        else Ok(res)
+    }
   }

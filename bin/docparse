@@ -80,7 +80,8 @@ Examples:
   docparse ~/inbox/                     Parse all files in folder
   docparse slides.pptx --describe       With AI image descriptions
   docparse report.docx --summarize      With AI summary
-  docparse scan.pdf                     PDF (auto-enables AI)
+  docparse contract.pdf                 PDF (deterministic pdftotext, no AI)
+  docparse scan.pdf --pdf-backend ai    Scanned PDF (needs multimodal AI)
   docparse photo.png                    Image (auto-enables AI)
 
 Performance:
@@ -95,8 +96,9 @@ Performance:
 Options:
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
-  --pdf-backend B   PDF backend: ai (default, multimodal AI), docling
-                    (deterministic local layout), liteparse (fast text)
+  --pdf-backend B   PDF backend: pdftotext (default, deterministic plain text),
+                    docling (local ML layout), liteparse (font-size headings),
+                    ai (multimodal AI — required for scanned/image-only PDFs)
   --ai MODEL        AI model (default: gemini-2.5-flash; gemini-3-flash-preview
                     is supported but ~5x slower for PDF parsing due to thinking
                     tokens — pass it explicitly only when reasoning helps)
@@ -251,7 +253,7 @@ AI_MODEL="$DEFAULT_AI_MODEL"
 VERIFY=false
 BUDGET=false
 OUTPUT_DIR=""
-PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-ai}"
+PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-pdftotext}"
 EXTRA_FLAGS=()
 
 while [ $# -gt 0 ]; do
@@ -307,9 +309,9 @@ while [ $# -gt 0 ]; do
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
-        ai|docling|liteparse) ;;
+        pdftotext|ai|docling|liteparse) ;;
         *)
-          echo "Error: --pdf-backend must be one of: ai, docling, liteparse (got: $PDF_BACKEND)" >&2
+          echo "Error: --pdf-backend must be one of: pdftotext, ai, docling, liteparse (got: $PDF_BACKEND)" >&2
           exit 2
           ;;
       esac
@@ -373,7 +375,7 @@ fi
 RESOLVED_FILES=("${EXPANDED_FILES[@]}")
 
 # --- Detect if AI is needed (check all files) ---
-# When --pdf-backend is docling/liteparse, .pdf files do not require AI cap.
+# PDFs default to pdftotext (Process cap, no AI). Only --pdf-backend ai needs AI.
 
 NEEDS_AI=false
 NEEDS_PROCESS=false

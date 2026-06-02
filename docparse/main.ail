@@ -46,7 +46,7 @@ import pkg/sunholo/a2ui/components (A2UINode, renderA2UI)
 import std/xml (parse, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
 import std/zip (listEntries, readEntry, readEntryBytes)
 import std/ai (call)
-import std/io (println)
+import std/io (println, exit)
 import std/math (intToFloat, floatToInt)
 import std/env (getArgs, getEnvOr)
 import std/net (httpGet, httpPost)
@@ -507,23 +507,37 @@ func extractPdfExternal(backend: string, filepath: string, projectRoot: string) 
   println("--- Parsing PDF (${backend}) ---");
   println("");
   println("Invoking external backend '${backend}'...");
-  let ext = parsePdfViaBackend(backend, filepath, projectRoot);
-  println("Extracted ${show(countBlocks(ext.blocks))} content blocks.");
-  println("");
-  {metadata: ext.metadata, blocks: ext.blocks, aiCalls: 0}
+  -- Loud failure on any backend error or empty extraction: print a clear
+  -- message and exit non-zero, never write a silent empty "success".
+  match parsePdfViaBackend(backend, filepath, projectRoot) {
+    Err(msg) => {
+      println("Error: PDF backend '${backend}' failed: ${msg}");
+      println("  Scanned/image-only PDFs have no text layer — retry with --pdf-backend ai.");
+      let _ = exit(1);
+      {metadata: emptyMetadata(), blocks: [], aiCalls: 0}
+    },
+    Ok(ext) => {
+      println("Extracted ${show(countBlocks(ext.blocks))} content blocks.");
+      println("");
+      {metadata: ext.metadata, blocks: ext.blocks, aiCalls: 0}
+    }
+  }
 }
 
 -- Parse a PDF document. Backend selected via DOCPARSE_PDF_BACKEND env var:
---   "ai"        (default) — multimodal AI (Gemini/Claude/etc) via direct_ai_parser
+--   "pdftotext" (default) — poppler pdftotext -layout, deterministic plain text
 --   "docling"   — IBM Docling, deterministic local layout analysis
---   "liteparse" — run-llama LiteParse, fast plain-text extraction
+--   "liteparse" — run-llama LiteParse, font-size heading inference
+--   "ai"        — multimodal AI (Gemini/Claude/etc) via direct_ai_parser; the
+--                 only backend that handles scanned/image-only PDFs
 func parsePdfDocument(filepath: string, doSummarize: bool, convertTarget: string) -> () ! {IO, FS, AI, Env, Net, Process} {
-  let backend = getEnvOr("DOCPARSE_PDF_BACKEND", "ai");
+  let backend = getEnvOr("DOCPARSE_PDF_BACKEND", "pdftotext");
   let projectRoot = getEnvOr("DOCPARSE_PROJECT_ROOT", "");
 
-  let parsed = if backend == "docling" || backend == "liteparse"
-    then extractPdfExternal(backend, filepath, projectRoot)
-    else extractPdfAI(filepath);
+  -- Any backend except "ai" runs through the external adapter bridge.
+  let parsed = if backend == "ai"
+    then extractPdfAI(filepath)
+    else extractPdfExternal(backend, filepath, projectRoot);
 
   let metadata = parsed.metadata;
   let blocks = parsed.blocks;
