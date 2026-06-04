@@ -1,7 +1,7 @@
 module docparse/services/epub_parser
 
 import std/zip (listEntries, readEntry)
-import std/xml (parse, findAll, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
 import std/result (Ok, Err)
 import std/option (Some, None, getOrElse)
 import std/string (length, trim, endsWith, contains, startsWith, split, find, substring)
@@ -97,7 +97,7 @@ export func parseEpubMetadata(filepath: string) -> DocMetadata ! {FS} {
 -- Find OPF path from container.xml
 -- Looks for <rootfile full-path="..."/>
 export pure func epubFindOpfPath(containerXml: string) -> string {
-  match parse(containerXml) {
+  match parseLenient(containerXml) {
     Ok(root) => {
       let rootfiles = findAll(root, "rootfile");
       match rootfiles {
@@ -137,7 +137,7 @@ pure func epubLastSlash(s: string, pos: int, lastFound: int) -> int {
 -- Extract spine item hrefs from OPF XML
 -- Reads <manifest> items and <spine> itemrefs to get ordered content files
 export pure func epubExtractSpine(opfXml: string, opfDir: string) -> [string] {
-  match parse(opfXml) {
+  match parseLenient(opfXml) {
     Ok(root) => {
       -- Build manifest: find all <item> elements
       let items = findAll(root, "item");
@@ -218,7 +218,7 @@ pure func epubBaseName(path: string) -> string {
 
 -- Parse OPF metadata (title, author, date)
 export pure func epubParseOpfMetadata(opfXml: string) -> DocMetadata {
-  match parse(opfXml) {
+  match parseLenient(opfXml) {
     Ok(root) => {
       let title = epubFindMetaText(root, "dc:title");
       let author = epubFindMetaText(root, "dc:creator");

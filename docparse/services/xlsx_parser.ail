@@ -1,6 +1,6 @@
 module docparse/services/xlsx_parser
 
-import std/xml (parse, parseElements, parseFold, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, sanitizeXml, parseElements, parseFold, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
 import std/zip (scanFold)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
@@ -52,7 +52,7 @@ export func parseXlsx(filepath: string) -> [Block] ! {FS} {
 -- Parse metadata from XLSX (same core.xml format)
 export func parseXlsxMetadata(filepath: string) -> DocMetadata ! {FS} {
   let coreXml = readCoreProperties(filepath);
-  match parse(coreXml) {
+  match parseLenient(coreXml) {
     Ok(root) => extractXlsxMeta(root),
     Err(_) => emptyMetadata()
   }
@@ -122,7 +122,7 @@ pure func extractRichText(runs: [XmlNode]) -> string =
 func readWorkbookSheetNames(filepath: string) -> [string] ! {FS} {
   let xml = readZipEntry(filepath, "xl/workbook.xml");
   if length(xml) == 0 then []
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => {
       findAllAttrs(root, "sheet", "name")
     },
@@ -159,7 +159,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
   else {
     -- Use parseFold for streaming: fold directly over <row> elements without
     -- collecting them into a list first. O(1) memory per row, 5K row cap.
-    let foldResult = parseFold(xml, "row",
+    let foldResult = parseFold(sanitizeXml(xml), "row",
       { rows: [], count: 0, ss: sharedStrings },
       xlsxFoldRow);
     let parsedRows = match foldResult {

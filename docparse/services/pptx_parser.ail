@@ -1,6 +1,6 @@
 module docparse/services/pptx_parser
 
-import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
@@ -65,7 +65,7 @@ export func parsePptx(filepath: string) -> [Block] ! {FS} {
 -- Parse metadata from PPTX (same core.xml format as DOCX)
 export func parsePptxMetadata(filepath: string) -> DocMetadata ! {FS} {
   let coreXml = readCoreProperties(filepath);
-  match parse(coreXml) {
+  match parseLenient(coreXml) {
     Ok(root) => extractPptxMeta(root),
     Err(_) => emptyMetadata()
   }
@@ -97,7 +97,7 @@ func parseSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
 -- Parse a single slide's XML into blocks
 export pure func parseSlideXml(xml: string) -> [Block] {
   if length(xml) == 0 then []
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => extractSlideBlocks(root),
     Err(_) => []
   }
