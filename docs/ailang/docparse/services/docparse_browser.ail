@@ -10,7 +10,7 @@ module docparse/services/docparse_browser
 -- This is NOT a standalone module — it requires all docparse modules
 -- to be loaded in the WASM REPL first (in dependency order).
 
-import std/xml (parse, findAll, findAllTexts, findFirst, getText, getAttr, getChildren)
+import std/xml (parseLenient, findAll, findAllTexts, findFirst, getText, getAttr, getChildren)
 import std/json (encode, decode, jo, kv, js, jb, ja, jnum, asArray, getString, getInt, getBool, getArray, asString, getStringArrayOrEmpty)
 import std/string (length, join)
 import std/ai (callJsonSimple)
@@ -42,7 +42,7 @@ import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert,
 
 -- Parse DOCX body XML (word/document.xml) -> JSON array of blocks
 export pure func parseDocxBody(xml: string) -> string {
-  match parse(xml) {
+  match parseLenient(xml) {
     Ok(root) => encode(ja(blocksToJson(extractBodyBlocks(root)))),
     Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("XML parse error: ${e}"))])]))
   }
@@ -58,7 +58,7 @@ export pure func parseDocxSection(xml: string, kind: string) -> string {
 
 -- Parse metadata from core.xml -> JSON metadata object
 export pure func parseMetadataXml(coreXml: string) -> string {
-  match parse(coreXml) {
+  match parseLenient(coreXml) {
     Ok(root) => encode(metadataToJson(extractMetadata(root))),
     Err(_) => encode(metadataToJson(emptyMetadata()))
   }
@@ -67,7 +67,7 @@ export pure func parseMetadataXml(coreXml: string) -> string {
 -- Parse a single PPTX slide XML -> JSON array of blocks
 export pure func parsePptxSlide(slideXml: string) -> string {
   if length(slideXml) == 0 then encode(ja([]))
-  else match parse(slideXml) {
+  else match parseLenient(slideXml) {
     Ok(root) => {
       let blocks = extractSlideBlocks(root);
       if hasContent(blocks)
@@ -103,7 +103,7 @@ export pure func getFormatInfo(filename: string) -> string {
 -- The comment text includes the author prefix for context.
 export pure func parseDocxComments(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => {
       let comments = findAll(root, "w:comment");
       let blocks = parseCommentNodes(comments);
@@ -218,7 +218,7 @@ export pure func parseMboxThreadedContent(content: string) -> string {
 -- Parse ODT content.xml -> JSON array of blocks
 export pure func parseOdtContent(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(ja(blocksToJson(odtExtractBody(root)))),
     Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODT XML parse error: ${e}"))])]))
   }
@@ -227,7 +227,7 @@ export pure func parseOdtContent(xml: string) -> string {
 -- Parse ODT meta.xml -> JSON metadata object
 export pure func parseOdtMetadataXml(xml: string) -> string {
   if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(metadataToJson(odtParseMetadata(root))),
     Err(_) => encode(metadataToJson(emptyMetadata()))
   }
@@ -236,7 +236,7 @@ export pure func parseOdtMetadataXml(xml: string) -> string {
 -- Parse ODT styles.xml -> JSON array of header/footer SectionBlocks
 export pure func parseOdtStylesXml(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(ja(blocksToJson(odtExtractHeadersFooters(root)))),
     Err(_) => encode(ja([]))
   }
@@ -245,7 +245,7 @@ export pure func parseOdtStylesXml(xml: string) -> string {
 -- Parse ODP content.xml -> JSON array of slide SectionBlocks
 export pure func parseOdpContent(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(ja(blocksToJson(odpExtractSlides(root)))),
     Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODP XML parse error: ${e}"))])]))
   }
@@ -254,7 +254,7 @@ export pure func parseOdpContent(xml: string) -> string {
 -- Parse ODP meta.xml -> JSON metadata object
 export pure func parseOdpMetadataXml(xml: string) -> string {
   if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(metadataToJson(odpParseMetadata(root))),
     Err(_) => encode(metadataToJson(emptyMetadata()))
   }
@@ -263,7 +263,7 @@ export pure func parseOdpMetadataXml(xml: string) -> string {
 -- Parse ODS content.xml -> JSON array of sheet SectionBlocks
 export pure func parseOdsContent(xml: string) -> string {
   if length(xml) == 0 then encode(ja([]))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(ja(blocksToJson(odsExtractSheets(root)))),
     Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODS XML parse error: ${e}"))])]))
   }
@@ -272,7 +272,7 @@ export pure func parseOdsContent(xml: string) -> string {
 -- Parse ODS meta.xml -> JSON metadata object
 export pure func parseOdsMetadataXml(xml: string) -> string {
   if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => encode(metadataToJson(odsParseMetadata(root))),
     Err(_) => encode(metadataToJson(emptyMetadata()))
   }
@@ -339,7 +339,7 @@ pure func extractCommentTexts(paragraphs: [XmlNode]) -> [string] =
 -- Pure version for browser (no FS). Builds indexed map for O(1) cell resolution.
 pure func parseSharedStringsToMap(xml: string) -> Map[int, string] {
   if length(xml) == 0 then emptyMap()
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => {
       let items = findAll(root, "si");
       let strings = extractSharedStrings(items);

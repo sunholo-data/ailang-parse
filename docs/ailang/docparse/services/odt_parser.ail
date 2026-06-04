@@ -1,6 +1,6 @@
 module docparse/services/odt_parser
 
-import std/xml (parse, findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/zip (readEntry)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
@@ -38,7 +38,7 @@ export func parseOdt(filepath: string) -> [Block] ! {FS}
 
   if length(xml) == 0
   then [TextBlock({text: "ODT error: could not read content.xml", style: "error", level: 0})]
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => odtExtractBody(root),
     Err(e) => [TextBlock({text: "ODT XML parse error: ${e}", style: "error", level: 0})]
   }
@@ -53,7 +53,7 @@ export func parseOdtHeadersFooters(filepath: string) -> [Block] ! {FS} {
   };
 
   if length(xml) == 0 then []
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => odtExtractHeadersFooters(root),
     Err(_) => []
   }
@@ -92,7 +92,7 @@ export func parseOdtMetadata(filepath: string) -> DocMetadata ! {FS} {
   };
 
   if length(xml) == 0 then emptyMetadata()
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => odtParseMetadata(root),
     Err(_) => emptyMetadata()
   }

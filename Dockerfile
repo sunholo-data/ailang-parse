@@ -1,8 +1,9 @@
 FROM golang:1.24-bookworm AS builder
 
-# Clone and build AILANG from source (dev branch)
+# Clone and build AILANG from source (pinned release — keep in sync with ailang.toml `ailang = ">=…"`)
+ARG AILANG_REF=v0.24.0
 ARG CACHE_BUST=0
-RUN git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /ailang
+RUN git clone --depth 1 --branch ${AILANG_REF} https://github.com/sunholo-data/ailang.git /ailang
 WORKDIR /ailang
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/ailang ./cmd/ailang/
 

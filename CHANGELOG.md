@@ -30,6 +30,35 @@ with exponential backoff. All four SDKs bumped to 0.8.0 (`server.json` too).
 
 ---
 
+## [v0.20.3](https://github.com/sunholo-data/ailang-parse/compare/v0.20.2...v0.20.3) — 2026-06-04
+
+### Fixed — lenient XML parsing (bare `&` in Office files)
+
+Requires **AILANG ≥ 0.24.0** (`std/xml.parseLenient` / `sanitizeXml` landed
+there via M-STDLIB-XML-LENIENT; `ailang.toml` bumped accordingly). Office files
+produced by non-reference tools sometimes contain an unescaped `&` (a company
+name like `Apex Consulting & Partners`, an `R&D` line item, a URL query string).
+Go's strict `encoding/xml` — which `std/xml.parse` wraps — aborts the whole
+document with `invalid character entity & (no semicolon)`, so the parse returned
+a single error block with zero recovered content. Surfaced by a real ODT invoice
+submitted via the API/SDK.
+
+- All eight XML-backed parsers (`docx`, `pptx`, `xlsx`, `odt`, `odp`, `ods`,
+  `epub`, `docparse_browser`) now call `parseLenient` instead of `parse`.
+- `xlsx`'s streaming `parseFold` over `<row>` elements runs `sanitizeXml` on the
+  sheet XML first (no lenient fold variant exists).
+- `html_parser` is unchanged — it already uses the tolerant `std/html.parse`.
+- `sanitizeXml` only escapes a bare `&` that does not begin a valid entity
+  (`&amp;`, `&#123;`, `&lt;` pass through; idempotent), so well-formed files are
+  byte-identical — the office structural benchmark stays at 100% across 58 files.
+- The API Docker image now pins AILANG to the `v0.24.0` release (was tracking
+  `dev`) for deterministic builds.
+
+Known gap (deferred to AILANG v2 of the feature): stray `<` and unknown named
+entities like `&nbsp;` are still rejected by strict decode.
+
+---
+
 ## [v0.20.2](https://github.com/sunholo-data/ailang-parse/compare/v0.20.1...v0.20.2) — 2026-05-29
 
 ### Added — AI extraction-path resilience (completes the v0.20.1 work)

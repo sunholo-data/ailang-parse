@@ -1,6 +1,6 @@
 module docparse/services/docx_parser
 
-import std/xml (parse, findAll, findAllTexts, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findAllTexts, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
@@ -39,7 +39,7 @@ import docparse/services/zip_extract (readDocxContent, readCoreProperties, readA
 -- Parse a DOCX file into content blocks
 export func parseDocx(filepath: string) -> [Block] ! {FS} {
   let xml = readDocxContent(filepath);
-  match parse(xml) {
+  match parseLenient(xml) {
     Ok(root) => extractBodyBlocks(root),
     Err(e) => [TextBlock({text: "XML parse error: ${e}", style: "error", level: 0})]
   }
@@ -48,7 +48,7 @@ export func parseDocx(filepath: string) -> [Block] ! {FS} {
 -- Extract metadata from a DOCX file
 export func parseDocxMetadata(filepath: string) -> DocMetadata ! {FS} {
   let coreXml = readCoreProperties(filepath);
-  match parse(coreXml) {
+  match parseLenient(coreXml) {
     Ok(root) => extractMetadata(root),
     Err(_) => emptyMetadata()
   }
@@ -104,7 +104,7 @@ func parseSectionEntries(filepath: string, entries: [string], kind: string) -> [
 -- Parse XML from a header/footer/footnote part into blocks
 export pure func parseSectionXml(xml: string) -> [Block] {
   if length(xml) == 0 then []
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => {
       let children = getChildren(root);
       processBodyChildren(children)
@@ -503,7 +503,7 @@ func extractImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
 export func parseDocxComments(filepath: string) -> [Block] ! {FS} {
   let xml = readComments(filepath);
   if length(xml) == 0 then []
-  else match parse(xml) {
+  else match parseLenient(xml) {
     Ok(root) => {
       let commentNodes = findAll(root, "w:comment");
       docxParseCommentNodes(commentNodes)
