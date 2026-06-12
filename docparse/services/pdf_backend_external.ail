@@ -37,6 +37,15 @@ pure func adapterPath(projectRoot: string) -> string
     then "docparse/services/pdf_backends/adapter.py"
     else "${projectRoot}/docparse/services/pdf_backends/adapter.py"
 
+-- The uv project directory to resolve the backend env from. Empty projectRoot
+-- means "invoked from the repo root", so cwd (".") is the project. This keeps
+-- backend deps (docling, liteparse) resolving through uv's managed env rather
+-- than whatever happens to be on the system python3 — see backendArgv.
+pure func backendProject(projectRoot: string) -> string
+  ensures { strLength(result) > 0 }
+=
+  if strLength(projectRoot) == 0 then "." else projectRoot
+
 -- Decode a single JSON block. Unknown "kind" values fall back to TextBlock.
 pure func decodeBlock(j: Json) -> Block = {
   let kind = getOrElse(getString(j, "kind"), "text");
@@ -106,7 +115,11 @@ export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult = {
 -- "successes"). Scanned/image-only PDFs land here too — the message points the
 -- user at --pdf-backend ai.
 export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {Process} =
-  match runJson("python3", [adapterPath(projectRoot), backend, filepath]) {
+  -- Run the adapter through `uv run` so backend deps (docling, liteparse)
+  -- resolve from the project's managed env, not an arbitrary system python3.
+  -- uv emits sync/resolution logs to stderr only, so adapter stdout stays the
+  -- pure JSON the bridge parses.
+  match runJson("uv", ["run", "--project", backendProject(projectRoot), "python", adapterPath(projectRoot), backend, filepath]) {
     Err(e) => Err(formatError(e)),
     Ok(doc) => {
       let res = decodeAdapterDoc(doc);
