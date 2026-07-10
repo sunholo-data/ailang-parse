@@ -386,6 +386,7 @@ for f in "${RESOLVED_FILES[@]}"; do
     pdf)
       if [ "$PDF_BACKEND" = "ai" ]; then
         NEEDS_AI=true
+        NEEDS_PROCESS=true  # AI backend still calls pdftotext first; needs Process cap
       else
         NEEDS_PROCESS=true
       fi
@@ -470,8 +471,8 @@ fi
 if $USE_AI; then
   ENV_PREFIX+=(GOOGLE_API_KEY="")
 fi
+ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
 if [ "$PDF_BACKEND" != "ai" ]; then
-  ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
   ENV_PREFIX+=(DOCPARSE_PROJECT_ROOT="$PROJECT_DIR")
 fi
 
