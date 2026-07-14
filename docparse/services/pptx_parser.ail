@@ -7,6 +7,7 @@ import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, length as listLength, take)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable)
 import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
+import docparse/services/omml (renderOmml)
 
 -- PPTX Parser
 -- Parses PowerPoint slides into content Blocks.
@@ -181,6 +182,8 @@ pure func drawingMLNodeText(node: XmlNode) -> string {
   let tag = getTag(node);
   if tag == "a:r" then extractDrawingMLRunText(node)
   else if tag == "a:br" then "\n"
+  else if tag == "m:oMath" then renderOmml(node)
+  else if tag == "m:oMathPara" then renderOmml(node)
   else ""
 }
 

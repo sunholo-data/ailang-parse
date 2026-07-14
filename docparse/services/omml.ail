@@ -1,0 +1,93 @@
+module docparse/services/omml
+
+import std/xml (getText, getChildren, getTag)
+import std/option (Option, Some, None)
+import std/string (join)
+import std/list (map)
+
+-- Office Math (OMML, §22.1) linear-text renderer.
+--
+-- DOCX and PPTX both embed equations as an <m:oMath> / <m:oMathPara> tree in
+-- the "m:" namespace, sibling to the normal text runs. The base parsers only
+-- read w:t / a:t runs, so equation content was silently dropped. This module
+-- walks the math tree and renders it as machine-usable linear math:
+--
+--   fraction   m:f        -> (num)/(den)
+--   superscript m:sSup    -> base^(sup)
+--   subscript  m:sSub     -> base_(sub)
+--   sub+sup    m:sSubSup  -> base_(sub)^(sup)
+--   radical    m:rad      -> √(e)
+--   delimiter  m:d        -> (e)
+--   run text   m:t        -> literal text
+--
+-- Structural children (m:num, m:den, m:e, m:sup, m:sub) are resolved by DIRECT
+-- child lookup, not descendant search, so nested equations (a fraction inside a
+-- superscript) render correctly. Unknown/property elements (m:rPr, m:fPr,
+-- m:ctrlPr, …) carry no m:t and fall through to child recursion as empty.
+--
+-- OMML structure (E = mc²):
+--   <m:oMath>
+--     <m:r><m:t>E</m:t></m:r>
+--     <m:r><m:t>=</m:t></m:r>
+--     <m:r><m:t>m</m:t></m:r>
+--     <m:sSup>
+--       <m:e><m:r><m:t>c</m:t></m:r></m:e>
+--       <m:sup><m:r><m:t>2</m:t></m:r></m:sup>
+--     </m:sSup>
+--   </m:oMath>
+-- renders as: E=mc^(2)
+
+-- Render an OMML element (or container) as linear math text.
+export pure func renderOmml(node: XmlNode) -> string {
+  let tag = getTag(node);
+  if tag == "m:t" then getText(node)
+  else if tag == "m:f" then {
+    let num = ommlChildText(node, "m:num");
+    let den = ommlChildText(node, "m:den");
+    "(${num})/(${den})"
+  }
+  else if tag == "m:sSup" then {
+    let base = ommlChildText(node, "m:e");
+    let sup = ommlChildText(node, "m:sup");
+    "${base}^(${sup})"
+  }
+  else if tag == "m:sSub" then {
+    let base = ommlChildText(node, "m:e");
+    let sub = ommlChildText(node, "m:sub");
+    "${base}_(${sub})"
+  }
+  else if tag == "m:sSubSup" then {
+    let base = ommlChildText(node, "m:e");
+    let sub = ommlChildText(node, "m:sub");
+    let sup = ommlChildText(node, "m:sup");
+    "${base}_(${sub})^(${sup})"
+  }
+  else if tag == "m:rad" then {
+    let e = ommlChildText(node, "m:e");
+    "√(${e})"
+  }
+  else if tag == "m:d" then {
+    let e = ommlChildText(node, "m:e");
+    "(${e})"
+  }
+  else ommlRenderChildren(node)
+}
+
+-- Concatenate the rendered output of a node's direct children.
+pure func ommlRenderChildren(node: XmlNode) -> string =
+  join("", map(renderOmml, getChildren(node)))
+
+-- Render the first direct child with the given tag by rendering ITS children.
+-- Direct-child (not descendant) lookup keeps nested structures correct.
+pure func ommlChildText(node: XmlNode, childTag: string) -> string =
+  match ommlFindDirectChild(getChildren(node), childTag) {
+    Some(child) => ommlRenderChildren(child),
+    None => ""
+  }
+
+-- First element in a child list whose tag matches; None if absent.
+pure func ommlFindDirectChild(nodes: [XmlNode], tag: string) -> Option[XmlNode] =
+  match nodes {
+    [] => None,
+    n :: rest => if getTag(n) == tag then Some(n) else ommlFindDirectChild(rest, tag)
+  }

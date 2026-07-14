@@ -269,21 +269,24 @@ def check_equation_text(output: dict) -> dict:
     blocks = flatten_blocks(get_blocks(output))
     all_text = " ".join(b.get("text", "") for b in blocks)
 
-    equations = {
-        "E": "E=mc² (mass-energy)",
-        "mc": "E=mc² (mass-energy)",
-        "quadratic": "quadratic formula",
-    }
-
-    # Check for equation text fragments
+    # Four equations, each testing a distinct OMML construct rendered as linear
+    # math. Fragment presence alone is not enough — the STRUCTURE must render
+    # (superscript ^(), fraction (num)/(den), subscript _()), which is what the
+    # answer-key use case depends on.
     detected = 0
-    total = 2  # Two equations total
+    total = 4
 
-    # Check E=mc²
-    if "E" in all_text and "mc" in all_text:
+    # 1. Superscript (m:sSup): E = mc²  ->  E=mc^(2)
+    if "mc^(2)" in all_text:
         detected += 1
-    # Check quadratic (any part of it)
-    if "(-b" in all_text or "2a" in all_text:
+    # 2. Pre-flattened display equation (m:oMathPara): quadratic formula
+    if "(-b" in all_text and "2a" in all_text:
+        detected += 1
+    # 3. Fraction (m:f/m:num/m:den): U = (168 W)/(1,40 A)
+    if "(168 W)/(1,40 A)" in all_text:
+        detected += 1
+    # 4. Subscript (m:sSub/m:e/m:sub): E_kin  ->  E_(kin)
+    if "E_(kin)" in all_text:
         detected += 1
 
     return {
@@ -293,7 +296,7 @@ def check_equation_text(output: dict) -> dict:
         "score": detected / total if total else 0,
         "detected": detected,
         "total": total,
-        "detail": f"{detected}/{total} equations have text extracted",
+        "detail": f"{detected}/{total} equations rendered as linear math",
     }
 
 

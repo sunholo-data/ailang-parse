@@ -597,6 +597,42 @@ def create_challenge_equations():
     oMathPara.append(omath2)
     p2._element.append(oMathPara)
 
+    def _m_run(text):
+        r = OxmlElement("m:r")
+        t = OxmlElement("m:t")
+        t.text = text
+        r.append(t)
+        return r
+
+    # Create a real fraction using m:f/m:num/m:den (the answer-key payload):
+    # U = (168 W)/(1,40 A) — structural, NOT pre-flattened text.
+    p3 = doc.add_paragraph("Ohm's law worked example: ")
+    omath3 = OxmlElement("m:oMath")
+    omath3.append(_m_run("U"))
+    omath3.append(_m_run("="))
+    frac = OxmlElement("m:f")
+    num = OxmlElement("m:num")
+    num.append(_m_run("168 W"))
+    den = OxmlElement("m:den")
+    den.append(_m_run("1,40 A"))
+    frac.append(num)
+    frac.append(den)
+    omath3.append(frac)
+    p3._element.append(omath3)
+
+    # Create a subscript using m:sSub/m:e/m:sub: E_kin (kinetic energy).
+    p4 = doc.add_paragraph("Kinetic energy symbol: ")
+    omath4 = OxmlElement("m:oMath")
+    sSub = OxmlElement("m:sSub")
+    e_base = OxmlElement("m:e")
+    e_base.append(_m_run("E"))
+    sub = OxmlElement("m:sub")
+    sub.append(_m_run("kin"))
+    sSub.append(e_base)
+    sSub.append(sub)
+    omath4.append(sSub)
+    p4._element.append(omath4)
+
     doc.add_paragraph("A well-formed parser should extract at least the text content of these equations.")
 
     path = OUTPUT_DIR / "challenge_equations.docx"
