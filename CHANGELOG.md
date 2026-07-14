@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.20.2...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.21.0...HEAD)
 
 ### SDKs — v0.8.0 (retry parity across JS, Go, R)
 
@@ -27,6 +27,31 @@ SDKs to parity. Retry stays **off by default** (opt in per SDK):
 
 `parse` / `parseFile` re-issue the request (rebuilding the body) on each retry
 with exponential backoff. All four SDKs bumped to 0.8.0 (`server.json` too).
+
+---
+
+## [v0.21.0](https://github.com/sunholo-data/ailang-parse/compare/v0.20.3...v0.21.0) — 2026-07-14
+
+### Added — OMML equation extraction (DOCX + PPTX, §22.1)
+
+Office Math (OMML) equations were silently dropped by every parser: the DOCX
+and PPTX walkers read only `w:t` / `a:t` text runs, so `m:oMath` / `m:oMathPara`
+subtrees — fractions, superscripts, subscripts — produced empty output. In
+answer keys and scientific documents, the equations *are* the payload, so a
+worked example like `U = 168 W / 1,40 A` came out as ambiguous flattened text.
+
+- New shared module `docparse/services/omml` renders the math tree as
+  machine-usable linear math: `m:f` → `(num)/(den)`, `m:sSup` → `base^(sup)`,
+  `m:sSub` → `base_(sub)`, `m:sSubSup`, `m:rad` → `√(e)`, `m:d` → `(e)`.
+  Structural children (`m:num`/`m:den`/`m:e`/`m:sup`/`m:sub`) resolve via
+  direct-child lookup, so nested equations render correctly.
+- Wired into `docx_parser` (`childNodeText`, which also covers table cells) and
+  `pptx_parser` (`drawingMLNodeText`) — one renderer, no duplication.
+- The equations challenge file + gap check were strengthened to exercise real
+  `m:f` fractions and `m:sSub` subscripts (the old fixture used pre-flattened
+  text and would pass a broken parser).
+- Gap analysis (equations) `0% → 100%` (4/4); office structural benchmark stays
+  at **100%** across 58 files; OfficeDocBench composite `92.5% → 92.6%`.
 
 ---
 
