@@ -68,6 +68,49 @@ jobs:
           fi
           echo "All inline tests passed (property test failures are known AILANG bugs)"
 
+  floor-check:
+    # Guards against the manifest advertising a lower AILANG floor than the code
+    # actually needs. The other jobs build the `dev` toolchain, which satisfies
+    # ANY `ailang = ">=X"` — so the declared minimum is never exercised. Here we
+    # install exactly the version named in the constraint and compile against it:
+    # if it doesn't build, the constraint is a lie and a consumer on that toolchain
+    # would hit a silent boot failure. Skips gracefully if the floor isn't released
+    # yet (a pre-release floor can't be compiled against).
+    name: Minimum AILANG Floor Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Compile against the declared minimum AILANG version
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          FLOOR=$(grep -E '^ailang[[:space:]]*=' ailang.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          if [ -z "$FLOOR" ]; then
+            echo "::error::could not parse an X.Y.Z floor from the 'ailang = \">=...\"' line in ailang.toml"
+            exit 1
+          fi
+          TAG="v$FLOOR"
+          echo "Declared minimum AILANG: $TAG"
+          if ! git ls-remote --exit-code --tags https://github.com/sunholo-data/ailang.git "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::notice::AILANG $TAG is not released yet — floor-compile check pending until it ships. Skipping."
+            exit 0
+          fi
+          git clone --depth 1 --branch "$TAG" https://github.com/sunholo-data/ailang.git /tmp/ailang-floor
+          cd /tmp/ailang-floor && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
+          cd "$GITHUB_WORKSPACE"
+          ailang --version
+          # Resolve deps and type-check the whole package with the floor toolchain.
+          # If this fails, raise the constraint in ailang.toml to a version that compiles.
+          ailang lock
+          ./bin/docparse --check
+
   check-windows:
     name: Windows CLI Smoke Test
     runs-on: windows-latest
