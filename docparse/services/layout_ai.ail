@@ -1,12 +1,13 @@
 module docparse/services/layout_ai
 
-import std/ai (call, callJson, callJsonSimple)
-import std/string (length, join, substring, startsWith)
-import std/json (decode, getString, getArray, getInt, asString, asArray, asNumber)
+import std/ai (call, callJson, callJsonSimple, callResult, AIError)
+import std/string (length, join, substring, startsWith, find, contains, split, toLower)
+import std/json (decode, encode, jo, kv, js, getString, getArray, getInt, asString, asArray, asNumber)
 import std/math (floatToInt)
 import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
-import std/list (map, foldl, length as listLength, flatMap, mapE, nth)
+import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, last_or)
+import std/fs (readFileBytes)
 import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
 
 -- AI-powered layout understanding
@@ -19,32 +20,155 @@ import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioB
 -- Budget: AI @limit=N ensures bounded cost per document.
 -- Pure parsing handles the deterministic parts; AI handles ambiguity.
 
--- Describe all images in a document using AI vision
-export func describeImages(blocks: [Block]) -> [Block] ! {AI}
-  ensures { listLength(result) == listLength(blocks) }
+-- What an ImageBlock.data string actually refers to. Office/EPUB/ODF parsers
+-- embed raw base64; the HTML parser stores the <img src> verbatim, which may be
+-- a data: URI, a local file path, or a remote URL.
+type ImageSource
+  = InlineBase64(string)   -- bytes in hand (embedded base64 or decoded data: URI)
+  | LocalFile(string)      -- path to read from disk, relative to the doc's dir
+  | RemoteUrl(string)      -- http(s) — not fetched by the CLI (warned)
+  | NotAnImage             -- empty / unusable reference
+
+-- Describe every image in a document using AI vision.
+--
+-- Resolves each image's source rather than assuming embedded base64:
+--   * embedded base64 and data: URIs      -> described directly
+--   * local file refs (<img src="a/x.png">) -> read from disk relative to baseDir
+--   * remote URLs / unreadable files       -> a WARNING, never a silent no-op
+--
+-- Returns the described blocks alongside the warnings raised and the real number
+-- of AI calls made, so callers can surface both instead of guessing.
+export func describeImages(baseDir: string, blocks: [Block]) -> {blocks: [Block], warnings: [string], aiCalls: int} ! {AI, FS}
+  ensures { listLength(result.blocks) == listLength(blocks) }
 {
-  mapE(describeOneBlock, blocks)
+  layoutDescribeList(baseDir, blocks)
 }
 
-func describeOneBlock(b: Block) -> Block ! {AI} =
-  match b {
-    ImageBlock(img) => {
-      -- Only describe if data is actual base64 (long) and not a URL reference
-      let description = if length(img.data) > 100 && layoutIsUrlRef(img.data) == false
-        then call("Describe this image concisely in one sentence. Focus on the key content and any text visible. Image data (base64): ${img.data}")
-        else img.description;
-      mkImage(img.data, description, img.mime)
-    },
-    SectionBlock(s) => {
-      let describedInner = mapE(describeOneBlock, s.blocks);
-      SectionBlock({kind: s.kind, blocks: describedInner})
-    },
-    _ => b
+func layoutDescribeList(baseDir: string, blocks: [Block]) -> {blocks: [Block], warnings: [string], aiCalls: int} ! {AI, FS} =
+  match blocks {
+    [] => { blocks: [], warnings: [], aiCalls: 0 },
+    b :: rest => {
+      let h = layoutDescribeOne(baseDir, b);
+      let t = layoutDescribeList(baseDir, rest);
+      { blocks: h.block :: t.blocks,
+        warnings: concat(h.warnings, t.warnings),
+        aiCalls: h.aiCalls + t.aiCalls }
+    }
   }
 
--- Check if data looks like a URL reference rather than base64 image data
-pure func layoutIsUrlRef(data: string) -> bool {
-  startsWith(data, "http://") || startsWith(data, "https://") || startsWith(data, "data:")
+func layoutDescribeOne(baseDir: string, b: Block) -> {block: Block, warnings: [string], aiCalls: int} ! {AI, FS} =
+  match b {
+    ImageBlock(img) =>
+      match layoutClassifySource(img.data) {
+        InlineBase64(b64) => {
+          let mime = layoutEffectiveMime(img.mime, img.data);
+          let r = layoutDescribeBytes(b64, mime, "embedded image");
+          { block: ImageBlock({img | description: layoutPickDesc(r.desc, img.description)}), warnings: r.warnings, aiCalls: r.calls }
+        },
+        LocalFile(path) => {
+          let full = layoutJoinPath(baseDir, path);
+          match readFileBytes(full) {
+            Ok(b64) => {
+              let r = layoutDescribeBytes(b64, layoutMimeFromPath(path), "'${path}'");
+              { block: ImageBlock({img | description: layoutPickDesc(r.desc, img.description)}), warnings: r.warnings, aiCalls: r.calls }
+            },
+            Err(_) => { block: b, warnings: ["describe: could not read linked image '${path}' (looked in '${baseDir}') — left undescribed"], aiCalls: 0 }
+          }
+        },
+        RemoteUrl(url) => { block: b, warnings: ["describe: remote image '${url}' not fetched — the CLI does not download remote images"], aiCalls: 0 },
+        NotAnImage => { block: b, warnings: [], aiCalls: 0 }
+      },
+    SectionBlock(s) => {
+      let inner = layoutDescribeList(baseDir, s.blocks);
+      { block: SectionBlock({kind: s.kind, blocks: inner.blocks}), warnings: inner.warnings, aiCalls: inner.aiCalls }
+    },
+    _ => { block: b, warnings: [], aiCalls: 0 }
+  }
+
+-- Classify what an ImageBlock.data string refers to. Base64 uses the alphabet
+-- A-Za-z0-9+/= and so never contains "."; a real file reference carries an
+-- extension dot. That "." is the discriminator between a long embedded blob and
+-- a path.
+pure func layoutClassifySource(data: string) -> ImageSource {
+  if length(data) == 0 then NotAnImage
+  else if startsWith(data, "data:") then {
+    let idx = find(data, ",");
+    if idx >= 0 then InlineBase64(substring(data, idx + 1, length(data)))
+    else NotAnImage
+  }
+  else if startsWith(data, "http://") || startsWith(data, "https://") then RemoteUrl(data)
+  else if length(data) > 100 && contains(data, ".") == false then InlineBase64(data)
+  else LocalFile(data)
+}
+
+-- Send image bytes to the AI as a real multimodal request (mode=multimodal),
+-- NOT base64 interpolated into a text prompt — the old path did the latter,
+-- which risks the documented call() truncation and is not seen as an image.
+-- Fail-soft: an AI error on one image (e.g. a corrupt/rejected file) becomes a
+-- warning and an empty description, rather than aborting the whole parse.
+func layoutDescribeBytes(base64: string, mime: string, label: string) -> {desc: string, warnings: [string], calls: int} ! {AI} {
+  let request = encode(jo([
+    kv("mode", js("multimodal")),
+    kv("mimeType", js(mime)),
+    kv("data", js(base64)),
+    kv("prompt", js(layoutDescribePrompt()))
+  ]));
+  match callResult(request) {
+    Ok(text) => { desc: text, warnings: [], calls: 1 },
+    Err(e) => { desc: "", warnings: ["describe: AI could not describe ${label} — ${e.message}"], calls: 0 }
+  }
+}
+
+-- Keep an existing description (e.g. HTML alt text) if the AI returned nothing.
+pure func layoutPickDesc(aiDesc: string, existing: string) -> string =
+  if length(aiDesc) > 0 then aiDesc else existing
+
+-- Reading-first, not OCR-first: describe what a chart CONVEYS (trend/shape),
+-- then note the labels — the reverse of the old "one sentence, any text visible".
+pure func layoutDescribePrompt() -> string =
+  "Describe this image for a reader who cannot see it. If it is a chart, graph, or plot: name the chart type, state each axis and its units, and describe the shape and trend of the plotted data — where it rises, falls, peaks, and any notable values or inflection points. If it is a diagram, screenshot, or photo: say what it shows and how it is laid out. Then note any visible text or labels. Be concise but complete (2-4 sentences)."
+
+pure func layoutEffectiveMime(imgMime: string, data: string) -> string {
+  if imgMime != "image/unknown" && imgMime != "" then imgMime
+  else if startsWith(data, "data:") then layoutDataUriMime(data)
+  else "image/unknown"
+}
+
+-- Extract the MIME from a data: URI header, e.g. "data:image/png;base64,..." -> "image/png".
+pure func layoutDataUriMime(data: string) -> string {
+  let afterPrefix = substring(data, 5, length(data));
+  let semi = find(afterPrefix, ";");
+  let comma = find(afterPrefix, ",");
+  let end = if semi >= 0 then semi else (if comma >= 0 then comma else length(afterPrefix));
+  substring(afterPrefix, 0, end)
+}
+
+pure func layoutMimeFromPath(path: string) -> string {
+  let parts = split(path, ".");
+  let ext = toLower(last_or(parts, ""));
+  if ext == "png" then "image/png"
+  else if ext == "jpg" || ext == "jpeg" then "image/jpeg"
+  else if ext == "gif" then "image/gif"
+  else if ext == "webp" then "image/webp"
+  else if ext == "bmp" then "image/bmp"
+  else if ext == "svg" then "image/svg+xml"
+  else if ext == "tif" || ext == "tiff" then "image/tiff"
+  else "image/unknown"
+}
+
+pure func layoutJoinPath(base: string, rel: string) -> string {
+  if startsWith(rel, "/") then rel
+  else if base == "" || base == "." then rel
+  else "${base}/${rel}"
+}
+
+-- Directory portion of a file path (everything before the last "/").
+-- Used to resolve <img src> relative to the document, not the process CWD.
+export pure func dirOf(path: string) -> string {
+  let parts = split(path, "/");
+  let n = listLength(parts);
+  if n <= 1 then "."
+  else join("/", take(n - 1, parts))
 }
 
 -- Use AI to infer table structure from raw cell data

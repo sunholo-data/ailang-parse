@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.21.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.22.0...HEAD)
 
 ### SDKs — v0.8.0 (retry parity across JS, Go, R)
 
@@ -27,6 +27,46 @@ SDKs to parity. Retry stays **off by default** (opt in per SDK):
 
 `parse` / `parseFile` re-issue the request (rebuilding the body) on each retry
 with exponential backoff. All four SDKs bumped to 0.8.0 (`server.json` too).
+
+---
+
+## [v0.22.0](https://github.com/sunholo-data/ailang-parse/compare/v0.21.0...v0.22.0) — 2026-07-15
+
+### Fixed — `--describe` fetches linked images and reads the picture
+
+Two field-reported gaps in `--describe`
+([design doc](design_docs/implemented/v0_22_0/v0_22_0_describe_image_fetch_and_prompts.md)):
+
+- **HTML external images are no longer a silent no-op.** The HTML path never ran
+  the describe pass, and the describe filter only accepted embedded base64
+  anyway — so `<img src="assets/x.png">` produced an empty description,
+  `aiCallsUsed: 0`, and no warning. Now `describeImages` resolves each image
+  source: local file references are **read from disk relative to the document's
+  directory**, `data:` URIs are decoded, and remote URLs / unreadable files
+  produce a **warning** (surfaced on the terminal and in the JSON `warnings`
+  array) instead of a silent empty. `aiCallsUsed` now reflects the **real**
+  number of describe calls. Describe is fail-soft per image — one corrupt/rejected
+  image warns rather than aborting the parse.
+- **Direct images now describe the picture, not just OCR the axes.** Passing a
+  chart/graph image ran a document-OCR prompt that returned axis labels and tick
+  values but never a reading of the plotted curve (the descriptive prompt was an
+  unreachable fallback, since any chart has *some* text). The direct-image prompt
+  now leads with a visual reading — chart type, axes + units, and the trend/shape
+  of the data — then extracts the literal text. The shared describe prompt
+  (Office/HTML/EPUB/ODF) was retuned the same way.
+
+Image describe requests now go through a proper multimodal request instead of
+base64 interpolated into a text prompt. Verified end-to-end across HTML, direct
+images, DOCX, PPTX, ODT/ODF, and **LaTeX/arXiv** — `\includegraphics` figures are
+now described, resolved against the `.tex` directory (the extraction dir for arXiv
+`.tar.gz` bundles); PDF/EPS or missing figures degrade to warnings.
+
+Also fixes a **pre-existing DOCX image-extraction bug** surfaced while verifying
+describe coverage: `readEmbeddedImage` double-prepended `word/media/`, so every
+DOCX embedded image had empty `data` (describe had nothing to work with), and the
+`word/media/` directory entry was emitted as a phantom `octet-stream` image. Both
+fixed in `zip_extract.ail`; the `pandoc_inline_images.docx` golden is corrected
+from `images: 3` to `images: 2`. Structural benchmark stays at 100% across 58 files.
 
 ---
 
