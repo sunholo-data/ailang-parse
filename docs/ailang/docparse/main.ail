@@ -15,7 +15,7 @@ import docparse/services/pptx_parser (parsePptx, parsePptxMetadata, parsePptxIma
 import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
 import docparse/services/direct_ai_parser (parsePdf, parseDocumentImage, parseImage, parseAudio, parseVideo, parsePdfMetadata)
 import docparse/services/pdf_backend_external (parsePdfViaBackend, ExternalDocResult)
-import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStructure, cleanExtractedText)
+import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStructure, cleanExtractedText, dirOf)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
 import docparse/services/rtf_parser (parseRtf)
@@ -40,6 +40,7 @@ import docparse/services/ods_generator (generateOds)
 import docparse/services/qmd_generator (generateQmd)
 import docparse/services/ai_generator (aiGenerateBlocks)
 import docparse/services/xml_helpers (xmlEscape)
+import docparse/services/omml (renderOmml)
 import docparse/services/unstructured_compat (blocksToUnstructuredJson, unstMimeType)
 import docparse/services/a2ui_formatter (documentToA2UI, blocksToA2UINodes, convertBlocksJsonToA2UI, a2ui_jsonToBlockList)
 import pkg/sunholo/a2ui/components (A2UINode, renderA2UI)
@@ -151,7 +152,7 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env}
       "epub" => parseEpubDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "zip-odf" => parseOdfDocument(filepath, ext, useAI || doSummarize, doSummarize, convertTarget),
       "email" => parseEmailDocument(filepath, ext, hasFlag(args, "--threaded"), hasFlag(args, "--deep")),
-      "latex" => parseLatexDocument(filepath, convertTarget),
+      "latex" => parseLatexDocument(filepath, useAI || doSummarize, convertTarget),
       "rtf" => parseRtfDocument(filepath, convertTarget),
       "text" => parseTextDocument(filepath),
       _ => println("Format '${format}' not yet supported in this demo.")
@@ -162,6 +163,14 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env}
 -- Check if a flag is present in args list
 pure func hasFlag(args: [string], flag: string) -> bool =
   any(\a. a == flag, args)
+
+-- Surface describe warnings to the terminal so an image that could not be
+-- described reads as "skipped, here's why" rather than a silent empty.
+func printWarnings(warnings: [string]) -> () ! {IO} =
+  match warnings {
+    [] => (),
+    w :: rest => { println("⚠ ${w}"); printWarnings(rest) }
+  }
 
 -- Extract --convert target path from args: ["file.docx", "--convert", "out.html"] -> "out.html"
 pure func getConvertTarget(args: [string]) -> string =
@@ -331,15 +340,17 @@ func parseWordDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 
   -- Step 2f: AI image descriptions (optional)
   let imageCount = countBlocks(filterImages(combinedBlocks));
-  let describedBlocks = if useAI && imageCount > 0 then {
+  let describeRes = if useAI && imageCount > 0 then {
     println("Describing ${show(imageCount)} images with AI...");
-    describeImages(combinedBlocks)
+    describeImages(dirOf(filepath), combinedBlocks)
   } else {
     if imageCount > 0
     then println("Images: ${show(imageCount)} (pass 'describe' arg for AI descriptions)")
     else println("No images found.");
-    combinedBlocks
+    { blocks: combinedBlocks, warnings: [], aiCalls: 0 }
   };
+  let describedBlocks = describeRes.blocks;
+  printWarnings(describeRes.warnings);
 
   -- Step 2g: AI self-healing (fix tables with empty/ambiguous cells)
   let allBlocks = if useAI then {
@@ -348,7 +359,6 @@ func parseWordDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   } else describedBlocks;
 
   -- Step 3: Build result
-  let aiCalls = if useAI then imageCount else 0;
   let doc = {
     format: "docx",
     filename: filepath,
@@ -358,8 +368,8 @@ func parseWordDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 
   let result = {
     document: doc,
-    warnings: [],
-    aiCallsUsed: aiCalls
+    warnings: describeRes.warnings,
+    aiCallsUsed: describeRes.aiCalls
   };
 
   -- Step 4: Output
@@ -405,15 +415,17 @@ func parsePowerPointDocument(filepath: string, useAI: bool, doSummarize: bool, c
 
   -- Step 2d: AI image descriptions (optional)
   let imageCount = countBlocks(filterImages(combinedBlocks));
-  let describedBlocks = if useAI && imageCount > 0 then {
+  let describeRes = if useAI && imageCount > 0 then {
     println("Describing ${show(imageCount)} images with AI...");
-    describeImages(combinedBlocks)
+    describeImages(dirOf(filepath), combinedBlocks)
   } else {
     if imageCount > 0
     then println("Images: ${show(imageCount)} (pass 'describe' arg for AI descriptions)")
     else println("No images found.");
-    combinedBlocks
+    { blocks: combinedBlocks, warnings: [], aiCalls: 0 }
   };
+  let describedBlocks = describeRes.blocks;
+  printWarnings(describeRes.warnings);
 
   -- Step 2e: AI self-healing (fix tables with empty/ambiguous cells)
   let allBlocks = if useAI then {
@@ -422,7 +434,6 @@ func parsePowerPointDocument(filepath: string, useAI: bool, doSummarize: bool, c
   } else describedBlocks;
 
   -- Step 3: Build result
-  let aiCalls = if useAI then imageCount else 0;
   let doc = {
     format: "pptx",
     filename: filepath,
@@ -432,8 +443,8 @@ func parsePowerPointDocument(filepath: string, useAI: bool, doSummarize: bool, c
 
   let result = {
     document: doc,
-    warnings: [],
-    aiCallsUsed: aiCalls
+    warnings: describeRes.warnings,
+    aiCallsUsed: describeRes.aiCalls
   };
 
   -- Step 4: Output
@@ -819,7 +830,7 @@ func resolveLatexSource(filepath: string) -> string ! {IO, FS} {
 -- Scientific-paper wedge: deterministic parsing of .tex source (as found in
 -- ~89% of arXiv papers) where competitors are OCR-bound on the rendered PDF.
 -- Accepts raw .tex files or .tar.gz / .tgz arXiv source bundles.
-func parseLatexDocument(filepath: string, convertTarget: string) -> () ! {IO, FS, AI, Env} {
+func parseLatexDocument(filepath: string, useAI: bool, convertTarget: string) -> () ! {IO, FS, AI, Env} {
   println("--- Parsing LaTeX (pure AILANG, deterministic) ---");
   println("");
 
@@ -847,6 +858,23 @@ func parseLatexDocument(filepath: string, convertTarget: string) -> () ! {IO, FS
   if length(meta.author) > 0 then println("Author: ${meta.author}") else println("");
   println("");
 
+  -- AI figure descriptions (optional). \includegraphics figures are external
+  -- refs, so describeImages resolves each against basedir — the main .tex file's
+  -- directory, which for arXiv tarballs is the extraction dir. Raster figures
+  -- (PNG/JPG) are described; PDF/EPS figures the model can't read become warnings.
+  let imageCount = countBlocks(filterImages(blocks));
+  let describeRes = if useAI && imageCount > 0 then {
+    println("Describing ${show(imageCount)} figures with AI...");
+    describeImages(basedir, blocks)
+  } else {
+    if imageCount > 0
+    then println("Figures: ${show(imageCount)} (pass 'describe' arg for AI descriptions)")
+    else ();
+    { blocks: blocks, warnings: [], aiCalls: 0 }
+  };
+  let describedBlocks = describeRes.blocks;
+  printWarnings(describeRes.warnings);
+
   let docMeta = {
     title: meta.title,
     author: meta.author,
@@ -859,19 +887,19 @@ func parseLatexDocument(filepath: string, convertTarget: string) -> () ! {IO, FS
     format: "latex",
     filename: filepath,
     metadata: docMeta,
-    blocks: blocks
+    blocks: describedBlocks
   };
 
   let result = {
     document: doc,
-    warnings: [],
-    aiCallsUsed: 0
+    warnings: describeRes.warnings,
+    aiCallsUsed: describeRes.aiCalls
   };
 
   printSummary(doc);
   println("");
   println("--- Content Blocks ---");
-  printBlocks(blocks);
+  printBlocks(describedBlocks);
   println("");
 
   writeOutputs(doc, result, false, filepath, convertTarget)
@@ -897,15 +925,17 @@ func parseEpubDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   let imageCount = countBlocks(filterImages(resolvedBlocks));
 
   -- AI image descriptions (optional)
-  let describedBlocks = if useAI && imageCount > 0 then {
+  let describeRes = if useAI && imageCount > 0 then {
     println("Describing ${show(imageCount)} images with AI...");
-    describeImages(resolvedBlocks)
+    describeImages(dirOf(filepath), resolvedBlocks)
   } else {
     if imageCount > 0
     then println("Images: ${show(imageCount)} (pass 'describe' arg for AI descriptions)")
     else println("No images found.");
-    resolvedBlocks
+    { blocks: resolvedBlocks, warnings: [], aiCalls: 0 }
   };
+  let describedBlocks = describeRes.blocks;
+  printWarnings(describeRes.warnings);
 
   -- AI self-healing (fix tables with empty/ambiguous cells)
   let allBlocks = if useAI then {
@@ -914,7 +944,6 @@ func parseEpubDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   } else describedBlocks;
   println("");
 
-  let aiCalls = if useAI then imageCount else 0;
   let doc = {
     format: "epub",
     filename: filepath,
@@ -924,8 +953,8 @@ func parseEpubDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 
   let result = {
     document: doc,
-    warnings: [],
-    aiCallsUsed: aiCalls
+    warnings: describeRes.warnings,
+    aiCallsUsed: describeRes.aiCalls
   };
 
   printSummary(doc);
@@ -974,15 +1003,17 @@ func parseOdfDocument(filepath: string, ext: string, useAI: bool, doSummarize: b
   let imageCount = countBlocks(filterImages(resolvedBlocks));
 
   -- AI image descriptions (optional)
-  let describedBlocks = if useAI && imageCount > 0 then {
+  let describeRes = if useAI && imageCount > 0 then {
     println("Describing ${show(imageCount)} images with AI...");
-    describeImages(resolvedBlocks)
+    describeImages(dirOf(filepath), resolvedBlocks)
   } else {
     if imageCount > 0
     then println("Images: ${show(imageCount)} (pass 'describe' arg for AI descriptions)")
     else println("No images found.");
-    resolvedBlocks
+    { blocks: resolvedBlocks, warnings: [], aiCalls: 0 }
   };
+  let describedBlocks = describeRes.blocks;
+  printWarnings(describeRes.warnings);
 
   -- AI self-healing (fix tables with empty/ambiguous cells)
   let allBlocks = if useAI then {
@@ -991,7 +1022,6 @@ func parseOdfDocument(filepath: string, ext: string, useAI: bool, doSummarize: b
   } else describedBlocks;
   println("");
 
-  let aiCalls = if useAI then imageCount else 0;
   let doc = {
     format: ext,
     filename: filepath,
@@ -1001,8 +1031,8 @@ func parseOdfDocument(filepath: string, ext: string, useAI: bool, doSummarize: b
 
   let result = {
     document: doc,
-    warnings: [],
-    aiCallsUsed: aiCalls
+    warnings: describeRes.warnings,
+    aiCallsUsed: describeRes.aiCalls
   };
 
   printSummary(doc);
@@ -1042,11 +1072,28 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 
   println("Extracted ${show(countBlocks(resolvedBlocks))} blocks.");
 
+  -- AI image descriptions (optional). Unlike the ZIP-based formats, HTML stores
+  -- <img src> verbatim, so describeImages resolves each reference: local files are
+  -- read from disk relative to the HTML file's directory, data: URIs are decoded,
+  -- and remote URLs / missing files produce a warning instead of a silent no-op.
+  let imageCount = countBlocks(filterImages(resolvedBlocks));
+  let describeRes = if useAI && hasError == false && imageCount > 0 then {
+    println("Describing ${show(imageCount)} images with AI...");
+    describeImages(dirOf(filepath), resolvedBlocks)
+  } else {
+    if useAI == false && imageCount > 0
+    then println("Images: ${show(imageCount)} (pass 'describe' arg for AI descriptions)")
+    else ();
+    { blocks: resolvedBlocks, warnings: [], aiCalls: 0 }
+  };
+  let describedBlocks = describeRes.blocks;
+  printWarnings(describeRes.warnings);
+
   -- Apply AI table enhancement (only if parse succeeded deterministically)
   let allBlocks = if useAI && hasError == false then {
     println("Enhancing blocks with AI (fixing tables, layout)...");
-    enhanceBlocks(resolvedBlocks)
-  } else resolvedBlocks;
+    enhanceBlocks(describedBlocks)
+  } else describedBlocks;
   println("");
 
   let doc = {
@@ -1056,10 +1103,12 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
     blocks: allBlocks
   };
 
+  -- Count the AI text-extraction fallback call too, when it ran.
+  let extractCall = if hasError && useAI then 1 else 0;
   let result = {
     document: doc,
-    warnings: [],
-    aiCallsUsed: 0
+    warnings: describeRes.warnings,
+    aiCallsUsed: describeRes.aiCalls + extractCall
   };
 
   printSummary(doc);

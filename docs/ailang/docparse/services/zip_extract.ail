@@ -66,8 +66,12 @@ export func readDocxRelationships(path: string) -> string ! {FS} {
 }
 
 -- Read an embedded image as base64
+-- Read an embedded image by its full ZIP entry path (e.g. "word/media/image1.jpg").
+-- findMediaEntries already yields full paths, so we must NOT re-prepend
+-- "word/media/" here — doing so looked up "word/media/word/media/…" and always
+-- missed, leaving every DOCX image with empty data (and describe with nothing to do).
 export func readEmbeddedImage(path: string, imageName: string) -> string ! {FS} {
-  match readEntryBytes(path, "word/media/${imageName}") {
+  match readEntryBytes(path, imageName) {
     Ok(data) => data,
     Err(_) => ""
   }
@@ -206,10 +210,14 @@ pure func filterMedia(entries: [string]) -> [string] =
   }
 
 -- Check if a ZIP entry is a media file
+-- A media file entry — but NOT the "word/media/" directory entry itself, which
+-- ZIP listings include as a 0-byte name ending in "/". Without this guard the
+-- directory was emitted as a phantom image with empty data and an octet-stream mime.
 pure func isMediaEntry(entry: string) -> bool {
-  contains(entry, "word/media/") ||
-  contains(entry, "ppt/media/") ||
-  contains(entry, "xl/media/")
+  endsWith(entry, "/") == false &&
+  (contains(entry, "word/media/") ||
+   contains(entry, "ppt/media/") ||
+   contains(entry, "xl/media/"))
 }
 
 -- Determine the MIME type from a media filename.
