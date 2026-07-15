@@ -9,7 +9,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.22.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.22.2...HEAD)
+
+## [v0.22.2](https://github.com/sunholo-data/ailang-parse/compare/v0.22.1...v0.22.2) — 2026-07-15
+
+### Fixed — accurate AILANG toolchain requirement
+
+The manifest declared `ailang = ">=0.24.0"`, but the module actually requires
+**AILANG ≥ 0.29.0** — a consumer on an older toolchain hit a silent boot failure
+instead of a clear resolver error. Tightened the constraint in `ailang.toml` (and
+the `docs/ailang` mirror) so unsupported toolchains fail fast at resolve time.
+No code changes.
 
 ### SDKs — v0.8.0 (retry parity across JS, Go, R)
 
