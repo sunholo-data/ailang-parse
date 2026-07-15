@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.22.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.22.1...HEAD)
 
 ### SDKs — v0.8.0 (retry parity across JS, Go, R)
 
@@ -30,12 +30,14 @@ with exponential backoff. All four SDKs bumped to 0.8.0 (`server.json` too).
 
 ---
 
-## [v0.22.0](https://github.com/sunholo-data/ailang-parse/compare/v0.21.0...v0.22.0) — 2026-07-15
+## [v0.22.1](https://github.com/sunholo-data/ailang-parse/compare/v0.21.0...v0.22.1) — 2026-07-15
+
+_(v0.22.0's registry publish failed on a stale `docs/ailang` mirror; the fix ships here.)_
 
 ### Fixed — `--describe` fetches linked images and reads the picture
 
 Two field-reported gaps in `--describe`
-([design doc](design_docs/implemented/v0_22_0/v0_22_0_describe_image_fetch_and_prompts.md)):
+([design doc](design_docs/implemented/v0_22_1/v0_22_1_describe_image_fetch_and_prompts.md)):
 
 - **HTML external images are no longer a silent no-op.** The HTML path never ran
   the describe pass, and the describe filter only accepted embedded base64

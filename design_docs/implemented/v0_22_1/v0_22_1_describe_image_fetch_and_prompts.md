@@ -1,6 +1,6 @@
 # `--describe` — Fetch Linked Images & Read the Picture, Not Just the Text
 
-**Status**: SHIPPED in v0.22.0 (2026-07-15). (v0.21.0 was a concurrent OMML-equations release; this work landed as the next minor.) Both findings fixed and verified end-to-end across HTML, direct images, DOCX, PPTX, ODT/ODF, and LaTeX/arXiv (plus a pre-existing DOCX extraction bug found en route).
+**Status**: SHIPPED in v0.22.1 (2026-07-15). (v0.21.0 was a concurrent OMML-equations release; v0.22.0's registry publish failed on a stale `docs/ailang` mirror, so this landed as v0.22.1.) Both findings fixed and verified end-to-end across HTML, direct images, DOCX, PPTX, ODT/ODF, and LaTeX/arXiv (plus a pre-existing DOCX extraction bug found en route).
 
 ## Format coverage (verified 2026-07-15)
 
