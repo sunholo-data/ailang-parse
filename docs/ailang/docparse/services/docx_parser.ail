@@ -7,6 +7,7 @@ import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments)
+import docparse/services/omml (renderOmml)
 
 -- DOCX Parser
 -- Parses Word document XML into a list of content Blocks.
@@ -217,6 +218,8 @@ pure func childNodeText(node: XmlNode) -> string {
   else if tag == "w:smartTag" then extractNestedRunText(node)
   else if tag == "w:hyperlink" then extractNestedRunText(node)
   else if tag == "w:sdt" then extractSdtText(node)
+  else if tag == "m:oMath" then renderOmml(node)
+  else if tag == "m:oMathPara" then renderOmml(node)
   else ""
 }
 
