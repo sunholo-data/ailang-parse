@@ -128,6 +128,19 @@ def extract_pkg_imports(ail_source: str) -> list[tuple[str, list[str]]]:
     return results
 
 
+def extract_docparse_imports(ail_source: str) -> list[str]:
+    """Pull module paths from `import docparse/...` lines.
+
+    Used to prove every intra-docparse dependency of a browser-loaded module is
+    itself in MODULES_TO_LOAD. If it isn't, the WASM runtime boots, starts
+    loading modules, and dies at init with
+    "undefined global variable: <fn> from <module>" — which surfaces only as an
+    opaque 60s DocParseEngine.isReady() timeout in the browser smoke test.
+    """
+    pattern = re.compile(r"^\s*import\s+(docparse/[A-Za-z0-9_/]+)", re.MULTILINE)
+    return sorted(set(pattern.findall(ail_source)))
+
+
 def extract_vendor_modules(vendor_source: str) -> list[str]:
     """Pull the MODULES bash array out of vendor-wasm-packages.sh."""
     block_match = re.search(r"MODULES=\(\s*(.*?)\s*\)", vendor_source, re.DOTALL)
@@ -240,6 +253,35 @@ def main() -> int:
             failures += len(vendored_not_loaded)
         if not loaded_not_vendored and not vendored_not_loaded:
             ok(f"vendor-wasm-packages.sh and MODULES_TO_LOAD agree on {len(vendor_set)} modules")
+
+    # ── Invariant 3a: every docparse import of a loaded module is itself loaded ──
+    # Regression guard: the v0.21.0 OMML change added
+    # `import docparse/services/omml (renderOmml)` to docx_parser + pptx_parser but
+    # never added omml to MODULES_TO_LOAD. Every other check passed (the modules
+    # resolved, vendor and loader agreed), yet the browser died at init with
+    # "undefined global variable: renderOmml from docparse/services/omml" — the
+    # WASM smoke test then failed as a bare 60s timeout with no visible cause.
+    if modules:
+        loaded_names = {name for name, _ in modules}
+        missing_deps: list[tuple[str, str]] = []
+        for name, path in modules:
+            if path.startswith("pkg/"):
+                continue
+            source_file = SOURCE_DOCPARSE / path[len("docparse/"):]
+            if not source_file.exists():
+                continue
+            for dep in extract_docparse_imports(source_file.read_text()):
+                if dep not in loaded_names:
+                    missing_deps.append((name, dep))
+        if missing_deps:
+            for mod, dep in sorted(set(missing_deps)):
+                fail(
+                    f"{mod} imports {dep}, which is not in MODULES_TO_LOAD — "
+                    "the browser will fail at init with 'undefined global variable'"
+                )
+            failures += len(set(missing_deps))
+        else:
+            ok(f"All docparse imports across {len(loaded_names)} loaded module(s) are themselves loaded")
 
     # ── Invariant 3b: vendored pkg/... packages export every imported symbol ──
     # The browser bundle has no package resolution — it loads exactly the

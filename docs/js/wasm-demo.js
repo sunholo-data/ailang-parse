@@ -38,6 +38,8 @@
     { name: 'docparse/types/document',           path: 'docparse/types/document.ail' },
     { name: 'docparse/services/format_router',    path: 'docparse/services/format_router.ail' },
     { name: 'docparse/services/zip_extract',      path: 'docparse/services/zip_extract.ail' },
+    // omml before docx_parser/pptx_parser — both import renderOmml from it
+    { name: 'docparse/services/omml',             path: 'docparse/services/omml.ail' },
     { name: 'docparse/services/docx_parser',      path: 'docparse/services/docx_parser.ail' },
     { name: 'docparse/services/pptx_parser',      path: 'docparse/services/pptx_parser.ail' },
     { name: 'docparse/services/xlsx_parser',      path: 'docparse/services/xlsx_parser.ail' },
