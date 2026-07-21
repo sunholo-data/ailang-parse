@@ -157,8 +157,11 @@ def check_tables(blocks: list[dict], expected_tables: list[dict]) -> dict:
 def run_docparse(filepath: str, ai_model: str) -> dict | None:
     """Run docparse on a file and return parsed JSON output."""
     cmd = [
+        # Process: the PDF path shells out to the external pdftotext backend
+        # (ailang_parse >= 0.21.0). Without it the run dies with
+        # "effect 'Process' requires capability".
         "ailang", "run", "--entry", "main",
-        "--caps", "IO,FS,Env,AI",
+        "--caps", "IO,FS,Env,AI,Process",
         "--ai", ai_model,
         "docparse/main.ail", filepath,
     ]
@@ -168,6 +171,13 @@ def run_docparse(filepath: str, ai_model: str) -> dict | None:
     if not env.get("GOOGLE_API_KEY") and "gemini" in ai_model.lower():
         env["GOOGLE_API_KEY"] = ""
 
+    # writeOutputs names the file after the input basename (docparse/data/<name>.json),
+    # not a fixed output.json. Delete any prior run's file first so a failed parse
+    # can't be silently scored against a previous model's leftover output.
+    out_path = REPO_DIR / "docparse" / "data" / (Path(filepath).name + ".json")
+    if out_path.exists():
+        out_path.unlink()
+
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=120,
@@ -176,11 +186,11 @@ def run_docparse(filepath: str, ai_model: str) -> dict | None:
     except subprocess.TimeoutExpired:
         return None
 
-    if not OUTPUT_JSON.exists():
+    if not out_path.exists():
         return None
 
     try:
-        return json.loads(OUTPUT_JSON.read_text())
+        return json.loads(out_path.read_text())
     except json.JSONDecodeError:
         return None
 
