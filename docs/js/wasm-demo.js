@@ -25,7 +25,7 @@
   // docs/wasm/.ailang-version. The checked-in value reflects whatever pin was
   // current at the last commit; CI rewrites it to match the deployed pin so a
   // stale browser cache can never serve a mismatched ailang.wasm.
-  var WASM_BINARY_URL = 'wasm/ailang.wasm?v=v0.24.0';
+  var WASM_BINARY_URL = 'wasm/ailang.wasm?v=v0.30.0';
   var MODULE_BASE = 'ailang/';
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
   var MAX_XML_SIZE = 5 * 1024 * 1024;
@@ -38,6 +38,8 @@
     { name: 'docparse/types/document',           path: 'docparse/types/document.ail' },
     { name: 'docparse/services/format_router',    path: 'docparse/services/format_router.ail' },
     { name: 'docparse/services/zip_extract',      path: 'docparse/services/zip_extract.ail' },
+    // omml before docx_parser/pptx_parser — both import renderOmml from it
+    { name: 'docparse/services/omml',             path: 'docparse/services/omml.ail' },
     { name: 'docparse/services/docx_parser',      path: 'docparse/services/docx_parser.ail' },
     { name: 'docparse/services/pptx_parser',      path: 'docparse/services/pptx_parser.ail' },
     { name: 'docparse/services/xlsx_parser',      path: 'docparse/services/xlsx_parser.ail' },
