@@ -46,6 +46,7 @@ VENDOR_SCRIPT = DOCS_DIR / "scripts" / "vendor-wasm-packages.sh"
 VENDORED_PKG_DIR = DOCS_DIR / "ailang" / "pkg"
 VENDORED_DOCPARSE_DIR = DOCS_DIR / "ailang" / "docparse"
 PIN_FILE = DOCS_DIR / "wasm" / ".ailang-version"
+MANIFEST = ROOT / "ailang.toml"
 SITE_DATA_JS = DOCS_DIR / "js" / "site-data.js"
 WASM_DEMO_JS_FOR_CACHEBUST = DOCS_DIR / "js" / "wasm-demo.js"
 PIN_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-\S+)?$")
@@ -387,6 +388,36 @@ def main() -> int:
                 failures += 1
             else:
                 ok(f"Pinned AILANG version: {pin_value}")
+
+    # ── Invariant: the pinned WASM runtime satisfies the declared floor ──
+    # ailang.toml's `ailang = ">=X.Y.Z"` is the minimum the parser sources need.
+    # If the pin drifts below it, the browser cannot load the modules and the demo
+    # dies at init. That is exactly how the pin sat at v0.24.0 against a >=0.29.0
+    # floor from 2026-06-01 while six bump PRs went unmerged — the public demo was
+    # broken for weeks and the only symptom was a 60s Playwright timeout.
+    # Fail loudly, early, and with the remedy in the message.
+    if pin_value and MANIFEST.exists():
+        floor_m = re.search(
+            r'^\s*ailang\s*=\s*"[^"]*?(\d+)\.(\d+)\.(\d+)', MANIFEST.read_text(), re.MULTILINE
+        )
+        pin_m = re.match(r"^v(\d+)\.(\d+)\.(\d+)", pin_value)
+        if not floor_m:
+            fail("Could not parse an X.Y.Z floor from the 'ailang = \">=...\"' line in ailang.toml")
+            failures += 1
+        elif pin_m:
+            floor = tuple(int(g) for g in floor_m.groups())
+            pinned = tuple(int(g) for g in pin_m.groups())
+            floor_s = ".".join(map(str, floor))
+            pinned_s = ".".join(map(str, pinned))
+            if pinned < floor:
+                fail(
+                    f"pinned WASM runtime v{pinned_s} is BELOW the ailang.toml floor "
+                    f">={floor_s} — the browser bundle cannot load the parser modules. "
+                    "Merge the open 'bump AILANG WASM pin' PR."
+                )
+                failures += 1
+            else:
+                ok(f"Pin v{pinned_s} satisfies ailang.toml floor >={floor_s}")
 
     if pin_value and SITE_DATA_JS.exists():
         sd = SITE_DATA_JS.read_text()

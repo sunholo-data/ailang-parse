@@ -67,7 +67,16 @@ jobs:
         if: steps.compare.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: chore/bump-ailang-${{ steps.compare.outputs.latest }}
+          # FIXED branch name — deliberately not version-suffixed. With a
+          # per-version branch this workflow opened a brand-new PR every release
+          # and never closed the previous one, so unmerged bumps piled up (six
+          # open PRs spanning 2026-06-01..07-13, each carrying a ~40 MB WASM
+          # blob) while the pin silently rotted five versions behind the floor
+          # declared in ailang.toml — which is what broke the browser demo.
+          # A stable branch makes create-pull-request force-update the existing
+          # PR instead, so there is always exactly one open bump PR pointing at
+          # the newest release.
+          branch: chore/bump-ailang-wasm
           base: main
           commit-message: "chore: bump AILANG WASM pin to ${{ steps.compare.outputs.latest }}"
           title: "chore: bump AILANG WASM pin → ${{ steps.compare.outputs.latest }}"
@@ -83,6 +92,13 @@ jobs:
             workflow. It is **not** auto-merged — CI runs the full suite including
             the `wasm-smoke` Playwright job, which loads the new bundle in a
             real browser and parses a fixture document. Merge only if green.
+
+            > **This PR self-supersedes.** It lives on a fixed branch
+            > (`chore/bump-ailang-wasm`), so when a newer AILANG release lands the
+            > workflow force-updates this same PR rather than opening another one.
+            > There should never be more than one open bump PR. Don't let it sit:
+            > a pin left behind the `ailang = ">=X.Y.Z"` floor in `ailang.toml`
+            > silently breaks the in-browser demo (see the pin-floor CI guard).
 
             ### Review checklist
             - [ ] `check` job (type-check + bindings) passes
