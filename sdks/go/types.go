@@ -40,7 +40,7 @@ type Block struct {
 	// than inferring one from nearby blocks.
 	ID               string `json:"id,omitempty"`
 	AnchorText       string `json:"anchorText,omitempty"`
-	AnchorKind       string `json:"anchorKind,omitempty"` // range, point, none
+	AnchorKind       string `json:"anchorKind,omitempty"` // range, point, cell, slide, none
 	Anchored         bool   `json:"anchored,omitempty"`
 	AnchorBlockIndex int    `json:"anchorBlockIndex,omitempty"`
 	ParentID         string `json:"parentId,omitempty"` // set on threaded replies

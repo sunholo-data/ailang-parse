@@ -453,22 +453,39 @@ def check_xlsx_number_formats(output: dict) -> dict:
 
 
 def check_xlsx_comments(output: dict) -> dict:
-    """Does the parser extract cell comments/notes?
+    """Does the parser extract cell comments/notes, anchored to their cell?
 
     File: challenge_comments.xlsx
-    Expected: Comment text and author preserved.
-    Gap: xl/comments*.xml never read.
+    Expected: comment text, author, and the cell it annotates.
     Spec: §18.7 (Comments)
-    """
-    full_output = json.dumps(output)
 
+    Excel does not split a comment from its anchor the way Word does — ref="B5"
+    names the cell directly — so a comment that arrives without its cell is a
+    parser failure, not an unresolvable anchor. Author and cell are checked as
+    strictly as the comment body.
+    """
+    comments = _collect_comment_blocks(output)
+    by_ref = {}
+    for c in comments:
+        anchor = c.get("anchorText", "")
+        ref = anchor.split(":")[0].strip() if anchor else ""
+        by_ref[ref] = c
+
+    # (cell, author, comment text, the cell's own value)
     expected = [
-        "Q1 revenue",
-        "Exceeds target",
-        "Under budget",
+        ("A1", "Finance Team", "Q1 revenue", "Revenue"),
+        ("B1", "Manager", "Exceeds target", "50000"),
+        ("B2", "Finance Team", "Under budget", "35000"),
     ]
 
-    found = sum(1 for text in expected if text in full_output)
+    found = 0
+    for ref, author, text, cell_value in expected:
+        c = by_ref.get(ref)
+        if c is None or not c.get("anchored"):
+            continue
+        if text in c.get("text", "") and c.get("author") == author \
+                and cell_value in c.get("anchorText", ""):
+            found += 1
     total = len(expected)
 
     return {
@@ -478,7 +495,7 @@ def check_xlsx_comments(output: dict) -> dict:
         "score": found / total if total else 0,
         "detected": found,
         "total": total,
-        "detail": f"{found}/{total} cell comments extracted",
+        "detail": f"{found}/{total} cell comments anchored to their cell and value",
     }
 
 
@@ -733,6 +750,118 @@ def check_docx_comment_table(output: dict) -> dict:
     }
 
 
+def check_xlsx_threaded_comments(output: dict) -> dict:
+    """Are modern Excel review threads read, and the legacy shim not double-counted?
+
+    File: challenge_threaded_comments.xlsx
+    Expected: two threaded comments on B2 with real display names from
+    xl/persons, the reply linked to its parent, and the legacy compatibility
+    copy (author "tc={guid}") dropped rather than reported as a third comment.
+    Spec: §18.7 + MS-XLSX threaded comments
+    """
+    comments = _collect_comment_blocks(output)
+    found = 0
+    total = 4
+
+    # Exactly two comments — the legacy shim must not appear as a third
+    if len(comments) == 2:
+        found += 1
+    # No placeholder authors leaked through from the compatibility part
+    if not any("tc=" in c.get("author", "") for c in comments):
+        found += 1
+
+    by_author = {c.get("author", ""): c for c in comments}
+    laura = by_author.get("Laura", {})
+    miguel = by_author.get("Miguel", {})
+    # Anchored to the cell and its value
+    if laura.get("anchored") and "B2" in laura.get("anchorText", "") \
+            and "184000" in laura.get("anchorText", ""):
+        found += 1
+    # The reply points at the parent comment
+    if miguel.get("parentId") and miguel.get("parentId") == laura.get("id"):
+        found += 1
+
+    return {
+        "name": "XLSX Threaded Comments",
+        "spec_ref": "§18.7",
+        "file": "challenge_threaded_comments.xlsx",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} threading + dedup behaviours correct",
+    }
+
+
+def check_pptx_comments(output: dict) -> dict:
+    """Are legacy PowerPoint comments read and attached to the right slide?
+
+    File: poi_comment.pptx
+    Expected: both comments resolve their author via ppt/commentAuthors.xml and
+    anchor to the slide their relationship points at. These two comments live on
+    slides 3 and 7, so a parser that matches comment1.xml to slide1.xml by
+    number gets both wrong while appearing to work.
+    Spec: §19.3 (Comments)
+    """
+    comments = _collect_comment_blocks(output)
+    texts = {c.get("text", "").strip(): c for c in comments}
+
+    found = 0
+    expected = [("test phrase", "Slide 3"), ("testdoc", "Slide 7")]
+    total = len(expected) + 1
+
+    for text, slide in expected:
+        c = texts.get(text)
+        if c and c.get("anchored") and slide in c.get("anchorText", ""):
+            found += 1
+    # Author resolved from commentAuthors.xml rather than left as a raw id
+    if comments and all(c.get("author") not in ("", "Unknown", "0") for c in comments):
+        found += 1
+
+    return {
+        "name": "PPTX Comments",
+        "spec_ref": "§19.3",
+        "file": "poi_comment.pptx",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} slide comments attached to the correct slide",
+    }
+
+
+def check_pptx_modern_comments(output: dict) -> dict:
+    """Are modern PowerPoint comments (2018 schema) read?
+
+    File: challenge_pptx_modern_comments.pptx
+    Expected: current PowerPoint writes ppt/comments/modernComment_*.xml with
+    GUID authorIds resolved via ppt/authors.xml, related from the slide by a
+    SINGULAR ".../modernComment" relationship type. Supporting only the legacy
+    p:cm shape means silently dropping comments from every current PowerPoint.
+    Spec: MS-PPTX modern comments
+    """
+    comments = _collect_comment_blocks(output)
+    found = 0
+    total = 3
+
+    if len(comments) == 1:
+        found += 1
+    if comments:
+        c = comments[0]
+        if c.get("author") == "Laura":
+            found += 1
+        if c.get("anchored") and "Slide 1" in c.get("anchorText", ""):
+            found += 1
+
+    return {
+        "name": "PPTX Modern Comments",
+        "spec_ref": "MS-PPTX",
+        "file": "challenge_pptx_modern_comments.pptx",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} modern-schema comments extracted",
+    }
+
+
 def _collect_comment_blocks(output: dict) -> list[dict]:
     """Every CommentBlock in the output, wherever it is nested."""
     found = []
@@ -864,13 +993,21 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "challenge_comment_ranges.docx": [check_docx_comment_ranges],
         "challenge_comment_orphans.docx": [check_docx_comment_orphans],
         "challenge_comment_table.docx": [check_docx_comment_table],
+        "challenge_threaded_comments.xlsx": [check_xlsx_threaded_comments],
+        "challenge_pptx_modern_comments.pptx": [check_pptx_modern_comments],
+        "poi_comment.pptx": [check_pptx_comments],
         "challenge_bookmarks.docx": [check_docx_bookmarks],
     }
 
     results = []
 
     for filename, checks in file_checks.items():
+        # Most gap fixtures are purpose-built and live in challenge/, but a few
+        # checks run against real-world files already in the main corpus — fall
+        # back there rather than keeping a duplicate copy of a binary fixture.
         filepath = CHALLENGE_DIR / filename
+        if not filepath.exists():
+            filepath = CHALLENGE_DIR.parent / filename
         if not filepath.exists():
             print(f"  SKIP {filename} (not found)", file=sys.stderr)
             continue

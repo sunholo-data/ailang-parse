@@ -7,8 +7,8 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable)
-import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
 -- XLSX Parser
 -- Parses Excel worksheets into content Blocks.
@@ -48,6 +48,185 @@ export func parseXlsx(filepath: string) -> [Block] ! {FS} {
   }
   else sheetBlocks
 }
+
+-- === Cell comments (ECMA-376 §18.7) ======================================
+--
+-- Unlike Word, Excel does not split a comment from its anchor: each comment
+-- carries ref="B5" naming the cell it belongs to. So there is no correlation
+-- pass here — the anchor is present in the comment itself. We resolve the
+-- cell's displayed text as well, so a reader gets "Under budget" attached to
+-- the value being commented on rather than to a bare coordinate.
+--
+-- Two shapes exist in the wild and both are handled:
+--   xl/comments1.xml            legacy notes: <comment ref authorId><text>
+--   xl/threadedComments/*.xml   review threads: personId -> xl/persons/*.xml,
+--                               with parentId linking replies
+-- Modern Excel writes BOTH (the legacy part is a compatibility shim whose
+-- author is a placeholder), so when a threaded comment exists for a cell it
+-- wins and the legacy duplicate is dropped.
+
+type XlsxComment = {
+  ref: string,
+  author: string,
+  date: string,
+  text: string,
+  id: string,
+  parentId: string,
+  threaded: bool
+}
+
+-- Read every comment attached to one worksheet, anchored to its cell.
+func xlsxSheetComments(filepath: string, sheetXml: string, ss: Map[int, string],
+                        sheetIdx: int) -> [Block] ! {FS} {
+  let legacy = xlsxReadLegacyComments(filepath, sheetIdx);
+  let threaded = xlsxReadThreadedComments(filepath, sheetIdx);
+  -- Threaded comments supersede the legacy compatibility copy for the same cell
+  let threadedRefs = map(\c. c.ref, threaded);
+  let keptLegacy = filter(\c. not xlsxRefSeen(c.ref, threadedRefs), legacy);
+  let all = concat(threaded, keptLegacy);
+  map(\c. xlsxCommentBlock(c, sheetXml, ss), all)
+}
+
+pure func xlsxRefSeen(ref: string, refs: [string]) -> bool =
+  match filter(\r. r == ref, refs) {
+    [] => false,
+    _ => true
+  }
+
+-- Build the CommentBlock, resolving the commented cell's text as the anchor.
+-- A comment on an empty cell still anchors — to the cell reference — because
+-- the reference is itself an unambiguous target; only a missing ref degrades.
+pure func xlsxCommentBlock(c: XlsxComment, sheetXml: string, ss: Map[int, string]) -> Block {
+  if length(c.ref) == 0
+  then mkUnanchoredComment(c.id, c.author, c.date, c.text, c.parentId, false)
+  else {
+    let cellText = xlsxCellTextAt(sheetXml, ss, c.ref);
+    let anchor = if length(cellText) > 0 then "${c.ref}: ${cellText}" else c.ref;
+    mkAnchoredComment(c.id, c.author, c.date, c.text, anchor, "cell", 0, c.parentId, false)
+  }
+}
+
+-- Find one cell's displayed text by reference. Streams over <c> elements so a
+-- large sheet costs O(1) memory; only runs when a sheet actually has comments.
+pure func xlsxCellTextAt(sheetXml: string, ss: Map[int, string], ref: string) -> string {
+  if length(sheetXml) == 0 then ""
+  else match parseFold(sanitizeXml(sheetXml), "c", { ss: ss, ref: ref, found: "" }, xlsxFoldFindCell) {
+    Ok(acc) => acc.found,
+    Err(_) => ""
+  }
+}
+
+pure func xlsxFoldFindCell(acc: { ss: Map[int, string], ref: string, found: string }, c: XmlNode)
+    -> { ss: Map[int, string], ref: string, found: string } {
+  if length(acc.found) > 0 then acc
+  else if getOrElse(getAttr(c, "r"), "") == acc.ref
+  then { ss: acc.ss, ref: acc.ref, found: trim(parseXlsxCell(c, acc.ss).text) }
+  else acc
+}
+
+-- Legacy notes: xl/comments1.xml (or xl/comments/comment1.xml)
+func xlsxReadLegacyComments(filepath: string, sheetIdx: int) -> [XlsxComment] ! {FS} {
+  let entries = findXlsxCommentEntries(filepath);
+  match nth(entries, sheetIdx) {
+    Some(entry) => {
+      let xml = readZipEntry(filepath, entry);
+      if length(xml) == 0 then []
+      else match parseLenient(xml) {
+        Ok(root) => {
+          let authors = findAllTexts(root, "author");
+          map(\n. xlsxLegacyComment(n, authors), findAll(root, "comment"))
+        },
+        Err(_) => []
+      }
+    },
+    None => []
+  }
+}
+
+pure func xlsxLegacyComment(node: XmlNode, authors: [string]) -> XlsxComment {
+  let authorId = getOrElse(optMap(\v. parseIntOr(v, 0 - 1), getAttr(node, "authorId")), 0 - 1);
+  {
+    ref: getOrElse(getAttr(node, "ref"), ""),
+    author: xlsxAuthorAt(authors, authorId),
+    date: "",
+    text: trim(join("", findAllTexts(node, "t"))),
+    id: getOrElse(getAttr(node, "ref"), ""),
+    parentId: "",
+    threaded: false
+  }
+}
+
+pure func xlsxAuthorAt(authors: [string], idx: int) -> string =
+  if idx < 0 then "Unknown"
+  else match nth(authors, idx) {
+    Some(a) => if length(trim(a)) > 0 then a else "Unknown",
+    None => "Unknown"
+  }
+
+pure func parseIntOr(s: string, dflt: int) -> int = getOrElse(stringToInt(s), dflt)
+
+-- Threaded comments: xl/threadedComments/*.xml, authors in xl/persons/*.xml
+func xlsxReadThreadedComments(filepath: string, sheetIdx: int) -> [XlsxComment] ! {FS} {
+  let entries = findXlsxThreadedEntries(filepath);
+  match nth(entries, sheetIdx) {
+    Some(entry) => {
+      let xml = readZipEntry(filepath, entry);
+      if length(xml) == 0 then []
+      else {
+        let persons = xlsxReadPersons(filepath);
+        match parseLenient(xml) {
+          Ok(root) => map(\n. xlsxThreadedComment(n, persons),
+                          findAll(root, "threadedComment")),
+          Err(_) => []
+        }
+      }
+    },
+    None => []
+  }
+}
+
+-- personId GUID -> display name
+func xlsxReadPersons(filepath: string) -> [(string, string)] ! {FS} {
+  let entries = findXlsxPersonEntries(filepath);
+  xlsxReadPersonEntries(filepath, entries)
+}
+
+func xlsxReadPersonEntries(filepath: string, entries: [string]) -> [(string, string)] ! {FS} =
+  match entries {
+    [] => [],
+    e :: rest => {
+      let xml = readZipEntry(filepath, e);
+      let here = match parseLenient(xml) {
+        Ok(root) => map(\p. (getOrElse(getAttr(p, "id"), ""),
+                             getOrElse(getAttr(p, "displayName"), "Unknown")),
+                        findAll(root, "person")),
+        Err(_) => []
+      };
+      concat(here, xlsxReadPersonEntries(filepath, rest))
+    }
+  }
+
+pure func xlsxThreadedComment(node: XmlNode, persons: [(string, string)]) -> XlsxComment {
+  let personId = getOrElse(getAttr(node, "personId"), "");
+  {
+    ref: getOrElse(getAttr(node, "ref"), ""),
+    author: xlsxPersonName(persons, personId),
+    date: getOrElse(getAttr(node, "dT"), ""),
+    text: trim(join("", findAllTexts(node, "text"))),
+    id: getOrElse(getAttr(node, "id"), ""),
+    parentId: getOrElse(getAttr(node, "parentId"), ""),
+    threaded: true
+  }
+}
+
+pure func xlsxPersonName(persons: [(string, string)], id: string) -> string =
+  match filter(\p. xlsxPairKey(p) == id, persons) {
+    [] => "Unknown",
+    p :: _ => xlsxPairVal(p)
+  }
+
+pure func xlsxPairKey(p: (string, string)) -> string = match p { (k, _) => k }
+pure func xlsxPairVal(p: (string, string)) -> string = match p { (_, v) => v }
 
 -- Parse metadata from XLSX (same core.xml format)
 export func parseXlsxMetadata(filepath: string) -> DocMetadata ! {FS} {
@@ -147,10 +326,18 @@ func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Ma
       let xml = readZipEntry(filepath, entry);
       let sheetName = xlsxGetSheetName(names, idx, entry);
       let blocks = parseSheetXml(xml, sharedStrings, sheetName);
+      -- Cell comments follow their sheet, each anchored to the cell (and the
+      -- cell's value) it annotates.
+      let comments = xlsxSheetComments(filepath, xml, sharedStrings, idx);
+      let wrapped = map(xlsxWrapComment, comments);
       let moreBlocks = parseSheetsWithNames(filepath, rest, sharedStrings, names, idx + 1);
-      concat(blocks, moreBlocks)
+      concat(concat(blocks, wrapped), moreBlocks)
     }
   }
+
+-- Keep the SectionBlock(kind: "comment") wrapper used by every other format
+pure func xlsxWrapComment(b: Block) -> Block =
+  SectionBlock({kind: "comment", blocks: [b]})
 
 -- Parse a single worksheet's XML into blocks
 -- Emits a HeadingBlock with the sheet name followed by the table data.

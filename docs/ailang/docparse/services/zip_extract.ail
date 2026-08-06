@@ -1,7 +1,8 @@
 module docparse/services/zip_extract
 
 import std/zip (listEntries, readEntry, readEntryBytes)
-import std/string (contains, length, endsWith, startsWith)
+import std/string (contains, length, endsWith, startsWith, split, substring)
+import std/list (last as listLast)
 import std/result (Ok, Err)
 import docparse/types/document (Block, ImageBlock, SectionBlock, mkImage)
 
@@ -193,6 +194,79 @@ pure func isSheetEntry(entry: string) -> bool {
   startsWith(entry, "xl/worksheets/sheet") &&
   endsWith(entry, ".xml")
 }
+
+-- Find XLSX cell-comment parts. Excel normally writes xl/comments1.xml, but
+-- some producers nest them as xl/comments/comment1.xml — both are in the wild,
+-- so match on the prefix rather than an exact path.
+export func findXlsxCommentEntries(path: string) -> [string] ! {FS} {
+  match listEntries(path) {
+    Ok(entries) => filterByPrefix(entries, "xl/comments"),
+    Err(_) => []
+  }
+}
+
+-- Find XLSX threaded-comment parts (modern Excel review threads)
+export func findXlsxThreadedEntries(path: string) -> [string] ! {FS} {
+  match listEntries(path) {
+    Ok(entries) => filterByPrefix(entries, "xl/threadedComments/"),
+    Err(_) => []
+  }
+}
+
+-- Find xl/persons/*.xml — display names for threaded-comment authors
+export func findXlsxPersonEntries(path: string) -> [string] ! {FS} {
+  match listEntries(path) {
+    Ok(entries) => filterByPrefix(entries, "xl/persons/"),
+    Err(_) => []
+  }
+}
+
+-- Find PPTX comment parts. Covers both the legacy per-slide
+-- ppt/comments/comment1.xml and the modern ppt/comments/modernComment_*.xml
+-- that current PowerPoint writes.
+export func findPptxCommentEntries(path: string) -> [string] ! {FS} {
+  match listEntries(path) {
+    Ok(entries) => filterByPrefix(entries, "ppt/comments/"),
+    Err(_) => []
+  }
+}
+
+-- Read a slide's relationship part (ppt/slides/_rels/slideN.xml.rels).
+-- Which comment part belongs to which slide is defined by these relationships,
+-- not by the file numbering — matching "comment1.xml" to "slide1.xml" happens
+-- to work for simple decks and silently mis-attributes on the rest.
+export func readPptxSlideRels(path: string, slideEntry: string) -> string ! {FS} {
+  let relsPath = pptxRelsPathFor(slideEntry);
+  match readEntry(path, relsPath) {
+    Ok(content) => content,
+    Err(_) => ""
+  }
+}
+
+-- "ppt/slides/slide3.xml" -> "ppt/slides/_rels/slide3.xml.rels"
+export pure func pptxRelsPathFor(slideEntry: string) -> string {
+  let base = pptxBaseName(slideEntry);
+  if length(base) == 0 then ""
+  else "ppt/slides/_rels/${base}.rels"
+}
+
+pure func pptxBaseName(entry: string) -> string {
+  let parts = split(entry, "/");
+  match parts {
+    [] => "",
+    _ => match listLast(parts) {
+      Some(b) => b,
+      None => ""
+    }
+  }
+}
+
+-- Resolve a relationship target relative to ppt/slides/ into a ZIP path.
+-- "../comments/comment1.xml" -> "ppt/comments/comment1.xml"
+export pure func pptxResolveTarget(target: string) -> string =
+  if startsWith(target, "../") then "ppt/${substring(target, 3, length(target))}"
+  else if startsWith(target, "/") then substring(target, 1, length(target))
+  else "ppt/slides/${target}"
 
 -- Read a binary ZIP entry by full path (format-agnostic image reading)
 export func readImageEntry(path: string, entryPath: string) -> string ! {FS} {

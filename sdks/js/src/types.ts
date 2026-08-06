@@ -119,7 +119,7 @@ export interface Block {
   // not infer one from surrounding blocks.
   id?: string;
   anchorText?: string;
-  anchorKind?: "range" | "point" | "none";
+  anchorKind?: "range" | "point" | "cell" | "slide" | "none";
   anchored?: boolean;
   anchorBlockIndex?: number;
   parentId?: string; // set on threaded replies

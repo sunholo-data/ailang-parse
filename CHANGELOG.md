@@ -21,6 +21,54 @@ instead of a clear resolver error. Tightened the constraint in `ailang.toml` (an
 the `docs/ailang` mirror) so unsupported toolchains fail fast at resolve time.
 No code changes.
 
+### v0.24.0 — comments across every Office format (XLSX, PPTX, PDF parity)
+
+v0.23.0 anchored DOCX comments. This closes the rest: XLSX and PPTX had **no
+comment extraction at all**, while `docs/comments.html` advertised comment text,
+author, timestamp, cell references and slide numbers for both.
+
+"Anchor" means something different per format, and this does not pretend
+otherwise — `anchorKind` gains `cell` and `slide` alongside `range` / `point` /
+`none`.
+
+- **XLSX (§18.7).** Legacy notes (`xl/comments1.xml`, also seen nested as
+  `xl/comments/comment1.xml`) and modern threads (`xl/threadedComments/` with
+  names from `xl/persons/` and `parentId` replies). Excel never separates a
+  comment from its anchor — `ref="B5"` names the cell directly — so there is no
+  correlation pass; we additionally resolve the cell's own value, giving
+  `B2: 184000` rather than a bare coordinate.
+- **XLSX dedup.** Modern Excel writes both shapes, the legacy one being a
+  compatibility shim with a placeholder `tc={guid}` author. Threaded wins; the
+  duplicate is dropped, so a two-message thread reports as two comments.
+- **PPTX (§19.3 + modern).** Legacy `p:cm` with `ppt/commentAuthors.xml`, and
+  the `modernComment_*.xml` / `ppt/authors.xml` shape current PowerPoint writes.
+  Supporting only the legacy form silently drops comments from every recent
+  PowerPoint. Note the modern relationship type is SINGULAR (`modernComment`).
+- **PPTX slide association comes from slide relationships**, not filename
+  numbering. In `poi_comment.pptx` the two comment parts belong to slides 3 and
+  7 — matching `comment1.xml` to `slide1.xml` gets both wrong while appearing to
+  work. A PowerPoint comment pins to an x/y point, so the anchor is the slide
+  and its opening line; we do not claim a text range the format lacks.
+- **PDF annotations** now emit `CommentBlock` like every other format instead of
+  a stringly-typed `[Author, page 3, Highlight]` body. `anchored` stays false:
+  `/QuadPoints` gives page coordinates, and mapping those to text needs
+  positional extraction neither backend provides.
+
+Gap coverage **49% → 60%** (22 checks). XLSX Comments 0% → 100%; three new
+checks (XLSX Threaded 4/4, PPTX 3/3, PPTX Modern 3/3) all pass, and the DOCX
+checks stay at 100%. New fixtures: `challenge_threaded_comments.xlsx` (thread
+plus legacy shim, to catch double-counting) and
+`challenge_pptx_modern_comments.pptx`.
+
+**Docs correction:** the `docs/comments.html` capability table claimed PPTX and
+XLSX support that did not exist. Those claims are now true, and the table was
+corrected where it still overstated — XLSX timestamps, ids and threading are
+threaded-only, and XLSX anchor text is the cell value rather than a document
+span. Two prose errors fixed: DOCX threading lives in `commentsExtended.xml`
+(not `w:commentReference`), and PPTX has two comment formats.
+
+Design doc: [`v0_24_0_comments_all_formats.md`](design_docs/implemented/v0_24_0/v0_24_0_comments_all_formats.md)
+
 ### v0.23.0 — DOCX comment anchoring (§17.13.1)
 
 Comments now carry the exact span of document text they annotate. Previously a

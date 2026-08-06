@@ -118,13 +118,16 @@
 
       <h3>DOCX (Word)</h3>
       <p>Word stores comments in <code>word/comments.xml</code> as <code>w:comment</code> elements, each with an <code>w:id</code>, <code>w:author</code>, and <code>w:date</code> attribute. In the document body (<code>word/document.xml</code>), <code>w:commentRangeStart</code> and <code>w:commentRangeEnd</code> markers bracket the exact text the comment is attached to. AILANG Parse correlates these ranges with the comment content to produce fully anchored output.</p>
-      <p>Threaded replies use <code>w:commentReference</code> linking back to a parent comment ID, preserving the full conversation chain.</p>
+      <p>Threaded replies are <em>not</em> expressed in <code>comments.xml</code> at all &mdash; they live in <code>word/commentsExtended.xml</code>, which maps each comment's final paragraph id (<code>w14:paraId</code>) to its parent's via <code>w15:paraIdParent</code>, along with a <code>w15:done</code> resolved flag. AILANG Parse resolves that chain back to comment ids, and a reply inherits its parent's anchor.</p>
+      <p>Where an anchor cannot be resolved with certainty &mdash; a comment body with no matching range, a range that is never closed, an id present in one part but not the other &mdash; the comment is returned with <code>anchored: false</code> and an empty anchor rather than being attached to nearby text. A comment confidently pinned to the wrong clause is worse than one with no target, because nothing signals that it was a guess.</p>
 
       <h3>PPTX (PowerPoint)</h3>
-      <p>PowerPoint stores comments in per-slide XML files (<code>ppt/comments/comment1.xml</code>) with author references resolved from <code>ppt/commentAuthors.xml</code>. Each comment includes <code>pos</code> coordinates indicating where on the slide it was placed. AILANG Parse extracts the comment text, author, date, and associates it with the slide number.</p>
+      <p>PowerPoint has two comment formats and AILANG Parse reads both. Legacy decks use <code>ppt/comments/comment1.xml</code> with authors resolved from <code>ppt/commentAuthors.xml</code>; current PowerPoint writes <code>ppt/comments/modernComment_*.xml</code> with GUID author ids resolved from <code>ppt/authors.xml</code>. Supporting only the legacy shape means silently dropping every comment made in a recent version of PowerPoint.</p>
+      <p>Which comment belongs to which slide is taken from the slide's own relationships, not from matching <code>comment1.xml</code> to <code>slide1.xml</code> by number &mdash; that coincidence holds for simple decks and mis-attributes on the rest. A PowerPoint comment is pinned to an x/y point on a slide rather than to a run of text, so the anchor we report is the slide and its opening line; we do not claim a text range the format does not carry.</p>
 
       <h3>XLSX (Excel)</h3>
-      <p>Excel comments (formerly "notes") live in per-sheet files (<code>xl/comments1.xml</code>) keyed to cell references. Each <code>comment</code> element has a <code>ref</code> attribute (e.g., <code>B5</code>) and an <code>authorId</code> resolved from the <code>authors</code> list. The comment text is in <code>r/t</code> sub-elements, often with rich formatting spans. AILANG Parse extracts the comment text, author, and cell reference.</p>
+      <p>Excel never separates a comment from its anchor: each <code>comment</code> carries a <code>ref</code> attribute (e.g. <code>B5</code>) naming its cell directly, so no correlation pass is needed. Legacy notes live in <code>xl/comments1.xml</code> with an <code>authorId</code> into the <code>authors</code> list. Modern review threads live in <code>xl/threadedComments/</code>, with display names in <code>xl/persons/</code> and <code>parentId</code> linking replies.</p>
+      <p>Modern Excel writes <em>both</em>, the legacy part being a compatibility shim whose author is a placeholder like <code>tc={guid}</code>. AILANG Parse prefers the threaded version and drops the duplicate, so a two-message thread reports as two comments and not three. Alongside the cell reference we resolve the cell's own value, so a comment arrives attached to <code>B2: 184000</code> rather than to a bare coordinate.</p>
 
       <h2 id="what-gets-extracted">What Gets Extracted</h2>
       <table class="dp-config-table">
@@ -134,12 +137,13 @@
         <tbody>
           <tr><td>Comment Text</td><td>The full text content of the comment</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td></tr>
           <tr><td>Author Name</td><td>Who wrote the comment</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td></tr>
-          <tr><td>Timestamp</td><td>When the comment was created (ISO 8601)</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td></tr>
-          <tr><td>Anchor Text</td><td>The document text the comment is attached to</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td>Timestamp</td><td>When the comment was created (ISO 8601)</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td>Threaded only</td></tr>
+          <tr><td>Anchor Text</td><td>The exact document text the comment is attached to</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td><td>Cell value</td></tr>
           <tr><td>Cell Reference</td><td>The cell a comment is attached to (e.g., B5)</td><td>&mdash;</td><td>&mdash;</td><td><span class="dp-preserved">Yes</span></td></tr>
           <tr><td>Slide Number</td><td>Which slide the comment appears on</td><td>&mdash;</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td></tr>
-          <tr><td>Comment ID</td><td>Unique identifier for cross-referencing</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td></tr>
-          <tr><td>Reply Threading</td><td>Parent-child relationships between comments</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td>Comment ID</td><td>Unique identifier for cross-referencing</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td>Threaded only</td></tr>
+          <tr><td>Reply Threading</td><td>Parent-child relationships between comments</td><td><span class="dp-preserved">Yes</span></td><td>&mdash;</td><td>Threaded only</td></tr>
+          <tr><td>Unanchored flag</td><td>Explicit marker when an anchor cannot be resolved</td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td><td><span class="dp-preserved">Yes</span></td></tr>
         </tbody>
       </table>
 

@@ -4,9 +4,9 @@ import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren,
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
-import std/list (map, flatMap, any, length as listLength, take)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable)
-import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType)
+import std/list (map, flatMap, any, filter, concat, length as listLength, take)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment)
+import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget)
 import docparse/services/omml (renderOmml)
 
 -- PPTX Parser
@@ -80,20 +80,161 @@ export func parsePptxImages(filepath: string) -> [Block] ! {FS} {
 
 -- Parse each slide entry into a SectionBlock
 func parseSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
+  pptxParseSlidesFrom(filepath, entries, 1)
+
+func pptxParseSlidesFrom(filepath: string, entries: [string], slideNo: int) -> [Block] ! {FS} =
   match entries {
     [] => [],
     entry :: rest => {
       let xml = readZipEntry(filepath, entry);
       let blocks = parseSlideXml(xml);
-      let moreBlocks = parseSlides(filepath, rest);
+      let comments = pptxSlideComments(filepath, entry, xml, slideNo);
+      let moreBlocks = pptxParseSlidesFrom(filepath, rest, slideNo + 1);
       if pptxHasContent(blocks)
       then {
         let section = SectionBlock({kind: "slide", blocks: blocks});
-        section :: moreBlocks
+        section :: concat(comments, moreBlocks)
       }
-      else moreBlocks
+      else concat(comments, moreBlocks)
     }
   }
+
+-- === Slide comments (ECMA-376 §19.3 + modern PowerPoint) =================
+--
+-- A PowerPoint comment is pinned to a point on a slide, not to a run of text,
+-- so the honest anchor is the slide itself — we use the slide number plus its
+-- opening line, which is what a reader needs to locate it. Claiming a text
+-- range here would be inventing precision the format does not carry.
+--
+-- Two shapes, both handled:
+--   ppt/comments/comment1.xml         legacy <p:cm authorId> + ppt/commentAuthors.xml
+--   ppt/comments/modernComment_*.xml  modern <p188:cm authorId=GUID> + ppt/authors.xml
+--
+-- Which comment part belongs to which slide comes from the slide's own
+-- relationships, not from matching "comment1.xml" to "slide1.xml" — that
+-- numbering coincidence holds for simple decks and mis-attributes on the rest.
+func pptxSlideComments(filepath: string, slideEntry: string, slideXml: string,
+                        slideNo: int) -> [Block] ! {FS} {
+  let relsXml = readPptxSlideRels(filepath, slideEntry);
+  let targets = pptxCommentTargets(relsXml);
+  let anchor = pptxSlideAnchor(slideXml, slideNo);
+  pptxReadCommentParts(filepath, targets, anchor)
+}
+
+-- Comment-part targets declared by a slide's relationships
+pure func pptxCommentTargets(relsXml: string) -> [string] =
+  if length(relsXml) == 0 then []
+  else match parseLenient(relsXml) {
+    Ok(root) =>
+      map(\r. pptxResolveTarget(getOrElse(getAttr(r, "Target"), "")),
+          filter(pptxIsCommentRel, findAll(root, "Relationship"))),
+    Err(_) => []
+  }
+
+-- Legacy relationships end in "/comments"; modern PowerPoint uses the SINGULAR
+-- ".../2018/8/relationships/modernComment", so match both spellings.
+pure func pptxIsCommentRel(r: XmlNode) -> bool {
+  let relType = getOrElse(getAttr(r, "Type"), "");
+  contains(relType, "/comments") || contains(relType, "modernComment")
+}
+
+-- "Slide 3: Q3 Revenue Forecast" — the slide number plus its opening line
+pure func pptxSlideAnchor(slideXml: string, slideNo: int) -> string {
+  let first = pptxFirstSlideText(slideXml);
+  if length(first) > 0 then "Slide ${intToStr(slideNo)}: ${first}"
+  else "Slide ${intToStr(slideNo)}"
+}
+
+pure func pptxFirstSlideText(slideXml: string) -> string =
+  match parseLenient(slideXml) {
+    Ok(root) => match findAll(root, "a:t") {
+      [] => "",
+      t :: _ => trim(getText(t))
+    },
+    Err(_) => ""
+  }
+
+func pptxReadCommentParts(filepath: string, targets: [string], anchor: string) -> [Block] ! {FS} =
+  match targets {
+    [] => [],
+    target :: rest => {
+      let xml = readZipEntry(filepath, target);
+      let here = pptxParseCommentPart(filepath, xml, anchor);
+      concat(here, pptxReadCommentParts(filepath, rest, anchor))
+    }
+  }
+
+func pptxParseCommentPart(filepath: string, xml: string, anchor: string) -> [Block] ! {FS} {
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => {
+      let modern = findAll(root, "p188:cm");
+      match modern {
+        [] => {
+          let authors = pptxLegacyAuthors(filepath);
+          map(\n. pptxLegacyComment(n, authors, anchor), findAll(root, "p:cm"))
+        },
+        _ => {
+          let authors = pptxModernAuthors(filepath);
+          map(\n. pptxModernComment(n, authors, anchor), modern)
+        }
+      }
+    },
+    Err(_) => []
+  }
+}
+
+-- Legacy: ppt/commentAuthors.xml maps numeric id -> name
+func pptxLegacyAuthors(filepath: string) -> [(string, string)] ! {FS} {
+  let xml = readZipEntry(filepath, "ppt/commentAuthors.xml");
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => map(\a. (getOrElse(getAttr(a, "id"), ""),
+                         getOrElse(getAttr(a, "name"), "Unknown")),
+                    findAll(root, "p:cmAuthor")),
+    Err(_) => []
+  }
+}
+
+-- Modern: ppt/authors.xml maps GUID -> name
+func pptxModernAuthors(filepath: string) -> [(string, string)] ! {FS} {
+  let xml = readZipEntry(filepath, "ppt/authors.xml");
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => map(\a. (getOrElse(getAttr(a, "id"), ""),
+                         getOrElse(getAttr(a, "name"), "Unknown")),
+                    findAll(root, "p188:author")),
+    Err(_) => []
+  }
+}
+
+pure func pptxLegacyComment(node: XmlNode, authors: [(string, string)], anchor: string) -> Block {
+  let authorId = getOrElse(getAttr(node, "authorId"), "");
+  let text = trim(join(" ", map(getText, findAll(node, "p:text"))));
+  mkAnchoredComment(getOrElse(getAttr(node, "idx"), ""),
+                    pptxAuthorName(authors, authorId),
+                    getOrElse(getAttr(node, "dt"), ""),
+                    text, anchor, "slide", 0, "", false)
+}
+
+pure func pptxModernComment(node: XmlNode, authors: [(string, string)], anchor: string) -> Block {
+  let authorId = getOrElse(getAttr(node, "authorId"), "");
+  let text = trim(join(" ", map(getText, findAll(node, "a:t"))));
+  mkAnchoredComment(getOrElse(getAttr(node, "id"), ""),
+                    pptxAuthorName(authors, authorId),
+                    getOrElse(getAttr(node, "created"), ""),
+                    text, anchor, "slide", 0,
+                    getOrElse(getAttr(node, "parentId"), ""), false)
+}
+
+pure func pptxAuthorName(authors: [(string, string)], id: string) -> string =
+  match filter(\a. pptxPairKey(a) == id, authors) {
+    [] => "Unknown",
+    a :: _ => pptxPairVal(a)
+  }
+
+pure func pptxPairKey(p: (string, string)) -> string = match p { (k, _) => k }
+pure func pptxPairVal(p: (string, string)) -> string = match p { (_, v) => v }
 
 -- Parse a single slide's XML into blocks
 export pure func parseSlideXml(xml: string) -> [Block] {

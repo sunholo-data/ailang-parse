@@ -33,8 +33,13 @@ export type TableCell = {
 -- the anchor cannot be resolved with certainty, `anchored` is false and
 -- `anchorText` is empty rather than a nearby guess. It stays wrapped in a
 -- SectionBlock(kind: "comment") so consumers of the older shape keep working.
---   anchorKind:        "range" (commentRangeStart/End) | "point" (bare
---                      commentReference, anchored to its paragraph) | "none"
+--   anchorKind:        what kind of thing the comment is attached to —
+--                      "range" (DOCX commentRangeStart/End text span)
+--                      "point" (DOCX bare commentReference, its paragraph)
+--                      "cell"  (XLSX ref="B5", plus that cell's value)
+--                      "slide" (PPTX — pinned to an x/y point on a slide, so
+--                               the slide is the honest anchor, not a text run)
+--                      "none"  (unresolvable; anchorText is empty)
 --   anchorBlockIndex:  index of the annotated block; -1 when unanchored
 --   parentId:          id of the comment this replies to; "" for top-level
 export type Block = TextBlock({text: string, style: string, level: int})

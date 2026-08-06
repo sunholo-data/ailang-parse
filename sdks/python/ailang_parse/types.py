@@ -143,7 +143,7 @@ class Block:
     # not infer one from surrounding blocks.
     id: str = ""
     anchor_text: str = ""
-    anchor_kind: str = ""  # "range" | "point" | "none"
+    anchor_kind: str = ""  # "range" | "point" | "cell" | "slide" | "none"
     anchored: bool = False
     anchor_block_index: int = -1
     parent_id: str = ""  # set on threaded replies

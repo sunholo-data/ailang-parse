@@ -17,7 +17,7 @@ import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/bytes (fromInts, toString as bytesToString)
 import std/fs (readFile)
-import docparse/types/document (Block, TextBlock, SectionBlock)
+import docparse/types/document (Block, TextBlock, SectionBlock, CommentBlock)
 
 -- ============================================================
 -- Public API
@@ -704,15 +704,30 @@ pure func pdfannApplyPageMapHelper(
 -- Block conversion
 -- ============================================================
 
--- Render an annotation as a SectionBlock(kind: "annotation") matching the
--- existing DOCX comment shape — author and page surfaced in the text prefix.
+-- Render an annotation as a CommentBlock, the same shape DOCX/XLSX/PPTX
+-- comments use, so a consumer reads review commentary uniformly across formats.
+--
+-- Anchoring is deliberately false. A highlight carries /QuadPoints — page
+-- coordinates of the highlighted region — but turning coordinates into the text
+-- they cover needs positional text extraction that neither PDF backend gives
+-- us. The page number goes in anchorText as a locator, and `anchored` stays
+-- false so nobody mistakes it for the exact annotated span.
 pure func pdfannToBlock(a: Annotation) -> Block {
-  let pageStr = if a.page > 0 then ", page ${intToStr(a.page)}" else "";
-  let prefix = "[${a.author}${pageStr}, ${a.subtype}]";
-  let body = if length(a.contents) == 0 then prefix
-             else "${prefix} ${a.contents}";
+  let pageStr = if a.page > 0 then "page ${intToStr(a.page)}" else "";
+  let body = if length(a.contents) == 0 then "[${a.subtype}]" else a.contents;
   SectionBlock({
     kind: "annotation",
-    blocks: [TextBlock({text: body, style: "Annotation", level: 0})]
+    blocks: [CommentBlock({
+      id: "",
+      author: a.author,
+      date: a.modified,
+      text: body,
+      anchorText: pageStr,
+      anchorKind: "none",
+      anchored: false,
+      anchorBlockIndex: 0 - 1,
+      parentId: "",
+      resolved: false
+    })]
   })
 }
