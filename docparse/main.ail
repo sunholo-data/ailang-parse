@@ -10,7 +10,7 @@ import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, cellText, countBlocks, filterHeadings, filterTables, filterImages, filterSections)
 import docparse/services/format_router (detectFormat, getExtension, officeType, strategyDescription, needsAI)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, listOfficeEntries, findMediaEntries, readEmbeddedImage, mediaMimeType, resolveBlockImages)
-import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxImages, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments)
+import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxImages, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxWithComments)
 import docparse/services/pptx_parser (parsePptx, parsePptxMetadata, parsePptxImages)
 import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
 import docparse/services/direct_ai_parser (parsePdf, parseDocumentImage, parseImage, parseAudio, parseVideo, parsePdfMetadata)
@@ -301,9 +301,10 @@ func parseWordDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   println("Extracting metadata...");
   let metadata = parseDocxMetadata(filepath);
 
-  -- Step 2b: Parse document content (pure XML parsing)
+  -- Step 2b: Parse document content, with comments anchored to the text they
+  -- annotate and spliced in at their anchor point (one pass over document.xml).
   println("Parsing document XML...");
-  let blocks = parseDocx(filepath);
+  let blocks = parseDocxWithComments(filepath);
   println("Extracted ${show(countBlocks(blocks))} content blocks.");
   println("");
 
@@ -319,10 +320,8 @@ func parseWordDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   let endnoteBlocks = parseDocxEndnotes(filepath);
   println("Found ${show(countBlocks(footnoteBlocks))} footnotes, ${show(countBlocks(endnoteBlocks))} endnotes.");
 
-  -- Step 2e: Extract comments
-  println("Extracting comments...");
-  let commentBlocks = parseDocxComments(filepath);
-  println("Found ${show(countBlocks(commentBlocks))} comments.");
+  -- Comments were anchored and spliced in step 2b, so there is no separate
+  -- end-of-document comment list to append here.
 
   -- Step 2f: Extract embedded images
   println("Extracting images...");
@@ -330,13 +329,13 @@ func parseWordDocument(filepath: string, useAI: bool, doSummarize: bool, convert
   println("Found ${show(countBlocks(imageBlocks))} embedded images.");
   println("");
 
-  -- Combine all blocks: headers + body + footers + footnotes + endnotes + comments + images
+  -- Combine all blocks: headers + body (comments already spliced at their
+  -- anchors) + footers + footnotes + endnotes + images
   let combinedBlocks = concat(headerBlocks,
     concat(blocks,
       concat(footerBlocks,
         concat(footnoteBlocks,
-          concat(endnoteBlocks,
-            concat(commentBlocks, imageBlocks))))));
+          concat(endnoteBlocks, imageBlocks)))));
 
   -- Step 2f: AI image descriptions (optional)
   let imageCount = countBlocks(filterImages(combinedBlocks));

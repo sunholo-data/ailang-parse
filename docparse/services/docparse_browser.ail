@@ -24,7 +24,7 @@ import docparse/types/document (Block, TextBlock, SectionBlock, DocMetadata, emp
 import docparse/services/format_router (detectFormat, getExtension, officeType,
     needsAI, strategyDescription)
 import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml,
-    hasContent, extractMetadata)
+    hasContent, extractMetadata, parseDocxWithCommentsXml, docxCommentsOnlyXml)
 import docparse/services/pptx_parser (extractSlideBlocks)
 import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml)
 import docparse/services/html_parser (parseHtml)
@@ -98,18 +98,25 @@ export pure func getFormatInfo(filename: string) -> string {
   ]))
 }
 
--- Parse DOCX comments XML (word/comments.xml) -> JSON array of blocks
--- Each comment becomes a SectionBlock with kind "comment" containing text blocks.
--- The comment text includes the author prefix for context.
-export pure func parseDocxComments(xml: string) -> string {
-  if length(xml) == 0 then encode(ja([]))
-  else match parseLenient(xml) {
-    Ok(root) => {
-      let comments = findAll(root, "w:comment");
-      let blocks = parseCommentNodes(comments);
-      encode(ja(blocksToJson(blocks)))
-    },
-    Err(_) => encode(ja([]))
+-- Parse DOCX body XML together with its comments -> JSON array of blocks.
+--
+-- Comments are anchored to the span of body text they annotate and spliced in
+-- at that point, exactly as the CLI does — this calls the same pure core, so
+-- the browser cannot drift into the unanchored behaviour the CLI has left
+-- behind. JavaScript passes word/document.xml, word/comments.xml and
+-- word/commentsExtended.xml; the latter two may be empty strings.
+export pure func parseDocxBodyWithComments(documentXml: string, commentsXml: string,
+                                            extXml: string) -> string =
+  encode(ja(blocksToJson(parseDocxWithCommentsXml(documentXml, commentsXml, extXml))))
+
+-- Parse DOCX comments alone (word/comments.xml + word/document.xml for the
+-- anchors) -> JSON array of blocks. Prefer parseDocxBodyWithComments, which
+-- places each comment beside the text it annotates.
+export pure func parseDocxComments(commentsXml: string, documentXml: string,
+                                    extXml: string) -> string {
+  if length(commentsXml) == 0 then encode(ja([]))
+  else {
+    encode(ja(blocksToJson(docxCommentsOnlyXml(commentsXml, documentXml, extXml))))
   }
 }
 
@@ -307,33 +314,9 @@ export pure func parseEpubMetadataXml(opfXml: string) -> string {
 export pure func convertBlocksToA2UI(blocksJson: string) -> string =
   a2uiConvert(blocksJson)
 
--- Parse a list of w:comment nodes into SectionBlocks
-pure func parseCommentNodes(nodes: [XmlNode]) -> [Block] =
-  match nodes {
-    [] => [],
-    node :: rest => {
-      let author = getOrElse(getAttr(node, "w:author"), "Unknown");
-      let paragraphs = findAll(node, "w:p");
-      let texts = extractCommentTexts(paragraphs);
-      let commentText = join(" ", texts);
-      let block = SectionBlock({kind: "comment", blocks: [
-        TextBlock({text: "[${author}] ${commentText}", style: "CommentText", level: 0})
-      ]});
-      block :: parseCommentNodes(rest)
-    }
-  }
-
--- Extract text from comment paragraphs (find all w:t nodes and join)
-pure func extractCommentTexts(paragraphs: [XmlNode]) -> [string] =
-  match paragraphs {
-    [] => [],
-    p :: rest => {
-      let pText = join("", findAllTexts(p, "w:t"));
-      if length(pText) > 0
-      then pText :: extractCommentTexts(rest)
-      else extractCommentTexts(rest)
-    }
-  }
+-- (The browser's own unanchored comment reader has been removed; comment
+-- parsing now goes through docx_parser's anchored core so there is exactly one
+-- implementation.)
 
 -- Helper: parse shared strings XML into a Map[int, string]
 -- Pure version for browser (no FS). Builds indexed map for O(1) cell resolution.

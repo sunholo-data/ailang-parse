@@ -10,7 +10,7 @@ import std/net (httpGet, httpPost)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages)
 import docparse/services/format_router (detectFormat, getExtension, needsAI, strategyDescription)
-import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxImages)
+import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxWithComments, parseDocxImages)
 import docparse/services/pptx_parser (parsePptx, parsePptxMetadata)
 import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
 import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeadersFooters)
@@ -156,14 +156,15 @@ func mcpFormatOutput(doc: ParsedDocument, outputFormat: string) -> string ! {} {
 -- DOCX: full structural parse (metadata, headers, footers, footnotes, endnotes, comments, images).
 func mcpParseDocx(filepath: string) -> ParsedDocument ! {FS} {
   let metadata = parseDocxMetadata(filepath);
-  let blocks = parseDocx(filepath);
+  -- Comments are anchored to the text they annotate and spliced into the body
+  -- at that point, so there is no separate comment list to concatenate.
+  let blocks = parseDocxWithComments(filepath);
   let headers = parseDocxHeaders(filepath);
   let footers = parseDocxFooters(filepath);
   let footnotes = parseDocxFootnotes(filepath);
   let endnotes = parseDocxEndnotes(filepath);
-  let comments = parseDocxComments(filepath);
   let images = parseDocxImages(filepath);
-  let allBlocks = concat(headers, concat(blocks, concat(footers, concat(footnotes, concat(endnotes, concat(comments, images))))));
+  let allBlocks = concat(headers, concat(blocks, concat(footers, concat(footnotes, concat(endnotes, images)))));
   { format: "docx", filename: filepath, metadata: metadata, blocks: allBlocks }
 }
 

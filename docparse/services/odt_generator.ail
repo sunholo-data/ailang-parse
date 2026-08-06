@@ -4,7 +4,7 @@ import std/string (length, intToStr)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
 -- ODT Generator — converts Block ADT to a valid .odt file.
@@ -93,7 +93,12 @@ pure func odtBlockToXml(block: Block) -> string =
       "<text:p text:style-name=\"Standard\">${xmlEscape(c.text)} (${xmlEscape(c.changeType)} by ${xmlEscape(c.author)}, ${xmlEscape(c.date)})</text:p>",
 
     LinkBlock(l) =>
-      "<text:p text:style-name=\"Standard\"><text:a xlink:type=\"simple\" xlink:href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</text:a></text:p>"
+      "<text:p text:style-name=\"Standard\"><text:a xlink:type=\"simple\" xlink:href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</text:a></text:p>",
+
+    -- Write-back of real ODF annotations (office:annotation) is out of scope
+    -- for this read-only release; the pairing is preserved as text.
+    CommentBlock(c) =>
+      "<text:p text:style-name=\"Standard\">${xmlEscape(commentText(c.author, c.text, c.anchorText, c.anchored))}</text:p>"
   }
 
 -- Build an ODF table

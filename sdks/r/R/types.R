@@ -56,6 +56,13 @@ NULL
     mime          = .s(d$mime),
     data_length   = .i(d$dataLength),
     kind          = .s(d$kind),
+    id            = .s(d$id),
+    anchor_text   = .s(d$anchorText),
+    anchor_kind   = .s(d$anchorKind),
+    anchored      = .b(d$anchored),
+    anchor_block_index = .i(d$anchorBlockIndex),
+    parent_id     = .s(d$parentId),
+    resolved      = .b(d$resolved),
     ordered       = .b(d$ordered),
     items         = if (is.null(d$items)) character() else vapply(d$items, .s, character(1)),
     headers       = lapply(if (is.null(d$headers)) list() else d$headers, .cell_from_raw),
@@ -86,6 +93,11 @@ format.ailang_block <- function(x, ...) {
     "video"   = sprintf("Video (%s, %d bytes)", x$mime, x$data_length),
     "section" = sprintf("Section (%s, %d children)", x$kind, length(x$children)),
     "change"  = sprintf("%s by %s: %s", x$change_type, x$author, x$text),
+    # An unanchored comment is labelled as such: it has no known target, and
+    # callers must not infer one from surrounding blocks.
+    "comment" = if (isTRUE(x$anchored) && nzchar(x$anchor_text))
+                  sprintf("Comment by %s on \"%s\": %s", x$author, x$anchor_text, x$text)
+                else sprintf("Comment by %s (unanchored): %s", x$author, x$text),
     sprintf("%s: %s", x$type, substr(x$text, 1L, 80L))
   )
 }

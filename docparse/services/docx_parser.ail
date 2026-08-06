@@ -4,9 +4,9 @@ import std/xml (parseLenient, findAll, findAllTexts, findFirst, getText, getAttr
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
-import std/list (map, flatMap, any, concat, length as listLength, filter)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable)
-import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments)
+import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
 -- DOCX Parser
@@ -501,35 +501,412 @@ func extractImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
     }
   }
 
--- Extract comments from a DOCX file (word/comments.xml)
--- Each w:comment becomes a SectionBlock(kind: "comment") with author-prefixed text
-export func parseDocxComments(filepath: string) -> [Block] ! {FS} {
-  let xml = readComments(filepath);
-  if length(xml) == 0 then []
-  else match parseLenient(xml) {
-    Ok(root) => {
-      let commentNodes = findAll(root, "w:comment");
-      docxParseCommentNodes(commentNodes)
+-- === Comment anchoring (ECMA-376 §17.13.1) ================================
+--
+-- A comment's body lives in word/comments.xml keyed by w:id; the span it
+-- annotates lives in word/document.xml as w:commentRangeStart /
+-- w:commentRangeEnd markers carrying the same w:id. Correlating the two is
+-- what makes a comment usable — "this is nonsense" is noise without the text
+-- it points at, and an agent handed a detached comment will guess a target.
+--
+-- Ranges are stateful: they open at one node and close at a later one, which
+-- may be a different paragraph or a different table cell. So the anchor walk
+-- is a fold threading the set of currently-open ranges, not a stateless map
+-- like processBodyChildren.
+--
+-- Note: w:bookmarkStart also carries a w:id, in a SEPARATE numbering space.
+-- Ids are therefore only ever read off comment-specific tags.
+
+-- A range opened but not yet closed. `parts` holds run text in REVERSE order
+-- (prepend during the walk, reverse at close — never concat onto the tail
+-- inside a fold).
+type DocxOpenRange = {
+  id: string,
+  parts: [string],
+  startIndex: int
+}
+
+-- A resolved anchor: the exact text a comment points at.
+-- kind is "range" (w:commentRangeStart/End pair) or "point" (a bare
+-- w:commentReference, which anchors to its containing paragraph).
+-- startIndex/endIndex are body block indices, so a consumer can render the
+-- comment in place.
+type DocxAnchor = {
+  id: string,
+  text: string,
+  kind: string,
+  startIndex: int,
+  endIndex: int
+}
+
+-- Body walk state. blocks and anchors accumulate REVERSED.
+type DocxWalk = {
+  blocks: [Block],
+  anchors: [DocxAnchor],
+  open: [DocxOpenRange],
+  count: int
+}
+
+-- Walk the body once, producing content blocks and comment anchors together.
+-- Doing both in one pass keeps the block indices honest (an anchor's index is
+-- the position of its paragraph in the emitted block list, which only this
+-- walk knows) and avoids parsing document.xml twice.
+export pure func docxWalkBodyRoot(root: XmlNode) -> DocxWalk =
+  match findFirst(root, "w:body") {
+    Some(body) => {
+      let st = docxWalkNodes(getChildren(body), docxEmptyWalk());
+      { blocks: reverse(st.blocks), anchors: reverse(st.anchors),
+        open: st.open, count: st.count }
     },
-    Err(_) => []
+    None => docxEmptyWalk()
+  }
+
+pure func docxEmptyWalk() -> DocxWalk =
+  { blocks: [], anchors: [], open: [], count: 0 }
+
+pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk) -> DocxWalk =
+  match nodes {
+    [] => st,
+    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st))
+  }
+
+-- Process one body-level node: emit its blocks (reusing processBodyNode so
+-- block extraction stays in one place) and scan it for comment markers.
+pure func docxWalkNode(node: XmlNode, st: DocxWalk) -> DocxWalk {
+  let tag = getTag(node);
+  if tag == "w:sdt" then
+    -- SDTs emit their content's blocks, so recurse rather than counting them
+    -- as one node; the recursion keeps the index accounting correct.
+    match findFirst(node, "w:sdtContent") {
+      Some(content) => docxWalkNodes(getChildren(content), st),
+      None => st
+    }
+  else {
+    let emitted = processBodyNode(node);
+    let scanned =
+      if tag == "w:p" then docxScanParagraph(node, st)
+      else if tag == "w:tbl" then docxScanParagraphs(findAll(node, "w:p"), st)
+      else st;
+    { blocks: docxPrependAll(emitted, scanned.blocks),
+      anchors: scanned.anchors,
+      open: scanned.open,
+      count: scanned.count + listLength(emitted) }
   }
 }
 
--- Parse a list of w:comment nodes into SectionBlocks
--- Prefixed with docx to avoid module scoping collision
-pure func docxParseCommentNodes(nodes: [XmlNode]) -> [Block] =
+-- Prepend a list onto a reversed accumulator
+pure func docxPrependAll(xs: [Block], acc: [Block]) -> [Block] =
+  match xs {
+    [] => acc,
+    x :: rest => docxPrependAll(rest, x :: acc)
+  }
+
+-- Scan several paragraphs in document order (table cells, nested tables)
+pure func docxScanParagraphs(ps: [XmlNode], st: DocxWalk) -> DocxWalk =
+  match ps {
+    [] => st,
+    p :: rest => docxScanParagraphs(rest, docxScanParagraph(p, st))
+  }
+
+-- Scan one paragraph's children in document order, then close the paragraph
+pure func docxScanParagraph(p: XmlNode, st: DocxWalk) -> DocxWalk {
+  let paraText = extractParagraphText(p);
+  let scanned = docxScanChildren(getChildren(p), paraText, st);
+  docxEndParagraph(scanned)
+}
+
+pure func docxScanChildren(nodes: [XmlNode], paraText: string, st: DocxWalk) -> DocxWalk =
   match nodes {
+    [] => st,
+    n :: rest => docxScanChildren(rest, paraText, docxScanChild(n, paraText, st))
+  }
+
+-- One paragraph child. Text is appended to EVERY currently-open range, which
+-- is what makes nested and overlapping ranges fall out for free.
+pure func docxScanChild(node: XmlNode, paraText: string, st: DocxWalk) -> DocxWalk {
+  let tag = getTag(node);
+  if tag == "w:commentRangeStart" then
+    match getAttr(node, "w:id") {
+      Some(id) => docxOpenRange(id, st),
+      None => st
+    }
+  else if tag == "w:commentRangeEnd" then
+    match getAttr(node, "w:id") {
+      Some(id) => docxCloseRange(id, st),
+      None => st
+    }
+  else {
+    let withRefs = docxScanRefs(findAll(node, "w:commentReference"), paraText, st);
+    let text = childNodeText(node);
+    if length(text) == 0 then withRefs
+    else docxAppendOpen(text, withRefs)
+  }
+}
+
+-- A w:commentReference whose id never had a range is a point anchor, not an
+-- error: attach the containing paragraph and mark it as such.
+pure func docxScanRefs(refs: [XmlNode], paraText: string, st: DocxWalk) -> DocxWalk =
+  match refs {
+    [] => st,
+    r :: rest => {
+      let next = match getAttr(r, "w:id") {
+        Some(id) =>
+          if docxKnowsId(id, st) then st
+          else {
+            let anchor = { id: id, text: trim(paraText), kind: "point",
+                           startIndex: st.count, endIndex: st.count };
+            { blocks: st.blocks, anchors: anchor :: st.anchors,
+              open: st.open, count: st.count }
+          },
+        None => st
+      };
+      docxScanRefs(rest, paraText, next)
+    }
+  }
+
+-- Is this id already open, or already resolved?
+pure func docxKnowsId(id: string, st: DocxWalk) -> bool =
+  any(\r. r.id == id, st.open) || any(\a. a.id == id, st.anchors)
+
+pure func docxOpenRange(id: string, st: DocxWalk) -> DocxWalk =
+  { blocks: st.blocks, anchors: st.anchors, count: st.count,
+    open: { id: id, parts: [], startIndex: st.count } :: st.open }
+
+-- Close a range: reverse its collected fragments into the anchor text.
+-- A close with no matching open is ignored — it degrades to unanchored
+-- rather than anchoring to whatever text happens to be nearby.
+pure func docxCloseRange(id: string, st: DocxWalk) -> DocxWalk =
+  match filter(\r. r.id == id, st.open) {
+    [] => st,
+    r :: _ => {
+      let anchor = { id: id, text: trim(join("", reverse(r.parts))),
+                     kind: "range", startIndex: r.startIndex, endIndex: st.count };
+      { blocks: st.blocks,
+        anchors: anchor :: st.anchors,
+        open: filter(\o. o.id != id, st.open),
+        count: st.count }
+    }
+  }
+
+pure func docxAppendOpen(text: string, st: DocxWalk) -> DocxWalk =
+  { blocks: st.blocks, anchors: st.anchors, count: st.count,
+    open: map(\r. { id: r.id, parts: text :: r.parts, startIndex: r.startIndex }, st.open) }
+
+-- A range still open at a paragraph break keeps collecting across it, so
+-- record the boundary rather than running the two paragraphs together.
+pure func docxEndParagraph(st: DocxWalk) -> DocxWalk =
+  match st.open {
+    [] => st,
+    _ => docxAppendOpen("\n", st)
+  }
+
+-- A comment body read from comments.xml, before the anchor join.
+-- lastParaId is the w14:paraId of its final paragraph — the key
+-- commentsExtended.xml uses to express threading.
+type DocxCommentBody = {
+  id: string,
+  author: string,
+  date: string,
+  text: string,
+  lastParaId: string
+}
+
+-- A comment together with the body block index it should follow.
+-- index < 0 means unanchored: the comment goes in the trailing group.
+type DocxPlacedComment = {
+  index: int,
+  block: Block
+}
+
+-- Parse a DOCX body with its comments spliced in at their anchors.
+--
+-- Comments appear exactly once, immediately after the block holding the end
+-- of the span they annotate, so a linear reader (or an agent walking blocks in
+-- order) meets each comment beside its target. Comments whose anchor could not
+-- be resolved go in a trailing group, explicitly labelled unanchored.
+export func parseDocxWithComments(filepath: string) -> [Block] ! {FS} =
+  parseDocxWithCommentsXml(readDocxContent(filepath),
+                           readComments(filepath),
+                           readCommentsExtended(filepath))
+
+-- Pure core of the anchored parse, over raw XML strings.
+--
+-- The browser (WASM) build has no filesystem — JavaScript unzips and hands the
+-- parts over as strings — so both the CLI and the browser go through this one
+-- function. Anchoring that worked on the CLI but silently degraded in the
+-- browser demo would be worse than either being consistently unanchored.
+export pure func parseDocxWithCommentsXml(documentXml: string, commentsXml: string,
+                                           extXml: string) -> [Block] =
+  match parseLenient(documentXml) {
+    Ok(root) => {
+      let walk = docxWalkBodyRoot(root);
+      let placed = docxCommentsFromXml(commentsXml, extXml, walk.anchors);
+      docxSpliceComments(walk.blocks, placed)
+    },
+    Err(e) => [TextBlock({text: "XML parse error: ${e}", style: "error", level: 0})]
+  }
+
+-- Extract comments from a DOCX file (word/comments.xml), each anchored to the
+-- span of document.xml text it annotates. Returned as a flat list for callers
+-- that want comments alone; parseDocxWithComments splices them into the body.
+export func parseDocxComments(filepath: string) -> [Block] ! {FS} {
+  let anchors = match parseLenient(readDocxContent(filepath)) {
+    Ok(root) => docxWalkBodyRoot(root).anchors,
+    Err(_) => []
+  };
+  let placed = docxCommentsFromXml(readComments(filepath), readCommentsExtended(filepath), anchors);
+  map(\p. docxWrapComment(p.block), placed)
+}
+
+-- Anchored comments alone, over raw XML strings (browser/WASM entry point).
+export pure func docxCommentsOnlyXml(commentsXml: string, documentXml: string,
+                                      extXml: string) -> [Block] {
+  let anchors = match parseLenient(documentXml) {
+    Ok(root) => docxWalkBodyRoot(root).anchors,
+    Err(_) => []
+  };
+  map(\p. docxWrapComment(p.block), docxCommentsFromXml(commentsXml, extXml, anchors))
+}
+
+-- Join comments.xml + commentsExtended.xml to the anchors collected from
+-- document.xml.
+pure func docxCommentsFromXml(commentsXml: string, extXml: string,
+                               anchors: [DocxAnchor]) -> [DocxPlacedComment] =
+  if length(commentsXml) == 0 then []
+  else match parseLenient(commentsXml) {
+    Ok(root) => {
+      let bodies = map(docxCommentBody, findAll(root, "w:comment"));
+      let exNodes = docxReadCommentExNodes(extXml);
+      let placed = map(\b. docxPlaceComment(b, anchors, bodies, exNodes), bodies);
+      docxInheritReplyAnchors(placed, bodies, anchors, exNodes)
+    },
+    Err(_) => []
+  }
+
+-- Read one w:comment element into a body record
+pure func docxCommentBody(node: XmlNode) -> DocxCommentBody {
+  let paragraphs = findAll(node, "w:p");
+  {
+    id: getOrElse(getAttr(node, "w:id"), ""),
+    author: getOrElse(getAttr(node, "w:author"), "Unknown"),
+    date: getOrElse(getAttr(node, "w:date"), ""),
+    text: join(" ", docxExtractCommentTexts(paragraphs)),
+    lastParaId: docxLastParaId(paragraphs)
+  }
+}
+
+-- commentsExtended.xml keys threading on the LAST paragraph of a comment body
+pure func docxLastParaId(ps: [XmlNode]) -> string =
+  match last(ps) {
+    Some(p) => getOrElse(getAttr(p, "w14:paraId"), ""),
+    None => ""
+  }
+
+pure func docxReadCommentExNodes(xml: string) -> [XmlNode] =
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => findAll(root, "w15:commentEx"),
+    Err(_) => []
+  }
+
+-- Join one comment body to its anchor.
+--
+-- Every path that cannot resolve an anchor with certainty produces an
+-- unanchored comment: no matching range, an empty range, a missing w:id. The
+-- one thing this must never do is fall back to nearby text — a comment
+-- confidently pinned to the wrong clause is worse than one with no target,
+-- because nothing signals that it was a guess.
+pure func docxPlaceComment(body: DocxCommentBody, anchors: [DocxAnchor],
+                            bodies: [DocxCommentBody], exNodes: [XmlNode]) -> DocxPlacedComment {
+  let parentId = docxParentIdOf(body, bodies, exNodes);
+  let resolved = docxIsResolved(body, exNodes);
+  match filter(\a. a.id == body.id, anchors) {
+    [] => docxUnplaced(body, parentId, resolved),
+    a :: _ =>
+      if length(trim(a.text)) == 0 then docxUnplaced(body, parentId, resolved)
+      else {
+        index: a.endIndex,
+        block: mkAnchoredComment(body.id, body.author, body.date, body.text,
+                                 a.text, a.kind, a.startIndex, parentId, resolved)
+      }
+  }
+}
+
+pure func docxUnplaced(body: DocxCommentBody, parentId: string, resolved: bool) -> DocxPlacedComment =
+  { index: 0 - 1,
+    block: mkUnanchoredComment(body.id, body.author, body.date, body.text, parentId, resolved) }
+
+-- Which comment does this one reply to?
+-- commentsExtended maps a comment's last paraId to its parent's last paraId;
+-- we resolve that back to the parent's w:id.
+pure func docxParentIdOf(body: DocxCommentBody, bodies: [DocxCommentBody], exNodes: [XmlNode]) -> string {
+  if length(body.lastParaId) == 0 then ""
+  else match filter(\n. getOrElse(getAttr(n, "w15:paraId"), "") == body.lastParaId, exNodes) {
+    [] => "",
+    ex :: _ => {
+      let parentPara = getOrElse(getAttr(ex, "w15:paraIdParent"), "");
+      if length(parentPara) == 0 then ""
+      else match filter(\b. b.lastParaId == parentPara, bodies) {
+        [] => "",
+        parent :: _ => parent.id
+      }
+    }
+  }
+}
+
+pure func docxIsResolved(body: DocxCommentBody, exNodes: [XmlNode]) -> bool =
+  match filter(\n. getOrElse(getAttr(n, "w15:paraId"), "") == body.lastParaId, exNodes) {
+    [] => false,
+    ex :: _ => getOrElse(getAttr(ex, "w15:done"), "0") == "1"
+  }
+
+-- A reply annotates the same span as the comment it replies to. Word does not
+-- always write a separate range for replies, so an unanchored reply inherits
+-- its parent's anchor. This is the OOXML thread model, not a proximity guess:
+-- the parent link is explicit in commentsExtended.xml.
+pure func docxInheritReplyAnchors(placed: [DocxPlacedComment], bodies: [DocxCommentBody],
+                                   anchors: [DocxAnchor], exNodes: [XmlNode]) -> [DocxPlacedComment] =
+  map(\p. docxInheritOne(p, bodies, anchors, exNodes), placed)
+
+pure func docxInheritOne(p: DocxPlacedComment, bodies: [DocxCommentBody],
+                          anchors: [DocxAnchor], exNodes: [XmlNode]) -> DocxPlacedComment =
+  match p.block {
+    CommentBlock(c) =>
+      if c.anchored || length(c.parentId) == 0 then p
+      else match filter(\a. a.id == c.parentId, anchors) {
+        [] => p,
+        a :: _ =>
+          if length(trim(a.text)) == 0 then p
+          else {
+            index: a.endIndex,
+            block: mkAnchoredComment(c.id, c.author, c.date, c.text,
+                                     a.text, a.kind, a.startIndex, c.parentId, c.resolved)
+          }
+      },
+    _ => p
+  }
+
+-- Keep the SectionBlock(kind: "comment") wrapper so consumers written against
+-- the pre-anchoring shape still find comments where they expect them.
+pure func docxWrapComment(b: Block) -> Block =
+  SectionBlock({kind: "comment", blocks: [b]})
+
+-- Place each comment directly after the block its span ends in; anything
+-- unanchored (or pointing past the end of the body) trails the document.
+pure func docxSpliceComments(blocks: [Block], placed: [DocxPlacedComment]) -> [Block] {
+  let n = listLength(blocks);
+  let inline = filter(\p. p.index >= 0 && p.index < n, placed);
+  let trailing = filter(\p. p.index < 0 || p.index >= n, placed);
+  concat(docxSpliceAt(blocks, 0, inline),
+         map(\p. docxWrapComment(p.block), trailing))
+}
+
+pure func docxSpliceAt(blocks: [Block], idx: int, placed: [DocxPlacedComment]) -> [Block] =
+  match blocks {
     [] => [],
-    node :: rest => {
-      let author = getOrElse(getAttr(node, "w:author"), "Unknown");
-      let date = getOrElse(getAttr(node, "w:date"), "");
-      let paragraphs = findAll(node, "w:p");
-      let texts = docxExtractCommentTexts(paragraphs);
-      let commentText = join(" ", texts);
-      let block = SectionBlock({kind: "comment", blocks: [
-        TextBlock({text: "[${author}] ${commentText}", style: "CommentText", level: 0})
-      ]});
-      block :: docxParseCommentNodes(rest)
+    b :: rest => {
+      let here = map(\p. docxWrapComment(p.block), filter(\p. p.index == idx, placed));
+      b :: concat(here, docxSpliceAt(rest, idx + 1, placed))
     }
   }
 

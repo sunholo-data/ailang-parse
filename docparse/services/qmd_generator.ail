@@ -2,7 +2,7 @@ module docparse/services/qmd_generator
 
 import std/string (length, join, intToStr, split)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
 
 -- QMD Generator — converts Block ADT to Quarto Markdown (.qmd) format.
 -- Pure string concatenation: generates YAML front matter + Quarto-flavored Markdown.
@@ -100,7 +100,12 @@ pure func qmdBlockToStr(block: Block) -> string =
       qmdChangeToStr(c.changeType, c.author, c.date, c.text),
 
     LinkBlock(l) =>
-      "[${l.text}](${l.href})\n\n"
+      "[${l.text}](${l.href})\n\n",
+
+    CommentBlock(c) =>
+      if c.anchored && length(c.anchorText) > 0
+      then "> ${c.anchorText}\n>\n> — **${c.author}**: ${c.text}\n\n"
+      else "> — **${c.author}** (unanchored): ${c.text}\n\n"
   }
 
 -- Heading prefix from level

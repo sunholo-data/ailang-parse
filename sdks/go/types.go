@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// Block represents a parsed content block (9 variants discriminated by Type).
+// Block represents a parsed content block (11 variants discriminated by Type).
 type Block struct {
-	Type string `json:"type"` // text, heading, table, list, image, audio, video, section, change
+	Type string `json:"type"` // text, heading, table, list, image, audio, video, section, change, link, comment
 
 	// TextBlock / HeadingBlock / ChangeBlock
 	Text  string `json:"text,omitempty"`
@@ -33,6 +33,18 @@ type Block struct {
 	Transcription string `json:"transcription,omitempty"`
 	Mime          string `json:"mime,omitempty"`
 	DataLength    int    `json:"dataLength,omitempty"`
+
+	// CommentBlock. AnchorText is the span of document text the comment
+	// annotates. When Anchored is false the anchor could not be resolved and
+	// AnchorText is empty — treat the comment as having no known target rather
+	// than inferring one from nearby blocks.
+	ID               string `json:"id,omitempty"`
+	AnchorText       string `json:"anchorText,omitempty"`
+	AnchorKind       string `json:"anchorKind,omitempty"` // range, point, none
+	Anchored         bool   `json:"anchored,omitempty"`
+	AnchorBlockIndex int    `json:"anchorBlockIndex,omitempty"`
+	ParentID         string `json:"parentId,omitempty"` // set on threaded replies
+	Resolved         bool   `json:"resolved,omitempty"`
 
 	// SectionBlock (recursive)
 	Kind     string  `json:"kind,omitempty"`

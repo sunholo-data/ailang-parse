@@ -26,6 +26,17 @@ export type TableCell = {
 -- LinkBlock represents an HTML anchor with href. Generators that don't
 -- preserve link semantics (DOCX/PPTX paragraph writers, plain-text
 -- renderers) treat it as a TextBlock with the anchor's visible text.
+--
+-- CommentBlock is a review comment together with the span of document text it
+-- annotates (DOCX §17.13.1). A comment without its anchor is noise — "this is
+-- nonsense" is only actionable if you know which clause is nonsense — so when
+-- the anchor cannot be resolved with certainty, `anchored` is false and
+-- `anchorText` is empty rather than a nearby guess. It stays wrapped in a
+-- SectionBlock(kind: "comment") so consumers of the older shape keep working.
+--   anchorKind:        "range" (commentRangeStart/End) | "point" (bare
+--                      commentReference, anchored to its paragraph) | "none"
+--   anchorBlockIndex:  index of the annotated block; -1 when unanchored
+--   parentId:          id of the comment this replies to; "" for top-level
 export type Block = TextBlock({text: string, style: string, level: int})
                   | TableBlock({rows: [[TableCell]], headers: [TableCell], caption: string})
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
@@ -36,6 +47,9 @@ export type Block = TextBlock({text: string, style: string, level: int})
                   | SectionBlock({kind: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
                   | LinkBlock({text: string, href: string, title: string})
+                  | CommentBlock({id: string, author: string, date: string, text: string,
+                                  anchorText: string, anchorKind: string, anchored: bool,
+                                  anchorBlockIndex: int, parentId: string, resolved: bool})
 
 -- Document metadata from core.xml / app.xml
 export type DocMetadata = {
@@ -74,8 +88,17 @@ export pure func blockText(block: Block) -> string =
     HeadingBlock(b) => b.text,
     SectionBlock(b) => "[${b.kind}]",
     ChangeBlock(b) => "[${b.changeType} by ${b.author}] ${b.text}",
-    LinkBlock(b) => "${b.text} <${b.href}>"
+    LinkBlock(b) => "${b.text} <${b.href}>",
+    CommentBlock(b) => commentText(b.author, b.text, b.anchorText, b.anchored)
   }
+
+-- Render a comment so the pairing with its anchor is unambiguous to a reader
+-- (human or agent). An unanchored comment says so explicitly — the one thing
+-- it must never do is look like it has a target when it doesn't.
+export pure func commentText(author: string, text: string, anchorText: string, anchored: bool) -> string =
+  if anchored && length(anchorText) > 0
+  then "[comment by ${author} on \"${anchorText}\"] ${text}"
+  else "[comment by ${author}, unanchored] ${text}"
 
 export pure func isHeading(block: Block) -> bool =
   match block {
@@ -130,6 +153,40 @@ export pure func filterImages(blocks: [Block]) -> [Block]
 {
   filter(isImage, blocks)
 }
+
+export pure func isComment(block: Block) -> bool =
+  match block {
+    CommentBlock(_) => true,
+    _ => false
+  }
+
+export pure func filterComments(blocks: [Block]) -> [Block]
+  ensures { listLength(result) <= listLength(blocks) }
+{
+  filter(isComment, blocks)
+}
+
+-- Construct an anchored comment (the annotated span was resolved from
+-- document.xml with certainty).
+export pure func mkAnchoredComment(id: string, author: string, date: string, text: string,
+                                    anchorText: string, anchorKind: string, anchorBlockIndex: int,
+                                    parentId: string, resolved: bool) -> Block =
+  CommentBlock({
+    id: id, author: author, date: date, text: text,
+    anchorText: anchorText, anchorKind: anchorKind, anchored: true,
+    anchorBlockIndex: anchorBlockIndex, parentId: parentId, resolved: resolved
+  })
+
+-- Construct an unanchored comment. Used whenever the anchor cannot be
+-- resolved — a w:id present in one part but not the other, a malformed or
+-- missing id, an unterminated range. Never falls back to nearby text.
+export pure func mkUnanchoredComment(id: string, author: string, date: string, text: string,
+                                      parentId: string, resolved: bool) -> Block =
+  CommentBlock({
+    id: id, author: author, date: date, text: text,
+    anchorText: "", anchorKind: "none", anchored: false,
+    anchorBlockIndex: 0 - 1, parentId: parentId, resolved: resolved
+  })
 
 export pure func isChange(block: Block) -> bool =
   match block {

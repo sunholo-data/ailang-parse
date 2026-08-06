@@ -2,7 +2,7 @@ module docparse/services/html_generator
 
 import std/string (length, join, intToStr)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
@@ -89,7 +89,14 @@ pure func htmlBlockToStr(block: Block) -> string =
     LinkBlock(l) =>
       if length(l.title) > 0
       then "<p><a href=\"${xmlEscape(l.href)}\" title=\"${xmlEscape(l.title)}\">${xmlEscape(l.text)}</a></p>\n"
-      else "<p><a href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</a></p>\n"
+      else "<p><a href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</a></p>\n",
+
+    -- Anchored comments render as a blockquote quoting the annotated span, so
+    -- a reader sees comment and target together rather than having to guess.
+    CommentBlock(c) =>
+      if c.anchored && length(c.anchorText) > 0
+      then "<aside class=\"comment\"><blockquote>${xmlEscape(c.anchorText)}</blockquote><p><strong>${xmlEscape(c.author)}</strong>: ${xmlEscape(c.text)}</p></aside>\n"
+      else "<aside class=\"comment comment-unanchored\"><p><strong>${xmlEscape(c.author)}</strong> (unanchored): ${xmlEscape(c.text)}</p></aside>\n"
   }
 
 -- Heading tag from level

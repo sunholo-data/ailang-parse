@@ -137,8 +137,16 @@ class Block:
     # SectionBlock
     kind: str = ""
     children: List["Block"] = field(default_factory=list)
-    # CommentBlock — parser-side support gated on docparse v0.19.0+
-    # comment-threading work; this field ships forward-compat.
+    # CommentBlock. anchor_text is the span of document text this comment
+    # annotates. When anchored is False the anchor could not be resolved and
+    # anchor_text is empty — the comment has no known target, and callers must
+    # not infer one from surrounding blocks.
+    id: str = ""
+    anchor_text: str = ""
+    anchor_kind: str = ""  # "range" | "point" | "none"
+    anchored: bool = False
+    anchor_block_index: int = -1
+    parent_id: str = ""  # set on threaded replies
     resolved: bool = False
 
     @classmethod
@@ -159,6 +167,12 @@ class Block:
         b.kind = d.get("kind", "")
         b.ordered = d.get("ordered", False)
         b.items = d.get("items", [])
+        b.id = d.get("id", "")
+        b.anchor_text = d.get("anchorText", "")
+        b.anchor_kind = d.get("anchorKind", "")
+        b.anchored = d.get("anchored", False)
+        b.anchor_block_index = d.get("anchorBlockIndex", -1)
+        b.parent_id = d.get("parentId", "")
         b.resolved = d.get("resolved", False)
 
         # Table

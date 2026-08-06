@@ -4,7 +4,7 @@ import std/string (length, intToStr)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
 -- PPTX Generator — converts Block ADT to a valid .pptx file.
@@ -211,7 +211,11 @@ pure func pptxBlockToShape(block: Block, shapeId: int) -> string {
 
     LinkBlock(l) =>
       pptxTextBox(idStr, "Link ${idStr}", "457200", yOff, "8229600", "400000",
-        "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"1400\"/><a:t>${xmlEscape(l.text)} (${xmlEscape(l.href)})</a:t></a:r></a:p>")
+        "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"1400\"/><a:t>${xmlEscape(l.text)} (${xmlEscape(l.href)})</a:t></a:r></a:p>"),
+
+    CommentBlock(c) =>
+      pptxTextBox(idStr, "Comment ${idStr}", "457200", yOff, "8229600", "400000",
+        "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"1400\"/><a:t>${xmlEscape(commentText(c.author, c.text, c.anchorText, c.anchored))}</a:t></a:r></a:p>")
   }
 }
 

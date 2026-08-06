@@ -166,7 +166,16 @@
       return '> **' + (b.changeType || 'change') + '** by ' + (b.author || 'unknown') + ': ' + (b.text || '');
     }
     if (t === 'comment' || b.kind === 'comment') {
-      return '> **[' + (b.author || 'comment') + ']** ' + (b.text || extractCommentText(b));
+      var body = b.text || extractCommentText(b);
+      // Quote the annotated span so the comment and its target read as one
+      // unit; an unanchored comment is labelled rather than left to imply one.
+      if (b.anchored && b.anchorText) {
+        return '> ' + b.anchorText + '\n>\n> **Comment (' + (b.author || 'unknown') + '):** ' + body;
+      }
+      if (b.anchored === false) {
+        return '> **Comment (' + (b.author || 'unknown') + ', unanchored):** ' + body;
+      }
+      return '> **[' + (b.author || 'comment') + ']** ' + body;
     }
     if (t === 'image') {
       return '![' + (b.description || b.alt || 'image') + ']()';

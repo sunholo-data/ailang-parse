@@ -8,7 +8,7 @@ import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
 import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, last_or)
 import std/fs (readFileBytes)
-import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
+import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
 
 -- AI-powered layout understanding
 -- Uses LLM to handle complex document structure that pure XML parsing misses:
@@ -310,7 +310,11 @@ pure func blockSummary(b: Block) -> string =
     VideoBlock(v) => "[video] ${v.mime}",
     SectionBlock(s) => "[${s.kind}] ${show(aiCountItems2(s.blocks))} blocks",
     ChangeBlock(c) => "[${c.changeType}] ${truncateStr(c.text, 60)}",
-    LinkBlock(l) => "[link] ${truncateStr(l.text, 40)} → ${truncateStr(l.href, 60)}"
+    LinkBlock(l) => "[link] ${truncateStr(l.text, 40)} → ${truncateStr(l.href, 60)}",
+    CommentBlock(c) =>
+      if c.anchored
+      then "[comment] ${truncateStr(c.author, 20)} on \"${truncateStr(c.anchorText, 40)}\": ${truncateStr(c.text, 60)}"
+      else "[comment] ${truncateStr(c.author, 20)} (unanchored): ${truncateStr(c.text, 60)}"
   }
 
 pure func aiCountItems2(blocks: [Block]) -> int = listLength(blocks)

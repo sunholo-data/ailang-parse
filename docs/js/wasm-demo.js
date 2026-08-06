@@ -593,14 +593,22 @@
   async function parseDocxZip(zip) {
     var allBlocks = [];
 
-    // Body
+    // Body (with comments anchored to the text they annotate and spliced in
+    // at their anchor point — comments.xml holds only the comment bodies, the
+    // ranges they point at live in document.xml, so the two parse together)
     var bodyEntry = zip.file('word/document.xml');
     if (bodyEntry) {
       var bodyXml = await bodyEntry.async('string');
+      var commentsEntry = zip.file('word/comments.xml');
+      var commentsXml = commentsEntry ? await commentsEntry.async('string') : '';
+      var extEntry = zip.file('word/commentsExtended.xml');
+      var extXml = extEntry ? await extEntry.async('string') : '';
+      if (commentsXml.length > MAX_XML_SIZE) commentsXml = '';
+      if (extXml.length > MAX_XML_SIZE) extXml = '';
       if (bodyXml.length <= MAX_XML_SIZE) {
         pipelineLog('xml', 'Parsing document body...');
         setStatus('Parsing document body...', false, true);
-        var r = engine.call('parseDocxBody', bodyXml);
+        var r = engine.call('parseDocxBodyWithComments', bodyXml, commentsXml, extXml);
         if (r.success) {
           var blocks = safeJsonParse(r.result, []);
           allBlocks = allBlocks.concat(blocks);
@@ -636,16 +644,9 @@
       }
     }
 
-    // Comments
-    var commentsEntry = zip.file('word/comments.xml');
-    if (commentsEntry) {
-      pipelineLog('xml', 'Parsing comments...');
-      var cxml = await commentsEntry.async('string');
-      if (cxml.length <= MAX_XML_SIZE) {
-        var cr = engine.call('parseDocxComments', cxml);
-        if (cr.success) allBlocks = allBlocks.concat(safeJsonParse(cr.result, []));
-      }
-    }
+    // Comments — anchored to the body text they annotate, so they are parsed
+    // alongside document.xml rather than on their own. Handled above in the
+    // body step; nothing to append here.
 
     // Metadata
     var coreEntry = zip.file('docProps/core.xml');
@@ -1543,6 +1544,16 @@
           return '<div class="dp-block"><div class="dp-block-change ' + cls + '">' +
             '<strong>' + escHtml(b.changeType || '') + '</strong> by ' + escHtml(b.author || '') + ': ' + escHtml(b.text || '') +
             '</div></div>';
+
+        case 'comment':
+          // Quote the annotated span above the comment. An unanchored comment
+          // says so — it must never look like it has a target when it doesn't.
+          var anchorHtml = (b.anchored && b.anchorText)
+            ? '<div class="dp-block-comment-anchor">' + escHtml(b.anchorText) + '</div>'
+            : '<div class="dp-block-comment-anchor dp-block-comment-anchor--none">unanchored</div>';
+          return '<div class="dp-block"><div class="dp-block-comment">' + anchorHtml +
+            '<div class="dp-block-comment-body"><strong>' + escHtml(b.author || '') + '</strong>: ' +
+            escHtml(b.text || '') + '</div></div></div>';
 
         case 'section':
           return '<div class="dp-block dp-block-section"><div class="dp-block-section-label">' + escHtml(b.kind || 'section') + '</div>' +

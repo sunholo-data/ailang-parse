@@ -94,7 +94,7 @@ export interface Cell {
 // ── Block (discriminated union via type field) ──
 
 export interface Block {
-  type: "text" | "heading" | "table" | "list" | "image" | "audio" | "video" | "section" | "change";
+  type: "text" | "heading" | "table" | "list" | "image" | "audio" | "video" | "section" | "change" | "link" | "comment";
   text: string;
   level: number;
   style: string;
@@ -113,6 +113,17 @@ export interface Block {
   transcription?: string;
   mime?: string;
   dataLength?: number;
+  // CommentBlock. `anchorText` is the span of document text this comment
+  // annotates. When `anchored` is false the anchor could not be resolved and
+  // `anchorText` is empty — the comment has no known target, and callers must
+  // not infer one from surrounding blocks.
+  id?: string;
+  anchorText?: string;
+  anchorKind?: "range" | "point" | "none";
+  anchored?: boolean;
+  anchorBlockIndex?: number;
+  parentId?: string; // set on threaded replies
+  resolved?: boolean;
   // SectionBlock
   kind?: string;
   blocks?: Block[];

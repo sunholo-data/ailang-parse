@@ -109,6 +109,17 @@ export func readComments(path: string) -> string ! {FS} {
   }
 }
 
+-- Read commentsExtended.xml from a DOCX (comment threading: which comment
+-- replies to which, and whether a thread is marked resolved). Absent in
+-- documents produced by older tools — an empty string is the normal "no
+-- threading information" case, not an error.
+export func readCommentsExtended(path: string) -> string ! {FS} {
+  match readEntry(path, "word/commentsExtended.xml") {
+    Ok(content) => content,
+    Err(_) => ""
+  }
+}
+
 -- Find footnotes.xml if present
 export func findFootnoteEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {

@@ -127,6 +127,26 @@ def _flatten_ailang_blocks(
             else:
                 result.extend(_flatten_ailang_blocks(child_blocks, section=kind))
 
+        elif btype == "comment":
+            result.append(NormalizedElement(
+                type="comment",
+                # Text carries the anchor so a comment that loses its anchor
+                # shows up as a text diff, not just a metadata one.
+                text=block.get("text", ""),
+                level=0,
+                metadata={
+                    "source_type": "CommentBlock",
+                    "section": section or "comment",
+                    "comment_id": block.get("id", ""),
+                    "author": block.get("author", ""),
+                    "date": block.get("date", ""),
+                    "anchor_text": block.get("anchorText", ""),
+                    "anchor_kind": block.get("anchorKind", ""),
+                    "anchored": block.get("anchored", False),
+                    "parent_id": block.get("parentId", ""),
+                },
+            ))
+
         elif btype == "change":
             result.append(NormalizedElement(
                 type="change",

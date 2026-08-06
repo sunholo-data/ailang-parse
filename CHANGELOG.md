@@ -21,6 +21,58 @@ instead of a clear resolver error. Tightened the constraint in `ailang.toml` (an
 the `docs/ailang` mirror) so unsupported toolchains fail fast at resolve time.
 No code changes.
 
+### v0.23.0 — DOCX comment anchoring (§17.13.1)
+
+Comments now carry the exact span of document text they annotate. Previously a
+comment arrived as `[Author] text` in a detached list at the end of the
+document, with no indication of what it referred to — so an agent asked "what
+did the reviewer object to?" had to guess a target from proximity or topic. A
+confidently misattributed comment (the right comment pinned to the wrong
+clause) is worse than no comment support at all, because nothing signals that
+it was a guess.
+
+In OOXML the comment *body* lives in `word/comments.xml` keyed by `w:id`, while
+the anchored *range* lives in `word/document.xml` as
+`w:commentRangeStart`/`w:commentRangeEnd`. The parser now walks the body once,
+threading open ranges, and joins the two on `w:id`.
+
+- **New `CommentBlock` Block variant** with `anchorText`, `anchorKind`
+  (`range` | `point` | `none`), `anchored`, `anchorBlockIndex`, `parentId` and
+  `resolved`. It stays wrapped in `SectionBlock(kind: "comment")`, so consumers
+  written against the previous shape keep finding comments where they expect
+  them. Strictly additive on the wire.
+- **Spliced at the anchor.** Each comment appears exactly once, immediately
+  after the block its span ends in, so a linear reader meets the comment beside
+  the text it annotates. Unanchored comments trail the document.
+- **Degrades instead of guessing.** No matching range, a range with no body, an
+  empty range, an unterminated range, or a missing `w:id` all produce
+  `anchored: false` with empty `anchorText`. Never a proximity fallback.
+- **Handles** ranges nested inside other ranges, ranges crossing paragraph
+  boundaries, and ranges spanning table cells and rows.
+- **Point anchors.** A bare `w:commentReference` with no range anchors to its
+  containing paragraph and is marked `anchorKind: "point"`.
+- **Threading.** `word/commentsExtended.xml` supplies `parentId` (via
+  `w15:paraIdParent`) and `resolved` (via `w15:done`). Replies inherit their
+  parent's anchor — the OOXML thread model, not an inference.
+- **Note:** `w:bookmarkStart` also carries a `w:id`, in a separate numbering
+  space. Ids are only ever read off comment-specific tags; there is a
+  regression fixture for exactly this collision.
+
+Benchmarks: the `DOCX Comment Ranges` gap check (§17.13.1) goes **0% → 100%**,
+plus two new checks (`DOCX Comment Orphans` 5/5, `DOCX Comment Ranges in
+Tables` 2/2). Office structural suite stays at 100% across 58 files.
+
+The WASM/browser path calls the same pure core
+(`parseDocxWithCommentsXml`), so the demo cannot drift back to the unanchored
+behaviour. `parseDocxComments` in the browser module now takes
+`(commentsXml, documentXml, extXml)` — **breaking change** for direct callers
+of that WASM export.
+
+Not included: writing comments back into a `.docx` (read-only for now), and
+comment extraction for ODT/PPTX/XLSX, which have no comment support at all yet.
+
+Design doc: [`v0_23_0_docx_comment_anchoring.md`](design_docs/implemented/v0_23_0/v0_23_0_docx_comment_anchoring.md)
+
 ### SDKs — v0.8.0 (retry parity across JS, Go, R)
 
 The server now returns `502`/`503`/`504` for transient AI-provider failures

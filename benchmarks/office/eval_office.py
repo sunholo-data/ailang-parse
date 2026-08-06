@@ -116,7 +116,12 @@ def check_track_changes(golden_els: list[NormalizedElement], actual_els: list[No
 
 
 def check_comments(golden_els: list[NormalizedElement], actual_els: list[NormalizedElement]) -> dict:
-    """Check comment extraction."""
+    """Check comment extraction, including the text span each comment annotates.
+
+    A comment without its anchor is worse than no comment at all — an agent will
+    guess a target and give no signal that it guessed — so anchor text is
+    checked as strictly as the comment body itself.
+    """
     # Comments appear as section elements with kind="comment" in AILANG
     golden_comments = [e for e in golden_els if e.metadata.get("section") == "comment"]
     actual_comments = [e for e in actual_els if e.metadata.get("section") == "comment"]
@@ -124,11 +129,25 @@ def check_comments(golden_els: list[NormalizedElement], actual_els: list[Normali
     if not golden_comments:
         return {"applicable": False}
 
+    golden_anchors = sorted(
+        (c.metadata.get("comment_id", ""), c.metadata.get("anchor_text", ""))
+        for c in golden_comments
+    )
+    actual_anchors = sorted(
+        (c.metadata.get("comment_id", ""), c.metadata.get("anchor_text", ""))
+        for c in actual_comments
+    )
+    golden_anchored = sum(1 for c in golden_comments if c.metadata.get("anchored"))
+    actual_anchored = sum(1 for c in actual_comments if c.metadata.get("anchored"))
+
     return {
         "applicable": True,
         "count_match": len(actual_comments) == len(golden_comments),
         "golden_count": len(golden_comments),
         "actual_count": len(actual_comments),
+        "anchors_match": golden_anchors == actual_anchors,
+        "golden_anchored": golden_anchored,
+        "actual_anchored": actual_anchored,
     }
 
 

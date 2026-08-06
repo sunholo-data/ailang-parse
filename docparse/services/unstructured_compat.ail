@@ -4,7 +4,7 @@ import std/string (length, intToStr, join, split, substring)
 import std/list (map, foldl, length as listLength, flatMap, concat)
 import std/math (intToFloat)
 import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
 import docparse/services/xml_helpers (xmlEscape)
 
 -- Unstructured API Compatibility Layer
@@ -92,7 +92,17 @@ pure func unstBlockToElements(block: Block, filename: string, filetype: string, 
     -- schema get something they can route.
     LinkBlock(l) =>
       [unstElement("NarrativeText", l.text, filename, filetype, idx, 0,
-        jo([kv("link_urls", ja([js(l.href)]))]))]
+        jo([kv("link_urls", ja([js(l.href)]))]))],
+
+    -- Unstructured.io has no comment category, so we emit NarrativeText and
+    -- carry the anchor in metadata. The visible text keeps the pairing even
+    -- for consumers that ignore metadata entirely.
+    CommentBlock(c) =>
+      [unstElement("NarrativeText", commentText(c.author, c.text, c.anchorText, c.anchored),
+        filename, filetype, idx, 0,
+        jo([kv("comment_author", js(c.author)),
+            kv("comment_anchor_text", js(c.anchorText)),
+            kv("comment_anchored", jb(c.anchored))]))]
   }
 
 -- Build a single Unstructured element as JSON

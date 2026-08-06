@@ -5,7 +5,7 @@ import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
 import std/string (length)
 import std/math (intToFloat)
 import std/list (map, foldl, filter, length as listLength, forEachE, concat)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
 
 -- Output Formatter
 -- Converts ParsedDocument to structured JSON output with validation.
@@ -116,6 +116,19 @@ export pure func blockToJson(block: Block) -> Json =
       kv("text", js(b.text)),
       kv("href", js(b.href)),
       kv("title", js(b.title))
+    ]),
+    CommentBlock(b) => jo([
+      kv("type", js("comment")),
+      kv("id", js(b.id)),
+      kv("author", js(b.author)),
+      kv("date", js(b.date)),
+      kv("text", js(b.text)),
+      kv("anchorText", js(b.anchorText)),
+      kv("anchorKind", js(b.anchorKind)),
+      kv("anchored", jb(b.anchored)),
+      kv("anchorBlockIndex", jnum(intToFloat(b.anchorBlockIndex))),
+      kv("parentId", js(b.parentId)),
+      kv("resolved", jb(b.resolved))
     ])
   }
 
@@ -262,7 +275,11 @@ func printBlock(block: Block) -> () ! {IO} =
     ChangeBlock(b) =>
       println("[${b.changeType}:${b.author}] ${b.text}"),
     LinkBlock(b) =>
-      println("[link] ${b.text} → ${b.href}")
+      println("[link] ${b.text} → ${b.href}"),
+    CommentBlock(b) =>
+      if b.anchored
+      then println("[comment:${b.author}] on \"${b.anchorText}\" → ${b.text}")
+      else println("[comment:${b.author}] (unanchored) → ${b.text}")
   }
 
 pure func countCellRows(rows: [[TableCell]]) -> int = listLength(rows)
@@ -402,8 +419,21 @@ pure func renderBlockMd(block: Block) -> string =
     ChangeBlock(b) =>
       renderChangeMd(b.changeType, b.author, b.date, b.text),
     LinkBlock(b) =>
-      "[${b.text}](${b.href})\n\n"
+      "[${b.text}](${b.href})\n\n",
+    CommentBlock(b) =>
+      renderCommentMd(b.author, b.date, b.text, b.anchorText, b.anchored)
   }
+
+-- A comment renders as a blockquote of the annotated span followed by the
+-- comment itself, so a linear reader meets the two together. Unanchored
+-- comments are labelled, never quietly attached to the preceding block.
+pure func renderCommentMd(author: string, date: string, text: string,
+                          anchorText: string, anchored: bool) -> string {
+  let byline = if length(date) > 0 then "${author}, ${date}" else author;
+  if anchored && length(anchorText) > 0
+  then "> ${anchorText}\n>\n> **Comment (${byline}):** ${text}\n\n"
+  else "> **Comment (${byline}, unanchored):** ${text}\n\n"
+}
 
 pure func headingPrefix(level: int) -> string
   ensures { length(result) >= 2 }

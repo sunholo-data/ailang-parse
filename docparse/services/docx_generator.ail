@@ -5,7 +5,7 @@ import std/list (map, foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl, docxContentTypes, docxRootRels, docxRun, docxParagraph, docxStyledParagraph)
 
 -- DOCX Generator — converts Block ADT to a valid .docx file.
@@ -129,7 +129,13 @@ pure func docxBlockToXml(block: Block) -> string =
     -- downgrade to a paragraph with "text (url)" — proper <w:hyperlink>
     -- wrapping is left for a future write-back release.
     LinkBlock(l) =>
-      docxParagraph(docxRun("${l.text} (${l.href})"))
+      docxParagraph(docxRun("${l.text} (${l.href})")),
+
+    -- Writing real w:comment parts + commentRange markers back into a .docx is
+    -- explicitly out of scope for this read-only release; the comment and its
+    -- anchor are preserved as text so nothing is lost on a round trip.
+    CommentBlock(c) =>
+      docxParagraph(docxRun(commentText(c.author, c.text, c.anchorText, c.anchored)))
   }
 
 -- Image-aware block conversion: tracks image index for rId references

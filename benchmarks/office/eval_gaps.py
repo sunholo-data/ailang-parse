@@ -642,6 +642,113 @@ def check_docx_comment_ranges(output: dict) -> dict:
     }
 
 
+def check_docx_comment_orphans(output: dict) -> dict:
+    """Does the parser degrade unresolvable anchors instead of guessing?
+
+    File: challenge_comment_orphans.docx
+    Expected: a comment whose anchor cannot be resolved is marked anchored=false
+    with no anchorText. A confidently misattributed comment — the right comment
+    pinned to the wrong clause — is worse than an unanchored one, because
+    nothing signals to the reader that it was a guess.
+    Spec: §17.13.1 (Comment Range)
+    """
+    comments = _collect_comment_blocks(output)
+    by_id = {c.get("id", ""): c for c in comments}
+
+    checks = [
+        # A well-formed range still anchors correctly.
+        ("1", True, "terminates on 30 June"),
+        # Comment body with no marker anywhere in document.xml.
+        ("2", False, ""),
+        # Bare commentReference: a point anchor to its own paragraph, not an error.
+        ("4", True, "A paragraph carrying only a point anchor."),
+        # Range opened and never closed.
+        ("5", False, ""),
+    ]
+
+    found = 0
+    for cid, want_anchored, want_text in checks:
+        c = by_id.get(cid)
+        if c is None:
+            continue
+        if bool(c.get("anchored")) != want_anchored:
+            continue
+        if want_anchored:
+            if want_text in c.get("anchorText", ""):
+                found += 1
+        elif not c.get("anchorText", ""):
+            found += 1
+
+    # A w:commentRangeStart id="3" exists with no body in comments.xml — it must
+    # not conjure a comment. And a w:bookmarkStart shares id="1" with comment 1;
+    # if ids were read without checking the tag, comment 1 would anchor to the
+    # bookmarked paragraph instead of its own range.
+    total = len(checks) + 1
+    if "3" not in by_id:
+        found += 1
+
+    return {
+        "name": "DOCX Comment Orphans",
+        "spec_ref": "§17.13.1",
+        "file": "challenge_comment_orphans.docx",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} unresolvable anchors degraded rather than guessed",
+    }
+
+
+def check_docx_comment_table(output: dict) -> dict:
+    """Does a comment range spanning table cells resolve?
+
+    File: challenge_comment_table.docx
+    Expected: a range opening in one cell and closing in another (crossing both
+    cell and row boundaries) captures the spanned text; a range wholly inside
+    one cell captures exactly that cell.
+    Spec: §17.13.1 (Comment Range)
+    """
+    comments = _collect_comment_blocks(output)
+    by_id = {c.get("id", ""): c for c in comments}
+
+    found = 0
+    total = 2
+
+    spanning = by_id.get("10", {})
+    if spanning.get("anchored") and "EUR 250,000" in spanning.get("anchorText", "") \
+            and "EUR 750,000" in spanning.get("anchorText", ""):
+        found += 1
+
+    single = by_id.get("11", {})
+    if single.get("anchored") and single.get("anchorText", "").strip() == "EUR 100,000":
+        found += 1
+
+    return {
+        "name": "DOCX Comment Ranges in Tables",
+        "spec_ref": "§17.13.1",
+        "file": "challenge_comment_table.docx",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} table-spanning comment ranges resolved",
+    }
+
+
+def _collect_comment_blocks(output: dict) -> list[dict]:
+    """Every CommentBlock in the output, wherever it is nested."""
+    found = []
+
+    def walk(blocks):
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "comment":
+                found.append(b)
+            walk(b.get("blocks", []))
+
+    walk(get_blocks(output))
+    return found
+
+
 def check_docx_bookmarks(output: dict) -> dict:
     """Does the parser extract bookmark definitions?
 
@@ -755,6 +862,8 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         # Round 3 (new gaps)
         "challenge_formula_cached.xlsx": [check_xlsx_formula_fallback],
         "challenge_comment_ranges.docx": [check_docx_comment_ranges],
+        "challenge_comment_orphans.docx": [check_docx_comment_orphans],
+        "challenge_comment_table.docx": [check_docx_comment_table],
         "challenge_bookmarks.docx": [check_docx_bookmarks],
     }
 
