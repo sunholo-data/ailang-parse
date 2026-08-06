@@ -34,7 +34,7 @@ pure func pdfMimeType() -> string = "application/pdf"
 -- from the PDF object structure — Gemini multimodal sees the rasterised page
 -- and misses these entirely. Annotation extraction is fail-soft: if it errors
 -- or hits a compressed-object PDF, the AI output still ships.
-export func parsePdf(filepath: string) -> [Block] ! {FS, AI, Net, Env} {
+export func parsePdf(filepath: string) -> [Block] ! {Clock, FS, AI, Net, Env} {
   match readFileBytes(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
@@ -155,8 +155,9 @@ func aiGetPageCountResult(base64Data: string, fileUri: string, filepath: string)
 
 -- Upload file if large enough and a backend (GCS or AI Studio) is available.
 -- Returns Ok(UploadedFile) if uploaded, Err if below threshold or unavailable.
+-- Clock: uploadFile timestamps the temporary GCS object name (gemini_files 0.2.1).
 func prepareUpload(base64Data: string, mimeType: string, filepath: string)
-  -> Result[UploadedFile, string] ! {Net, FS, Env} {
+  -> Result[UploadedFile, string] ! {Clock, Net, FS, Env} {
   if length(base64Data) <= 500000 then Err("below threshold")
   else uploadFile(base64Data, mimeType, filepath)
 }

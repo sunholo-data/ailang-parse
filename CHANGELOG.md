@@ -66,6 +66,15 @@ offsets from the scanner's lossy UTF-8 string do not map to byte offsets, and
 the authoritative offsets live in the xref, which in these files is itself a
 compressed stream.
 
+**Effect-signature corrections.** Newer AILANG effect checking caught two real
+under-declarations. `sunholo/gemini_files` `uploadToGcs` called `now()` while
+declaring only `! {Net, FS, Env}` — fixed upstream and released as
+**gemini_files 0.2.1**, which this release depends on; the `Clock` effect then
+propagates through `prepareUpload` → `parsePdf` → the MCP tool entries → `main`.
+Separately `extractPdfExternal` gained `FS`, which it genuinely uses now that it
+reads the PDF for annotations. These were latent, not new: the same failure
+reproduces on commits predating this work.
+
 Design doc: [`v0_25_0_pdf_annotation_anchoring.md`](design_docs/implemented/v0_25_0/v0_25_0_pdf_annotation_anchoring.md)
 
 ### v0.24.0 — comments across every Office format (XLSX, PPTX, PDF parity)

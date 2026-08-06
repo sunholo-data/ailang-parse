@@ -86,7 +86,7 @@ import docparse/services/samples (samples, sampleResolvePath)
 --   FS @limit=100   - File reads (ZIP entries) + output write (increased from 20 for complex DOCX with headers/footers)
 --   AI @limit=200  - PDF page-by-page parsing + image descriptions + layout inference (2 per page × up to ~100 pages)
 
-export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env} {
+export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env, Clock, Net, Process} {
   println("=== AILANG Parse: Universal Document Parsing ===");
   println("");
 
@@ -500,7 +500,7 @@ func parseExcelDocument(filepath: string, doSummarize: bool, convertTarget: stri
 }
 
 -- AI-backed PDF parse path (default).
-func extractPdfAI(filepath: string) -> {metadata: DocMetadata, blocks: [Block], aiCalls: int} ! {IO, FS, AI, Net, Env} {
+func extractPdfAI(filepath: string) -> {metadata: DocMetadata, blocks: [Block], aiCalls: int} ! {IO, FS, AI, Net, Env, Clock} {
   println("--- Parsing PDF (AI) ---");
   println("");
   println("Extracting metadata via AI...");
@@ -514,7 +514,7 @@ func extractPdfAI(filepath: string) -> {metadata: DocMetadata, blocks: [Block], 
 }
 
 -- External-backend PDF parse path (docling, liteparse, …).
-func extractPdfExternal(backend: string, filepath: string, projectRoot: string) -> {metadata: DocMetadata, blocks: [Block], aiCalls: int} ! {IO, Process} {
+func extractPdfExternal(backend: string, filepath: string, projectRoot: string) -> {metadata: DocMetadata, blocks: [Block], aiCalls: int} ! {IO, FS, Process} {
   println("--- Parsing PDF (${backend}) ---");
   println("");
   println("Invoking external backend '${backend}'...");
@@ -563,7 +563,7 @@ pure func countAnns(anns: [Annotation]) -> int = listLength(anns)
 --                 only backend that handles scanned/image-only PDFs
 -- ("words" also exists in the adapter but is not a document backend: it returns
 -- word positions used to resolve what a highlight annotation covers.)
-func parsePdfDocument(filepath: string, doSummarize: bool, convertTarget: string) -> () ! {IO, FS, AI, Env, Net, Process} {
+func parsePdfDocument(filepath: string, doSummarize: bool, convertTarget: string) -> () ! {IO, FS, AI, Env, Net, Process, Clock} {
   let backend = getEnvOr("DOCPARSE_PDF_BACKEND", "pdftotext");
   let projectRoot = getEnvOr("DOCPARSE_PROJECT_ROOT", "");
 

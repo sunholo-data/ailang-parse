@@ -41,7 +41,7 @@ import docparse/services/samples (sampleResolvePath)
 -- In hosted mode, pass an apiKey (from mcpAuth) or use Bearer token auth.
 -- Pass a requestId from a previous parse to replay it.
 @route("POST", "/mcp/v1/parse")
-export func mcpParse(filepath: string, outputFormat: string, apiKey: string, requestId: string) -> string ! {AI, Env, FS, IO, Net} {
+export func mcpParse(filepath: string, outputFormat: string, apiKey: string, requestId: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
   let mode = getEnvOr("DOCPARSE_MODE", "local");
 
   if mode == "hosted" then
@@ -76,7 +76,7 @@ func mcpParseHosted(filepath: string, outputFormat: string, apiKey: string, requ
 }
 
 -- Local mode: parse directly from filesystem.
-func mcpParseLocal(filepath: string, outputFormat: string) -> string ! {AI, Env, FS, IO, Net} {
+func mcpParseLocal(filepath: string, outputFormat: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
   -- Resolve sample IDs
   let resolved = if contains(filepath, ".") then filepath
                  else sampleResolvePath(filepath);
@@ -120,7 +120,7 @@ func mcpParseDeterministic(filepath: string, ext: string, format: string, output
 }
 
 -- Parse AI-required formats.
-func mcpParseAI(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {AI, Env, FS, IO, Net} {
+func mcpParseAI(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
   let doc = if format == "pdf" then mcpParsePdfDoc(filepath)
     else if format == "image" then mcpParseImageDoc(filepath, ext)
     else if format == "audio" then mcpParseAudioDoc(filepath, ext)
@@ -243,7 +243,7 @@ func mcpParseText(filepath: string, ext: string) -> ParsedDocument ! {FS} {
 }
 
 -- AI-required parsers
-func mcpParsePdfDoc(filepath: string) -> ParsedDocument ! {AI, Env, FS, Net} {
+func mcpParsePdfDoc(filepath: string) -> ParsedDocument ! {Clock, AI, Env, FS, Net} {
   let blocks = parsePdf(filepath);
   let metadata = parsePdfMetadata(filepath);
   { format: "pdf", filename: filepath, metadata: metadata, blocks: blocks }
@@ -269,7 +269,7 @@ func mcpParseVideoDoc(filepath: string, ext: string) -> ParsedDocument ! {FS, AI
 -- Returns the output file path on success.
 -- In hosted mode, pass an apiKey (from mcpAuth) for authenticated access.
 @route("POST", "/mcp/v1/convert")
-export func mcpConvert(input: string, outputFormat: string, outputPath: string, apiKey: string) -> string ! {AI, Env, FS, IO, Net} {
+export func mcpConvert(input: string, outputFormat: string, outputPath: string, apiKey: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
   let mode = getEnvOr("DOCPARSE_MODE", "local");
 
   if mode == "hosted" && length(apiKey) == 0 then
