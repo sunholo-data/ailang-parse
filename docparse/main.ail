@@ -3,7 +3,7 @@ module docparse/main
 import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile, mkdirAll)
 import std/json (encode)
 import std/string (length, intToStr, floatToStr, toLower, split, contains)
-import std/list (last, concat, any, map, flatMap as listFlatMap, filter)
+import std/list (last, concat, any, map, flatMap as listFlatMap, filter, length as listLength)
 import std/option (Some, None)
 import std/bytes (fromBase64)
 import std/result (Ok, Err)
@@ -14,7 +14,8 @@ import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxIma
 import docparse/services/pptx_parser (parsePptx, parsePptxMetadata, parsePptxImages)
 import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
 import docparse/services/direct_ai_parser (parsePdf, parseDocumentImage, parseImage, parseAudio, parseVideo, parsePdfMetadata)
-import docparse/services/pdf_backend_external (parsePdfViaBackend, ExternalDocResult)
+import docparse/services/pdf_annotations (extractAnnotations, scanAnnotations, annotationsAsBlocksAnchored, Annotation)
+import docparse/services/pdf_backend_external (parsePdfViaBackend, ExternalDocResult, fetchPdfWords)
 import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStructure, cleanExtractedText, dirOf)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
@@ -528,11 +529,31 @@ func extractPdfExternal(backend: string, filepath: string, projectRoot: string) 
     },
     Ok(ext) => {
       println("Extracted ${show(countBlocks(ext.blocks))} content blocks.");
+      -- Layer in PDF annotations (highlights, sticky notes, free text).
+      -- These live in the /Annots object layer, which no text-extraction
+      -- backend reports — without this the default backend silently drops
+      -- every review comment in the document.
+      let scan = scanAnnotations(filepath);
+      let anns = scan.annotations;
+      -- Object streams are readable by neither this scanner nor pdftotext's
+      -- annotation view; say so rather than implying the list is complete.
+      let _ = if scan.mayBeIncomplete
+        then println("Note: PDF uses compressed object streams — annotations inside them are not visible.")
+        else ();
+      let annBlocks = if countAnns(anns) == 0 then [] else {
+        -- Word positions let a highlight report the text it covers rather than
+        -- just a page number. Unavailable positions degrade to unanchored.
+        let words = fetchPdfWords(filepath, projectRoot);
+        println("Found ${show(countAnns(anns))} annotations.");
+        annotationsAsBlocksAnchored(anns, words)
+      };
       println("");
-      {metadata: ext.metadata, blocks: ext.blocks, aiCalls: 0}
+      {metadata: ext.metadata, blocks: concat(ext.blocks, annBlocks), aiCalls: 0}
     }
   }
 }
+
+pure func countAnns(anns: [Annotation]) -> int = listLength(anns)
 
 -- Parse a PDF document. Backend selected via DOCPARSE_PDF_BACKEND env var:
 --   "pdftotext" (default) — poppler pdftotext -layout, deterministic plain text
@@ -540,6 +561,8 @@ func extractPdfExternal(backend: string, filepath: string, projectRoot: string) 
 --   "liteparse" — run-llama LiteParse, font-size heading inference
 --   "ai"        — multimodal AI (Gemini/Claude/etc) via direct_ai_parser; the
 --                 only backend that handles scanned/image-only PDFs
+-- ("words" also exists in the adapter but is not a document backend: it returns
+-- word positions used to resolve what a highlight annotation covers.)
 func parsePdfDocument(filepath: string, doSummarize: bool, convertTarget: string) -> () ! {IO, FS, AI, Env, Net, Process} {
   let backend = getEnvOr("DOCPARSE_PDF_BACKEND", "pdftotext");
   let projectRoot = getEnvOr("DOCPARSE_PROJECT_ROOT", "");

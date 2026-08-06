@@ -21,6 +21,7 @@ Result[ProcessOutput, ProcessError] for non-zero exit).
 from __future__ import annotations
 
 import contextlib
+import html
 import json
 import re
 import subprocess
@@ -238,11 +239,65 @@ def run_liteparse(pdf: Path) -> dict:
     return {"metadata": meta, "blocks": blocks}
 
 
+def run_words(pdf: Path) -> dict:
+    """Word-level bounding boxes via poppler's `pdftotext -bbox`.
+
+    Used to resolve what a PDF highlight actually covers: annotations carry
+    /QuadPoints in PDF user space, and without positions for the text there is
+    no way to say which words fall inside them.
+
+    Coordinates are returned in PDF user space (origin bottom-left) so the
+    AILANG side can compare them to /QuadPoints directly. pdftotext reports a
+    top-left origin, so y is flipped here against each page's own height —
+    doing it once, next to the tool that defines the convention, rather than
+    leaving a flip for every caller to get wrong.
+    """
+    proc = subprocess.run(
+        ["pdftotext", "-bbox", str(pdf), "-"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"pdftotext -bbox exited {proc.returncode}: {proc.stderr.strip()}")
+
+    words: list[dict] = []
+    page_no = 0
+    page_h = 0.0
+    page_re = re.compile(r'<page width="([\d.]+)" height="([\d.]+)"')
+    word_re = re.compile(
+        r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)</word>'
+    )
+    for line in proc.stdout.splitlines():
+        pm = page_re.search(line)
+        if pm:
+            page_no += 1
+            page_h = float(pm.group(2))
+            continue
+        wm = word_re.search(line)
+        if wm:
+            x0, y0, x1, y1, text = wm.groups()
+            words.append({
+                "page": page_no,
+                "x0": float(x0),
+                "x1": float(x1),
+                # flip to PDF user space (origin bottom-left)
+                "y0": page_h - float(y1),
+                "y1": page_h - float(y0),
+                "text": html.unescape(text),
+            })
+
+    return {"metadata": _empty_meta(), "blocks": [], "words": words}
+
+
 BACKENDS = {
     "pdftotext": run_pdftotext,
     "docling": run_docling,
     "liteparse": run_liteparse,
+    "words": run_words,
 }
+
+# Modes whose job is to return data other than blocks, so the "extracted no
+# content" guard below does not apply to them.
+NON_BLOCK_BACKENDS = {"words"}
 
 
 def main() -> int:
@@ -284,7 +339,7 @@ def main() -> int:
     # Empty guard: a backend that extracts nothing is a failure, not an empty
     # success. Fail loudly so the AILANG bridge surfaces it instead of writing
     # a 1-byte "succeeded" file (the silent-failure shape we're eliminating).
-    if not doc.get("blocks"):
+    if backend not in NON_BLOCK_BACKENDS and not doc.get("blocks"):
         print(
             f"ERR: backend '{backend}' extracted no content (0 blocks) from "
             f"{pdf.name}. For scanned/image-only PDFs with no text layer, "

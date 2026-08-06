@@ -11,13 +11,14 @@ module docparse/services/pdf_backend_external
 -- Architecture: pure core (decode logic + contracts) + thin effectful outer
 -- (`parsePdfViaBackend`) that only owns exec and error reporting.
 
-import std/json (getArray, getString, getInt, asString, asArray, getOr)
+import std/json (getArray, getString, getInt, getNumber, asString, asArray, getOr)
 import std/option (Some, None, getOrElse)
 import std/list (map, length as listLength)
 import std/result (Result, Ok, Err)
 import std/string (length as strLength)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, simpleCell)
+import docparse/services/pdf_annotations (PdfWord)
 
 -- Output bundle from an external backend run.
 export type ExternalDocResult = {
@@ -106,6 +107,31 @@ export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult = {
 -- =====================================================================
 -- Effectful outer
 -- =====================================================================
+
+-- Fetch word positions for a PDF via the adapter's "words" backend
+-- (poppler `pdftotext -bbox`), used to resolve what a highlight covers.
+--
+-- Returns [] on any failure. Missing word positions must degrade to unanchored
+-- annotations, never block the parse: the comment text itself is still worth
+-- returning, and an annotation that says "page 3" is honest where a guessed
+-- span would not be.
+export func fetchPdfWords(filepath: string, projectRoot: string) -> [PdfWord] ! {Process} =
+  match runJson("uv", ["run", "--project", backendProject(projectRoot), "python", adapterPath(projectRoot), "words", filepath]) {
+    Err(_) => [],
+    Ok(doc) => decodeWords(getOrElse(getArray(doc, "words"), []))
+  }
+
+pure func decodeWords(items: [Json]) -> [PdfWord] =
+  map(decodeWord, items)
+
+pure func decodeWord(j: Json) -> PdfWord = {
+  page: getOrElse(getInt(j, "page"), 0),
+  x0: getOrElse(getNumber(j, "x0"), 0.0),
+  y0: getOrElse(getNumber(j, "y0"), 0.0),
+  x1: getOrElse(getNumber(j, "x1"), 0.0),
+  y1: getOrElse(getNumber(j, "y1"), 0.0),
+  text: getOrElse(getString(j, "text"), "")
+}
 
 -- Run the external backend and return parsed result.
 -- Backend names: "pdftotext", "docling", "liteparse" (must match adapter.py

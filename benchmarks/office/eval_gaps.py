@@ -31,7 +31,7 @@ OUTPUT_DIR = REPO_DIR / "docparse" / "data"
 def parse_file(filepath: Path) -> dict | None:
     """Run DocParse on a file and return the JSON output."""
     result = subprocess.run(
-        ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
+        ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env,Process,Net,AI",
          "--max-recursion-depth", "50000",
          "docparse/main.ail", str(filepath)],
         capture_output=True, text=True, cwd=str(REPO_DIR),
@@ -862,6 +862,79 @@ def check_pptx_modern_comments(output: dict) -> dict:
     }
 
 
+def check_pdf_highlight_anchors(output: dict) -> dict:
+    """Do PDF highlights report the text they actually cover?
+
+    File: challenge_pdf_highlights.pdf
+    Expected: a /Highlight stores /QuadPoints — where it sits on the page — and
+    never the words underneath. Resolving "which clause was highlighted" means
+    intersecting those quads with word positions from `pdftotext -bbox`. Without
+    it a reviewer's "this is far too broad" arrives attached to nothing.
+    Spec: PDF 32000-1 §12.5.6.10 (Text Markup Annotations)
+    """
+    comments = _collect_comment_blocks(output)
+    by_author = {c.get("author", ""): c for c in comments}
+
+    expected = [
+        ("Laura", "shall indemnify", "This indemnity is far too broad."),
+        ("Miguel", "net thirty days", "Thirty days is not what we agreed."),
+    ]
+
+    found = 0
+    total = len(expected) + 1
+    for author, highlighted, text in expected:
+        c = by_author.get(author)
+        if c is None or not c.get("anchored"):
+            continue
+        if highlighted in c.get("anchorText", "") and text in c.get("text", ""):
+            found += 1
+
+    # Page numbers must be right: "/Type /Page" is a prefix of "/Type /Pages",
+    # so a naive scan counts the page-tree node and shifts every page by one.
+    if comments and all("page 1" in c.get("anchorText", "") for c in comments):
+        found += 1
+
+    return {
+        "name": "PDF Highlight Anchors",
+        "spec_ref": "§12.5.6.10",
+        "file": "challenge_pdf_highlights.pdf",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} highlights resolved to the text they cover",
+    }
+
+
+def check_pdf_objstm_annotations(output: dict) -> dict:
+    """Are annotations still found when the file also uses object streams?
+
+    File: challenge_pdf_highlights_objstm.pdf
+    Expected: object streams are ubiquitous (any Word or LaTeX export), but
+    highlights are usually appended as plain objects by Preview/Acrobat. Skipping
+    a file because it contains an /ObjStm anywhere discards annotations sitting
+    in plain sight — the scan should return what it can see and flag the rest.
+    Spec: PDF 32000-1 §7.5.7 (Object Streams)
+    """
+    comments = _collect_comment_blocks(output)
+    found = 0
+    total = 2
+
+    if len(comments) == 2:
+        found += 1
+    if comments and all(c.get("anchored") for c in comments):
+        found += 1
+
+    return {
+        "name": "PDF Annotations with Object Streams",
+        "spec_ref": "§7.5.7",
+        "file": "challenge_pdf_highlights_objstm.pdf",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} annotations recovered alongside /ObjStm",
+    }
+
+
 def _collect_comment_blocks(output: dict) -> list[dict]:
     """Every CommentBlock in the output, wherever it is nested."""
     found = []
@@ -996,6 +1069,8 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "challenge_threaded_comments.xlsx": [check_xlsx_threaded_comments],
         "challenge_pptx_modern_comments.pptx": [check_pptx_modern_comments],
         "poi_comment.pptx": [check_pptx_comments],
+        "challenge_pdf_highlights.pdf": [check_pdf_highlight_anchors],
+        "challenge_pdf_highlights_objstm.pdf": [check_pdf_objstm_annotations],
         "challenge_bookmarks.docx": [check_docx_bookmarks],
     }
 

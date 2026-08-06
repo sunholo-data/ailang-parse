@@ -21,6 +21,53 @@ instead of a clear resolver error. Tightened the constraint in `ailang.toml` (an
 the `docs/ailang` mirror) so unsupported toolchains fail fast at resolve time.
 No code changes.
 
+### v0.25.0 — PDF annotation anchoring (and three defects it uncovered)
+
+v0.24.0 left PDF annotations `anchored: false`, on the grounds that mapping
+/QuadPoints to text needed positional extraction we did not have. Investigating
+that turned up three further defects, only one of which was the known gap.
+
+- **The default backend dropped every annotation.** `extractAnnotations` was
+  called only on the AI path; the external-backend path — which includes
+  `pdftotext`, the DEFAULT — never called it. Annotation support existed only if
+  you explicitly opted into `--pdf-backend ai`. On a default run a reviewer's
+  comments vanished silently. Now merged on both paths.
+- **Every page number was off by one.** `pdfannIsPage` matched `/Type /Page`,
+  which is a prefix of `/Type /Pages` — the page-tree node every PDF has. That
+  node counted as a page, so real pages started at 2. Harmless while nothing
+  consumed page numbers; load-bearing the moment anchoring had to match an
+  annotation's page against a word's page.
+- **Highlights now report the text they cover.** New `words` mode in adapter.py
+  runs `pdftotext -bbox`; AILANG intersects each annotation's quads with the
+  words on its page. Membership is by word CENTRE, not overlap: a highlight
+  drawn slightly wide clips its neighbour, and any-overlap would pull in a word
+  the reviewer never marked. The top-left → bottom-left coordinate flip happens
+  once in the adapter, not in every caller.
+- **The /ObjStm bail-out was far too broad.** Any object stream anywhere
+  returned zero annotations. But object streams are ubiquitous (any Word or
+  LaTeX export) while the annotations usually are not inside one — Preview and
+  Acrobat append highlights as plain objects. The common shape (export a PDF,
+  highlight it in Preview) returned nothing despite the annotations being in
+  plain sight. `scanAnnotations` now returns what it can see plus a
+  `mayBeIncomplete` flag, and the CLI says so.
+
+Anything unresolvable — point annotations with no quads, highlights over an
+image, pages with no text layer — stays `anchored: false` with the page as a
+locator. Same rule as DOCX: never dress a guess up as a span.
+
+Gap coverage **60% → 64%** (24 checks): PDF Highlight Anchors 3/3, PDF
+Annotations with Object Streams 2/2. New fixtures generated in two passes —
+emit the page, ask pdftotext where the glyphs landed, re-emit with /QuadPoints
+from those measured boxes, so the quads genuinely cover the words they claim to.
+
+Still not implemented: reading inside object streams. `std/deflate.inflateZlib`
+would handle decompression, but locating the stream bytes is the blocker —
+offsets from the scanner's lossy UTF-8 string do not map to byte offsets, and
+the authoritative offsets live in the xref, which in these files is itself a
+compressed stream.
+
+Design doc: [`v0_25_0_pdf_annotation_anchoring.md`](design_docs/implemented/v0_25_0/v0_25_0_pdf_annotation_anchoring.md)
+
 ### v0.24.0 — comments across every Office format (XLSX, PPTX, PDF parity)
 
 v0.23.0 anchored DOCX comments. This closes the rest: XLSX and PPTX had **no
