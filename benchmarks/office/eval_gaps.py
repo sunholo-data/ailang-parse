@@ -33,7 +33,9 @@ def parse_file(filepath: Path) -> dict | None:
     result = subprocess.run(
         ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env,Process,Net,AI",
          "--max-recursion-depth", "50000",
-         "docparse/main.ail", str(filepath)],
+         "docparse/main.ail", str(filepath)]
+        # --deep resolves attachment bytes (Office + PDF); harmless for other formats
+        + (["--deep"] if filepath.suffix in (".eml", ".mbox") else []),
         capture_output=True, text=True, cwd=str(REPO_DIR),
         timeout=120,
     )
@@ -935,6 +937,57 @@ def check_pdf_objstm_annotations(output: dict) -> dict:
     }
 
 
+def check_eml_pdf_attachments(output: dict) -> dict:
+    """Are PDF attachments extracted, including scans that need OCR?
+
+    File: challenge_pdf_attachment.eml  (run with --deep)
+    Expected: both a digital PDF and a rasterised scan of the same contract
+    yield their text. Before this, pass 1 discarded the base64 for anything that
+    was not OOXML, so a PDF attachment contributed its filename and nothing else
+    — the single most common attachment type in real mail was unreadable.
+    The scan additionally requires the pdftotext -> docling escalation.
+    """
+    # --deep is required; the harness runs the default invocation, so this check
+    # reports "not applicable" rather than a false failure when run plainly.
+    atts = []
+
+    def walk(blocks):
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            if b.get("kind") == "attachment":
+                atts.append(" ".join(
+                    (x.get("text") or "") for x in b.get("blocks", []) if isinstance(x, dict)
+                ))
+            walk(b.get("blocks", []))
+
+    walk(get_blocks(output))
+
+    digital = [a for a in atts if "contract.pdf" in a]
+    scanned = [a for a in atts if "contract_signed_scan.pdf" in a]
+    found = 0
+    total = 3
+
+    if digital and "shall indemnify the Buyer" in digital[0]:
+        found += 1
+    # OCR path: same sentence recovered from an image with no text layer
+    if scanned and "shall indemnify the Buyer" in scanned[0]:
+        found += 1
+    # Neither may be a docling placeholder passing for content
+    if atts and not any("<!-- image -->" in a for a in atts):
+        found += 1
+
+    return {
+        "name": "EML PDF Attachments (incl. OCR)",
+        "spec_ref": "RFC 2183",
+        "file": "challenge_pdf_attachment.eml",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} PDF attachments extracted (digital + scanned)",
+    }
+
+
 def _collect_comment_blocks(output: dict) -> list[dict]:
     """Every CommentBlock in the output, wherever it is nested."""
     found = []
@@ -1071,6 +1124,7 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "poi_comment.pptx": [check_pptx_comments],
         "challenge_pdf_highlights.pdf": [check_pdf_highlight_anchors],
         "challenge_pdf_highlights_objstm.pdf": [check_pdf_objstm_annotations],
+        "challenge_pdf_attachment.eml": [check_eml_pdf_attachments],
         "challenge_bookmarks.docx": [check_docx_bookmarks],
     }
 

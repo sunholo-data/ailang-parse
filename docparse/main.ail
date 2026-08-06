@@ -15,7 +15,7 @@ import docparse/services/pptx_parser (parsePptx, parsePptxMetadata, parsePptxIma
 import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
 import docparse/services/direct_ai_parser (parsePdf, parseDocumentImage, parseImage, parseAudio, parseVideo, parsePdfMetadata)
 import docparse/services/pdf_annotations (extractAnnotations, scanAnnotations, annotationsAsBlocksAnchored, Annotation)
-import docparse/services/pdf_backend_external (parsePdfViaBackend, ExternalDocResult, fetchPdfWords)
+import docparse/services/pdf_backend_external (parsePdfViaBackend, parsePdfWithFallback, ExternalDocResult, PdfParseOutcome, fetchPdfWords)
 import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStructure, cleanExtractedText, dirOf)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
@@ -1143,10 +1143,10 @@ func parseHtmlDocument(filepath: string, useAI: bool, doSummarize: bool, convert
 }
 
 -- Parse an email document (EML or MBOX)
-func parseEmailDocument(filepath: string, ext: string, threaded: bool, deep: bool) -> () ! {IO, FS, AI, Env} {
+func parseEmailDocument(filepath: string, ext: string, threaded: bool, deep: bool) -> () ! {IO, FS, AI, Env, Process} {
   println("--- Parsing Email (pure AILANG, RFC 5322) ---");
   if threaded then println("Mode: threaded (grouping by conversation)") else ();
-  if deep then println("Mode: deep (resolving Office attachments)") else ();
+  if deep then println("Mode: deep (resolving Office + PDF attachments)") else ();
   println("");
 
   let content = readFile(filepath);
@@ -1159,11 +1159,12 @@ func parseEmailDocument(filepath: string, ext: string, threaded: bool, deep: boo
   let metadata = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
   println("Extracted ${show(countBlocks(blocks))} blocks.");
 
-  -- Pass 2: Resolve Office attachments (DOCX/PPTX/XLSX) if --deep
+  -- Pass 2: Resolve attachments whose bytes pass 1 preserved (Office + PDF)
   let resolvedBlocks = if deep then {
-    println("Resolving Office attachments...");
-    let resolved = emlResolveOfficeAttachments(blocks, 0);
-    println("Resolved ${show(resolved.count)} Office attachment(s).");
+    println("Resolving attachments...");
+    let projectRoot = getEnvOr("DOCPARSE_PROJECT_ROOT", "");
+    let resolved = emlResolveAttachments(blocks, 0, projectRoot);
+    println("Resolved ${show(resolved.count)} attachment(s).");
     resolved.blocks
   } else blocks;
   println("");
@@ -1195,19 +1196,19 @@ func parseEmailDocument(filepath: string, ext: string, threaded: bool, deep: boo
 -- ============================================================
 
 -- Walk blocks, find attachment SectionBlocks with attachment-data, resolve them
-func emlResolveOfficeAttachments(blocks: [Block], counter: int) -> { blocks: [Block], count: int } ! {IO, FS} {
+func emlResolveAttachments(blocks: [Block], counter: int, projectRoot: string) -> { blocks: [Block], count: int } ! {IO, FS, Process} {
   match blocks {
     [] => { blocks: [], count: 0 },
     block :: rest => {
-      let resolved = emlResolveOneBlock(block, counter);
-      let restResolved = emlResolveOfficeAttachments(rest, counter + resolved.count);
+      let resolved = emlResolveOneBlock(block, counter, projectRoot);
+      let restResolved = emlResolveAttachments(rest, counter + resolved.count, projectRoot);
       { blocks: resolved.block :: restResolved.blocks, count: resolved.count + restResolved.count }
     }
   }
 }
 
 -- Resolve a single block (recurse into SectionBlocks)
-func emlResolveOneBlock(block: Block, counter: int) -> { block: Block, count: int } ! {IO, FS} {
+func emlResolveOneBlock(block: Block, counter: int, projectRoot: string) -> { block: Block, count: int } ! {IO, FS, Process} {
   match block {
     SectionBlock(s) => {
       if s.kind == "attachment" && emlHasAttachmentData(s.blocks) then {
@@ -1219,7 +1220,7 @@ func emlResolveOneBlock(block: Block, counter: int) -> { block: Block, count: in
         match fromBase64(b64) {
           Some(bytes) => {
             writeFileBytes(tmpPath, bytes);
-            let parsedBlocks = emlParseOfficeFile(tmpPath, ext);
+            let parsedBlocks = emlParseAttachmentFile(tmpPath, ext, projectRoot);
             removeFile(tmpPath);
             let metaBlock = TextBlock({text: meta, style: "attachment-meta", level: 0});
             { block: SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks}), count: 1 }
@@ -1232,7 +1233,7 @@ func emlResolveOneBlock(block: Block, counter: int) -> { block: Block, count: in
       }
       else {
         -- Recurse into nested sections (threads, mbox-messages, etc.)
-        let inner = emlResolveOfficeAttachments(s.blocks, counter);
+        let inner = emlResolveAttachments(s.blocks, counter, projectRoot);
         { block: SectionBlock({kind: s.kind, blocks: inner.blocks}), count: inner.count }
       }
     },
@@ -1240,12 +1241,32 @@ func emlResolveOneBlock(block: Block, counter: int) -> { block: Block, count: in
   }
 }
 
--- Parse an Office file by extension using existing parsers
-func emlParseOfficeFile(filepath: string, ext: string) -> [Block] ! {IO, FS} {
+-- Parse a resolved attachment by extension.
+--
+-- PDFs go through the pdftotext -> docling ladder. Crucially this NEVER calls
+-- exit(): an attachment that cannot be read is one bad file inside somebody's
+-- mailbox, not a reason to abandon the message — let alone the rest of a batch
+-- (see ailang#607, where exit() inside a batch item panics the whole run).
+-- The failure becomes a visible block instead, so it can't pass for success.
+func emlParseAttachmentFile(filepath: string, ext: string, projectRoot: string) -> [Block] ! {IO, FS, Process} {
   if ext == "docx" then parseDocx(filepath)
   else if ext == "xlsx" then parseXlsx(filepath)
   else if ext == "pptx" then parsePptx(filepath)
-  else [TextBlock({text: "[unsupported Office format: ${ext}]", style: "error", level: 0})]
+  else if ext == "pdf" then {
+    match parsePdfWithFallback("pdftotext", filepath, projectRoot) {
+      Ok(outcome) => {
+        if outcome.backendUsed != "pdftotext"
+        then println("    (no text layer — recovered via ${outcome.backendUsed} OCR)")
+        else ();
+        outcome.doc.blocks
+      },
+      Err(msg) => {
+        println("    Warning: PDF attachment not readable: ${msg}");
+        [TextBlock({text: "[unreadable PDF attachment: ${msg}]", style: "error", level: 0})]
+      }
+    }
+  }
+  else [TextBlock({text: "[unsupported attachment format: ${ext}]", style: "error", level: 0})]
 }
 
 -- Check if a block list contains an attachment-data TextBlock

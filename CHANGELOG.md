@@ -21,6 +21,41 @@ instead of a clear resolver error. Tightened the constraint in `ailang.toml` (an
 the `docs/ailang` mirror) so unsupported toolchains fail fast at resolve time.
 No code changes.
 
+### v0.26.0 — email attachments: PDF extraction with an OCR fallback
+
+Enables the `email-parse` M6 milestone. Measuring that archive found 8,323
+attachments of which **2,455 are PDF** and **zero** are DOCX/XLSX/PPTX — and
+pass 1 preserved base64 only for OOXML, so the most common attachment type in
+real mail contributed its filename and not one word of its contents.
+
+- **PDF attachments are now resolvable.** `emlIsOfficeMime` →
+  `emlIsResolvableMime`, plus `application/pdf`. The two-pass `--deep` resolver
+  already existed and worked; PDF was simply absent from the MIME set that
+  preserves the bytes, so they were discarded before pass 2 could run.
+- **Backend ladder with automatic escalation.** `parsePdfWithFallback` tries
+  `pdftotext` (free, ~0s) and escalates to `docling` (free, local OCR, ~9s) when
+  it comes back empty. Both tiers are free, so escalation needs no permission;
+  `ai` costs money and is never automatic. An explicit `--pdf-backend` choice is
+  respected rather than overridden.
+  Note `liteparse` is **not** an OCR tier — it infers headings from font sizes
+  in the existing text layer and fails on scans exactly as `pdftotext` does.
+- **Guard against a false success.** Docling returns `<!-- image -->`
+  placeholder blocks for a page it cannot read. That is a non-empty block list,
+  so the adapter's "0 blocks is a failure" check passed it and the caller would
+  have indexed `<!-- image -->` as the document body. The guard now judges
+  substance, not block count.
+- **The attachment path never calls `exit()`.** An unreadable attachment is one
+  bad file in a mailbox, not a reason to abandon the message — or, in batch
+  mode, the remaining files (ailang#607, where `exit()` inside a batch item
+  panics the whole run).
+
+Verified on an email carrying the same contract twice, digital and rasterised:
+both yield "The Seller shall indemnify the Buyer against all claims", the second
+purely via OCR. Gap coverage **64% → 65%** (25 checks); office suite stays at
+100% across 58 files.
+
+Design doc: `email-parse` `design_docs/planned/m6-attachment-expansion.md`
+
 ### v0.25.0 — PDF annotation anchoring (and three defects it uncovered)
 
 v0.24.0 left PDF annotations `anchored: false`, on the grounds that mapping

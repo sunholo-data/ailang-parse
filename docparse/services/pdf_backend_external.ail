@@ -108,6 +108,39 @@ export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult = {
 -- Effectful outer
 -- =====================================================================
 
+-- A parse plus which backend actually produced it.
+export type PdfParseOutcome = {
+  doc: ExternalDocResult,
+  backendUsed: string
+}
+
+-- Parse a PDF, escalating from the fast text-layer backend to OCR if needed.
+--
+-- Tier 1 `pdftotext` is instant and free but sees nothing in a scanned page.
+-- Tier 2 `docling` does local OCR — measured at ~9s against pdftotext's ~0s for
+-- near-identical output on a text-layer PDF, so it is a fallback and never the
+-- default. Both are free, so escalating between them needs no permission; tier
+-- 3 (`ai`) costs money and is therefore never automatic — the caller must ask
+-- for it explicitly.
+--
+-- Escalation only applies when the caller took the default. An explicit
+-- `--pdf-backend docling|liteparse|ai` is a decision, not a starting point, and
+-- is left alone. (Note `liteparse` is NOT an OCR fallback: it infers headings
+-- from font sizes in the existing text layer and fails on scans exactly as
+-- pdftotext does.)
+export func parsePdfWithFallback(backend: string, filepath: string, projectRoot: string)
+    -> Result[PdfParseOutcome, string] ! {Process} =
+  match parsePdfViaBackend(backend, filepath, projectRoot) {
+    Ok(res) => Ok({doc: res, backendUsed: backend}),
+    Err(firstErr) =>
+      if backend != "pdftotext" then Err(firstErr)
+      else match parsePdfViaBackend("docling", filepath, projectRoot) {
+        Ok(res) => Ok({doc: res, backendUsed: "docling"}),
+        Err(ocrErr) =>
+          Err("no text layer (pdftotext: ${firstErr}) and OCR found nothing (docling: ${ocrErr})")
+      }
+  }
+
 -- Fetch word positions for a PDF via the adapter's "words" backend
 -- (poppler `pdftotext -bbox`), used to resolve what a highlight covers.
 --

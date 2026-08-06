@@ -300,6 +300,28 @@ BACKENDS = {
 NON_BLOCK_BACKENDS = {"words"}
 
 
+_PLACEHOLDER_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def _has_substance(blocks: list[dict]) -> bool:
+    """True if any block carries real content, ignoring markdown placeholders.
+
+    Docling emits `<!-- image -->` for a page it could not read text from. Those
+    are structurally valid blocks with no information in them, so "did we get
+    any blocks?" is the wrong question — "did we get anything a reader could
+    use?" is the right one. Tables and lists count as substance even with no
+    text of their own.
+    """
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        if b.get("kind") in ("table", "list", "image"):
+            return True
+        if _PLACEHOLDER_RE.sub("", b.get("text", "")).strip():
+            return True
+    return False
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("ERR: usage: adapter.py <backend> <pdf_path>", file=sys.stderr)
@@ -339,7 +361,14 @@ def main() -> int:
     # Empty guard: a backend that extracts nothing is a failure, not an empty
     # success. Fail loudly so the AILANG bridge surfaces it instead of writing
     # a 1-byte "succeeded" file (the silent-failure shape we're eliminating).
-    if backend not in NON_BLOCK_BACKENDS and not doc.get("blocks"):
+    #
+    # Counting blocks is not enough. Docling on a PDF with no recoverable text
+    # returns placeholder blocks rather than none:
+    #     {"kind": "text", "text": "<!-- image -->"}
+    # That is a non-empty block list, so a naive count sails through this guard
+    # and the caller indexes "<!-- image -->" as the document's content — a
+    # silent empty success wearing a success exit code. Judge on substance.
+    if backend not in NON_BLOCK_BACKENDS and not _has_substance(doc.get("blocks") or []):
         print(
             f"ERR: backend '{backend}' extracted no content (0 blocks) from "
             f"{pdf.name}. For scanned/image-only PDFs with no text layer, "

@@ -331,8 +331,15 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
 }
 
 -- Check if a MIME type is an Office ZIP format (DOCX/PPTX/XLSX)
-pure func emlIsOfficeMime(mimeType: string) -> bool {
+-- Attachments whose bytes are worth keeping for the second pass to parse.
+--
+-- Anything not matched here is reduced to a `[attachment: name, mime]`
+-- placeholder and its base64 is DISCARDED, so this predicate decides what can
+-- ever be read. PDF belongs here: it is the most common attachment type in
+-- practice, and pdftotext extracts it deterministically for free.
+pure func emlIsResolvableMime(mimeType: string) -> bool {
   let mt = toLower(mimeType);
+  mt == "application/pdf" ||
   contains(mt, "wordprocessingml") ||
   contains(mt, "spreadsheetml") ||
   contains(mt, "presentationml") ||
@@ -350,9 +357,11 @@ pure func emlStripBodyWhitespace(body: string) -> string {
 }
 
 -- Map an Office MIME type to its file extension
-pure func emlOfficeExtension(mimeType: string) -> string {
+-- Extension the second pass uses to pick a parser for the preserved bytes
+pure func emlResolvableExtension(mimeType: string) -> string {
   let mt = toLower(mimeType);
-  if contains(mt, "wordprocessingml") then "docx"
+  if mt == "application/pdf" then "pdf"
+  else if contains(mt, "wordprocessingml") then "docx"
   else if contains(mt, "spreadsheetml") then "xlsx"
   else if contains(mt, "presentationml") then "pptx"
   else "bin"
@@ -398,10 +407,10 @@ pure func emlParseMimePart(part: string) -> [Block] {
       let metaBlock = TextBlock({text: "${filename} (${mimeType})", style: "attachment-meta", level: 0});
       [SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks})]
     }
-    else if emlIsOfficeMime(mimeType) then {
-      -- Office attachment: preserve base64 data for two-pass resolution
+    else if emlIsResolvableMime(mimeType) then {
+      -- Resolvable attachment (Office, PDF): preserve base64 for the second pass
       let rawBody = emlStripBodyWhitespace(splitResult.body);
-      let ext = emlOfficeExtension(mimeType);
+      let ext = emlResolvableExtension(mimeType);
       let metaBlock = TextBlock({text: "${filename} (${mimeType})", style: "attachment-meta", level: 0});
       let dataBlock = TextBlock({text: rawBody, style: "attachment-data", level: 0});
       let extBlock = TextBlock({text: ext, style: "attachment-ext", level: 0});
