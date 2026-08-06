@@ -152,7 +152,13 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
       "html" => parseHtmlDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "epub" => parseEpubDocument(filepath, useAI || doSummarize, doSummarize, convertTarget),
       "zip-odf" => parseOdfDocument(filepath, ext, useAI || doSummarize, doSummarize, convertTarget),
-      "email" => parseEmailDocument(filepath, ext, hasFlag(args, "--threaded"), hasFlag(args, "--deep")),
+      -- --deep also reads from DOCPARSE_DEEP because AILANG batch mode treats
+      -- every remaining argv entry as an input path: passing "file --deep"
+      -- per file made --deep itself a (failing) input, which is why batch runs
+      -- reported "4/4 succeeded" for 2 files. Env survives batch intact.
+      "email" => parseEmailDocument(filepath, ext,
+                   hasFlag(args, "--threaded") || getEnvOr("DOCPARSE_THREADED", "") == "1",
+                   hasFlag(args, "--deep") || getEnvOr("DOCPARSE_DEEP", "") == "1"),
       "latex" => parseLatexDocument(filepath, useAI || doSummarize, convertTarget),
       "rtf" => parseRtfDocument(filepath, convertTarget),
       "text" => parseTextDocument(filepath),

@@ -255,6 +255,8 @@ BUDGET=false
 OUTPUT_DIR=""
 PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-pdftotext}"
 EXTRA_FLAGS=()
+DEEP_REQUESTED=false
+THREADED_REQUESTED=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -316,6 +318,18 @@ while [ $# -gt 0 ]; do
           ;;
       esac
       shift 2
+      ;;
+    # Module flags, not ailang flags. Without these cases they fall through to
+    # EXTRA_FLAGS below, which is passed to `ailang` ahead of the .ail file —
+    # so ailang rejects them and the program never sees them. --deep in
+    # particular silently did nothing through this wrapper.
+    --deep)
+      DEEP_REQUESTED=true
+      shift
+      ;;
+    --threaded)
+      THREADED_REQUESTED=true
+      shift
       ;;
     -*)
       EXTRA_FLAGS+=("$1")
@@ -388,6 +402,14 @@ for f in "${RESOLVED_FILES[@]}"; do
         NEEDS_AI=true
         NEEDS_PROCESS=true  # AI backend still calls pdftotext first; needs Process cap
       else
+        NEEDS_PROCESS=true
+      fi
+      ;;
+    eml|mbox)
+      # --deep resolves PDF attachments, which shells out to the PDF backend.
+      # Without Process the resolver dies mid-parse with "effect 'Process'
+      # requires capability" after already reporting "Resolving attachments...".
+      if [ "${DEEP_REQUESTED:-false}" = "true" ]; then
         NEEDS_PROCESS=true
       fi
       ;;
@@ -474,6 +496,15 @@ fi
 ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
 if [ "$PDF_BACKEND" != "ai" ]; then
   ENV_PREFIX+=(DOCPARSE_PROJECT_ROOT="$PROJECT_DIR")
+fi
+
+# Batch mode consumes every trailing argv entry as an input path, so module
+# flags must travel as environment — see docparse/main.ail's DOCPARSE_DEEP note.
+if [ "$DEEP_REQUESTED" = "true" ]; then
+  ENV_PREFIX+=(DOCPARSE_DEEP=1)
+fi
+if [ "$THREADED_REQUESTED" = "true" ]; then
+  ENV_PREFIX+=(DOCPARSE_THREADED=1)
 fi
 
 run_cmd() {
