@@ -21,6 +21,38 @@ instead of a clear resolver error. Tightened the constraint in `ailang.toml` (an
 the `docs/ailang` mirror) so unsupported toolchains fail fast at resolve time.
 No code changes.
 
+### v0.27.0 — document chunking (`docparse/services/chunker`)
+
+Implements the long-planned chunker from
+`design_docs/planned/unscheduled/chunking.md`. Chunking decides what is
+*findable*: an embedding has a finite window, and text past it is not
+represented at all. Measured on a real 65k-message mail archive, appending PDF
+text to message bodies and embedding the first 3,000 characters left **14M
+characters** of successfully-extracted text outside every vector — present in
+the output, invisible to semantic search.
+
+- **Four deterministic strategies.** `FixedSize` (token budget + overlap),
+  `ByStructure` (new chunk at each heading), `BySection` (one per slide / sheet
+  / attachment), and `Auto`, which picks from the document's actual composition
+  — tabular and slide formats go to `BySection`, documents with headings to
+  `ByStructure`, everything else to `FixedSize`.
+- **`BySimilarity` from the design doc is deliberately omitted.** It needs an AI
+  round-trip, and a chunker that silently costs money is the wrong default.
+  Chunking stays deterministic and free.
+- **Blocks are never split.** A table stays whole even when it exceeds the
+  budget — an oversized intact table beats two halves of one.
+- **Tables keep their contents.** Chunk text uses a chunk-specific renderer,
+  not `blockText`, which renders a table as the placeholder `[table]`. Without
+  this a chunk would claim to cover a payment schedule while containing none of
+  it (verified: `tables.docx` went from 10 to 61 estimated tokens once cells
+  were included).
+- **Provenance for citation.** Each chunk carries `headingContext` (nearest
+  heading above it), `sectionKind`, block index range and `hasTable`, so a
+  passage lifted out of a contract can be shown with the clause it came from.
+- **Token counts are estimates** (`words × 1.3`, per the design doc's option 1)
+  — no tokenizer in AILANG and no model call. Callers sizing against a hard
+  model limit should leave headroom.
+
 ### v0.26.0 — email attachments: PDF extraction with an OCR fallback
 
 Enables the `email-parse` M6 milestone. Measuring that archive found 8,323

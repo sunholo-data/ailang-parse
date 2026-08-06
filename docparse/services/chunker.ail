@@ -1,0 +1,268 @@
+module docparse/services/chunker
+
+import std/string (length, trim, join, split, intToStr)
+import std/list (map, filter, reverse, concat, length as listLength, foldl)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock,
+    ImageBlock, SectionBlock, ChangeBlock, CommentBlock, LinkBlock, ParsedDocument,
+    TableCell, cellText, blockText, isHeading)
+
+-- Document chunking for RAG pipelines.
+--
+-- Downstream consumers embed documents, and an embedding has a finite window:
+-- text past it is simply not represented. Splitting is therefore not a
+-- convenience, it decides what is findable at all. Measured on a real mail
+-- archive, appending PDF text to a message body and embedding the first 3,000
+-- characters left 14M characters of extracted text outside every vector —
+-- present in the output, invisible to semantic search.
+--
+-- What makes this better than splitting a wall of text: the Block ADT already
+-- carries the document's structure. A heading is known to be a heading, a table
+-- is known to be a table. Chunks can respect boundaries a text-only splitter
+-- has to guess at, and can never cut a table in half.
+
+-- How to divide a document.
+--   FixedSize   — token budget with overlap; works on anything, respects
+--                 nothing. The fallback.
+--   ByStructure — start a new chunk at each heading, so chunks match the
+--                 author's own organisation.
+--   BySection   — one chunk per SectionBlock (slide, sheet, attachment,
+--                 header/footer). Natural for decks and spreadsheets.
+--   Auto        — pick from the document's actual composition.
+export type ChunkStrategy = Auto({maxTokens: int, overlap: int})
+                          | FixedSize({maxTokens: int, overlap: int})
+                          | ByStructure({maxTokens: int, groupUnderHeadings: bool})
+                          | BySection({maxTokens: int, includeMeta: bool})
+
+-- A chunk plus the provenance needed to cite it.
+--
+-- headingContext is the nearest heading above the chunk: a passage lifted out
+-- of a contract is much less useful when the reader cannot see which clause it
+-- came from.
+export type Chunk = {
+  id: int,
+  text: string,
+  tokenCount: int,
+  startBlockIndex: int,
+  endBlockIndex: int,
+  headingContext: string,
+  sectionKind: string,
+  hasTable: bool
+}
+
+-- Approximate token count.
+--
+-- AILANG has no tokenizer, and the design doc's three options are
+-- word*1.3, an AI round-trip, or chars/4. We use words*1.3: it needs no model
+-- call (chunking must stay deterministic and free), and it tracks real
+-- tokenizers better than chars/4 on prose, which is what documents mostly are.
+--
+-- This is an ESTIMATE. Callers sizing against a hard model limit should leave
+-- headroom rather than treat the number as exact.
+export pure func estimateTokens(text: string) -> int {
+  let words = listLength(filter(\w. length(w) > 0, split(trim(text), " ")));
+  words + (words * 3) / 10
+}
+
+-- Chunk a parsed document.
+export pure func chunkDocument(doc: ParsedDocument, strategy: ChunkStrategy) -> [Chunk] =
+  match strategy {
+    Auto(a) => chunkDocument(doc, chunkerResolveAuto(doc, a.maxTokens, a.overlap)),
+    FixedSize(f) => chunkerFixed(doc.blocks, f.maxTokens, f.overlap),
+    ByStructure(s) => chunkerByStructure(doc.blocks, s.maxTokens),
+    BySection(s) => chunkerBySection(doc.blocks, s.maxTokens)
+  }
+
+-- Resolve Auto against what the document actually contains.
+--
+-- Deliberately only inspects structure that is already known — no guessing, no
+-- model call. BySimilarity from the design doc is omitted: it needs an AI
+-- round-trip, and a chunker that silently costs money is the wrong default.
+export pure func chunkerResolveAuto(doc: ParsedDocument, maxTokens: int, overlap: int) -> ChunkStrategy {
+  let fmt = doc.format;
+  let tabularOrSlides = fmt == "xlsx" || fmt == "ods" || fmt == "csv" ||
+                        fmt == "pptx" || fmt == "odp";
+  if tabularOrSlides then BySection({maxTokens: maxTokens, includeMeta: true})
+  else if chunkerHasHeading(doc.blocks) then ByStructure({maxTokens: maxTokens, groupUnderHeadings: true})
+  else if chunkerHasSection(doc.blocks) then BySection({maxTokens: maxTokens, includeMeta: true})
+  else FixedSize({maxTokens: maxTokens, overlap: overlap})
+}
+
+pure func chunkerHasHeading(blocks: [Block]) -> bool =
+  match filter(isHeading, blocks) { [] => false, _ => true }
+
+pure func chunkerHasSection(blocks: [Block]) -> bool =
+  match filter(chunkerIsSection, blocks) { [] => false, _ => true }
+
+pure func chunkerIsSection(b: Block) -> bool =
+  match b { SectionBlock(_) => true, _ => false }
+
+-- === FixedSize ============================================================
+--
+-- Accumulate blocks until the token budget is reached, then start a new chunk.
+-- A block is never split, so a table or a long paragraph stays whole even if it
+-- exceeds the budget on its own — an oversized intact table is more useful than
+-- two halves of one.
+pure func chunkerFixed(blocks: [Block], maxTokens: int, overlap: int) -> [Chunk] =
+  chunkerFixedGo(blocks, maxTokens, overlap, 0, [], 0, "", reverse([]))
+
+pure func chunkerFixedGo(blocks: [Block], maxTokens: int, overlap: int, idx: int,
+                          pending: [Block], startIdx: int, heading: string,
+                          acc: [Chunk]) -> [Chunk] =
+  match blocks {
+    [] =>
+      if listLength(pending) == 0 then reverse(acc)
+      else reverse(chunkerEmit(pending, startIdx, idx - 1, heading, "", listLength(acc)) :: acc),
+    b :: rest => {
+      let nextHeading = chunkerHeadingOf(b, heading);
+      let candidate = concat(pending, [b]);
+      let tokens = estimateTokens(chunkerJoin(candidate));
+      if tokens > maxTokens && listLength(pending) > 0
+      then {
+        let chunk = chunkerEmit(pending, startIdx, idx - 1, heading, "", listLength(acc));
+        -- Overlap re-includes the tail of the previous chunk so a sentence
+        -- spanning a boundary is still wholly present in one of them.
+        let carry = chunkerOverlapTail(pending, overlap);
+        chunkerFixedGo(rest, maxTokens, overlap, idx + 1,
+                       concat(carry, [b]), idx - listLength(carry), nextHeading, chunk :: acc)
+      }
+      else chunkerFixedGo(rest, maxTokens, overlap, idx + 1, candidate,
+                          if listLength(pending) == 0 then idx else startIdx, nextHeading, acc)
+    }
+  }
+
+-- Trailing blocks worth about `overlap` tokens, kept for the next chunk
+pure func chunkerOverlapTail(blocks: [Block], overlap: int) -> [Block] =
+  if overlap <= 0 then []
+  else chunkerTakeTail(reverse(blocks), overlap, [])
+
+pure func chunkerTakeTail(revBlocks: [Block], budget: int, acc: [Block]) -> [Block] =
+  match revBlocks {
+    [] => acc,
+    b :: rest => {
+      let t = estimateTokens(blockText(b));
+      if t > budget then acc
+      else chunkerTakeTail(rest, budget - t, b :: acc)
+    }
+  }
+
+-- === ByStructure ==========================================================
+--
+-- A heading opens a new chunk. Chunks then match the author's own divisions,
+-- which is what a reader means by "the termination section".
+pure func chunkerByStructure(blocks: [Block], maxTokens: int) -> [Chunk] =
+  chunkerStructGo(blocks, maxTokens, 0, [], 0, "", [])
+
+pure func chunkerStructGo(blocks: [Block], maxTokens: int, idx: int, pending: [Block],
+                           startIdx: int, heading: string, acc: [Chunk]) -> [Chunk] =
+  match blocks {
+    [] =>
+      if listLength(pending) == 0 then reverse(acc)
+      else reverse(chunkerEmit(pending, startIdx, idx - 1, heading, "", listLength(acc)) :: acc),
+    b :: rest => {
+      let startsNew = isHeading(b) && listLength(pending) > 0;
+      let overBudget = estimateTokens(chunkerJoin(concat(pending, [b]))) > maxTokens
+                       && listLength(pending) > 0;
+      if startsNew || overBudget
+      then {
+        let chunk = chunkerEmit(pending, startIdx, idx - 1, heading, "", listLength(acc));
+        chunkerStructGo(rest, maxTokens, idx + 1, [b], idx,
+                        chunkerHeadingOf(b, heading), chunk :: acc)
+      }
+      else chunkerStructGo(rest, maxTokens, idx + 1, concat(pending, [b]),
+                           if listLength(pending) == 0 then idx else startIdx,
+                           chunkerHeadingOf(b, heading), acc)
+    }
+  }
+
+-- === BySection ============================================================
+--
+-- One chunk per SectionBlock — a slide, a sheet, an email attachment. Top-level
+-- blocks outside any section are gathered into a chunk of their own so nothing
+-- is dropped.
+pure func chunkerBySection(blocks: [Block], maxTokens: int) -> [Chunk] =
+  chunkerSectionGo(blocks, maxTokens, 0, [], [])
+
+pure func chunkerSectionGo(blocks: [Block], maxTokens: int, idx: int,
+                            loose: [Block], acc: [Chunk]) -> [Chunk] =
+  match blocks {
+    [] =>
+      if listLength(loose) == 0 then reverse(acc)
+      else reverse(chunkerEmit(loose, idx - listLength(loose), idx - 1, "", "", listLength(acc)) :: acc),
+    b :: rest =>
+      match b {
+        SectionBlock(s) => {
+          -- Flush anything loose first so document order is preserved
+          let flushed = if listLength(loose) == 0 then acc
+            else chunkerEmit(loose, idx - listLength(loose), idx - 1, "", "", listLength(acc)) :: acc;
+          -- A section larger than the budget is split further rather than
+          -- emitted oversized; a 40-page attachment is one section but not
+          -- one embeddable unit.
+          let inner = if estimateTokens(chunkerJoin(s.blocks)) > maxTokens
+            then chunkerFixed(s.blocks, maxTokens, 0)
+            else [chunkerEmit(s.blocks, idx, idx, "", s.kind, 0)];
+          let tagged = map(\c. chunkerWithKind(c, s.kind), inner);
+          chunkerSectionGo(rest, maxTokens, idx + 1, [],
+                           concat(reverse(tagged), flushed))
+        },
+        _ => chunkerSectionGo(rest, maxTokens, idx + 1, concat(loose, [b]), acc)
+      }
+  }
+
+pure func chunkerWithKind(c: Chunk, kind: string) -> Chunk =
+  { id: c.id, text: c.text, tokenCount: c.tokenCount,
+    startBlockIndex: c.startBlockIndex, endBlockIndex: c.endBlockIndex,
+    headingContext: c.headingContext, sectionKind: kind, hasTable: c.hasTable }
+
+-- === Shared ===============================================================
+
+pure func chunkerEmit(blocks: [Block], startIdx: int, endIdx: int, heading: string,
+                       kind: string, id: int) -> Chunk {
+  let text = chunkerJoin(blocks);
+  {
+    id: id,
+    text: text,
+    tokenCount: estimateTokens(text),
+    startBlockIndex: startIdx,
+    endBlockIndex: endIdx,
+    headingContext: heading,
+    sectionKind: kind,
+    hasTable: chunkerHasTable(blocks)
+  }
+}
+
+pure func chunkerJoin(blocks: [Block]) -> string =
+  trim(join("\n", filter(\t. length(t) > 0, map(chunkerBlockText, blocks))))
+
+-- Text of a block AS A CHUNK SEES IT.
+--
+-- Not `blockText`: that renders a table as the placeholder "[table]", which
+-- would drop every figure in a spreadsheet or a contract's payment schedule out
+-- of the embedding — the chunk would claim to cover the table while containing
+-- none of it. Cells are flattened row by row instead.
+pure func chunkerBlockText(b: Block) -> string =
+  match b {
+    TableBlock(t) => chunkerTableText(t.headers, t.rows),
+    _ => blockText(b)
+  }
+
+pure func chunkerTableText(headers: [TableCell], rows: [[TableCell]]) -> string {
+  let head = chunkerRowText(headers);
+  let body = join("\n", map(chunkerRowText, rows));
+  if length(head) > 0 then "${head}\n${body}" else body
+}
+
+pure func chunkerRowText(cells: [TableCell]) -> string =
+  join(" | ", filter(\t. length(t) > 0, map(cellText, cells)))
+
+pure func chunkerHasTable(blocks: [Block]) -> bool =
+  match filter(chunkerIsTable, blocks) { [] => false, _ => true }
+
+pure func chunkerIsTable(b: Block) -> bool =
+  match b { TableBlock(_) => true, _ => false }
+
+-- Nearest heading at or above this block, for chunk provenance
+pure func chunkerHeadingOf(b: Block, current: string) -> string =
+  match b {
+    HeadingBlock(h) => h.text,
+    _ => current
+  }
