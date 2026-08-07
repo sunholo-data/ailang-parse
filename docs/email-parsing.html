@@ -265,7 +265,7 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
         </div>
         <div class="dp-feature-card">
           <h4>Attachments &mdash; Parsed Inline</h4>
-          <p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline as <code>SectionBlock</code> with kind <code>attachment</code>. Binary attachments are identified by filename and MIME type. <a href="#attachment-chain">See details below</a>.</p>
+          <p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline as <code>SectionBlock</code> with kind <code>attachment</code>. With <code>--deep</code>, PDF and Office attachments are resolved too &mdash; PDFs with an automatic OCR fallback. Images are identified by filename and MIME type. <a href="#attachment-chain">See details below</a>.</p>
         </div>
       </div>
 
@@ -331,7 +331,7 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
   ]
 }</code></pre>
 
-      <p>With <code>--deep</code>, Office attachments get the same treatment &mdash; a DOCX attachment is decoded, extracted, and parsed into paragraphs and tables:</p>
+      <p>With <code>--deep</code>, PDF and Office attachments get the same treatment &mdash; a DOCX attachment is decoded, extracted, and parsed into paragraphs and tables:</p>
 
 <pre><code class="language-bash"># Parse email + resolve Office attachments
 ailang run --entry main --caps IO,FS,Env \
@@ -419,7 +419,7 @@ ailang run --entry main --caps IO,FS,Env \
         </div>
         <div class="dp-usecase-card">
           <h4>Multi-Format Document Pipelines</h4>
-          <p>CSV, HTML, and Markdown attachments are parsed inline automatically. A single API call returns the email body <em>and</em> the table data from the attached spreadsheet &mdash; no second parse step needed. Binary attachments (PDF, images) are identified for downstream AI processing.</p>
+          <p>CSV, HTML, and Markdown attachments are parsed inline automatically. A single API call returns the email body <em>and</em> the table data from the attached spreadsheet &mdash; no second parse step needed. With <code>--deep</code>, PDF and Office attachments are resolved in the same pass, scanned PDFs included via local OCR.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Compliance &amp; E-Discovery</h4>
@@ -530,7 +530,7 @@ for block in result.blocks:
         </details>
         <details>
           <summary>Are email attachments parsed automatically?</summary>
-          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the <code>--deep</code> flag, DOCX, PPTX, and XLSX attachments are also extracted and parsed using the full Office parser.</p></div>
+          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the <code>--deep</code> flag, PDF, DOCX, PPTX, and XLSX attachments are also extracted and parsed. PDF attachments use a free backend ladder: <code>pdftotext</code> first, escalating automatically to local OCR (<code>docling</code>) when the PDF has no text layer &mdash; a scanned contract, say.</p></div>
         </details>
         <details>
           <summary>Can I reconstruct email threads from an MBOX file?</summary>
