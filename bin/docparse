@@ -169,6 +169,7 @@ do_eval() {
   local pass=0
   local fail=0
   local total=0
+  local skipped=0
   local eval_tmpdir
   eval_tmpdir="$(mktemp -d)"
   trap "rm -rf '$eval_tmpdir'" EXIT
@@ -203,18 +204,52 @@ do_eval() {
     local fname
     fname="$(basename "$golden" .json)"
     local output_json="$eval_tmpdir/${fname}.json"
+    # Phase 1 only parses goldens whose source file exists locally. Apply the
+    # SAME filter here — 93 goldens are committed but only ~58 sources are in
+    # the tree (the rest come from benchmarks/download_test_files.sh). Counting
+    # those as failures made the summary arithmetically impossible
+    # ("56/58 passed (37 failures)") and buried the 2 real failures in 35 that
+    # were never going to run.
+    if [ ! -f "$test_dir/$fname" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
     if [ ! -f "$output_json" ]; then
+      echo "    $fname: FAIL (source present but produced no output JSON)"
       fail=$((fail + 1))
       continue
     fi
     local eval_out
-    eval_out=$(ailang run --entry evalMain --caps IO,FS,Env docparse/services/eval.ail "$golden" "$output_json" 2>&1)
+    local eval_rc
+    # `|| true` is load-bearing. This script runs under `set -euo pipefail`, so
+    # without it a non-zero `ailang run` makes the ASSIGNMENT non-zero, `set -e`
+    # fires, and the whole script dies mid-loop — no summary, no FAIL line, and
+    # an exit code that looks like an ordinary failure. The else-branch below
+    # was written to report exactly this case and could never run.
+    #
+    # Observed: --eval reported 6 of 58 files and exited 1, which read as
+    # "everything before this passed" rather than "the harness gave up".
+    # Capture the status in the `if` condition rather than with `|| true` —
+    # `|| true` would reset $? to 0 and the reported rc would always be a lie.
+    #
+    # NOTE: deliberately NOT raising --max-recursion-depth here. Phase 1 uses
+    # 50000 for parsing, and mirroring that in the scoring loop was tried and
+    # reverted: it did not make the two Gutenberg EPUBs pass (they still score
+    # <100, just with rc=0 instead of RT_REC_003), and running 50k-frame
+    # interpreter stacks across every file is memory-hungry enough to hurt the
+    # host. A recursion failure here is a genuine result worth recording, not
+    # something to paper over with a bigger stack.
+    if eval_out=$(ailang run --entry evalMain --caps IO,FS,Env \
+         docparse/services/eval.ail "$golden" "$output_json" 2>&1)
+    then eval_rc=0
+    else eval_rc=$?
+    fi
     if echo "$eval_out" | grep -q "Score: 100"; then
       echo "    $fname: 100%"
       pass=$((pass + 1))
     else
-      echo "    $fname: FAIL"
-      echo "$eval_out" | head -5
+      echo "    $fname: FAIL (rc=$eval_rc)"
+      echo "$eval_out" | head -5 | sed 's/^/      /'
       fail=$((fail + 1))
     fi
   done
@@ -222,6 +257,14 @@ do_eval() {
   rm -rf "$eval_tmpdir"
   echo ""
   echo "AILANG eval: $pass/$total passed ($fail failures)"
+  if [ "$skipped" -gt 0 ]; then
+    echo "  ($skipped golden files skipped — source not in data/test_files;"
+    echo "   run benchmarks/download_test_files.sh to include them)"
+  fi
+  # Fail the command when any file fails, so CI and callers can gate on it.
+  # Previously this always returned 0 (or died early), so a regression could
+  # not be detected by exit status.
+  [ "$fail" -eq 0 ]
 }
 
 do_prove() {

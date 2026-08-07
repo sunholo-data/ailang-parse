@@ -252,11 +252,38 @@ pure func evalIsCellMerged(cell: Json) -> bool =
 pure func evalTokenize(text: string) -> [string] =
   splitWords(toLower(text))
 
--- Collect unique words from elements.
--- Hash-based dedup is O(n), but AILANG JSON decode + flatMap on 2800+ elements
--- still OOMs on large docs (Moby Dick 1.4MB JSON). Cap at 10000 words (~40 pages).
+-- Word budget for the Jaccard comparison (~40 pages of prose). Comparing more
+-- than this adds nothing to a similarity score and costs a lot of memory.
+pure func evalWordBudget() -> int = 10000
+
+-- Collect unique words from elements, never materialising the full token list.
+--
+-- The previous form was:
+--   dedup(take(10000, flatMap(\el. evalTokenize(el.elText), elements)))
+-- which cannot bound memory. AILANG is strict, so flatMap builds EVERY token
+-- for every element first and take discards the excess afterwards — on Moby
+-- Dick that is the entire book tokenised before a single word is dropped. The
+-- 10000 cap bounded the OUTPUT, never the PEAK, which is why this still OOM'd
+-- despite the cap (and forced a host restart twice).
+--
+-- evalTakeWords walks elements with a shrinking budget and stops as soon as it
+-- is exhausted. Output is identical — the same first 10000 tokens in the same
+-- order — but peak allocation is bounded by the budget, and on a long document
+-- it also recurses over far fewer elements before returning.
 pure func evalCollectWords(elements: [EvalElement]) -> [string] =
-  dedup(take(10000, flatMap(\el. evalTokenize(el.elText), elements)))
+  dedup(evalTakeWords(elements, evalWordBudget()))
+
+pure func evalTakeWords(elements: [EvalElement], budget: int) -> [string] =
+  if budget <= 0 then []
+  else match elements {
+    [] => [],
+    el :: rest => {
+      -- Tokenise ONE element (bounded by that block's text), take only what
+      -- the remaining budget allows, and recurse with the budget reduced.
+      let ws = take(budget, evalTokenize(el.elText));
+      concat(ws, evalTakeWords(rest, budget - listLength(ws)))
+    }
+  }
 
 -- ================================================================
 -- Jaccard Similarity
