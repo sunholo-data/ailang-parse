@@ -40,18 +40,22 @@ module docparse/services/orchestrator
 
 import std/string (length, toLower)
 import std/list (concat, length as listLength)
-import std/fs (readFile)
+import std/fs (readFile, writeFileBytes, removeFile)
+import std/bytes (fromBase64)
+import std/option (Some, None)
+import std/io (println)
 import std/result (Ok, Err)
 import std/ai (AIError)
 
 import docparse/types/document (
-  Block, TextBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks
+  Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata,
+  countBlocks, filterImages
 )
 import docparse/services/format_router (detectFormat, getExtension, officeType)
 
 -- Deterministic parsers (all ! {FS} or pure)
 import docparse/services/docx_parser (
-  parseDocxWithComments, parseDocxHeaders, parseDocxFooters,
+  parseDocx, parseDocxWithComments, parseDocxHeaders, parseDocxFooters,
   parseDocxFootnotes, parseDocxEndnotes, parseDocxImages, parseDocxMetadata
 )
 import docparse/services/pptx_parser (parsePptx, parsePptxImages, parsePptxMetadata)
@@ -74,11 +78,12 @@ import docparse/services/rtf_parser (parseRtf)
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
-import docparse/services/pdf_backend_external (parsePdfViaBackend, fetchPdfWords)
+import docparse/services/pdf_backend_external (parsePdfViaBackend, parsePdfWithFallback, fetchPdfWords)
 import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocksAnchored)
 import docparse/services/direct_ai_parser (
   parsePdfResult, parsePdfMetadata, parseDocumentImage, parseAudio, parseVideo
 )
+import docparse/services/layout_ai (describeImages, enhanceBlocks, dirOf)
 
 -- =====================================================================
 -- Types
@@ -150,7 +155,7 @@ export func parseDocumentPure(filepath: string, opts: ParseOptions)
   else if format == "html" then Ok(orchHtml(filepath))
   else if format == "markdown" then Ok(orchMarkdown(filepath))
   else if format == "csv" then Ok(orchCsv(filepath, ext))
-  else if format == "email" then Ok(orchEmail(filepath, ext, opts))
+  else if format == "email" then Ok(orchNoteDeepUnavailable(orchEmail(filepath, ext, opts), opts))
   else if format == "rtf" then Ok(orchRtf(filepath))
   else if format == "text" then Ok(orchText(filepath))
   else Err(orchPureRefusal(format))
@@ -189,7 +194,11 @@ func orchOffice(filepath: string, ext: string, opts: ParseOptions)
   }
   else if kind == "powerpoint" then {
     let body = parsePptx(filepath);
-    let images = if opts.extractImages then parsePptxImages(filepath) else [];
+    -- PPTX image extraction has always been opt-in behind useAI, unlike DOCX
+    -- where it is unconditional. Preserved deliberately: switching PPTX to
+    -- extractImages would change output for every existing caller. The
+    -- inconsistency is worth resolving, but not silently inside a refactor.
+    let images = if opts.useAI then parsePptxImages(filepath) else [];
     let blocks = concat(body, images);
     Ok(mkOutcome("pptx", filepath, parsePptxMetadata(filepath), blocks,
       ["Parsed PPTX: ${show(countBlocks(blocks))} blocks"], [], 0))
@@ -260,12 +269,22 @@ func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcom
                else if isMbox then parseMbox(content)
                else parseEml(content);
   let meta = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
-  let warn = if opts.deep
-    then ["deep attachment resolution skipped: parseDocumentPure cannot shell out; use parseDocument"]
-    else [];
   mkOutcome("email", filepath, meta, blocks,
-    ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], warn, 0)
+    ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], [], 0)
 }
+
+-- parseDocumentPure cannot resolve attachments (that needs Process for the PDF
+-- ladder), so say so rather than quietly returning a shallow parse when the
+-- caller explicitly asked for --deep. parseDocument does the real work.
+pure func orchNoteDeepUnavailable(outcome: ParseOutcome, opts: ParseOptions) -> ParseOutcome =
+  if opts.deep == false then outcome
+  else {
+    document: outcome.document,
+    warnings: concat(outcome.warnings,
+      ["deep attachment resolution skipped: parseDocumentPure cannot shell out; use parseDocument"]),
+    notes: outcome.notes,
+    aiCallsUsed: outcome.aiCallsUsed
+  }
 
 func orchRtf(filepath: string) -> ParseOutcome ! {FS} = {
   let blocks = parseRtf(readFile(filepath));
@@ -294,12 +313,18 @@ export func parseDocument(filepath: string, opts: ParseOptions)
   -- bundles must be recognised by full filename before format detection.
   let format = if isTarGz(filepath) then "latex" else detectFormat(ext);
   if format == "pdf" then orchPdf(filepath, opts)
-  else if format == "latex" then Ok(orchLatex(filepath))
+  else if format == "latex" then Ok(orchEnrich(filepath, orchLatex(filepath), opts))
   else if format == "image" then Ok(orchMedia(filepath, "image", parseDocumentImage(filepath, orchImageMime(ext))))
   else if format == "audio" then Ok(orchMedia(filepath, "audio", parseAudio(filepath, orchAudioMime(ext))))
   else if format == "video" then Ok(orchMedia(filepath, "video", parseVideo(filepath, orchVideoMime(ext))))
   else match parseDocumentPure(filepath, opts) {
-    Ok(outcome) => Ok(outcome),
+    -- Email + --deep is the one case the deterministic path cannot finish:
+    -- resolving attachments shells out for the PDF ladder. Do it here, then
+    -- enrich as normal.
+    Ok(outcome) =>
+      if format == "email" && opts.deep
+        then Ok(orchEnrich(filepath, orchEmailDeep(outcome, opts), opts))
+        else Ok(orchEnrich(filepath, outcome, opts)),
     -- Deterministic path refused. AI-only formats (image/audio/video) are not
     -- yet routed here; surface the refusal rather than returning empty blocks.
     Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
@@ -307,6 +332,41 @@ export func parseDocument(filepath: string, opts: ParseOptions)
       [], [msg], 0))
   }
 }
+
+-- Optional AI enrichment, applied to an already-parsed document when the
+-- caller opts in: describe embedded images, then self-heal tables/layout.
+--
+-- This is orchestration, not presentation — the CLI's `describe`/`summarize`
+-- modes are just this step turned on — so it belongs here rather than being
+-- re-derived per caller. A no-op when useAI is false, which is the default.
+-- Which formats the CLI has historically enriched. Deliberately NOT every
+-- format: enhanceBlocks costs an AI call per block, so extending it to csv /
+-- markdown / email / rtf / text would silently add spend that the previous
+-- behaviour never incurred. A refactor should not change the bill.
+pure func orchEnrichable(format: string) -> bool =
+  format == "docx" || format == "pptx" || format == "xlsx"
+  || format == "odt" || format == "odp" || format == "ods"
+  || format == "html" || format == "epub" || format == "latex"
+
+func orchEnrich(filepath: string, outcome: ParseOutcome, opts: ParseOptions)
+  -> ParseOutcome ! {AI, FS} =
+  if opts.useAI == false || orchEnrichable(outcome.document.format) == false
+    then outcome
+  else {
+    let imageCount = countBlocks(filterImages(outcome.document.blocks));
+    let described = if imageCount > 0
+      then describeImages(dirOf(filepath), outcome.document.blocks)
+      else {blocks: outcome.document.blocks, warnings: [], aiCalls: 0};
+    let enhanced = enhanceBlocks(described.blocks);
+    {
+      document: {format: outcome.document.format, filename: outcome.document.filename,
+                 metadata: outcome.document.metadata, blocks: enhanced},
+      warnings: concat(outcome.warnings, described.warnings),
+      notes: concat(outcome.notes,
+        if imageCount > 0 then ["Described ${show(imageCount)} images with AI"] else []),
+      aiCallsUsed: outcome.aiCallsUsed + described.aiCalls
+    }
+  }
 
 -- AI-only media (image / audio / video). One shape for all three: the blocks
 -- come straight from the multimodal parser, and the AI call is counted so a
@@ -359,7 +419,7 @@ pure func orchVideoMime(ext: string) -> string =
 -- parsing. Without this a multi-file paper yields its preamble and section
 -- headings and nothing else — measured at 22 blocks vs 120 on a real arXiv
 -- source bundle.
-func orchLatex(filepath: string) -> ParseOutcome ! {IO, FS} = {
+func orchLatex(filepath: string) -> ParseOutcome ! {IO, FS, Process} = {
   -- arXiv source bundles (.tar.gz/.tgz/.tex.gz) extract first; the main .tex
   -- is the one containing \documentclass. Without this the CLI would lose
   -- arXiv support in the migration.
@@ -385,7 +445,7 @@ func orchLatex(filepath: string) -> ParseOutcome ! {IO, FS} = {
 -- A failed extraction degrades to parsing the archive path itself (which will
 -- yield little) rather than aborting — the caller sees the warning.
 func orchResolveTexSource(filepath: string)
-  -> {path: string, notes: [string], warnings: [string]} ! {IO, FS} =
+  -> {path: string, notes: [string], warnings: [string]} ! {IO, FS, Process} =
   if isTarGz(filepath) == false
     then {path: filepath, notes: [], warnings: []}
     else match extractArxivBundle(filepath) {
@@ -460,4 +520,138 @@ func orchPdfAnnotations(filepath: string, projectRoot: string)
       notes: ["Found ${show(listLength(anns))} annotations"],
       warnings: warns
     }
+}
+
+-- =====================================================================
+-- EML deep attachment resolution (moved from main.ail)
+-- =====================================================================
+--
+-- Pass 1 (eml_parser) preserves attachment bytes as base64 for the MIME types
+-- worth resolving; this is pass 2, which decodes them to /tmp and parses each
+-- with the right parser. It was CLI-only, which is why `--deep` did nothing on
+-- the MCP server or the hosted API.
+--
+-- Needs {IO, FS, Process}: Process for the PDF backend ladder, IO for the
+-- progress/warning lines. Those printlns are preserved verbatim rather than
+-- converted to accumulated notes — behaviour-preserving is the priority during
+-- a migration, and threading an accumulator through a mutual recursion is a
+-- separate change worth making on its own.
+
+-- Resolve every attachment in a block tree, returning the rewritten blocks and
+-- how many were resolved. `counter` makes temp filenames unique across a walk.
+func orchEmlResolveAttachments(blocks: [Block], counter: int, projectRoot: string)
+  -> { blocks: [Block], count: int } ! {IO, FS, Process} {
+  match blocks {
+    [] => { blocks: [], count: 0 },
+    block :: rest => {
+      let resolved = orchEmlResolveOneBlock(block, counter, projectRoot);
+      let restResolved = orchEmlResolveAttachments(rest, counter + resolved.count, projectRoot);
+      { blocks: resolved.block :: restResolved.blocks, count: resolved.count + restResolved.count }
+    }
+  }
+}
+
+-- Resolve a single block, recursing into SectionBlocks (threads, mbox messages).
+func orchEmlResolveOneBlock(block: Block, counter: int, projectRoot: string)
+  -> { block: Block, count: int } ! {IO, FS, Process} {
+  match block {
+    SectionBlock(s) => {
+      if s.kind == "attachment" && orchEmlHasData(s.blocks) then {
+        let b64 = orchEmlGetData(s.blocks);
+        let ext = orchEmlGetExt(s.blocks);
+        let meta = orchEmlGetMeta(s.blocks);
+        let tmpPath = "/tmp/ailang_email_attach_${show(counter)}.${ext}";
+        match fromBase64(b64) {
+          Some(bytes) => {
+            writeFileBytes(tmpPath, bytes);
+            let parsedBlocks = orchEmlParseAttachment(tmpPath, ext, projectRoot);
+            removeFile(tmpPath);
+            let metaBlock = TextBlock({text: meta, style: "attachment-meta", level: 0});
+            { block: SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks}), count: 1 }
+          },
+          None => {
+            println("  Warning: Failed to decode base64 for attachment");
+            { block: block, count: 0 }
+          }
+        }
+      }
+      else {
+        let inner = orchEmlResolveAttachments(s.blocks, counter, projectRoot);
+        { block: SectionBlock({kind: s.kind, blocks: inner.blocks}), count: inner.count }
+      }
+    },
+    _ => { block: block, count: 0 }
+  }
+}
+
+-- Parse a resolved attachment by extension.
+--
+-- PDFs go through the pdftotext -> docling ladder. Crucially this NEVER calls
+-- exit(): an attachment that cannot be read is one bad file inside somebody's
+-- mailbox, not a reason to abandon the message — let alone the rest of a batch
+-- (ailang#607, where exit() inside a batch item panics the whole run). The
+-- failure becomes a visible block instead, so it cannot pass for success.
+func orchEmlParseAttachment(filepath: string, ext: string, projectRoot: string)
+  -> [Block] ! {IO, FS, Process} {
+  if ext == "docx" then parseDocx(filepath)
+  else if ext == "xlsx" then parseXlsx(filepath)
+  else if ext == "pptx" then parsePptx(filepath)
+  else if ext == "pdf" then {
+    match parsePdfWithFallback("pdftotext", filepath, projectRoot) {
+      Ok(outcome) => {
+        if outcome.backendUsed != "pdftotext"
+        then println("    (no text layer — recovered via ${outcome.backendUsed} OCR)")
+        else ();
+        outcome.doc.blocks
+      },
+      Err(msg) => {
+        println("    Warning: PDF attachment not readable: ${msg}");
+        [TextBlock({text: "[unreadable PDF attachment: ${msg}]", style: "error", level: 0})]
+      }
+    }
+  }
+  else [TextBlock({text: "[unsupported attachment format: ${ext}]", style: "error", level: 0})]
+}
+
+pure func orchEmlHasData(blocks: [Block]) -> bool =
+  match blocks {
+    [] => false,
+    TextBlock(t) :: rest => if t.style == "attachment-data" then true else orchEmlHasData(rest),
+    _ :: rest => orchEmlHasData(rest)
+  }
+
+pure func orchEmlGetData(blocks: [Block]) -> string =
+  match blocks {
+    [] => "",
+    TextBlock(t) :: rest => if t.style == "attachment-data" then t.text else orchEmlGetData(rest),
+    _ :: rest => orchEmlGetData(rest)
+  }
+
+pure func orchEmlGetExt(blocks: [Block]) -> string =
+  match blocks {
+    [] => "bin",
+    TextBlock(t) :: rest => if t.style == "attachment-ext" then t.text else orchEmlGetExt(rest),
+    _ :: rest => orchEmlGetExt(rest)
+  }
+
+pure func orchEmlGetMeta(blocks: [Block]) -> string =
+  match blocks {
+    [] => "",
+    TextBlock(t) :: rest => if t.style == "attachment-meta" then t.text else orchEmlGetMeta(rest),
+    _ :: rest => orchEmlGetMeta(rest)
+  }
+
+-- Apply deep resolution to an already-parsed email outcome.
+func orchEmailDeep(outcome: ParseOutcome, opts: ParseOptions)
+  -> ParseOutcome ! {IO, FS, Process} = {
+  println("Resolving attachments...");
+  let resolved = orchEmlResolveAttachments(outcome.document.blocks, 0, opts.projectRoot);
+  println("Resolved ${show(resolved.count)} attachment(s).");
+  {
+    document: {format: outcome.document.format, filename: outcome.document.filename,
+               metadata: outcome.document.metadata, blocks: resolved.blocks},
+    warnings: outcome.warnings,
+    notes: concat(outcome.notes, ["Resolved ${show(resolved.count)} attachment(s)"]),
+    aiCallsUsed: outcome.aiCallsUsed
+  }
 }
