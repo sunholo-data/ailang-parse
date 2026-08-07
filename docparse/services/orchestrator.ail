@@ -68,12 +68,17 @@ import docparse/services/eml_parser (
   parseEml, parseMbox, parseMboxThreaded, parseEmlMetadata, parseMboxMetadata
 )
 
+import docparse/services/rtf_parser (parseRtf)
+
 -- Full-ladder only
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
+import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
 import docparse/services/pdf_backend_external (parsePdfViaBackend, fetchPdfWords)
 import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocksAnchored)
-import docparse/services/direct_ai_parser (parsePdfResult, parsePdfMetadata)
+import docparse/services/direct_ai_parser (
+  parsePdfResult, parsePdfMetadata, parseDocumentImage, parseAudio, parseVideo
+)
 
 -- =====================================================================
 -- Types
@@ -146,6 +151,7 @@ export func parseDocumentPure(filepath: string, opts: ParseOptions)
   else if format == "markdown" then Ok(orchMarkdown(filepath))
   else if format == "csv" then Ok(orchCsv(filepath, ext))
   else if format == "email" then Ok(orchEmail(filepath, ext, opts))
+  else if format == "rtf" then Ok(orchRtf(filepath))
   else if format == "text" then Ok(orchText(filepath))
   else Err(orchPureRefusal(format))
 }
@@ -261,6 +267,12 @@ func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcom
     ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], warn, 0)
 }
 
+func orchRtf(filepath: string) -> ParseOutcome ! {FS} = {
+  let blocks = parseRtf(readFile(filepath));
+  mkOutcome("rtf", filepath, emptyMetadata(), blocks,
+    ["Parsed RTF: ${show(countBlocks(blocks))} blocks"], [], 0)
+}
+
 func orchText(filepath: string) -> ParseOutcome ! {FS} = {
   let content = readFile(filepath);
   mkOutcome("text", filepath, emptyMetadata(),
@@ -278,9 +290,14 @@ func orchText(filepath: string) -> ParseOutcome ! {FS} = {
 export func parseDocument(filepath: string, opts: ParseOptions)
   -> Result[ParseOutcome, AIError] ! {IO, FS, AI, Env, Net, Process, Clock} = {
   let ext = toLower(getExtension(filepath));
-  let format = detectFormat(ext);
+  -- getExtension returns only the last dotted suffix (".gz"), so arXiv source
+  -- bundles must be recognised by full filename before format detection.
+  let format = if isTarGz(filepath) then "latex" else detectFormat(ext);
   if format == "pdf" then orchPdf(filepath, opts)
   else if format == "latex" then Ok(orchLatex(filepath))
+  else if format == "image" then Ok(orchMedia(filepath, "image", parseDocumentImage(filepath, orchImageMime(ext))))
+  else if format == "audio" then Ok(orchMedia(filepath, "audio", parseAudio(filepath, orchAudioMime(ext))))
+  else if format == "video" then Ok(orchMedia(filepath, "video", parseVideo(filepath, orchVideoMime(ext))))
   else match parseDocumentPure(filepath, opts) {
     Ok(outcome) => Ok(outcome),
     -- Deterministic path refused. AI-only formats (image/audio/video) are not
@@ -291,24 +308,93 @@ export func parseDocument(filepath: string, opts: ParseOptions)
   }
 }
 
+-- AI-only media (image / audio / video). One shape for all three: the blocks
+-- come straight from the multimodal parser, and the AI call is counted so a
+-- caller can bill or budget it.
+pure func orchMedia(filepath: string, kind: string, blocks: [Block]) -> ParseOutcome =
+  mkOutcome(kind, filepath, emptyMetadata(), blocks,
+    ["Parsed ${kind} via AI: ${show(countBlocks(blocks))} blocks"], [], 1)
+
+-- MIME maps, hoisted out of main.ail — they are orchestration (choosing what
+-- to tell the model a file is), not CLI presentation, so all three callers
+-- need them rather than just the CLI.
+pure func orchImageMime(ext: string) -> string =
+  match ext {
+    "png" => "image/png",
+    "jpg" => "image/jpeg",
+    "jpeg" => "image/jpeg",
+    "gif" => "image/gif",
+    "bmp" => "image/bmp",
+    "webp" => "image/webp",
+    "tiff" => "image/tiff",
+    _ => "image/unknown"
+  }
+
+pure func orchAudioMime(ext: string) -> string =
+  match ext {
+    "wav" => "audio/wav",
+    "mp3" => "audio/mp3",
+    "aiff" => "audio/aiff",
+    "aac" => "audio/aac",
+    "ogg" => "audio/ogg",
+    "flac" => "audio/flac",
+    _ => "audio/unknown"
+  }
+
+pure func orchVideoMime(ext: string) -> string =
+  match ext {
+    "mp4" => "video/mp4",
+    "mpeg" => "video/mpeg",
+    "mov" => "video/mov",
+    "avi" => "video/avi",
+    "flv" => "video/x-flv",
+    "mpg" => "video/mpg",
+    "webm" => "video/webm",
+    "wmv" => "video/wmv",
+    "3gpp" => "video/3gpp",
+    _ => "video/unknown"
+  }
+
 -- LaTeX: resolve \input/\include against the main file's directory BEFORE
 -- parsing. Without this a multi-file paper yields its preamble and section
 -- headings and nothing else — measured at 22 blocks vs 120 on a real arXiv
 -- source bundle.
 func orchLatex(filepath: string) -> ParseOutcome ! {IO, FS} = {
-  let raw = readFile(filepath);
-  let content = expandInputs(texDirname(filepath), raw);
+  -- arXiv source bundles (.tar.gz/.tgz/.tex.gz) extract first; the main .tex
+  -- is the one containing \documentclass. Without this the CLI would lose
+  -- arXiv support in the migration.
+  let resolved = orchResolveTexSource(filepath);
+  let raw = readFile(resolved.path);
+  let content = expandInputs(texDirname(resolved.path), raw);
   let expanded = length(content) != length(raw);
   let blocks = parseLatex(content);
   let m = parseLatexMetadata(content);
   let meta = { title: m.title, author: m.author, created: "", modified: "",
                pageCount: 0 };
-  let notes = if expanded
-    then ["Expanded \\input/\\include: ${show(length(raw))} -> ${show(length(content))} chars",
-          "Parsed LaTeX: ${show(countBlocks(blocks))} blocks"]
-    else ["Parsed LaTeX: ${show(countBlocks(blocks))} blocks"];
-  mkOutcome("latex", filepath, meta, blocks, notes, [], 0)
+  let expandNote = if expanded
+    then ["Expanded \\input/\\include: ${show(length(raw))} -> ${show(length(content))} chars"]
+    else [];
+  mkOutcome("latex", filepath, meta, blocks,
+    concat(resolved.notes,
+      concat(expandNote, ["Parsed LaTeX: ${show(countBlocks(blocks))} blocks"])),
+    resolved.warnings, 0)
 }
+
+-- Resolve a LaTeX input to the actual .tex file to parse. A plain path passes
+-- through untouched; an archive is extracted to /tmp and its main .tex used.
+-- A failed extraction degrades to parsing the archive path itself (which will
+-- yield little) rather than aborting — the caller sees the warning.
+func orchResolveTexSource(filepath: string)
+  -> {path: string, notes: [string], warnings: [string]} ! {IO, FS} =
+  if isTarGz(filepath) == false
+    then {path: filepath, notes: [], warnings: []}
+    else match extractArxivBundle(filepath) {
+      Ok(r) => {path: r.main,
+                notes: ["Extracted archive to ${r.dir}; main .tex: ${r.main}"],
+                warnings: []},
+      Err(msg) => {path: filepath, notes: [],
+                   warnings: ["Archive extraction failed: ${msg}"]}
+    }
 
 -- PDF: backend ladder, then annotations merged on EVERY path.
 --
