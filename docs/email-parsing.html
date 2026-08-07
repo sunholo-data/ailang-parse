@@ -127,7 +127,7 @@
     {"@type": "Question", "name": "What email encodings are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Base64 body decoding, quoted-printable (including multi-byte UTF-8), and RFC 2047 encoded-words for international headers (both B and Q encoding)."}},
     {"@type": "Question", "name": "Can I parse MBOX archives with multiple messages?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction."}},
     {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks (text, heading, section, table) with metadata (title from Subject, author from From, date from Date). Downstream code handles all formats identically."}},
-    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the --deep flag, DOCX, PPTX, and XLSX attachments are also extracted and parsed using the full Office parser."}},
+    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the --deep flag, PDF, DOCX, PPTX, and XLSX attachments are also extracted and parsed. PDF attachments use a free backend ladder: pdftotext first, escalating automatically to local OCR (docling) when the PDF has no text layer, such as a scanned contract."}},
     {"@type": "Question", "name": "Can I reconstruct email threads from an MBOX file?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use the --threaded flag. Messages are grouped into conversation threads using Message-ID/In-Reply-To/References headers, with quoted text stripped from replies."}}
   ]
 }
@@ -174,7 +174,7 @@
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>A 125 KB Google Cloud invoice email: 2,076 lines raw, 4 structured blocks. The parser extracts the message content, identifies the PDF attachment, and maps Subject/From/Date to typed metadata &mdash; in under 2 seconds, with zero AI calls.</div>
+        <div>A 125 KB Google Cloud invoice email: 2,076 lines raw, 4 structured blocks. The parser extracts the message content, resolves the PDF attachment's text (with <code>--deep</code>), and maps Subject/From/Date to typed metadata &mdash; in under 2 seconds, with zero AI calls.</div>
       </div>
 
       <h2 id="raw-vs-structured">Raw .eml vs Structured Output</h2>
@@ -309,7 +309,12 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
 
       <p>Emails are documents that contain other documents. A budget email has a CSV; a contract email has HTML or a forwarded <code>.eml</code>. AILANG Parse decodes and parses text-based attachments inline &mdash; one API call extracts the email <em>and</em> its attachment content.</p>
 
-      <p>Supported inline formats: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). With the <code>--deep</code> flag, <strong>DOCX</strong>, <strong>PPTX</strong>, and <strong>XLSX</strong> attachments are also extracted and parsed using the full Office parser. Binary attachments (PDF, images) are identified by filename and MIME type.</p>
+      <p>Supported inline formats: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). With the <code>--deep</code> flag, <strong>PDF</strong>, <strong>DOCX</strong>, <strong>PPTX</strong>, and <strong>XLSX</strong> attachments are also extracted and parsed. Image attachments are identified by filename and MIME type.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>PDF attachments resolve as of v0.26.0.</strong> Measuring a real 65,000-message archive found 8,323 attachments, of which <strong>2,455 were PDF</strong> and <strong>zero</strong> were DOCX, XLSX or PPTX. Until v0.26.0 the resolver preserved bytes only for OOXML &mdash; so the most common attachment type in real mail contributed its filename and not one word of its contents.</div>
+      </div>
 
 <pre><code class="language-json">{
   "type": "section",
@@ -344,6 +349,30 @@ ailang run --entry main --caps IO,FS,Env \
      "rows": [["EMEA", "$125,000"], ["APAC", "$143,000"], ["Americas", "$157,000"]]}
   ]
 }</code></pre>
+
+      <h3 id="pdf-attachments">PDF Attachments &mdash; With Automatic OCR</h3>
+
+      <p>PDF attachments resolve through a backend ladder that escalates only when it has to. <code>pdftotext</code> runs first: free, roughly instant, and correct for any born-digital PDF. If it comes back empty &mdash; the signature of a scanned or photographed document &mdash; the parser escalates to <strong>docling</strong>, a local OCR pass.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Tier</th><th>Cost</th><th>Speed</th><th>Handles</th><th>Automatic?</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>pdftotext</code></td><td>Free</td><td>~0s</td><td>Born-digital text layer</td><td>Yes &mdash; default</td></tr>
+          <tr><td><code>docling</code></td><td>Free</td><td>~9s</td><td>Scans, photos (local OCR)</td><td>Yes &mdash; on empty result</td></tr>
+          <tr><td><code>ai</code></td><td>Paid</td><td>Varies</td><td>Hardest layouts</td><td><strong>Never</strong> &mdash; opt in explicitly</td></tr>
+        </tbody>
+      </table>
+
+      <p>Both automatic tiers are free, which is why escalation needs no permission. The <code>ai</code> backend costs money, so it is never entered on your behalf &mdash; a parser that silently spends is the wrong default. An explicit <code>--pdf-backend</code> choice is always respected rather than overridden.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Verified on an email carrying the same contract twice &mdash; once digital, once rasterised. Both yield <em>"The Seller shall indemnify the Buyer against all claims"</em>; the second purely via OCR. Note that <code>liteparse</code> is <strong>not</strong> an OCR tier: it infers headings from font sizes in the existing text layer, so it fails on scans exactly as <code>pdftotext</code> does.</div>
+      </div>
+
+      <p>An unreadable attachment never aborts the run. One bad file in a mailbox is not a reason to abandon the message &mdash; or, in batch mode, the remaining files.</p>
 
       <p>Forwarded emails (<code>message/rfc822</code> attachments) are parsed recursively &mdash; the inner email gets full header and body extraction, nested inside the attachment block.</p>
 

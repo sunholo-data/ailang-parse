@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Chunking for RAG — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Split parsed documents into embedding-sized chunks with four deterministic strategies. Blocks are never split, tables keep their contents, and every chunk carries the heading it came from. No AI, no cost.">
+<meta property="og:title" content="Document Chunking for RAG — AILANG Parse">
+<meta property="og:description" content="Split parsed documents into embedding-sized chunks with four deterministic strategies. Blocks are never split, tables keep their contents, and every chunk carries the heading it came from.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* These classes are defined per-page across this site rather than in the shared
+   stylesheets; kept in sync with pdf-parsing.html / email-parsing.html. */
+.dp-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dp-feature-card {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.dp-feature-card h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+.dp-feature-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+.dp-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--bg-soft, #f0f0f0);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.dp-pill-new {
+  background: var(--accent, #16a34a);
+  color: #fff;
+  border-color: transparent;
+}
+@media (max-width: 900px) {
+  .dp-feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I chunk documents for a RAG pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse chunks the parsed Block ADT rather than raw text, so chunk boundaries fall on real document structure. Four deterministic strategies are available: Auto, FixedSize, ByStructure, and BySection. Chunking is free and requires no AI call."}},
+    {"@type": "Question", "name": "Does chunking split tables in half?", "acceptedAnswer": {"@type": "Answer", "text": "No. Blocks are never split. A table stays whole even when it exceeds the token budget, because an oversized intact table is more useful than two halves of one."}},
+    {"@type": "Question", "name": "Are chunk token counts exact?", "acceptedAnswer": {"@type": "Answer", "text": "No. Token counts are estimates based on words multiplied by 1.3. There is no tokenizer and no model call, which keeps chunking free and deterministic. Leave headroom when sizing against a hard model limit."}},
+    {"@type": "Question", "name": "Can I cite the source of a retrieved chunk?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every chunk carries headingContext (the nearest heading above it), sectionKind, a start and end block index, and a hasTable flag, so a passage can be shown with the clause it came from."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Document Chunking</span> for RAG</h1>
+    <p class="subtitle reveal reveal-delay-1">Four deterministic strategies. Blocks are never split, tables keep their contents, and every chunk knows where it came from.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#the-problem" class="active">The Problem</a>
+        <a href="#strategies">Four Strategies</a>
+        <a href="#guarantees">What It Guarantees</a>
+        <a href="#provenance">Citation Provenance</a>
+        <a href="#tokens">Token Estimates</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="the-problem">Chunking Decides What Is Findable</h2>
+
+      <p>An embedding has a finite window. Text past it is not represented at all &mdash; not ranked lower, not weakly matched. Absent. Whatever falls outside the window cannot be retrieved by any query, no matter how well the rest of the pipeline works.</p>
+
+      <p>That failure is quiet, which is what makes it expensive. Measured on a real 65,000-message mail archive: appending PDF attachment text to message bodies and embedding the first 3,000 characters left <strong>14 million characters</strong> of successfully-extracted text outside every vector. The parser did its job. The text was in the output. It simply was not in any embedding, and so it was invisible to search.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>AILANG Parse chunks the typed <a href="api.html">Block ADT</a>, not raw text. Boundaries fall on real document structure &mdash; a heading, a slide, a sheet, an attachment &mdash; instead of an arbitrary character offset that lands mid-sentence or mid-table.</div>
+      </div>
+
+      <h2 id="strategies">Four Strategies <span class="dp-pill dp-pill-new">v0.27+</span></h2>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Strategy</th><th>Boundary</th><th>Best for</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Auto</code></td>
+            <td>Picked from the document's actual composition</td>
+            <td>The default when you do not want to think about it</td>
+          </tr>
+          <tr>
+            <td><code>FixedSize</code></td>
+            <td>Token budget, with configurable overlap</td>
+            <td>Flat prose with no headings to lean on</td>
+          </tr>
+          <tr>
+            <td><code>ByStructure</code></td>
+            <td>A new chunk at each heading</td>
+            <td>Contracts, reports, specs &mdash; anything with a hierarchy</td>
+          </tr>
+          <tr>
+            <td><code>BySection</code></td>
+            <td>One chunk per slide, sheet, or attachment</td>
+            <td>PPTX, XLSX, and emails with attachments</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p><code>Auto</code> inspects what the document actually contains rather than trusting its file extension: tabular and slide formats go to <code>BySection</code>, documents with headings go to <code>ByStructure</code>, and everything else falls back to <code>FixedSize</code>.</p>
+
+      <h3>Why there is no <code>BySimilarity</code></h3>
+
+      <p>Semantic chunking is a reasonable idea and it is deliberately absent. It needs an AI round-trip, and a chunker that silently costs money on every document is the wrong default. Chunking here stays deterministic and free &mdash; same input, same chunks, no API key, no per-document charge.</p>
+
+      <h2 id="guarantees">What It Guarantees</h2>
+
+      <div class="dp-feature-grid">
+        <div class="dp-feature-card">
+          <h4>Blocks Are Never Split</h4>
+          <p>A table stays whole even when it exceeds the token budget. An oversized intact table beats two halves of one &mdash; half a payment schedule is not half as useful, it is misleading.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Tables Keep Their Contents</h4>
+          <p>Chunk text uses a chunk-specific renderer rather than the summary renderer, which prints a table as the placeholder <code>[table]</code>. Without this, a chunk would claim to cover a payment schedule while containing none of it.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Deterministic</h4>
+          <p>No model call, no sampling, no variability. The same document produces the same chunks on every run, so your index is reproducible and diffable.</p>
+        </div>
+        <div class="dp-feature-card">
+          <h4>Free</h4>
+          <p>Chunking adds no cost to a parse. It is pure computation over blocks you already have.</p>
+        </div>
+      </div>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>The table-rendering guarantee is measurable: <code>tables.docx</code> went from <strong>10</strong> to <strong>61</strong> estimated tokens once cell contents were included in chunk text. The earlier number was a chunk that pointed at a table without carrying any of it.</div>
+      </div>
+
+      <h2 id="provenance">Citation Provenance</h2>
+
+      <p>A retrieved passage is much less useful when the reader cannot see which clause it came from. Every chunk carries the context needed to cite it:</p>
+
+<pre><code class="language-json">{
+  "id": 3,
+  "text": "The Seller shall indemnify the Buyer against all claims...",
+  "tokenCount": 184,
+  "startBlockIndex": 12,
+  "endBlockIndex": 15,
+  "headingContext": "7. Indemnities",
+  "sectionKind": "",
+  "hasTable": false
+}</code></pre>
+
+      <p><code>headingContext</code> is the nearest heading above the chunk, so a passage lifted out of a contract can be shown with the clause heading it sits under. <code>startBlockIndex</code> and <code>endBlockIndex</code> map the chunk back to the exact block range in the parsed document, and <code>hasTable</code> lets a retrieval layer treat tabular chunks differently &mdash; rendering them as a grid, say, rather than as a wall of prose.</p>
+
+      <h2 id="tokens">Token Counts Are Estimates</h2>
+
+      <p>Counts come from <code>words &times; 1.3</code>. There is no tokenizer in the parser and no model call &mdash; that is the trade that keeps chunking free and deterministic, and it is accurate enough to size chunks sensibly.</p>
+
+      <p>It is not accurate enough to sit flush against a hard model limit. If you are packing chunks into a context window with no slack, leave headroom rather than treating <code>tokenCount</code> as exact.</p>
+
+      <h2 id="try-it">Try It</h2>
+
+      <p>Chunking operates on a parsed document, so it composes with every format the parser supports &mdash; the same call chunks a DOCX contract, a PPTX deck, or an email with a PDF attachment.</p>
+
+<pre><code class="language-ailang">import docparse/services/chunker (chunkDocument, Auto, ByStructure, Chunk)
+
+-- Let the document decide
+let chunks = chunkDocument(doc, Auto({maxTokens: 512, overlap: 64}))
+
+-- Or pin a strategy for a known corpus
+let chunks = chunkDocument(doc, ByStructure({maxTokens: 512, groupUnderHeadings: true}))</code></pre>
+
+      <h2 id="faq" style="margin-top:40px">FAQ</h2>
+
+      <div class="dp-faq">
+        <details>
+          <summary>How do I chunk documents for a RAG pipeline?</summary>
+          <div class="dp-faq-answer"><p>Parse the document, then call <code>chunkDocument</code> with a strategy. Because chunking runs over the typed Block ADT rather than raw text, boundaries land on real structure. It is deterministic and free &mdash; no AI call.</p></div>
+        </details>
+        <details>
+          <summary>Does chunking split tables in half?</summary>
+          <div class="dp-faq-answer"><p>No. Blocks are never split. A table stays whole even when it exceeds the token budget, because an oversized intact table is more useful than two halves of one.</p></div>
+        </details>
+        <details>
+          <summary>Are chunk token counts exact?</summary>
+          <div class="dp-faq-answer"><p>No &mdash; they are estimates (<code>words &times; 1.3</code>). There is no tokenizer and no model call. Leave headroom when sizing against a hard model limit.</p></div>
+        </details>
+        <details>
+          <summary>Can I cite the source of a retrieved chunk?</summary>
+          <div class="dp-faq-answer"><p>Yes. Each chunk carries <code>headingContext</code>, <code>sectionKind</code>, a start and end block index, and <code>hasTable</code>, so a passage can be shown with the clause it came from.</p></div>
+        </details>
+        <details>
+          <summary>Why is there no semantic (embedding-based) chunking?</summary>
+          <div class="dp-faq-answer"><p>It needs an AI round-trip, and a chunker that silently costs money on every document is the wrong default. Chunking stays deterministic and free.</p></div>
+        </details>
+      </div>
+
+      <h2 id="format-guides" style="margin-top:40px">Format Guides</h2>
+      <p>Chunking runs on any parsed document. See what gets extracted first:</p>
+      <p>
+        <a href="docx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">DOCX Parsing &rarr;</a> &nbsp;&middot;&nbsp;
+        <a href="pdf-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">PDF Parsing &rarr;</a> &nbsp;&middot;&nbsp;
+        <a href="email-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">Email Parsing &rarr;</a>
+      </p>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

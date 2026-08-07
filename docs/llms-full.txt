@@ -229,8 +229,52 @@ Pricing is per *document*, not per page — a 200-page PDF and a one-line memo e
 
 ---
 
+## Review annotations (comments, highlights)
+
+Comments carry author, timestamp, and the span of document text they annotate — not a
+detached list. Every format emits the same `CommentBlock` shape, so one consumer handles
+review comments across DOCX, XLSX, PPTX and PDF.
+
+```json
+{"type": "comment", "author": "Laura", "text": "This indemnity is far too broad.",
+ "anchorText": "shall indemnify", "anchorKind": "range", "anchored": true,
+ "parentId": "3", "resolved": false}
+```
+
+- `anchorText` — the exact text the comment annotates. `anchored: false` with an empty
+  `anchorText` means the anchor could not be resolved; it never falls back to nearby text,
+  because a confidently misattributed comment is worse than an unanchored one.
+- `parentId` — the comment this one replies to, so threads can be reconstructed.
+- PDF highlights are anchored by intersecting `/QuadPoints` with word positions, using word
+  CENTRE rather than any overlap. Some PDFs store annotations in compressed object streams;
+  those return what is visible plus a `mayBeIncomplete` flag rather than silent truncation.
+
+Note: comments are returned on the standard parse path — no extra flag or endpoint.
+
+## Chunking for RAG (v0.27+)
+
+Chunking runs over the parsed block list, not raw text, so boundaries land on real document
+structure. It is deterministic and free — no tokenizer, no model call.
+
+Four strategies: `Auto` (picks from the document's composition), `FixedSize` (token budget
++ overlap), `ByStructure` (new chunk per heading), `BySection` (one per slide / sheet /
+attachment). There is deliberately no embedding-based strategy — it would need an AI
+round-trip, and a chunker that silently costs money is the wrong default.
+
+Guarantees worth relying on:
+- **Blocks are never split.** A table stays whole even when it exceeds the budget.
+- **Tables keep their cell contents** in chunk text (not the `[table]` placeholder).
+- **Every chunk carries provenance** — `headingContext` (nearest heading above it),
+  `sectionKind`, `startBlockIndex`/`endBlockIndex`, and `hasTable` — so a retrieved passage
+  can be cited with the clause it came from.
+- **`tokenCount` is an estimate** (`words × 1.3`). Leave headroom against hard model limits.
+
+See [chunking.html](chunking.html).
+
 ## Where to go next
 
+- [chunking.html](chunking.html) — deterministic RAG chunking, four strategies, citation provenance.
+- [comments.html](comments.html) — comment extraction across all formats.
 - [mcp.html](mcp.html) — full human-readable MCP documentation, including Claude Desktop / Claude Code setup snippets.
 - [api.html](api.html) — REST API reference.
 - [examples/agent_workflow.sh](https://github.com/sunholo-data/ailang-parse/blob/main/examples/agent_workflow.sh) — complete bash agent lifecycle (discover → auth → estimate → parse → quota check).

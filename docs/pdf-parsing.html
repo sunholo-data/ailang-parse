@@ -221,6 +221,7 @@
         <a href="#how-it-works">How It Works</a>
         <a href="#providers">AI Providers</a>
         <a href="#what-gets-extracted">What Gets Extracted</a>
+        <a href="#annotations">Highlights &amp; Comments</a>
         <a href="#local-processing">Local Processing</a>
         <a href="#use-cases">Use Cases</a>
         <a href="#try-it">Try It</a>
@@ -363,6 +364,32 @@ uv pip install docling liteparse</code></pre>
           <h4>Uniform Output</h4>
           <p>Regardless of AI provider, the output is the same Block ADT: <code>heading</code>, <code>text</code>, <code>table</code>, <code>image</code>. Your pipeline code never changes when you switch providers.</p>
         </div>
+      </div>
+
+      <h2 id="annotations">Highlights &amp; Comments <span class="dp-pill dp-pill-new">v0.25+</span></h2>
+
+      <p>A reviewed PDF carries a second document alongside the text: the highlights, sticky notes and free-text comments a reader left on it. These live in the PDF's <code>/Annots</code> object layer, which <em>no</em> text-extraction backend reports. Extract the text alone and every review comment silently disappears.</p>
+
+      <p>AILANG Parse reads that layer on <strong>every</strong> backend &mdash; including the default <code>pdftotext</code> &mdash; and emits each annotation as a <code>CommentBlock</code>, the same shape DOCX, XLSX and PPTX comments use. One consumer handles review comments across every format.</p>
+
+      <h3>Anchored to the text they cover</h3>
+
+      <p>A highlight that reports only a page number tells you little. Each annotation's <code>/QuadPoints</code> rectangles are intersected with word positions on that page, so a highlight reports the text it actually covers:</p>
+
+<pre><code class="language-json">{
+  "type": "comment",
+  "author": "Laura",
+  "text": "This indemnity is far too broad.",
+  "anchorText": "shall indemnify",
+  "anchorKind": "range",
+  "anchored": true
+}</code></pre>
+
+      <p>Membership is decided by word <strong>centre</strong>, not by any overlap. A highlight drawn slightly wide clips its neighbour, and an any-overlap rule would pull in a word the reviewer never marked &mdash; a confidently wrong anchor is worse than an honest unanchored one. Where word positions are unavailable, annotations degrade to unanchored rather than being dropped or guessed.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong>Compressed object streams.</strong> Some PDFs store annotations inside an <code>/ObjStm</code>, where neither this scanner nor <code>pdftotext</code>'s annotation view can see them. Rather than return silence, the parser reports what it can see plus a <code>mayBeIncomplete</code> flag, and the CLI says so &mdash; an incomplete list you know about beats a complete-looking one you don't.</div>
       </div>
 
       <h2 id="local-processing">Local Processing with Ollama</h2>
