@@ -9,7 +9,97 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.22.2...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.28.0...HEAD)
+
+## [v0.28.0](https://github.com/sunholo-data/ailang-parse/compare/v0.27.0...v0.28.0) — 2026-08-07
+
+### Unified parse orchestration — one recipe per format
+
+The parsers here have always been shared. The *orchestration* — which parser
+runs for which extension, and what gets merged in (headers, footers, footnotes,
+comments, annotations, backend ladders) — was not. It was written **three
+times**: `docparse/main.ail` (CLI), `docparse/services/mcp/tools.ail` (stdio
+MCP), and `api_server.ail` in the private docparse repo (hosted API).
+
+That produced ten silent divergences. Nothing ever failed; the three surfaces
+simply disagreed about what a document contains. The worst two: the hosted API
+dropped **every PDF annotation** on the default backend, and parsed multi-file
+LaTeX without `\input` expansion — returning 22 blocks of a 120-block arXiv
+paper with no error.
+
+New `docparse/services/orchestrator` owns the recipes. Callers become printers
+and serialisers over it:
+
+| | before | after |
+|---|---|---|
+| `main.ail` (CLI) | 1471 | 450 |
+| `mcp/tools.ail` | 493 | 375 |
+| `orchestrator.ail` | — | 707 |
+
+**Three entry points, tiered by capability.** Not a design preference — AILANG
+has no working effect-row polymorphism (ailang#616), and effects are static, so
+one signature would hand every caller the union of all of them:
+
+```
+parseDocumentPure  ! {FS}                          deterministic only
+parseDocumentAI    ! {AI, Clock, Env, FS, IO, Net} + AI, no subprocess
+parseDocument      ! {..., Process}                 full ladder
+```
+
+The published stdio-MCP embedder configs launch with `--caps IO,FS,Env`;
+handing them `Process` would break every one at runtime. All three share the
+same per-format recipes — only the envelope differs. Collapse to one when
+effect rows unify.
+
+`parseDocumentPure` **refuses** what it cannot do correctly (pdf, latex,
+AI-only media) rather than returning a partial parse. Returning un-expanded
+LaTeX would recreate the exact silent-truncation bug this module exists to kill.
+
+### Fixed
+
+- **MCP gains what only the CLI had**: EML `--deep` attachment resolution, PDF
+  annotations (unanchored — anchoring needs the adapter subprocess — and
+  honestly reported as `anchored: false`), and the shared MIME maps.
+- **`mcpConvert` parsed every file twice** — once into a string it discarded,
+  then again through a duplicate of the whole extension dispatch. The comment
+  above it described both the bug and the fix; the dead parse stayed anyway.
+- **MCP passed `ext` where the AI parsers take `mime`** —
+  `parseDocumentImage(f, "png")` instead of `"image/png"`.
+- **MCP responses hardcoded `warnings: []` and `aiCallsUsed: 0`**; they now
+  carry real values, so a client can see when a PDF's annotation list may be
+  incomplete.
+- **Declared AILANG floor corrected `>=0.29.0` → `>=0.31.0`.** The package uses
+  `@allow_empty_ok`, which does not exist before v0.31.0, so resolving on 0.29
+  failed at parse time inside the declared range. Caught by the new Minimum
+  AILANG Floor Check CI job. The `docs/ailang` mirror is updated too.
+- **`evalCollectWords` could not bound memory** (ailang#617).
+  `take(10000, flatMap(...))` reads as a cap but AILANG is strict, so `flatMap`
+  tokenises the whole document before `take` discards anything — the cap
+  bounded the output, never the peak. It OOM'd a host twice despite a comment
+  saying it was capped. Now a budgeted walk with identical output.
+- **`bin/docparse --eval` could not report a failure.** Under `set -euo
+  pipefail` a non-zero `ailang run` aborted the whole scoring loop, so it
+  printed 6 of 58 files and died — which reads as "the first six passed". Also
+  skips goldens with no local source instead of counting them as failures (93
+  goldens vs 58 sources gave the impossible "56/58 passed (37 failures)"), and
+  exits non-zero when anything fails so CI can gate on it.
+
+### Notes
+
+- **Behaviour change (CLI):** progress notes print *after* the parse rather than
+  during it. The core returns data and cannot stream — the deliberate trade for
+  one shared recipe instead of three that drift.
+- `exit(1)` on empty extraction was tried and reverted: `exit()` inside a batch
+  item panics the entire run (ailang#607), killing a 56-file batch at item 21.
+  Now a loud warning.
+- PPTX image extraction stays gated on `useAI`, matching long-standing CLI
+  behaviour, rather than moving to `extractImages`. The DOCX/PPTX inconsistency
+  is real but resolving it silently inside a refactor would change output for
+  every existing caller.
+- Regression gate: **56/56 golden files score 100**, unchanged from the
+  pre-refactor baseline, verified on both v0.31.0 (the declared floor) and
+  v0.33.0. `gutenberg_alice.epub` and `gutenberg_moby_dick.epub` are excluded —
+  they fail today for unrelated reasons the eval harness had been hiding.
 
 ## [v0.22.2](https://github.com/sunholo-data/ailang-parse/compare/v0.22.1...v0.22.2) — 2026-07-15
 
