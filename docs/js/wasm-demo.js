@@ -25,7 +25,7 @@
   // docs/wasm/.ailang-version. The checked-in value reflects whatever pin was
   // current at the last commit; CI rewrites it to match the deployed pin so a
   // stale browser cache can never serve a mismatched ailang.wasm.
-  var WASM_BINARY_URL = 'wasm/ailang.wasm?v=v0.31.0';
+  var WASM_BINARY_URL = 'wasm/ailang.wasm?v=v0.30.0';
   var MODULE_BASE = 'ailang/';
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
   var MAX_XML_SIZE = 5 * 1024 * 1024;
