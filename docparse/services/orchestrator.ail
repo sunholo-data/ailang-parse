@@ -23,14 +23,21 @@
 --    could not reuse them (one even called exit(1) mid-parse). Here, progress
 --    is accumulated as `notes` and the caller decides whether to print them.
 --
--- 2. Two entry points, not one. AILANG has no working effect-row polymorphism
---    at v0.33.0 — a lowercase `! {e}` parses but behaves as an opaque concrete
---    effect that every caller must also declare, so a pure caller with a pure
---    argument still fails. A single unified signature would therefore hand
---    every caller the union of all effects (Net, Process, AI), which is a real
---    capability regression for an MCP embedder currently granting only {FS}.
---    So: parseDocumentPure at ! {FS} for the deterministic formats, and
---    parseDocument for the full ladder.
+-- 2. THREE entry points, tiered by capability — not one. AILANG has no working
+--    effect-row polymorphism at v0.33.0: a lowercase `! {e}` parses and looks
+--    polymorphic but behaves as an opaque concrete effect every caller must
+--    also declare, so a pure caller passing a pure function still fails
+--    (ailang#616). Effects are static, so a single signature would hand every
+--    caller the union of all of them:
+--
+--      parseDocumentPure  ! {FS}                          deterministic only
+--      parseDocumentAI    ! {AI, Clock, Env, FS, IO, Net} + AI, no subprocess
+--      parseDocument      ! {..., Process}                 full ladder
+--
+--    This is not gratuitous. The published stdio-MCP embedder configs launch
+--    with `--caps IO,FS,Env`; handing them Process would break every one at
+--    runtime. Each tier shares the same per-format recipes — only the
+--    capability envelope differs. Collapse to one the day effect rows unify.
 --
 -- 3. parseDocumentPure REFUSES formats it cannot do correctly rather than
 --    doing them partially. Returning un-expanded LaTeX from the pure path
@@ -79,7 +86,7 @@ import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
 import docparse/services/pdf_backend_external (parsePdfViaBackend, parsePdfWithFallback, fetchPdfWords)
-import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocksAnchored)
+import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocks, annotationsAsBlocksAnchored)
 import docparse/services/direct_ai_parser (
   parsePdfResult, parsePdfMetadata, parseDocumentImage, parseAudio, parseVideo
 )
@@ -653,5 +660,59 @@ func orchEmailDeep(outcome: ParseOutcome, opts: ParseOptions)
     warnings: outcome.warnings,
     notes: concat(outcome.notes, ["Resolved ${show(resolved.count)} attachment(s)"]),
     aiCallsUsed: outcome.aiCallsUsed
+  }
+}
+
+-- =====================================================================
+-- AI path without subprocess — ! {AI, Clock, Env, FS, IO, Net}
+-- =====================================================================
+
+-- Parse with AI available but WITHOUT Process.
+--
+-- This exists because the stdio MCP server is launched by published embedder
+-- configs (Claude Desktop, VS Code, Cursor, Claude Code) with `--caps IO,FS,Env`
+-- — no Process. Routing it through parseDocument would statically require
+-- Process and break every one of those configs at runtime, even though the AI
+-- branch never shells out. Effects are static, and AILANG has no effect-row
+-- polymorphism to express "Process only on the branch that uses it"
+-- (ailang#616), so the capability tiers become separate entry points:
+--
+--   parseDocumentPure  ! {FS}                          deterministic only
+--   parseDocumentAI    ! {AI, Clock, Env, FS, IO, Net} + AI, no subprocess
+--   parseDocument      ! {..., Process}                 full ladder
+--
+-- All three share the same per-format recipes; only the capability envelope
+-- differs. PDF here is AI-only (no pdftotext ladder, which needs Process), and
+-- annotations are UNANCHORED — anchoring needs word positions from the adapter,
+-- which is also a subprocess. Unanchored beats absent: the reviewer's comment
+-- is still returned, with anchored:false stating plainly that its span is
+-- unknown.
+export func parseDocumentAI(filepath: string, opts: ParseOptions)
+  -> Result[ParseOutcome, AIError] ! {AI, Clock, Env, FS, IO, Net} = {
+  let ext = toLower(getExtension(filepath));
+  let format = detectFormat(ext);
+  if format == "pdf" then match parsePdfResult(filepath) {
+    Err(e) => Err(e),
+    Ok(blocks) => {
+      let scan = scanAnnotations(filepath);
+      let annBlocks = annotationsAsBlocks(scan.annotations);
+      let warns = if scan.mayBeIncomplete
+        then ["PDF uses compressed object streams — annotations inside them are not visible"]
+        else [];
+      Ok(mkOutcome("pdf", filepath, parsePdfMetadata(filepath),
+        concat(blocks, annBlocks),
+        ["Parsed PDF (ai): ${show(countBlocks(blocks))} blocks",
+         "Found ${show(listLength(scan.annotations))} annotations (unanchored — anchoring needs Process)"],
+        warns, 1))
+    }
+  }
+  else if format == "image" then Ok(orchMedia(filepath, "image", parseDocumentImage(filepath, orchImageMime(ext))))
+  else if format == "audio" then Ok(orchMedia(filepath, "audio", parseAudio(filepath, orchAudioMime(ext))))
+  else if format == "video" then Ok(orchMedia(filepath, "video", parseVideo(filepath, orchVideoMime(ext))))
+  else match parseDocumentPure(filepath, opts) {
+    Ok(outcome) => Ok(orchEnrich(filepath, outcome, opts)),
+    Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
+      [TextBlock({text: "Parse failed: ${msg}", style: "error", level: 0})],
+      [], [msg], 0))
   }
 }

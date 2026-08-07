@@ -1,0 +1,15 @@
+module scripts/test_mcp_parse
+
+import std/io (println)
+import std/string (length, contains)
+import docparse/services/mcp/tools (mcpParse)
+
+export func main() -> () ! {IO, FS, AI, Env, Net, Clock} {
+  let d = "data/test_files/";
+  let r1 = mcpParse("${d}comments.docx", "blocks", "", "");
+  println("docx blocks: len=${show(length(r1))} hasAnchorText=${show(contains(r1, "anchorText"))} hasComment=${show(contains(r1, "comment"))}");
+  let r2 = mcpParse("${d}lo_nested_table.odt", "blocks", "", "");
+  println("odt  blocks: len=${show(length(r2))} hasFooter=${show(contains(r2, "footer"))}");
+  let r3 = mcpParse("${d}tables.docx", "markdown", "", "");
+  println("docx md    : len=${show(length(r3))} hasTable=${show(contains(r3, "|"))}")
+}

@@ -9,6 +9,7 @@ import std/env (getEnvOr)
 import std/net (httpGet, httpPost)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages)
+import docparse/services/orchestrator (parseDocumentPure, parseDocumentAI, ParseOptions, ParseOutcome)
 import docparse/services/format_router (detectFormat, getExtension, needsAI, strategyDescription)
 import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxWithComments, parseDocxImages)
 import docparse/services/pptx_parser (parsePptx, parsePptxMetadata)
@@ -101,168 +102,58 @@ func mcpParseLocal(filepath: string, outputFormat: string) -> string ! {Clock, A
 }
 
 -- Parse deterministic formats (no AI needed).
-func mcpParseDeterministic(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {IO, FS} {
-  let doc = if ext == "docx" then mcpParseDocx(filepath)
-    else if ext == "pptx" then mcpParsePptx(filepath)
-    else if ext == "xlsx" then mcpParseXlsx(filepath)
-    else if ext == "odt" then mcpParseOdt(filepath)
-    else if ext == "odp" then mcpParseOdp(filepath)
-    else if ext == "ods" then mcpParseOds(filepath)
-    else if ext == "csv" || ext == "tsv" then mcpParseCsv(filepath, ext)
-    else if ext == "md" || ext == "markdown" then mcpParseMarkdown(filepath)
-    else if ext == "html" || ext == "htm" || ext == "xhtml" then mcpParseHtml(filepath)
-    else if ext == "epub" then mcpParseEpub(filepath)
-    else if ext == "eml" then mcpParseEml(filepath)
-    else if ext == "mbox" then mcpParseMbox(filepath)
-    else mcpParseText(filepath, ext);
-
-  mcpFormatOutput(doc, outputFormat)
-}
+func mcpParseDeterministic(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {FS} =
+  match parseDocumentPure(filepath, mcpParseOptions()) {
+    Ok(outcome) => mcpFormatOutcome(outcome, outputFormat),
+    Err(msg) => encode(jo([
+      kv("error", js("UNSUPPORTED_FORMAT")),
+      kv("message", js(msg))
+    ]))
+  }
 
 -- Parse AI-required formats.
-func mcpParseAI(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
-  let doc = if format == "pdf" then mcpParsePdfDoc(filepath)
-    else if format == "image" then mcpParseImageDoc(filepath, ext)
-    else if format == "audio" then mcpParseAudioDoc(filepath, ext)
-    else if format == "video" then mcpParseVideoDoc(filepath, ext)
-    else {
-      format: "unknown",
-      filename: filepath,
-      metadata: emptyMetadata(),
-      blocks: []
-    };
+func mcpParseAI(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {Clock, AI, Env, FS, IO, Net} =
+  match parseDocumentAI(filepath, mcpParseOptions()) {
+    Ok(outcome) => mcpFormatOutcome(outcome, outputFormat),
+    Err(e) => encode(jo([
+      kv("error", js("AI_PROVIDER_ERROR")),
+      kv("message", js(show(e))),
+      kv("retryable", jb(true))
+    ]))
+  }
 
-  mcpFormatOutput(doc, outputFormat)
+-- Capability envelope for the stdio MCP server.
+--
+-- deep=false and extractImages=false deliberately: attachment resolution and
+-- binary image extraction both need capabilities the published embedder
+-- configs (--caps IO,FS,Env) do not grant, and silently doing less is better
+-- than failing at runtime. threaded stays false — MCP has no flag for it.
+pure func mcpParseOptions() -> ParseOptions = {
+  useAI: false,
+  pdfBackend: "ai",
+  deep: false,
+  extractImages: false,
+  threaded: false,
+  projectRoot: ""
 }
 
--- Format output based on requested format.
-func mcpFormatOutput(doc: ParsedDocument, outputFormat: string) -> string ! {} {
+-- Render a ParseOutcome. Warnings and AI-call count now come from the parse
+-- rather than being hardcoded to [] / 0, so an MCP client can finally see that
+-- e.g. a PDF's annotation list may be incomplete.
+func mcpFormatOutcome(outcome: ParseOutcome, outputFormat: string) -> string ! {} {
+  let doc = outcome.document;
   if outputFormat == "markdown" then renderMarkdown(doc)
   else if outputFormat == "markdown+metadata" then renderMarkdownMetaJson(doc)
   else if outputFormat == "html" then generateHtml(doc)
   else if outputFormat == "a2ui" then documentToA2UI(doc, false)
   else if outputFormat == "a2ui+editable" then documentToA2UI(doc, true)
-  else {
-    -- Default: blocks (JSON)
-    let result = {
-      document: doc,
-      warnings: [],
-      aiCallsUsed: 0
-    };
-    formatResult(result)
-  }
+  else formatResult({
+    document: doc,
+    warnings: outcome.warnings,
+    aiCallsUsed: outcome.aiCallsUsed
+  })
 }
 
--- DOCX: full structural parse (metadata, headers, footers, footnotes, endnotes, comments, images).
-func mcpParseDocx(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parseDocxMetadata(filepath);
-  -- Comments are anchored to the text they annotate and spliced into the body
-  -- at that point, so there is no separate comment list to concatenate.
-  let blocks = parseDocxWithComments(filepath);
-  let headers = parseDocxHeaders(filepath);
-  let footers = parseDocxFooters(filepath);
-  let footnotes = parseDocxFootnotes(filepath);
-  let endnotes = parseDocxEndnotes(filepath);
-  let images = parseDocxImages(filepath);
-  let allBlocks = concat(headers, concat(blocks, concat(footers, concat(footnotes, concat(endnotes, images)))));
-  { format: "docx", filename: filepath, metadata: metadata, blocks: allBlocks }
-}
-
-func mcpParsePptx(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parsePptxMetadata(filepath);
-  let blocks = parsePptx(filepath);
-  { format: "pptx", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseXlsx(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parseXlsxMetadata(filepath);
-  let blocks = parseXlsx(filepath);
-  { format: "xlsx", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseOdt(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parseOdtMetadata(filepath);
-  let blocks = parseOdt(filepath);
-  let hf = parseOdtHeadersFooters(filepath);
-  { format: "odt", filename: filepath, metadata: metadata, blocks: concat(blocks, hf) }
-}
-
-func mcpParseOdp(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parseOdpMetadata(filepath);
-  let blocks = parseOdp(filepath);
-  { format: "odp", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseOds(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parseOdsMetadata(filepath);
-  let blocks = parseOds(filepath);
-  { format: "ods", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseCsv(filepath: string, ext: string) -> ParsedDocument ! {FS} {
-  let content = readFile(filepath);
-  let blocks = parseCsv(content, ext);
-  { format: ext, filename: filepath, metadata: emptyMetadata(), blocks: blocks }
-}
-
-func mcpParseMarkdown(filepath: string) -> ParsedDocument ! {FS} {
-  let content = readFile(filepath);
-  let blocks = parseMarkdown(content);
-  { format: "markdown", filename: filepath, metadata: emptyMetadata(), blocks: blocks }
-}
-
-func mcpParseHtml(filepath: string) -> ParsedDocument ! {FS} {
-  let content = readFile(filepath);
-  let blocks = parseHtml(content);
-  { format: "html", filename: filepath, metadata: emptyMetadata(), blocks: blocks }
-}
-
-func mcpParseEpub(filepath: string) -> ParsedDocument ! {FS} {
-  let metadata = parseEpubMetadata(filepath);
-  let blocks = parseEpub(filepath);
-  { format: "epub", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseEml(filepath: string) -> ParsedDocument ! {FS} {
-  let content = readFile(filepath);
-  let metadata = parseEmlMetadata(content);
-  let blocks = parseEml(content);
-  { format: "eml", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseMbox(filepath: string) -> ParsedDocument ! {FS} {
-  let content = readFile(filepath);
-  let metadata = parseMboxMetadata(content);
-  let blocks = parseMbox(content);
-  { format: "mbox", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseText(filepath: string, ext: string) -> ParsedDocument ! {FS} {
-  let content = readFile(filepath);
-  { format: ext, filename: filepath, metadata: emptyMetadata(), blocks: [TextBlock({ text: content, style: "plain", level: 0 })] }
-}
-
--- AI-required parsers
-func mcpParsePdfDoc(filepath: string) -> ParsedDocument ! {Clock, AI, Env, FS, Net} {
-  let blocks = parsePdf(filepath);
-  let metadata = parsePdfMetadata(filepath);
-  { format: "pdf", filename: filepath, metadata: metadata, blocks: blocks }
-}
-
-func mcpParseImageDoc(filepath: string, ext: string) -> ParsedDocument ! {FS, AI} {
-  let blocks = parseDocumentImage(filepath, ext);
-  { format: ext, filename: filepath, metadata: emptyMetadata(), blocks: blocks }
-}
-
-func mcpParseAudioDoc(filepath: string, ext: string) -> ParsedDocument ! {FS, AI} {
-  let blocks = parseAudio(filepath, ext);
-  { format: ext, filename: filepath, metadata: emptyMetadata(), blocks: blocks }
-}
-
-func mcpParseVideoDoc(filepath: string, ext: string) -> ParsedDocument ! {FS, AI} {
-  let blocks = parseVideo(filepath, ext);
-  { format: ext, filename: filepath, metadata: emptyMetadata(), blocks: blocks }
-}
 
 -- Convert a document from one format to another.
 -- Parses the input file, then generates the output in the target format.
@@ -293,35 +184,25 @@ export func mcpConvert(input: string, outputFormat: string, outputPath: string, 
     let format = detectFormat(ext);
     let outFmt = toLower(outputFormat);
 
-    -- Parse source
-    let doc = if needsAI(format) then
-      mcpParseAI(resolved, ext, format, "blocks")
-    else
-      mcpParseDeterministic(resolved, ext, format, "blocks");
-
-    -- Re-parse doc from the blocks output (it was stringified)
-    -- Actually, we need the ParsedDocument directly, not the string.
-    -- Refactor: parse to doc, then generate.
-    let sourceDoc = if ext == "docx" then mcpParseDocx(resolved)
-      else if ext == "pptx" then mcpParsePptx(resolved)
-      else if ext == "xlsx" then mcpParseXlsx(resolved)
-      else if ext == "odt" then mcpParseOdt(resolved)
-      else if ext == "odp" then mcpParseOdp(resolved)
-      else if ext == "ods" then mcpParseOds(resolved)
-      else if ext == "csv" || ext == "tsv" then mcpParseCsv(resolved, ext)
-      else if ext == "md" || ext == "markdown" then mcpParseMarkdown(resolved)
-      else if ext == "html" || ext == "htm" || ext == "xhtml" then mcpParseHtml(resolved)
-      else if ext == "epub" then mcpParseEpub(resolved)
-      else if ext == "eml" then mcpParseEml(resolved)
-      else if ext == "mbox" then mcpParseMbox(resolved)
-      else mcpParseText(resolved, ext);
-
-    -- Determine output path
+    -- Parse source ONCE.
+    --
+    -- This previously parsed twice: once via mcpParseAI/mcpParseDeterministic
+    -- into a string that was then thrown away, and again through a duplicate
+    -- of the whole extension dispatch to get a ParsedDocument. The comment
+    -- ("Actually, we need the ParsedDocument directly") described the bug and
+    -- the fix, but the dead first parse stayed. One orchestrator call now
+    -- returns the document directly.
     let outPath = if length(outputPath) > 0 then outputPath
       else mcpReplaceExt(resolved, outFmt);
 
-    -- Generate
-    mcpGenerate(sourceDoc, outFmt, outPath)
+    match parseDocumentAI(resolved, mcpParseOptions()) {
+      Ok(outcome) => mcpGenerate(outcome.document, outFmt, outPath),
+      Err(e) => encode(jo([
+        kv("error", js("AI_PROVIDER_ERROR")),
+        kv("message", js(show(e))),
+        kv("retryable", jb(true))
+      ]))
+    }
   }
   }
 }
