@@ -68,6 +68,15 @@ export func parsePdf(filepath: string) -> [Block] ! {Clock, FS, AI, Net, Env} {
 -- failure anywhere in the pipeline returns Err(AIError) → HTTP 502/503 instead
 -- of a bare 500. Kept parallel to parsePdf (which uses the non-Result twins),
 -- not shared, so the CLI path (parsePdf) stays free of the Clock effect.
+-- NOTE: the two Ok([]) branches below (unreadable file, empty file) mirror the
+-- non-Result twin `parsePdf`, which returns [] for the same cases. They are
+-- arguably the silent-empty-success shape this project works to eliminate: an
+-- unreadable PDF is indistinguishable from a successfully-parsed empty one.
+-- Changing them to Err would alter what the hosted API returns (a 4xx-shaped
+-- condition arriving as a 502/503), so it needs testing against that consumer
+-- rather than being changed unverified during a release. Annotated honestly
+-- and left for that review.
+@allow_empty_ok("read failure and zero-length input both yield no blocks, matching the non-Result parsePdf twin. Flagged for a semantics review against the hosted API before changing.")
 export func parsePdfResult(filepath: string) -> Result[[Block], AIError] ! {FS, AI, Net, Env, Clock} {
   match readFileBytes(filepath) {
     Err(_) => Ok([]),
@@ -270,6 +279,7 @@ func parsePdfAllPages(base64Data: string, fileUri: string, filepath: string, pag
 
 -- Result twin of parsePdfAllPages (used by parsePdfResult): returns Err on the
 -- first page whose extraction terminally fails, otherwise concatenates pages.
+@allow_empty_ok("recursion base case: page > totalPages means there are no more pages to append, not a failure. The caller concatenates this with the pages already extracted.")
 func parsePdfAllPagesResult(base64Data: string, fileUri: string, filepath: string, page: int, totalPages: int) -> Result[[Block], AIError] ! {AI, Clock} =
   if page > totalPages then Ok([])
   else match parsePdfOnePageResult(base64Data, fileUri, filepath, page, false) {
