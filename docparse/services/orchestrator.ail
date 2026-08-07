@@ -1,0 +1,377 @@
+-- Unified parse orchestration — one recipe per format, three thin callers.
+--
+-- WHY THIS EXISTS
+--
+-- The parsers in this package have always been shared. The *orchestration* —
+-- which parser runs for which extension, and what gets merged in (headers,
+-- footers, footnotes, comments, annotations, backend ladders) — was not. It was
+-- written three times: docparse/main.ail (CLI), docparse/services/mcp/tools.ail
+-- (stdio MCP), and api_server.ail in the private docparse repo (hosted API).
+--
+-- The result was ten silent divergences. Two were serious: the hosted API
+-- dropped every PDF annotation on the default backend, and parsed multi-file
+-- LaTeX without \input expansion, returning ~18% of a real arXiv paper with no
+-- error. Nothing failed; the surfaces simply disagreed about what a document
+-- contains.
+--
+-- This module owns the recipes. Callers become printers/serialisers over it.
+--
+-- DESIGN NOTES
+--
+-- 1. Data-returning, never effectful-printing. The CLI's parse* functions
+--    returned () and printed as they worked, which is precisely why a server
+--    could not reuse them (one even called exit(1) mid-parse). Here, progress
+--    is accumulated as `notes` and the caller decides whether to print them.
+--
+-- 2. Two entry points, not one. AILANG has no working effect-row polymorphism
+--    at v0.33.0 — a lowercase `! {e}` parses but behaves as an opaque concrete
+--    effect that every caller must also declare, so a pure caller with a pure
+--    argument still fails. A single unified signature would therefore hand
+--    every caller the union of all effects (Net, Process, AI), which is a real
+--    capability regression for an MCP embedder currently granting only {FS}.
+--    So: parseDocumentPure at ! {FS} for the deterministic formats, and
+--    parseDocument for the full ladder.
+--
+-- 3. parseDocumentPure REFUSES formats it cannot do correctly rather than
+--    doing them partially. Returning un-expanded LaTeX from the pure path
+--    would recreate the exact silent-truncation bug this module exists to kill.
+
+module docparse/services/orchestrator
+
+import std/string (length, toLower)
+import std/list (concat, length as listLength)
+import std/fs (readFile)
+import std/result (Ok, Err)
+import std/ai (AIError)
+
+import docparse/types/document (
+  Block, TextBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks
+)
+import docparse/services/format_router (detectFormat, getExtension, officeType)
+
+-- Deterministic parsers (all ! {FS} or pure)
+import docparse/services/docx_parser (
+  parseDocxWithComments, parseDocxHeaders, parseDocxFooters,
+  parseDocxFootnotes, parseDocxEndnotes, parseDocxImages, parseDocxMetadata
+)
+import docparse/services/pptx_parser (parsePptx, parsePptxImages, parsePptxMetadata)
+import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
+import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeadersFooters)
+import docparse/services/odp_parser (parseOdp, parseOdpMetadata)
+import docparse/services/ods_parser (parseOds, parseOdsMetadata)
+import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
+import docparse/services/zip_extract (resolveBlockImages)
+import docparse/services/html_parser (parseHtmlDoc)
+import docparse/services/markdown_parser (parseMarkdown)
+import docparse/services/csv_parser (parseCsv)
+import docparse/services/eml_parser (
+  parseEml, parseMbox, parseMboxThreaded, parseEmlMetadata, parseMboxMetadata
+)
+
+-- Full-ladder only
+import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
+import docparse/services/tex_input_resolver (expandInputs, texDirname)
+import docparse/services/pdf_backend_external (parsePdfViaBackend, fetchPdfWords)
+import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocksAnchored)
+import docparse/services/direct_ai_parser (parsePdfResult, parsePdfMetadata)
+
+-- =====================================================================
+-- Types
+-- =====================================================================
+
+-- Options controlling optional work. Everything defaults to the cheapest
+-- correct behaviour: no AI, no shelling out, no recursion.
+export type ParseOptions = {
+  useAI: bool,          -- AI image description / layout repair
+  pdfBackend: string,   -- "" (server default), pdftotext, docling, liteparse, ai
+  deep: bool,           -- recurse into EML attachments
+  extractImages: bool,  -- extract embedded binary images (DOCX/PPTX)
+  threaded: bool,       -- MBOX: group messages into conversation threads
+  projectRoot: string   -- root for Process shell-outs (PDF adapter)
+}
+
+export pure func defaultParseOptions() -> ParseOptions = {
+  useAI: false,
+  pdfBackend: "",
+  deep: false,
+  extractImages: true,
+  threaded: false,
+  projectRoot: ""
+}
+
+-- A parsed document plus everything a caller might want to report.
+--
+-- `notes` is progress/informational output the CLI used to println as it
+-- worked ("Found 3 annotations"). `warnings` is degradation the user should
+-- act on (an unreadable attachment, an incomplete annotation scan). Keeping
+-- them separate lets a server log warnings while discarding notes.
+--
+-- Deliberately NOT an extension of types/document.ExtractionResult: that type
+-- is exported and constructed in 17 places, so adding a field would break
+-- every record literal and every external consumer.
+export type ParseOutcome = {
+  document: ParsedDocument,
+  warnings: [string],
+  notes: [string],
+  aiCallsUsed: int
+}
+
+pure func mkOutcome(format: string, filepath: string, meta: DocMetadata,
+                    blocks: [Block], notes: [string], warnings: [string],
+                    aiCalls: int) -> ParseOutcome = {
+  document: {format: format, filename: filepath, metadata: meta, blocks: blocks},
+  warnings: warnings,
+  notes: notes,
+  aiCallsUsed: aiCalls
+}
+
+-- =====================================================================
+-- Deterministic path — ! {FS}
+-- =====================================================================
+
+-- Parse a document using only filesystem access: no AI, no network, no
+-- subprocess. Covers every format an MCP embedder granting {FS} can serve.
+--
+-- Returns Err for formats that genuinely need more capability (pdf, latex,
+-- image, audio, video). It does NOT fall back to a partial parse — a caller
+-- that gets Ok can trust the document is complete for its format.
+export func parseDocumentPure(filepath: string, opts: ParseOptions)
+  -> Result[ParseOutcome, string] ! {FS} = {
+  let ext = toLower(getExtension(filepath));
+  let format = detectFormat(ext);
+  if format == "zip-office" then orchOffice(filepath, ext, opts)
+  else if format == "zip-odf" then Ok(orchOdf(filepath, ext))
+  else if format == "epub" then Ok(orchEpub(filepath))
+  else if format == "html" then Ok(orchHtml(filepath))
+  else if format == "markdown" then Ok(orchMarkdown(filepath))
+  else if format == "csv" then Ok(orchCsv(filepath, ext))
+  else if format == "email" then Ok(orchEmail(filepath, ext, opts))
+  else if format == "text" then Ok(orchText(filepath))
+  else Err(orchPureRefusal(format))
+}
+
+-- Why a format is refused by the deterministic path, and what to call instead.
+pure func orchPureRefusal(format: string) -> string =
+  if format == "pdf" then
+    "pdf requires parseDocument: backends shell out (Process) and the AI fallback needs {AI, Net}"
+  else if format == "latex" then
+    "latex requires parseDocument: \\input expansion needs {IO, FS}; parsing without it silently drops every fragment"
+  else if format == "image" || format == "audio" || format == "video" then
+    "${format} is AI-only; use parseDocument"
+  else
+    "unsupported format '${format}'"
+
+-- --- DOCX / PPTX / XLSX ---
+--
+-- Block order is the standard for all three surfaces:
+--   headers ++ body(comments spliced at anchors) ++ footers ++ footnotes
+--   ++ endnotes ++ images
+-- A header prints at the top of a page, so it precedes the body.
+func orchOffice(filepath: string, ext: string, opts: ParseOptions)
+  -> Result[ParseOutcome, string] ! {FS} = {
+  let kind = officeType(ext);
+  if kind == "word" then {
+    let body = parseDocxWithComments(filepath);
+    let images = if opts.extractImages then parseDocxImages(filepath) else [];
+    let blocks = concat(parseDocxHeaders(filepath),
+      concat(body,
+        concat(parseDocxFooters(filepath),
+          concat(parseDocxFootnotes(filepath),
+            concat(parseDocxEndnotes(filepath), images)))));
+    Ok(mkOutcome("docx", filepath, parseDocxMetadata(filepath), blocks,
+      ["Parsed DOCX: ${show(countBlocks(blocks))} blocks"], [], 0))
+  }
+  else if kind == "powerpoint" then {
+    let body = parsePptx(filepath);
+    let images = if opts.extractImages then parsePptxImages(filepath) else [];
+    let blocks = concat(body, images);
+    Ok(mkOutcome("pptx", filepath, parsePptxMetadata(filepath), blocks,
+      ["Parsed PPTX: ${show(countBlocks(blocks))} blocks"], [], 0))
+  }
+  else if kind == "excel" then {
+    let blocks = parseXlsx(filepath);
+    Ok(mkOutcome("xlsx", filepath, parseXlsxMetadata(filepath), blocks,
+      ["Parsed XLSX: ${show(countBlocks(blocks))} blocks"], [], 0))
+  }
+  else Err("unknown Office type for extension '${ext}'")
+}
+
+-- --- ODT / ODP / ODS ---
+--
+-- ODT headers/footers live in styles.xml and are APPENDED (unlike DOCX, where
+-- headers lead) — this matches the CLI's long-standing behaviour.
+func orchOdf(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
+  if ext == "odt" then {
+    let blocks = concat(parseOdt(filepath), parseOdtHeadersFooters(filepath));
+    mkOutcome("odt", filepath, parseOdtMetadata(filepath), blocks,
+      ["Parsed ODT: ${show(countBlocks(blocks))} blocks"], [], 0)
+  }
+  else if ext == "odp" then {
+    let blocks = parseOdp(filepath);
+    mkOutcome("odp", filepath, parseOdpMetadata(filepath), blocks,
+      ["Parsed ODP: ${show(countBlocks(blocks))} blocks"], [], 0)
+  }
+  else {
+    let blocks = parseOds(filepath);
+    mkOutcome("ods", filepath, parseOdsMetadata(filepath), blocks,
+      ["Parsed ODS: ${show(countBlocks(blocks))} blocks"], [], 0)
+  }
+}
+
+-- EPUB images are referenced inside the ZIP, so resolve them against the
+-- archive rather than leaving dangling srcs.
+func orchEpub(filepath: string) -> ParseOutcome ! {FS} = {
+  let blocks = resolveBlockImages(filepath, parseEpub(filepath));
+  mkOutcome("epub", filepath, parseEpubMetadata(filepath), blocks,
+    ["Parsed EPUB: ${show(countBlocks(blocks))} blocks"], [], 0)
+}
+
+func orchHtml(filepath: string) -> ParseOutcome ! {FS} = {
+  let parsed = parseHtmlDoc(readFile(filepath));
+  mkOutcome("html", filepath, parsed.metadata, parsed.blocks,
+    ["Parsed HTML: ${show(countBlocks(parsed.blocks))} blocks"], [], 0)
+}
+
+func orchMarkdown(filepath: string) -> ParseOutcome ! {FS} = {
+  let blocks = parseMarkdown(readFile(filepath));
+  mkOutcome("markdown", filepath, emptyMetadata(), blocks,
+    ["Parsed Markdown: ${show(countBlocks(blocks))} blocks"], [], 0)
+}
+
+func orchCsv(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
+  let delim = if ext == "tsv" then "\t" else ",";
+  let blocks = parseCsv(readFile(filepath), delim);
+  mkOutcome("csv", filepath, emptyMetadata(), blocks,
+    ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], [], 0)
+}
+
+-- Shallow email parse. Attachment recursion (opts.deep) needs Process for the
+-- PDF backend ladder, so it lives in parseDocument.
+func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcome ! {FS} = {
+  let content = readFile(filepath);
+  let isMbox = ext == "mbox";
+  let blocks = if isMbox && opts.threaded then parseMboxThreaded(content)
+               else if isMbox then parseMbox(content)
+               else parseEml(content);
+  let meta = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
+  let warn = if opts.deep
+    then ["deep attachment resolution skipped: parseDocumentPure cannot shell out; use parseDocument"]
+    else [];
+  mkOutcome("email", filepath, meta, blocks,
+    ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], warn, 0)
+}
+
+func orchText(filepath: string) -> ParseOutcome ! {FS} = {
+  let content = readFile(filepath);
+  mkOutcome("text", filepath, emptyMetadata(),
+    [TextBlock({text: content, style: "normal", level: 0})],
+    ["Parsed as plain text (${show(length(content))} chars)"], [], 0)
+}
+
+-- =====================================================================
+-- Full ladder — everything the deterministic path refuses
+-- =====================================================================
+
+-- Parse any supported document. Delegates to parseDocumentPure for the
+-- deterministic formats so there is exactly ONE recipe per format, then
+-- handles the formats that need more capability.
+export func parseDocument(filepath: string, opts: ParseOptions)
+  -> Result[ParseOutcome, AIError] ! {IO, FS, AI, Env, Net, Process, Clock} = {
+  let ext = toLower(getExtension(filepath));
+  let format = detectFormat(ext);
+  if format == "pdf" then orchPdf(filepath, opts)
+  else if format == "latex" then Ok(orchLatex(filepath))
+  else match parseDocumentPure(filepath, opts) {
+    Ok(outcome) => Ok(outcome),
+    -- Deterministic path refused. AI-only formats (image/audio/video) are not
+    -- yet routed here; surface the refusal rather than returning empty blocks.
+    Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
+      [TextBlock({text: "Parse failed: ${msg}", style: "error", level: 0})],
+      [], [msg], 0))
+  }
+}
+
+-- LaTeX: resolve \input/\include against the main file's directory BEFORE
+-- parsing. Without this a multi-file paper yields its preamble and section
+-- headings and nothing else — measured at 22 blocks vs 120 on a real arXiv
+-- source bundle.
+func orchLatex(filepath: string) -> ParseOutcome ! {IO, FS} = {
+  let raw = readFile(filepath);
+  let content = expandInputs(texDirname(filepath), raw);
+  let expanded = length(content) != length(raw);
+  let blocks = parseLatex(content);
+  let m = parseLatexMetadata(content);
+  let meta = { title: m.title, author: m.author, created: "", modified: "",
+               pageCount: 0 };
+  let notes = if expanded
+    then ["Expanded \\input/\\include: ${show(length(raw))} -> ${show(length(content))} chars",
+          "Parsed LaTeX: ${show(countBlocks(blocks))} blocks"]
+    else ["Parsed LaTeX: ${show(countBlocks(blocks))} blocks"];
+  mkOutcome("latex", filepath, meta, blocks, notes, [], 0)
+}
+
+-- PDF: backend ladder, then annotations merged on EVERY path.
+--
+-- Annotations live in the /Annots object layer, which no text-extraction
+-- backend reports. Merging them only on the AI path (the old CLI behaviour)
+-- meant a reviewer's comments vanished silently on the default backend.
+func orchPdf(filepath: string, opts: ParseOptions)
+  -> Result[ParseOutcome, AIError] ! {IO, FS, AI, Env, Net, Process, Clock} = {
+  let backend = if length(opts.pdfBackend) > 0 then opts.pdfBackend else "pdftotext";
+  if backend == "ai" then match parsePdfResult(filepath) {
+    Err(e) => Err(e),
+    Ok(blocks) => {
+      let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+      Ok(mkOutcome("pdf", filepath, parsePdfMetadata(filepath),
+        concat(blocks, ann.blocks),
+        concat(["Parsed PDF (ai): ${show(countBlocks(blocks))} blocks"], ann.notes),
+        ann.warnings, 1))
+    }
+  }
+  else match parsePdfViaBackend(backend, filepath, opts.projectRoot) {
+    Ok(ext) => {
+      let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+      Ok(mkOutcome("pdf", filepath, ext.metadata,
+        concat(ext.blocks, ann.blocks),
+        concat(["Parsed PDF (${backend}): ${show(countBlocks(ext.blocks))} blocks"], ann.notes),
+        ann.warnings, 0))
+    },
+    -- An explicit backend choice is respected: no silent AI fallback, because
+    -- AI costs money and the caller asked for something free.
+    Err(msg) =>
+      if length(opts.pdfBackend) > 0
+        then Ok(mkOutcome("pdf", filepath, emptyMetadata(),
+          [TextBlock({text: "PDF extraction failed: ${msg}. If this is a scanned PDF, retry with pdfBackend=ai.", style: "error", level: 0})],
+          [], ["PDF backend '${backend}' failed: ${msg}"], 0))
+        else match parsePdfResult(filepath) {
+          Err(e) => Err(e),
+          Ok(blocks) => {
+            let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+            Ok(mkOutcome("pdf", filepath, parsePdfMetadata(filepath),
+              concat(blocks, ann.blocks),
+              concat(["PDF backend '${backend}' found no text; fell back to AI"], ann.notes),
+              ann.warnings, 1))
+          }
+        }
+  }
+}
+
+-- Annotation blocks plus the notes/warnings describing what was found.
+-- Anchoring is by word CENTRE, not overlap: a highlight drawn slightly wide
+-- clips its neighbour, and any-overlap would claim words the reviewer never
+-- marked. Missing word positions degrade to unanchored rather than dropped.
+func orchPdfAnnotations(filepath: string, projectRoot: string)
+  -> {blocks: [Block], notes: [string], warnings: [string]} ! {FS, Process} = {
+  let scan = scanAnnotations(filepath);
+  let anns = scan.annotations;
+  let warns = if scan.mayBeIncomplete
+    then ["PDF uses compressed object streams — annotations inside them are not visible"]
+    else [];
+  if listLength(anns) == 0
+    then {blocks: [], notes: [], warnings: warns}
+    else {
+      blocks: annotationsAsBlocksAnchored(anns, fetchPdfWords(filepath, projectRoot)),
+      notes: ["Found ${show(listLength(anns))} annotations"],
+      warnings: warns
+    }
+}

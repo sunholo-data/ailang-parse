@@ -1,0 +1,34 @@
+module scripts/test_orchestrator
+
+import std/io (println)
+import std/list (length as listLength)
+import std/result (Ok, Err)
+import docparse/services/orchestrator (parseDocument, parseDocumentPure, defaultParseOptions, ParseOutcome)
+import docparse/types/document (countBlocks, filterImages)
+
+func report(label: string, r: Result[ParseOutcome, string]) -> () ! {IO} =
+  match r {
+    Err(e) => println("  ${label}: Err -> ${e}"),
+    Ok(o) => println("  ${label}: ${show(countBlocks(o.document.blocks))} blocks, ${show(listLength(o.notes))} notes, ${show(listLength(o.warnings))} warnings")
+  }
+
+export func main() -> () ! {IO, FS, AI, Env, Net, Process, Clock} {
+  let d = "data/test_files/";
+  let opts = defaultParseOptions();
+  println("=== parseDocumentPure (FS-only) ===");
+  report("docx(comments)", parseDocumentPure("${d}comments.docx", opts));
+  report("docx(images)  ", parseDocumentPure("${d}pandoc_inline_images.docx", opts));
+  report("odt(hdr/ftr)  ", parseDocumentPure("${d}lo_nested_table.odt", opts));
+  report("pdf (refused) ", parseDocumentPure("${d}simple_text.pdf", opts));
+  report("latex(refused)", parseDocumentPure("${d}arxiv/vaswani_attention/ms.tex", opts));
+  println("");
+  println("=== parseDocument (full ladder) ===");
+  match parseDocument("${d}arxiv/vaswani_attention/ms.tex", opts) {
+    Err(_) => println("  latex: AIError"),
+    Ok(o) => println("  latex: ${show(countBlocks(o.document.blocks))} blocks | notes=${show(o.notes)}")
+  };
+  match parseDocument("${d}challenge/challenge_pdf_highlights.pdf", opts) {
+    Err(_) => println("  pdf: AIError"),
+    Ok(o) => println("  pdf: ${show(countBlocks(o.document.blocks))} blocks | notes=${show(o.notes)}")
+  }
+}
