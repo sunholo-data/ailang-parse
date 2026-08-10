@@ -1,12 +1,13 @@
 module docparse/services/odt_parser
 
-import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag, nodeKind, NodeKind, KindElement, KindText, KindComment)
 import std/zip (readEntry)
 import std/option (Some, None, getOrElse)
+import std/map (fromList as mapFromList, lookup as mapLookup)
 import std/result (Ok, Err)
 import std/string (length, trim, contains, startsWith, substring, endsWith)
-import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
+import std/list (map, flatMap, filter, concat, any, length as listLength)
+import docparse/types/document (mkHeadingRuns, mkTextRuns, mkListRuns, InlineRun, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODT Parser — converts OpenDocument Text to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -61,22 +62,23 @@ export func parseOdtHeadersFooters(filepath: string) -> [Block] ! {FS} {
 
 -- Extract header/footer blocks from styles.xml
 export pure func odtExtractHeadersFooters(root: XmlNode) -> [Block] {
+  let styles = odtBuildStyles(root);
   let masterPages = findAll(root, "style:master-page");
-  flatMap(odtExtractMasterPage, masterPages)
+  flatMap(\mp. odtExtractMasterPage(mp, styles), masterPages)
 }
 
 -- Extract headers/footers from a single master-page
-pure func odtExtractMasterPage(mp: XmlNode) -> [Block] {
+pure func odtExtractMasterPage(mp: XmlNode, styles: Map[string, OdtFmt]) -> [Block] {
   let headers = match findFirst(mp, "style:header") {
     Some(h) =>
-      let blocks = odtProcessChildren(getChildren(h)) in
+      let blocks = odtProcessChildren(getChildren(h), styles) in
       if listLength(blocks) > 0 then [SectionBlock({kind: "header", blocks: blocks})]
       else [],
     None => []
   };
   let footers = match findFirst(mp, "style:footer") {
     Some(f) =>
-      let blocks = odtProcessChildren(getChildren(f)) in
+      let blocks = odtProcessChildren(getChildren(f), styles) in
       if listLength(blocks) > 0 then [SectionBlock({kind: "footer", blocks: blocks})]
       else [],
     None => []
@@ -100,41 +102,140 @@ export func parseOdtMetadata(filepath: string) -> DocMetadata ! {FS} {
 
 -- Navigate to office:body/office:text and extract blocks
 export pure func odtExtractBody(root: XmlNode) -> [Block] {
+  -- Index automatic styles once, then thread them through the walk: a
+  -- <text:span> names its style but does not carry the properties.
+  let styles = odtBuildStyles(root);
   -- ODF: root > office:body > office:text
   match findFirst(root, "office:body") {
     Some(body) =>
       match findFirst(body, "office:text") {
-        Some(text) => odtProcessChildren(getChildren(text)),
+        Some(text) => odtProcessChildren(getChildren(text), styles),
         None => []
       },
     None => {
       -- Try direct children (some ODT files have flat structure)
       let textNodes = findAll(root, "office:text");
-      flatMap(\t. odtProcessChildren(getChildren(t)), textNodes)
+      flatMap(\t. odtProcessChildren(getChildren(t), styles), textNodes)
     }
   }
 }
 
 -- Process a list of ODF child nodes into blocks
-pure func odtProcessChildren(nodes: [XmlNode]) -> [Block] =
-  flatMap(odtProcessNode, nodes)
+pure func odtProcessChildren(nodes: [XmlNode], styles: Map[string, OdtFmt]) -> [Block] =
+  flatMap(\n. odtProcessNode(n, styles), nodes)
+
+-- === Character formatting (ODF §16.27) ===================================
+--
+-- ODF differs from both OOXML dialects again: formatting is not on the run at
+-- all. A <text:span> carries only text:style-name="T2", and the properties live
+-- in a <style:style style:name="T2"> elsewhere in the document, so the span
+-- cannot be interpreted without first indexing the styles. That is why the
+-- style map is built once at the top and threaded through the walk.
+--
+-- Limitation: style:parent-style-name chains are NOT resolved. Automatic styles
+-- (T1, T2, …), which is what LibreOffice and Word emit for direct formatting,
+-- carry their properties inline, so the common case is covered; formatting
+-- inherited purely from a named parent style is not.
+type OdtFmt = {bold: bool, italic: bool, underline: bool, strike: bool, vertAlign: string}
+
+pure func odtNoFmt() -> OdtFmt =
+  {bold: false, italic: false, underline: false, strike: false, vertAlign: ""}
+
+-- Index every style:style by name. Built once per document — a linear scan per
+-- span would be O(spans x styles) on documents that have plenty of both.
+pure func odtBuildStyles(root: XmlNode) -> Map[string, OdtFmt] =
+  mapFromList(map(odtStyleEntry, findAll(root, "style:style")))
+
+pure func odtStyleEntry(s: XmlNode) -> (string, OdtFmt) {
+  let name = getOrElse(getAttr(s, "style:name"), "");
+  match findFirst(s, "style:text-properties") {
+    Some(tp) => (name, odtFmtFromProps(tp)),
+    None => (name, odtNoFmt())
+  }
+}
+
+pure func odtFmtFromProps(tp: XmlNode) -> OdtFmt = {
+  bold: getOrElse(getAttr(tp, "fo:font-weight"), "") == "bold",
+  italic: getOrElse(getAttr(tp, "fo:font-style"), "") == "italic",
+  underline: odtLineOn(getOrElse(getAttr(tp, "style:text-underline-style"), "none")),
+  strike: odtLineOn(getOrElse(getAttr(tp, "style:text-line-through-style"), "none")),
+  vertAlign: odtVertAlign(getOrElse(getAttr(tp, "style:text-position"), ""))
+}
+
+-- These name a line style; "none" is the off state, as in DrawingML.
+pure func odtLineOn(v: string) -> bool = length(v) > 0 && v != "none"
+
+-- style:text-position is "super 58%" / "sub 58%" / a raw percentage.
+pure func odtVertAlign(v: string) -> string =
+  if startsWith(v, "super") then "superscript"
+  else if startsWith(v, "sub") then "subscript"
+  else ""
+
+pure func odtLookupFmt(styles: Map[string, OdtFmt], name: string) -> OdtFmt =
+  getOrElse(mapLookup(styles, name), odtNoFmt())
+
+pure func odtRunsFor(node: XmlNode, styles: Map[string, OdtFmt]) -> [InlineRun] {
+  let runs = odtCollectRuns(node, styles, odtNoFmt());
+  if any(odtRunIsFormatted, runs) then runs else []
+}
+
+pure func odtRunIsFormatted(r: InlineRun) -> bool =
+  r.bold || r.italic || r.underline || r.strike || length(r.vertAlign) > 0
+
+pure func odtCollectRuns(node: XmlNode, styles: Map[string, OdtFmt], fmt: OdtFmt) -> [InlineRun] {
+  let children = getChildren(node);
+  if listLength(children) == 0
+  then odtLeafRun(getText(node), fmt)
+  else flatMap(\c. odtChildRuns(c, styles, fmt), children)
+}
+
+pure func odtChildRuns(child: XmlNode, styles: Map[string, OdtFmt], fmt: OdtFmt) -> [InlineRun] =
+  match nodeKind(child) {
+    KindText => odtLeafRun(getText(child), fmt),
+    KindComment => [],
+    KindElement => {
+      let tag = getTag(child);
+      -- Nested spans compose, so bold inside an italic span yields one run that
+      -- is both.
+      if tag == "text:span"
+      then odtCollectRuns(child, styles,
+             odtMergeFmt(fmt, odtLookupFmt(styles, getOrElse(getAttr(child, "text:style-name"), ""))))
+      else if tag == "text:line-break" then odtLeafRun("\n", fmt)
+      -- draw:frame children are images, handled as their own blocks.
+      else if tag == "draw:frame" then []
+      else odtCollectRuns(child, styles, fmt)
+    }
+  }
+
+pure func odtMergeFmt(a: OdtFmt, b: OdtFmt) -> OdtFmt = {
+  bold: a.bold || b.bold,
+  italic: a.italic || b.italic,
+  underline: a.underline || b.underline,
+  strike: a.strike || b.strike,
+  vertAlign: if length(b.vertAlign) > 0 then b.vertAlign else a.vertAlign
+}
+
+pure func odtLeafRun(text: string, fmt: OdtFmt) -> [InlineRun] =
+  if length(text) == 0 then []
+  else [{text: text, bold: fmt.bold, italic: fmt.italic, underline: fmt.underline,
+         strike: fmt.strike, code: false, vertAlign: fmt.vertAlign}]
 
 -- Process a single ODF node into blocks
-pure func odtProcessNode(node: XmlNode) -> [Block] {
+pure func odtProcessNode(node: XmlNode, styles: Map[string, OdtFmt]) -> [Block] {
   let tag = getTag(node);
 
   -- Headings: text:h with text:outline-level attribute
   if tag == "text:h" then
     let text = trim(getText(node)) in
     let level = odtHeadingLevel(node) in
-    if length(text) > 0 then [mkHeading(text, level)]
+    if length(text) > 0 then [mkHeadingRuns(text, level, odtRunsFor(node, styles))]
     else []
 
   -- Paragraphs: text:p (may contain embedded draw:frame children)
   else if tag == "text:p" then
     let text = trim(getText(node)) in
-    let embeddedFrames = flatMap(odtProcessNode, filter(\c. getTag(c) == "draw:frame", getChildren(node))) in
-    let textBlocks = if length(text) > 0 then [mkText(text, "normal", 0)] else [] in
+    let embeddedFrames = flatMap(\c. odtProcessNode(c, styles), filter(\c. getTag(c) == "draw:frame", getChildren(node))) in
+    let textBlocks = if length(text) > 0 then [mkTextRuns(text, "normal", 0, odtRunsFor(node, styles))] else [] in
     concat(textBlocks, embeddedFrames)
 
   -- Tables: table:table
@@ -145,13 +246,13 @@ pure func odtProcessNode(node: XmlNode) -> [Block] {
 
   -- Sections: text:section
   else if tag == "text:section" then
-    let blocks = odtProcessChildren(getChildren(node)) in
+    let blocks = odtProcessChildren(getChildren(node), styles) in
     let name = getOrElse(getAttr(node, "text:name"), "section") in
     if listLength(blocks) > 0 then [SectionBlock({kind: name, blocks: blocks})]
     else []
 
   -- Frames: draw:frame (may contain images or text boxes)
-  else if tag == "draw:frame" then odtProcessFrame(node)
+  else if tag == "draw:frame" then odtProcessFrame(node, styles)
 
   -- Skip everything else (office:forms, text:sequence-decls, etc.)
   else []
@@ -230,11 +331,11 @@ pure func odtListItemText(item: XmlNode) -> string =
   trim(getText(item))
 
 -- Process a draw:frame (may contain draw:image or draw:text-box)
-pure func odtProcessFrame(frame: XmlNode) -> [Block] {
+pure func odtProcessFrame(frame: XmlNode, styles: Map[string, OdtFmt]) -> [Block] {
   -- Check for text box first
   match findFirst(frame, "draw:text-box") {
     Some(textBox) =>
-      let blocks = odtProcessChildren(getChildren(textBox)) in
+      let blocks = odtProcessChildren(getChildren(textBox), styles) in
       if listLength(blocks) > 0 then [SectionBlock({kind: "textbox", blocks: blocks})]
       else [],
     None =>

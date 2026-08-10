@@ -365,6 +365,42 @@ Three goldens changed, each verified identical apart from the added fields.
 VML image extraction), so that drift is now resolved too. Office suite 100.0%
 across 60 files; `--eval` 60/60.
 
+#### PPTX generation + ODT parsing (2026-08-10) — DONE, with one gap
+
+**PPTX generation** closed the parse/generate asymmetry: headings and list items
+now render runs. Headings keep their larger size and stay bold by default — that
+is the title look this generator has always produced — while italic/underline/
+strike/baseline come from the run. The bullet/number prefix stays a plain leading
+run; DrawingML has real autonumbering via `a:buChar`/`a:buAutoNum`, but this
+generator has always written the marker as text and changing that is a separate
+concern.
+
+**ODT parsing** is the third dialect and needed a third approach. Formatting is
+not on the run at all: `<text:span text:style-name="T2">` names a style, and the
+properties live in a `<style:style style:name="T2">` elsewhere in the document.
+So the span cannot be interpreted without first indexing the styles — the map is
+built once per document and threaded through the walk, which is why
+`odtProcessNode`/`odtProcessChildren`/`odtProcessFrame` all gained a parameter. A
+per-span linear scan would have been O(spans x styles).
+
+Working on the real `officeparser.odt`: **bold, italic, bold-italic (nested
+composition), underline and strike** all extract correctly.
+
+**Known gap: superscript/subscript do not resolve in ODT.** The styles are
+present and correct in the file (`T10` = `style:text-position="super 66.6%"`,
+`T11` = `sub 66.6%`), and the mapping code reads that attribute, but those two
+runs come back unformatted where `T1`–`T9` resolve fine. The cause is not yet
+identified — a synthetic `findAll(root, "style:style")` probe returned 0 matches
+on hand-written namespaced XML, which suggests something about namespace
+handling, but that probe is not representative of the real document since most
+styles *do* resolve there. Recorded rather than guessed at; needs its own
+investigation.
+
+Two further limitations, both deliberate: `style:parent-style-name` chains are
+not resolved (automatic styles — what LibreOffice and Word emit for direct
+formatting — carry properties inline, so the common case is covered), and ODT
+generation does not yet render runs.
+
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
 Note this now means two fields: `runs` on text/heading blocks and `itemRuns` on
 list blocks.
