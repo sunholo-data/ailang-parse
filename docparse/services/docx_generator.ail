@@ -1,12 +1,12 @@
 module docparse/services/docx_generator
 
-import std/string (length, intToStr, split)
+import std/string (length, intToStr, split, contains)
 import std/list (map, foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
-import docparse/services/xml_helpers (xmlEscape, xmlDecl, docxContentTypes, docxRootRels, docxRun, docxParagraph, docxStyledParagraph)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks)
+import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl, docxNs, docxRun, docxParagraph, docxStyledParagraph)
 
 -- DOCX Generator — converts Block ADT to a valid .docx file.
 --
@@ -28,69 +28,136 @@ import docparse/services/xml_helpers (xmlEscape, xmlDecl, docxContentTypes, docx
 --
 -- Contract: non-empty blocks produce a valid DOCX
 
+-- Which optional parts a given document needs. Threaded through the
+-- [Content_Types].xml and document.xml.rels builders so every part that gets
+-- written also gets declared and related — the P0 bug was styles.xml being
+-- written and declared but never related, which makes it invisible to Word.
+type DocxOptParts = {
+  images: [DocxImage],
+  links: [DocxLink],
+  comments: [DocxComment],
+  headers: [DocxHdrFtr],
+  footers: [DocxHdrFtr],
+  hasNumbering: bool
+}
+
 -- Generate a DOCX file from a ParsedDocument, writing to outputPath
 export func generateDocx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
   ensures { length(result) > 0 }
 {
-  let images = docxCollectImages(doc.blocks, 1);
+  -- Headers and footers become real parts, so they leave the body block list.
+  let sections = docxSplitSections(doc.blocks);
+  let body = sections.body;
+
+  let images = docxCollectImages(body, 1);
+  let links = docxCollectLinks(body, 1);
+  let comments = docxCollectComments(body, 1);
+  let parts = {
+    images: images,
+    links: links,
+    comments: comments,
+    headers: docxHdrFtrParts(sections.headers, "header", 1),
+    footers: docxHdrFtrParts(sections.footers, "footer", 1),
+    hasNumbering: docxHasList(body)
+  };
+
+  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1});
+  let sectPr = docxSectPr(parts.headers, parts.footers);
+  let documentXml = docxBuildDocument("${bodyResult.xml}${sectPr}");
+
+  let textParts = docxTextParts(doc, documentXml, parts);
   let hasImages = listLength(images) > 0;
-  let bodyResult = docxBlocksToXmlWithImages(doc.blocks, 1);
-  let documentXml = docxBuildDocumentWithNs(bodyResult.xml, hasImages);
-  let stylesXml = docxMinimalStyles();
-  let contentTypes = docxContentTypesWithImages(images);
-  let rootRels = docxRootRels();
 
   if hasImages then {
-    -- Use createArchiveWithBytes for mixed text+binary archive
-    let docRels = docxDocumentRels(images);
-    let textEntries = [
-      {name: "[Content_Types].xml", data: docxTextToBase64(contentTypes)},
-      {name: "_rels/.rels", data: docxTextToBase64(rootRels)},
-      {name: "word/document.xml", data: docxTextToBase64(documentXml)},
-      {name: "word/styles.xml", data: docxTextToBase64(stylesXml)},
-      {name: "word/_rels/document.xml.rels", data: docxTextToBase64(docRels)}
-    ];
-    let imageEntries = docxImageEntries(images);
-    let allEntries = docxAppendByteEntries(textEntries, imageEntries);
-    let result = createArchiveWithBytes(outputPath, allEntries);
-    match result {
+    -- Mixed text+binary archive: everything goes through base64.
+    let allEntries = docxAppendByteEntries(
+      docxPartsToByteEntries(textParts),
+      docxImageEntries(images)
+    );
+    match createArchiveWithBytes(outputPath, allEntries) {
       Ok(_) => "Generated DOCX: ${outputPath} (${intToStr(listLength(images))} images)",
       Err(e) => "Error generating DOCX: ${e}"
     }
   } else {
-    -- No images: use createArchive (simpler, no base64 overhead).
-    -- document.xml.rels is still required — it carries the styles relationship
-    -- that makes word/styles.xml reachable. See docxDocumentRels.
-    let entries = [
-      {name: "[Content_Types].xml", content: contentTypes},
-      {name: "_rels/.rels", content: rootRels},
-      {name: "word/document.xml", content: documentXml},
-      {name: "word/styles.xml", content: stylesXml},
-      {name: "word/_rels/document.xml.rels", content: docxDocumentRels([])}
-    ];
-    let result = createArchive(outputPath, entries);
-    match result {
+    -- No images: createArchive takes text directly, no base64 overhead.
+    match createArchive(outputPath, textParts) {
       Ok(_) => "Generated DOCX: ${outputPath}",
       Err(e) => "Error generating DOCX: ${e}"
     }
   }
 }
 
+-- The full text-part list for a document. Single source of truth: both the
+-- image and no-image archive paths derive their entries from this, so a part
+-- can never be present on one path and missing on the other (which is how
+-- document.xml.rels came to be image-path-only).
+pure func docxTextParts(doc: ParsedDocument, documentXml: string, parts: DocxOptParts) -> [{name: string, content: string}] {
+  let base = [
+    {name: "[Content_Types].xml", content: docxContentTypes(parts)},
+    {name: "_rels/.rels", content: docxRootRelsWithCore()},
+    {name: "docProps/core.xml", content: docxCoreProps(doc.metadata)},
+    {name: "word/document.xml", content: documentXml},
+    {name: "word/styles.xml", content: docxMinimalStyles()},
+    {name: "word/_rels/document.xml.rels", content: docxDocumentRels(parts)}
+  ];
+  let withNum = if parts.hasNumbering
+    then docxAppendTextParts(base, [{name: "word/numbering.xml", content: docxNumbering()}])
+    else base;
+  let withComments = if listLength(parts.comments) > 0
+    then docxAppendTextParts(withNum, [{name: "word/comments.xml", content: docxCommentsPart(parts.comments)}])
+    else withNum;
+  docxAppendTextParts(withComments,
+    docxAppendTextParts(docxHdrFtrTextParts(parts.headers), docxHdrFtrTextParts(parts.footers)))
+}
+
+pure func docxAppendTextParts(a: [{name: string, content: string}], b: [{name: string, content: string}]) -> [{name: string, content: string}] =
+  match a {
+    [] => b,
+    x :: rest => x :: docxAppendTextParts(rest, b)
+  }
+
+pure func docxPartsToByteEntries(parts: [{name: string, content: string}]) -> [{name: string, data: string}] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      let entry = {name: p.name, data: docxTextToBase64(p.content)} in
+      entry :: docxPartsToByteEntries(rest)
+  }
+
 -- Base64-encode a text string for createArchiveWithBytes
 pure func docxTextToBase64(text: string) -> string =
   toBase64(fromString(text))
 
--- Build word/document.xml with optional drawing namespaces for images
-pure func docxBuildDocumentWithNs(body: string, hasImages: bool) -> string
+-- Build word/document.xml. The drawing namespaces are declared unconditionally:
+-- unused namespace declarations are harmless, and making them conditional meant
+-- the namespace set had to be kept in sync with a separate image check.
+pure func docxBuildDocument(body: string) -> string
   ensures { length(result) > 0 }
 {
-  let imageNs = if hasImages
-    then " xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\""
-    else "";
-  "${xmlDecl()}<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"${imageNs}><w:body>${body}</w:body></w:document>"
+  "${xmlDecl()}<w:document ${docxDocumentNsAttrs()}><w:body>${body}</w:body></w:document>"
 }
 
--- Convert a single Block to DOCX XML (no image embedding — used in fallback path)
+pure func docxDocumentNsAttrs() -> string =
+  "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\""
+
+-- Section properties, last child of w:body. Carries the header/footer
+-- references, so headers only take effect once this is emitted.
+pure func docxSectPr(headers: [DocxHdrFtr], footers: [DocxHdrFtr]) -> string {
+  let refs = "${docxHdrFtrRefs(headers, "header")}${docxHdrFtrRefs(footers, "footer")}";
+  "<w:sectPr>${refs}<w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/></w:sectPr>"
+}
+
+pure func docxHdrFtrRefs(parts: [DocxHdrFtr], kind: string) -> string =
+  match parts {
+    [] => "",
+    p :: rest =>
+      "<w:${kind}Reference w:type=\"default\" r:id=\"${docxHdrFtrRelId(p)}\"/>${docxHdrFtrRefs(rest, kind)}"
+  }
+
+-- Simple, counter-free block rendering. Used for header/footer part bodies,
+-- which are rendered standalone and so cannot own document-body rIds: an image
+-- or link inside a header degrades to text rather than claiming an rId that the
+-- body walk has already allocated.
 pure func docxBlockToXml(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
@@ -128,46 +195,70 @@ pure func docxBlockToXml(block: Block) -> string =
     ChangeBlock(c) =>
       docxChangeToXml(c.changeType, c.author, c.date, c.text),
 
-    -- Hyperlink XML in DOCX requires a relationship rId. For now we
-    -- downgrade to a paragraph with "text (url)" — proper <w:hyperlink>
-    -- wrapping is left for a future write-back release.
     LinkBlock(l) =>
       docxParagraph(docxRun("${l.text} (${l.href})")),
 
-    -- Writing real w:comment parts + commentRange markers back into a .docx is
-    -- explicitly out of scope for this read-only release; the comment and its
-    -- anchor are preserved as text so nothing is lost on a round trip.
     CommentBlock(c) =>
       docxParagraph(docxRun(commentText(c.author, c.text, c.anchorText, c.anchored)))
   }
 
--- Image-aware block conversion: tracks image index for rId references
-type DocxBlockResult = { xml: string, nextIdx: int }
+-- Counters threaded through the body walk. Images and links each need a
+-- relationship id, comments need an id shared with word/comments.xml, and
+-- revisions need a document-unique w:id. Collect* functions below walk the same
+-- blocks in the same order, so the ids they assign line up with these.
+type DocxIdx = { img: int, link: int, rev: int, cmt: int }
 
-pure func docxBlocksToXmlWithImages(blocks: [Block], imgIdx: int) -> DocxBlockResult =
+type DocxBlockResult = { xml: string, idx: DocxIdx }
+
+pure func docxBlocksToXml(blocks: [Block], idx: DocxIdx) -> DocxBlockResult =
   match blocks {
-    [] => {xml: "", nextIdx: imgIdx},
+    [] => {xml: "", idx: idx},
     block :: rest =>
-      let r = docxBlockToXmlWithImage(block, imgIdx) in
-      let rest_r = docxBlocksToXmlWithImages(rest, r.nextIdx) in
-      {xml: "${r.xml}${rest_r.xml}", nextIdx: rest_r.nextIdx}
+      let r = docxBlockToXmlIndexed(block, idx) in
+      let restR = docxBlocksToXml(rest, r.idx) in
+      {xml: "${r.xml}${restR.xml}", idx: restR.idx}
   }
 
-pure func docxBlockToXmlWithImage(block: Block, imgIdx: int) -> DocxBlockResult =
+pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
   match block {
+    -- Predicate MUST match docxCollectImages exactly: this walk assigns the
+    -- rIds that the collector's relationship entries have to line up with, so
+    -- any divergence points a <w:drawing> at the wrong image (or a missing one).
     ImageBlock(i) =>
-      if length(i.data) > 0 && length(i.mime) > 0
-      then {xml: docxInlineImage(imgIdx, i.description), nextIdx: imgIdx + 1}
-      else {xml: docxBlockToXml(block), nextIdx: imgIdx},
+      if docxIsBinaryPayload(i.data, i.mime)
+      then {
+        xml: docxInlineImage(idx.img, i.description),
+        idx: {img: idx.img + 1, link: idx.link, rev: idx.rev, cmt: idx.cmt}
+      }
+      else {xml: docxBlockToXml(block), idx: idx},
+
+    LinkBlock(l) =>
+      if length(l.href) > 0
+      then {
+        xml: docxHyperlinkPara(idx.link, l.text, l.title),
+        idx: {img: idx.img, link: idx.link + 1, rev: idx.rev, cmt: idx.cmt}
+      }
+      else {xml: docxBlockToXml(block), idx: idx},
+
+    ChangeBlock(c) => {
+      xml: docxRevisionPara(idx.rev, c.changeType, c.author, c.date, c.text),
+      idx: {img: idx.img, link: idx.link, rev: idx.rev + 1, cmt: idx.cmt}
+    },
+
+    CommentBlock(c) => {
+      xml: docxCommentAnchorPara(idx.cmt, c.anchorText, c.anchored),
+      idx: {img: idx.img, link: idx.link, rev: idx.rev, cmt: idx.cmt + 1}
+    },
 
     SectionBlock(s) =>
-      let r = docxBlocksToXmlWithImages(s.blocks, imgIdx) in
+      let r = docxBlocksToXml(s.blocks, idx) in
       let label = docxSectionLabel(s.kind) in
       let labelXml = if length(label) > 0 then docxStyledParagraph("Heading3", label) else "" in
-      {xml: "${labelXml}${r.xml}", nextIdx: r.nextIdx},
+      {xml: "${labelXml}${r.xml}", idx: r.idx},
 
-    _ => {xml: docxBlockToXml(block), nextIdx: imgIdx}
+    _ => {xml: docxBlockToXml(block), idx: idx}
   }
+
 
 -- Section label helper (extracted for reuse)
 pure func docxSectionLabel(kind: string) -> string =
@@ -237,16 +328,18 @@ pure func docxDataCellToXml(cell: TableCell) -> string {
 -- bullet list items get a bullet character prefix, numbered get "N. " prefix.
 -- Full list numbering would require word/numbering.xml (deferred).
 pure func docxListToXml(items: [string], ordered: bool) -> string =
-  docxListItemsToXml(items, ordered, 1)
+  docxListItemsToXml(items, if ordered then 2 else 1)
 
-pure func docxListItemsToXml(items: [string], ordered: bool, idx: int) -> string =
+-- Real list paragraphs referencing word/numbering.xml (numId 1 = bullet,
+-- 2 = decimal). Previously these were literal "\u2022 " / "N. " text prefixes, which
+-- looked right on screen but were not lists: Word would not renumber, demote or
+-- continue them, and the bullet was part of the paragraph text.
+pure func docxListItemsToXml(items: [string], numId: int) -> string =
   match items {
     [] => "",
     item :: rest =>
-      let prefix = if ordered
-        then "${intToStr(idx)}. "
-        else "\u2022 " in
-      "${docxParagraph(docxRun("${prefix}${item}"))}${docxListItemsToXml(rest, ordered, idx + 1)}"
+      let pPr = "<w:pPr><w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"${intToStr(numId)}\"/></w:numPr></w:pPr>" in
+      "${docxParagraph("${pPr}${docxRun(item)}")}${docxListItemsToXml(rest, numId)}"
   }
 
 -- Section blocks: render child blocks with a section label
@@ -280,10 +373,31 @@ pure func docxChangeToXml(changeType: string, author: string, date: string, text
 }
 
 -- [Content_Types].xml with styles + image extensions
-pure func docxContentTypesWithImages(images: [DocxImage]) -> string {
-  let imageDefaults = docxImageContentTypeDefaults(images);
-  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>${imageDefaults}<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/></Types>"
+-- [Content_Types].xml. Every part written by docxTextParts must have an Override
+-- here (or a Default for its extension) or Word rejects the package.
+pure func docxContentTypes(parts: DocxOptParts) -> string {
+  let wordNs = "application/vnd.openxmlformats-officedocument.wordprocessingml";
+  let overrides = "${docxOverride("/word/document.xml", "${wordNs}.document.main+xml")}${docxOverride("/word/styles.xml", "${wordNs}.styles+xml")}${docxOverride("/docProps/core.xml", "application/vnd.openxmlformats-package.core-properties+xml")}";
+  let numOverride = if parts.hasNumbering
+    then docxOverride("/word/numbering.xml", "${wordNs}.numbering+xml")
+    else "";
+  let cmtOverride = if listLength(parts.comments) > 0
+    then docxOverride("/word/comments.xml", "${wordNs}.comments+xml")
+    else "";
+  let hdrOverrides = docxHdrFtrOverrides(parts.headers, "${wordNs}.header+xml");
+  let ftrOverrides = docxHdrFtrOverrides(parts.footers, "${wordNs}.footer+xml");
+  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>${docxImageContentTypeDefaults(parts.images)}${overrides}${numOverride}${cmtOverride}${hdrOverrides}${ftrOverrides}</Types>"
 }
+
+pure func docxOverride(partName: string, contentType: string) -> string =
+  "<Override PartName=\"${partName}\" ContentType=\"${contentType}\"/>"
+
+pure func docxHdrFtrOverrides(parts: [DocxHdrFtr], contentType: string) -> string =
+  match parts {
+    [] => "",
+    p :: rest =>
+      "${docxOverride("/word/${docxHdrFtrPartName(p)}", contentType)}${docxHdrFtrOverrides(rest, contentType)}"
+  }
 
 -- Build <Default> entries for image MIME types found in the document
 pure func docxImageContentTypeDefaults(images: [DocxImage]) -> string =
@@ -316,7 +430,13 @@ pure func docxExtInList(parts: [string], ext: string) -> bool =
 -- style, and consumers report no style at all for unstyled paragraphs
 -- (python-docx returns None for paragraph.style).
 pure func docxMinimalStyles() -> string {
-  "${xmlDecl()}<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>${docxHeadingStyle(1, "28")}${docxHeadingStyle(2, "24")}${docxHeadingStyle(3, "20")}${docxHeadingStyle(4, "18")}${docxHeadingStyle(5, "16")}${docxHeadingStyle(6, "14")}</w:styles>"
+  let normal = "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>";
+  -- ListParagraph is referenced by every w:numPr paragraph, Hyperlink by every
+  -- w:hyperlink run. A missing style definition here is the same class of bug as
+  -- the orphaned styles.xml: the reference resolves to nothing.
+  let listPara = "<w:style w:type=\"paragraph\" w:styleId=\"ListParagraph\"><w:name w:val=\"List Paragraph\"/><w:pPr><w:ind w:left=\"720\"/><w:contextualSpacing/></w:pPr></w:style>";
+  let hyperlink = "<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr></w:style>";
+  "${xmlDecl()}<w:styles xmlns:w=\"${docxNs()}\">${normal}${listPara}${hyperlink}${docxHeadingStyle(1, "28")}${docxHeadingStyle(2, "24")}${docxHeadingStyle(3, "20")}${docxHeadingStyle(4, "18")}${docxHeadingStyle(5, "16")}${docxHeadingStyle(6, "14")}</w:styles>"
 }
 
 -- Build a heading style definition
@@ -335,7 +455,7 @@ pure func docxCollectImages(blocks: [Block], startIdx: int) -> [DocxImage] =
   match blocks {
     [] => [],
     ImageBlock(i) :: rest =>
-      if length(i.data) > 0 && length(i.mime) > 0
+      if docxIsBinaryPayload(i.data, i.mime)
       then
         let img = {idx: startIdx, data: i.data, mime: i.mime, ext: docxMimeToExt(i.mime)} in
         img :: docxCollectImages(rest, startIdx + 1)
@@ -346,6 +466,43 @@ pure func docxCollectImages(blocks: [Block], startIdx: int) -> [DocxImage] =
       docxAppendImageList(inner, docxCollectImages(rest, nextIdx)),
     _ :: rest => docxCollectImages(rest, startIdx)
   }
+
+-- Whether an ImageBlock's payload can be embedded as a binary part.
+--
+-- ImageBlock.data is overloaded across parsers. DOCX/PPTX put base64 bytes in
+-- it, but html_parser stores the <img src> URL (html_parser.ail:378) and
+-- odt_parser stores the package href (odt_parser.ail:247). Embedding on
+-- `length(data) > 0 && length(mime) > 0` therefore fed "hero-small.png" and
+-- "Pictures/10000...svg" to the base64 decoder, and the archive writer failed
+-- the ENTIRE document with "invalid base64: illegal base64 data at input byte
+-- N" — every HTML file with an <img>, and two ODTs, could not be converted to
+-- DOCX at all.
+--
+-- Mime alone cannot discriminate: odt_parser guesses a real mime
+-- ("image/svg+xml") from the href's extension, so the reference looks
+-- embeddable by every metadata check. The payload itself is the only reliable
+-- signal, so require both a mime we can name an extension for and a payload
+-- that is not obviously a path or URL.
+--
+-- References fall back to the "[Image: description]" text placeholder, which is
+-- what external images already got.
+pure func docxIsEmbeddableMime(mime: string) -> bool =
+  mime == "image/png" || mime == "image/jpeg" || mime == "image/gif"
+  || mime == "image/bmp" || mime == "image/tiff" || mime == "image/svg+xml"
+
+-- "." " " and ":" are outside both the standard and URL-safe base64 alphabets,
+-- and are near-universal in paths and URLs ("hero-small.png",
+-- "Pictures/x.svg", "data:image/png;base64,..."). Checked with `contains`
+-- builtins rather than a per-character scan, which would walk multi-megabyte
+-- payloads in the interpreter.
+pure func docxIsBinaryPayload(data: string, mime: string) -> bool {
+  if length(data) == 0 then false
+  else if docxIsEmbeddableMime(mime) == false then false
+  else if contains(data, ".") then false
+  else if contains(data, " ") then false
+  else if contains(data, ":") then false
+  else true
+}
 
 -- MIME type to file extension
 pure func docxMimeToExt(mime: string) -> string =
@@ -370,10 +527,42 @@ pure func docxMimeToExt(mime: string) -> string =
 --
 -- Image rIds are allocated from 1 (docxCollectImages(blocks, 1)), so the styles
 -- relationship uses a non-numeric id to stay clear of them.
-pure func docxDocumentRels(images: [DocxImage]) -> string {
-  let stylesRel = "<Relationship Id=\"${docxStylesRelId()}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>";
-  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${stylesRel}${docxImageRelsEntries(images)}</Relationships>"
+pure func docxDocumentRels(parts: DocxOptParts) -> string {
+  let ofcNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  let stylesRel = docxRel(docxStylesRelId(), "${ofcNs}/styles", "styles.xml");
+  let numRel = if parts.hasNumbering
+    then docxRel("rIdNumbering", "${ofcNs}/numbering", "numbering.xml")
+    else "";
+  let cmtRel = if listLength(parts.comments) > 0
+    then docxRel("rIdComments", "${ofcNs}/comments", "comments.xml")
+    else "";
+  let hdrRels = docxHdrFtrRels(parts.headers, "${ofcNs}/header");
+  let ftrRels = docxHdrFtrRels(parts.footers, "${ofcNs}/footer");
+  let linkRels = docxLinkRels(parts.links, "${ofcNs}/hyperlink");
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${stylesRel}${numRel}${cmtRel}${hdrRels}${ftrRels}${linkRels}${docxImageRelsEntries(parts.images)}</Relationships>"
 }
+
+pure func docxRel(id: string, relType: string, target: string) -> string =
+  "<Relationship Id=\"${id}\" Type=\"${relType}\" Target=\"${target}\"/>"
+
+pure func docxHdrFtrRels(parts: [DocxHdrFtr], relType: string) -> string =
+  match parts {
+    [] => "",
+    p :: rest =>
+      "${docxRel(docxHdrFtrRelId(p), relType, docxHdrFtrPartName(p))}${docxHdrFtrRels(rest, relType)}"
+  }
+
+-- Hyperlink targets are external URLs, so they need TargetMode="External".
+-- Without it Word treats the href as a package-relative part path and the link
+-- silently does nothing.
+pure func docxLinkRels(links: [DocxLink], relType: string) -> string =
+  match links {
+    [] => "",
+    l :: rest =>
+      "<Relationship Id=\"${docxLinkRelId(l.idx)}\" Type=\"${relType}\" Target=\"${xmlAttrEscape(l.href)}\" TargetMode=\"External\"/>${docxLinkRels(rest, relType)}"
+  }
+
+pure func docxLinkRelId(idx: int) -> string = "rIdLink${intToStr(idx)}"
 
 -- Relationship id for word/styles.xml. Non-numeric so it cannot collide with the
 -- image rIds, which count up from rId1.
@@ -406,4 +595,214 @@ pure func docxAppendImageList(a: [DocxImage], b: [DocxImage]) -> [DocxImage] =
   match a {
     [] => b,
     x :: rest => x :: docxAppendImageList(rest, b)
+  }
+
+-- ============================================================
+-- docProps/core.xml — document metadata (P1 item 5)
+-- ============================================================
+
+-- The package-level rels must point at docProps/core.xml, otherwise the part is
+-- orphaned exactly the way styles.xml was. Local to this module rather than a
+-- change to xml_helpers.docxRootRels, which pptx/xlsx also use.
+pure func docxRootRelsWithCore() -> string {
+  let docRel = docxRel("rId1", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument", "word/document.xml");
+  let coreRel = docxRel("rIdCore", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", "docProps/core.xml");
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${docRel}${coreRel}</Relationships>"
+}
+
+pure func docxCoreProps(meta: DocMetadata) -> string {
+  let title = if length(meta.title) > 0 then "<dc:title>${xmlEscape(meta.title)}</dc:title>" else "";
+  let creator = if length(meta.author) > 0 then "<dc:creator>${xmlEscape(meta.author)}</dc:creator>" else "";
+  let modBy = if length(meta.author) > 0 then "<cp:lastModifiedBy>${xmlEscape(meta.author)}</cp:lastModifiedBy>" else "";
+  let created = docxDctermsDate("created", meta.created);
+  let modified = docxDctermsDate("modified", meta.modified);
+  "${xmlDecl()}<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">${title}${creator}${modBy}${created}${modified}</cp:coreProperties>"
+}
+
+-- dcterms dates are xsi:type="dcterms:W3CDTF" and Word refuses to open a package
+-- whose dates don't parse. Metadata reaching us from non-Office sources is
+-- free-form, so emit the element only when the value already looks like W3CDTF
+-- rather than risking an unopenable file for the sake of a date.
+pure func docxDctermsDate(field: string, value: string) -> string =
+  if docxIsW3CDTF(value)
+  then "<dcterms:${field} xsi:type=\"dcterms:W3CDTF\">${xmlEscape(value)}</dcterms:${field}>"
+  else ""
+
+pure func docxIsW3CDTF(value: string) -> bool =
+  length(value) >= 19 && contains(value, "-") && contains(value, "T") && contains(value, ":")
+
+-- ============================================================
+-- word/numbering.xml — real Word lists (P1 item 4)
+-- ============================================================
+
+-- Two abstract definitions, one instance each: numId 1 bullets, numId 2 decimal.
+-- Single level only — ListBlock({items: [string], ordered: bool}) is flat, so
+-- there is no nesting to represent. Nested lists need an ADT change.
+pure func docxNumbering() -> string {
+  let bulletLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"•\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr></w:lvl>";
+  let decimalLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>";
+  "${xmlDecl()}<w:numbering xmlns:w=\"${docxNs()}\"><w:abstractNum w:abstractNumId=\"0\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${bulletLvl}</w:abstractNum><w:abstractNum w:abstractNumId=\"1\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${decimalLvl}</w:abstractNum><w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num><w:num w:numId=\"2\"><w:abstractNumId w:val=\"1\"/></w:num></w:numbering>"
+}
+
+pure func docxHasList(blocks: [Block]) -> bool =
+  match blocks {
+    [] => false,
+    ListBlock(_) :: _ => true,
+    SectionBlock(s) :: rest => docxHasList(s.blocks) || docxHasList(rest),
+    _ :: rest => docxHasList(rest)
+  }
+
+-- ============================================================
+-- Hyperlinks (P1 item 6)
+-- ============================================================
+
+type DocxLink = { idx: int, href: string }
+
+pure func docxCollectLinks(blocks: [Block], startIdx: int) -> [DocxLink] =
+  match blocks {
+    [] => [],
+    LinkBlock(l) :: rest =>
+      if length(l.href) > 0
+      then
+        let link = {idx: startIdx, href: l.href} in
+        link :: docxCollectLinks(rest, startIdx + 1)
+      else docxCollectLinks(rest, startIdx),
+    SectionBlock(s) :: rest =>
+      let inner = docxCollectLinks(s.blocks, startIdx) in
+      docxAppendLinkList(inner, docxCollectLinks(rest, startIdx + listLength(inner))),
+    _ :: rest => docxCollectLinks(rest, startIdx)
+  }
+
+pure func docxAppendLinkList(a: [DocxLink], b: [DocxLink]) -> [DocxLink] =
+  match a {
+    [] => b,
+    x :: rest => x :: docxAppendLinkList(rest, b)
+  }
+
+pure func docxHyperlinkPara(idx: int, text: string, title: string) -> string {
+  let tooltip = if length(title) > 0 then " w:tooltip=\"${xmlAttrEscape(title)}\"" else "";
+  let run = "<w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>";
+  docxParagraph("<w:hyperlink r:id=\"${docxLinkRelId(idx)}\"${tooltip}>${run}</w:hyperlink>")
+}
+
+-- ============================================================
+-- Track changes and comments (P1 item 7)
+-- ============================================================
+
+type DocxComment = { id: int, author: string, date: string, text: string }
+
+pure func docxCollectComments(blocks: [Block], startId: int) -> [DocxComment] =
+  match blocks {
+    [] => [],
+    CommentBlock(c) :: rest =>
+      let cmt = {id: startId, author: c.author, date: c.date, text: c.text} in
+      cmt :: docxCollectComments(rest, startId + 1),
+    SectionBlock(s) :: rest =>
+      let inner = docxCollectComments(s.blocks, startId) in
+      docxAppendCommentList(inner, docxCollectComments(rest, startId + listLength(inner))),
+    _ :: rest => docxCollectComments(rest, startId)
+  }
+
+pure func docxAppendCommentList(a: [DocxComment], b: [DocxComment]) -> [DocxComment] =
+  match a {
+    [] => b,
+    x :: rest => x :: docxAppendCommentList(rest, b)
+  }
+
+pure func docxCommentsPart(comments: [DocxComment]) -> string =
+  "${xmlDecl()}<w:comments xmlns:w=\"${docxNs()}\">${docxCommentEntries(comments)}</w:comments>"
+
+pure func docxCommentEntries(comments: [DocxComment]) -> string =
+  match comments {
+    [] => "",
+    c :: rest =>
+      "<w:comment w:id=\"${intToStr(c.id)}\" w:author=\"${xmlAttrEscape(c.author)}\"${docxDateAttr(c.date)}>${docxParagraph(docxRun(c.text))}</w:comment>${docxCommentEntries(rest)}"
+  }
+
+-- w:date must be W3CDTF when present, and it is optional in the schema — so an
+-- unparseable date is dropped rather than written and risking the file.
+pure func docxDateAttr(date: string) -> string =
+  if docxIsW3CDTF(date) then " w:date=\"${xmlAttrEscape(date)}\"" else ""
+
+-- CommentBlock is a standalone block carrying the text it annotates, so the
+-- anchor paragraph is that text wrapped in the comment range. Unanchored
+-- comments still get a reference so the comment is reachable in Word's pane.
+pure func docxCommentAnchorPara(id: int, anchorText: string, anchored: bool) -> string {
+  let idStr = intToStr(id);
+  let ref = "<w:r><w:commentReference w:id=\"${idStr}\"/></w:r>";
+  if anchored && length(anchorText) > 0
+  then docxParagraph("<w:commentRangeStart w:id=\"${idStr}\"/>${docxRun(anchorText)}<w:commentRangeEnd w:id=\"${idStr}\"/>${ref}")
+  else docxParagraph(ref)
+}
+
+-- Real revision marks. Deleted text uses <w:delText>, not <w:t> — Word ignores
+-- a <w:t> inside <w:del>, which silently loses the deleted content.
+pure func docxRevisionPara(id: int, changeType: string, author: string, date: string, text: string) -> string {
+  let attrs = "w:id=\"${intToStr(id)}\" w:author=\"${xmlAttrEscape(author)}\"${docxDateAttr(date)}";
+  if changeType == "delete" || changeType == "move-from"
+  then docxParagraph("<w:del ${attrs}><w:r><w:delText xml:space=\"preserve\">${xmlEscape(text)}</w:delText></w:r></w:del>")
+  else docxParagraph("<w:ins ${attrs}>${docxRun(text)}</w:ins>")
+}
+
+-- ============================================================
+-- Headers and footers as real parts (P1 item 8)
+-- ============================================================
+
+type DocxHdrFtr = { idx: int, kind: string, xml: string }
+type DocxSections = { body: [Block], headers: [Block], footers: [Block] }
+
+-- Split top-level header/footer SectionBlocks out of the body. Only top-level:
+-- nested ones keep the old inline-with-label rendering, since a header nested
+-- inside another block has no meaningful sectPr to attach to.
+pure func docxSplitSections(blocks: [Block]) -> DocxSections =
+  match blocks {
+    [] => {body: [], headers: [], footers: []},
+    b :: rest =>
+      let r = docxSplitSections(rest) in
+      match b {
+        SectionBlock(s) =>
+          if s.kind == "header" then {body: r.body, headers: b :: r.headers, footers: r.footers}
+          else if s.kind == "footer" then {body: r.body, headers: r.headers, footers: b :: r.footers}
+          else {body: b :: r.body, headers: r.headers, footers: r.footers},
+        _ => {body: b :: r.body, headers: r.headers, footers: r.footers}
+      }
+  }
+
+pure func docxHdrFtrParts(blocks: [Block], kind: string, startIdx: int) -> [DocxHdrFtr] =
+  match blocks {
+    [] => [],
+    b :: rest =>
+      let inner = match b {
+        SectionBlock(s) => docxBlocksSimple(s.blocks),
+        _ => docxBlockToXml(b)
+      } in
+      let part = {idx: startIdx, kind: kind, xml: inner} in
+      part :: docxHdrFtrParts(rest, kind, startIdx + 1)
+  }
+
+pure func docxBlocksSimple(blocks: [Block]) -> string =
+  foldl(\acc b. "${acc}${docxBlockToXml(b)}", "", blocks)
+
+pure func docxHdrFtrPartName(p: DocxHdrFtr) -> string =
+  "${p.kind}${intToStr(p.idx)}.xml"
+
+pure func docxHdrFtrRelId(p: DocxHdrFtr) -> string =
+  "rId${docxCapKind(p.kind)}${intToStr(p.idx)}"
+
+pure func docxCapKind(kind: string) -> string =
+  if kind == "header" then "Header" else "Footer"
+
+pure func docxHdrFtrTextParts(parts: [DocxHdrFtr]) -> [{name: string, content: string}] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      let root = if p.kind == "header" then "w:hdr" else "w:ftr" in
+      -- A header part must contain at least one block-level element; an empty
+      -- one makes the package invalid.
+      let body = if length(p.xml) > 0 then p.xml else docxParagraph("") in
+      let entry = {
+        name: "word/${docxHdrFtrPartName(p)}",
+        content: "${xmlDecl()}<${root} ${docxDocumentNsAttrs()}>${body}</${root}>"
+      } in
+      entry :: docxHdrFtrTextParts(rest)
   }

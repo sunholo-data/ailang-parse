@@ -1,6 +1,6 @@
 # DOCX Generation Fidelity — fixing the package graph, and what native buys us over Quarto
 
-**Status**: PARTIAL — P0 implemented 2026-08-10, P1/P2 planned (2026-08-10)
+**Status**: PARTIAL — P0 + P1 items 4–8 implemented 2026-08-10; item 9 blocked upstream; P2 planned
 **Theme**: `generateDocx` emits correct heading XML into a package where nothing can find it. Fix the OPC wiring, then be explicit about which jobs belong to the native generator and which belong to Quarto.
 **Prompted by**: a user request for DOCX generation.
 **Complements**: [`v0_21_0_quarto_integration.md`](../v0_21_0/v0_21_0_quarto_integration.md) — that doc adds `quarto render` as an output renderer. This doc is not an alternative to it. The two cover different jobs; the split is argued in [Native vs Quarto](#native-vs-quarto).
@@ -238,6 +238,158 @@ include `docx_generator`, so the browser demo is unaffected either way.
 
 10. `InlineRun` in the Block ADT. Large, cross-cutting, and the only route to
     inline formatting.
+
+## P1 sprint plan
+
+Committed 2026-08-10. Six items, ~1 week, no breaking changes to the Block ADT
+or the public JSON shape. Every field these need already exists on the ADT —
+this is generator-side work only.
+
+### Shared prerequisite: one rId scheme
+
+Items 4, 6, 7 and 8 all add relationships to `word/_rels/document.xml.rels`, and
+item 5 adds one to the package-level `_rels/.rels`. Doing them independently
+would mean four separate rId allocators racing the numeric image ids.
+
+Instead, fix the scheme once, up front: **image relationships keep the numeric
+`rId1..rIdN` space (they are generated from a counter and it is not worth
+disturbing); everything else uses a reserved non-numeric id.** `rIdStyles`
+already set this precedent in P0.
+
+| Relationship | Id | Part |
+|---|---|---|
+| styles | `rIdStyles` | `word/styles.xml` |
+| numbering | `rIdNumbering` | `word/numbering.xml` |
+| comments | `rIdComments` | `word/comments.xml` |
+| header *n* | `rIdHeader<n>` | `word/header<n>.xml` |
+| footer *n* | `rIdFooter<n>` | `word/footer<n>.xml` |
+| hyperlink *n* | `rIdLink<n>` | external, `TargetMode="External"` |
+| image *n* | `rId<n>` | `word/media/image<n>.<ext>` |
+
+Non-numeric ids are valid `xsd:ID` values and cannot collide with the image
+counter, so no cross-item threading is needed.
+
+### Order of work
+
+Sequenced so the shared machinery lands before its consumers, and the riskiest
+part-authoring work happens once the pattern is established:
+
+1. **rId scheme + content-type/rels builders** — parameterise
+   `docxContentTypesWithImages` and `docxDocumentRels` over an optional-parts
+   record rather than bolting on a positional argument per feature.
+2. **Item 5 — `docProps/core.xml`** (~2h). New part, package-level rels entry,
+   two content-type overrides (`core-properties`, and `app.xml` if added).
+   `doc.metadata` already carries title/author/created/modified.
+3. **Item 4 — `word/numbering.xml`** (~½d). One `w:abstractNum` for bullets, one
+   for decimals, two `w:num` instances; `docxListToXml` swaps its literal `"• "`
+   / `"N. "` prefixes for `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="N"/></w:numPr>`.
+   Bounded: `ListBlock({items: [string], ordered: bool})` is flat, so single
+   level only. Nested lists need an ADT change and are explicitly out of scope.
+4. **Item 6 — `w:hyperlink`** (~½d). Collect `LinkBlock`s the way
+   `docxCollectImages` collects images, emit
+   `<w:hyperlink r:id="rIdLink<n>">` with a `Hyperlink` style run, and add
+   `TargetMode="External"` rels.
+5. **Item 8 — header/footer parts** (~1d). `SectionBlock(kind: "header"|"footer")`
+   becomes a real `word/header<n>.xml`, referenced from a `w:sectPr` that we do
+   not currently emit at all. Adding `sectPr` is the riskier half.
+6. **Item 7 — `w:ins`/`w:del` + `word/comments.xml`** (~1–1.5d). `w:ins`/`w:del`
+   is a `document.xml`-only change using `ChangeBlock`'s existing
+   changeType/author/date. Comments need the new part plus
+   `commentRangeStart`/`commentRangeEnd`/`commentReference` markers —
+   `CommentBlock` already carries `anchorText` and `anchored`, so anchored
+   comments can wrap the right span rather than trailing the paragraph.
+7. **Item 9 — WASM subset** — **BLOCKED, not shipped.** The two-list edit is
+   real but insufficient, and the ~2h estimate was wrong for a reason that only
+   surfaced on inspection: **`std/zip` has no in-memory archive builder.** Every
+   constructor writes to a path and carries `FS`:
+
+   ```
+   createArchive(string, list[{name, content}])   -> Result[(), string] ! {FS}
+   createArchiveWithBytes(string, list[{name, data}]) -> Result[(), string] ! {FS}
+   ```
+
+   A browser has no filesystem, so `generateDocx` cannot run there at all —
+   loading the module would only add a function that can never be called.
+   Parsing dodges this because the demo does ZIP *extraction* in JS (JSZip) and
+   feeds entry content to AILANG, so the read path never touches `FS`; there is
+   no equivalent on the write path.
+
+   Reported upstream rather than worked around, per the project's AILANG bug
+   policy: `ailang-core` msg `msg_20260810_153017_c7a8066a`, GitHub issue #644,
+   requesting `createArchiveBytes(entries) -> Result[string, string]` with no
+   `FS` effect. Item 9 stays open until that lands, and it then unblocks
+   browser-side PPTX/XLSX/ODT generation too, not just DOCX.
+
+### Outcome (2026-08-10)
+
+Items 4–8 shipped; item 9 blocked upstream (above). Verified against both
+renderers rather than by inspection:
+
+| Item | Evidence |
+|---|---|
+| 4 lists | LibreOffice renders real `<ul>`/`<ol>`/`<li>`; python-docx reports `List Paragraph` + a `w:numPr`; the `•`/`N.` text prefixes are gone from the run text |
+| 5 metadata | `pandoc_table_list.docx` → `core_properties.author == "Jesse Rosenthal"` |
+| 6 hyperlinks | `rIdLink1` with `TargetMode="External"`; LibreOffice renders a live `<a href="mailto:hello@example.com">` |
+| 7 revisions | real `<w:ins w:id="1" w:author="eng-dept" w:date="2014-06-25T10:40:00Z">` — parity with pandoc, which previously beat us here |
+| 7 comments | real `word/comments.xml` with author + date; 5 anchored comments with matching `commentRangeStart`/`End`/`Reference` |
+| 8 headers/footers | real `word/header1.xml` + `footer1.xml`, referenced from a `w:sectPr` we did not previously emit at all |
+
+Full sweep: **60/60** test files across docx/pptx/xlsx/odt/ods/odp/html/md/csv/epub/eml
+convert to DOCX and open in **both** python-docx and LibreOffice.
+
+#### Two defects found by the sweep, both pre-existing
+
+Neither was a regression from this work — the old code failed identically — but
+both made DOCX generation fail *completely* for whole input classes, so they are
+fixed here.
+
+**`ImageBlock.data` is overloaded across parsers.** DOCX/PPTX put base64 bytes
+in it; `html_parser.ail:378` puts the `<img src>` URL there, and
+`odt_parser.ail:247` puts the package href. The generator assumed base64 and the
+archive writer rejected the whole document:
+
+```
+Error generating DOCX: entry 5: invalid base64: illegal base64 data at input byte 4
+```
+
+Every HTML file containing an `<img>`, plus two ODTs, could not be converted at
+all. Mime cannot discriminate — `odt_parser` guesses a real
+`image/svg+xml` from the href's extension, so the reference passes every
+metadata check. The payload is the only reliable signal, so `docxIsBinaryPayload`
+now requires both a known image mime and a payload containing none of `.`, ` `
+or `:` (all outside the base64 alphabet, all near-universal in paths and URLs),
+checked with `contains` builtins rather than a per-character scan of
+multi-megabyte payloads. References fall back to the existing
+`[Image: description]` placeholder. Sweep went 56/58 → 60/60.
+
+**The committed demo artifacts were stale.** `data/examples/demo_report.docx`
+was built by the pre-P0 generator and still carried the orphaned-styles bug. The
+new L2b check (below) caught it; regenerated via
+`.claude/skills/verify-docs/scripts/regen_and_verify.sh`.
+
+### Definition of done
+
+Each item must hold the P0 verification bar, since parse-side goldens are
+structurally unable to catch generator regressions:
+
+- LibreOffice renders the feature (real list bullets/numbers, live hyperlink,
+  running header, tracked revision) — not merely "the file opens".
+- python-docx reads it back with the expected semantics.
+- `benchmarks/verify_generated.py` stays all-pass.
+- `run_benchmarks.py --suite office` stays at 100.0%.
+- `./bin/docparse --check` stays clean.
+- `verify_generated.py` gains a generation-side assertion per feature, so the
+  next regression is caught by CI rather than by inspection.
+
+Done as **L2b Parts** in `verify_generated.py`, written to catch the bug *class*
+rather than the six instances: every part declared in `[Content_Types].xml` must
+be reachable through the relationship graph, and every relationship must point
+at a part that exists. numbering.xml, comments.xml and the header/footer parts
+were therefore covered by the same assertion the moment they were added, and any
+future part is covered for free. It also asserts the user-visible symptom
+directly — if the body references a `Heading` style, a reader must resolve one.
+Orphaned parts are a FAIL, not a WARN: they produce a file that opens perfectly
+and silently drops formatting, which is precisely why P0(2) survived so long.
 
 ## Risks
 

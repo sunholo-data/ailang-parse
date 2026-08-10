@@ -119,6 +119,60 @@ def verify_library(path: Path) -> list[str]:
     return errors
 
 
+# ── Level 2b: DOCX package wiring ────────────────────────────────────────────
+
+def verify_docx_parts(path: Path) -> list[str]:
+    """Assert every declared part is reachable through the relationship graph.
+
+    OPC resolves parts via relationships, so a part that is written and declared
+    in [Content_Types].xml but never related to is invisible to Word. That is
+    exactly how word/styles.xml shipped for months while every heading rendered
+    as body text: the XML was correct, the package wiring was not.
+
+    Checked generically rather than per-feature so that numbering.xml,
+    comments.xml and header/footer parts are covered by the same assertion the
+    day they are added.
+    """
+    errors = []
+    with zipfile.ZipFile(path) as z:
+        names = set(z.namelist())
+
+        declared = set()
+        root = ET.fromstring(z.read("[Content_Types].xml"))
+        for ov in root.findall("{http://schemas.openxmlformats.org/package/2006/content-types}Override"):
+            declared.add(ov.get("PartName").lstrip("/"))
+
+        # Resolve every relationship target to a package-absolute part name.
+        reachable = {"word/document.xml"}
+        rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+        for rels_name, base in (("_rels/.rels", ""), ("word/_rels/document.xml.rels", "word/")):
+            if rels_name not in names:
+                continue
+            for rel in ET.fromstring(z.read(rels_name)).findall(rel_ns):
+                if rel.get("TargetMode") == "External":
+                    continue
+                reachable.add((base + rel.get("Target").lstrip("/")).replace("//", "/"))
+
+        for part in sorted(declared - reachable):
+            errors.append(f"part declared but unreachable (no relationship): {part}")
+        for part in sorted(p for p in reachable if p not in names and not p.startswith("docProps/app")):
+            errors.append(f"relationship points at missing part: {part}")
+
+        # The user-visible symptom of the above: headings falling back to body
+        # text. If the body asks for a Heading style, a reader must resolve it.
+        doc_xml = z.read("word/document.xml").decode("utf-8", "replace")
+        if 'w:val="Heading' in doc_xml:
+            try:
+                from docx import Document
+                styles = {p.style.name for p in Document(str(path)).paragraphs if p.style}
+                if not any(s.startswith("Heading") for s in styles):
+                    errors.append("document uses Heading styles but none resolve (orphaned styles.xml?)")
+            except Exception as e:
+                errors.append(f"heading-style check failed: {type(e).__name__}: {e}")
+
+    return errors
+
+
 # ── Level 4: Roundtrip Verification ──────────────────────────────────────────
 
 def verify_roundtrip(path: Path) -> list[str]:
@@ -212,6 +266,18 @@ def main():
                     print(f"     ⚠ {e}")
             else:
                 print(f"  L2 Library:    PASS")
+
+        # Level 2b: DOCX package wiring (orphaned parts are a FAIL, not a warn —
+        # they produce a file that opens fine and silently drops formatting)
+        if path.suffix.lower() == ".docx":
+            part_errors = verify_docx_parts(path)
+            if part_errors:
+                print(f"  L2b Parts:     FAIL")
+                for e in part_errors:
+                    print(f"     ⚠ {e}")
+                all_pass = False
+            else:
+                print(f"  L2b Parts:     PASS")
 
         # Level 4: Roundtrip (skip HTML — already tested separately)
         if path.suffix.lower() not in (".html", ".htm"):
