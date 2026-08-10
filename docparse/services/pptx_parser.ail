@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment)
+import docparse/types/document (mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment)
 import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget)
 import docparse/services/omml (renderOmml)
 
@@ -304,7 +304,7 @@ pure func extractShapeParagraphs(nodes: [XmlNode], phType: string) -> [Block] =
           then HeadingBlock({text: text, level: 1})
           else if phType == "subTitle"
           then HeadingBlock({text: text, level: 2})
-          else mkText(text, phType, 0)]
+          else mkTextRuns(text, phType, 0, extractDrawingMLParaRuns(node))]
       else []
     else [],
     nodes)
@@ -331,6 +331,80 @@ pure func drawingMLNodeText(node: XmlNode) -> string {
 -- Extract text from a single a:r run
 pure func extractDrawingMLRunText(run: XmlNode) -> string =
   getOrElse(optMap(getText, findFirst(run, "a:t")), "")
+
+-- === Character formatting (DrawingML §21.1.2.3) ==========================
+--
+-- DrawingML differs from WordprocessingML here: where DOCX puts each property
+-- in its own child element under w:rPr, a:rPr carries them as ATTRIBUTES —
+-- b="1" i="1" u="sng" strike="sngStrike" baseline="30000". So none of the DOCX
+-- toggle logic transfers; this reads attributes instead.
+--
+-- drawingMLNodeRuns mirrors drawingMLNodeText's tag handling exactly so runs and
+-- text describe the same content.
+pure func extractDrawingMLParaRuns(p: XmlNode) -> [InlineRun] {
+  let runs = flatMap(drawingMLNodeRuns, getChildren(p));
+  if any(pptxRunIsFormatted, runs) then runs else []
+}
+
+pure func drawingMLNodeRuns(node: XmlNode) -> [InlineRun] {
+  let tag = getTag(node);
+  if tag == "a:r" then [extractDrawingMLRun(node)]
+  else if tag == "a:br" then [plainRun("\n")]
+  else if tag == "m:oMath" then [plainRun(renderOmml(node))]
+  else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
+  else []
+}
+
+pure func extractDrawingMLRun(run: XmlNode) -> InlineRun {
+  let text = extractDrawingMLRunText(run);
+  match findFirst(run, "a:rPr") {
+    Some(rPr) => {
+      text: text,
+      bold: pptxBoolAttr(rPr, "b"),
+      italic: pptxBoolAttr(rPr, "i"),
+      underline: pptxHasUnderline(rPr),
+      strike: pptxHasStrike(rPr),
+      -- No "code" concept in DrawingML; a monospace typeface would be a guess.
+      code: false,
+      vertAlign: pptxBaseline(rPr)
+    },
+    None => plainRun(text)
+  }
+}
+
+pure func pptxRunIsFormatted(r: InlineRun) -> bool =
+  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+
+pure func pptxBoolAttr(rPr: XmlNode, name: string) -> bool =
+  match getAttr(rPr, name) {
+    Some(v) => v == "1" || v == "true",
+    None => false
+  }
+
+-- u and strike name a style; "none"/"noStrike" are the off states rather than
+-- the attribute being absent.
+pure func pptxHasUnderline(rPr: XmlNode) -> bool =
+  match getAttr(rPr, "u") {
+    Some(v) => v != "none" && length(v) > 0,
+    None => false
+  }
+
+pure func pptxHasStrike(rPr: XmlNode) -> bool =
+  match getAttr(rPr, "strike") {
+    Some(v) => v != "noStrike" && length(v) > 0,
+    None => false
+  }
+
+-- baseline is a percentage in thousandths of a percent, signed: positive raises
+-- (superscript), negative lowers (subscript). PowerPoint writes 30000 / -25000.
+pure func pptxBaseline(rPr: XmlNode) -> string =
+  match getAttr(rPr, "baseline") {
+    Some(v) => match stringToInt(v) {
+      Some(n) => if n > 0 then "superscript" else if n < 0 then "subscript" else "",
+      None => ""
+    },
+    None => ""
+  }
 
 -- Parse a graphic frame (contains tables or charts)
 pure func parseGraphicFrame(gf: XmlNode) -> [Block] {

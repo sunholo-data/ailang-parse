@@ -4,7 +4,7 @@ import std/string (length, intToStr)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 
 -- PPTX Generator — converts Block ADT to a valid .pptx file.
@@ -178,9 +178,9 @@ pure func pptxBlockToShape(block: Block, shapeId: int) -> string {
         "<a:p><a:pPr algn=\"ctr\"/><a:r><a:rPr lang=\"en-US\" sz=\"2800\" b=\"1\"/><a:t>${xmlEscape(h.text)}</a:t></a:r></a:p>"),
 
     TextBlock(t) =>
-      if length(t.text) > 0
+      if listLength(t.runs) > 0 || length(t.text) > 0
       then pptxTextBox(idStr, "Text ${idStr}", "457200", yOff, "8229600", "600000",
-        "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"1800\"/><a:t>${xmlEscape(t.text)}</a:t></a:r></a:p>")
+        "<a:p>${pptxParaRuns(t.runs, t.text)}</a:p>")
       else "",
 
     TableBlock(t) =>
@@ -220,6 +220,33 @@ pure func pptxBlockToShape(block: Block, shapeId: int) -> string {
 }
 
 -- Build a text box shape
+-- === Character formatting (P2 phase 4, DrawingML) ========================
+--
+-- Falls back to a single unformatted run when the block carries no runs, which
+-- keeps output identical for every parser that does not populate them.
+pure func pptxParaRuns(runs: [InlineRun], text: string) -> string =
+  if listLength(runs) > 0
+  then foldl(\acc r. "${acc}${pptxFormattedRun(r)}", "", runs)
+  else "<a:r><a:rPr lang=\"en-US\" sz=\"1800\"/><a:t>${xmlEscape(text)}</a:t></a:r>"
+
+-- DrawingML carries run properties as ATTRIBUTES on a:rPr, not as child
+-- elements the way WordprocessingML does.
+pure func pptxFormattedRun(r: InlineRun) -> string =
+  "<a:r><a:rPr lang=\"en-US\" sz=\"1800\"${pptxRunAttrs(r)}/><a:t>${xmlEscape(r.text)}</a:t></a:r>"
+
+pure func pptxRunAttrs(r: InlineRun) -> string {
+  let bold = if r.bold then " b=\"1\"" else "";
+  let italic = if r.italic then " i=\"1\"" else "";
+  let under = if r.underline then " u=\"sng\"" else "";
+  let strike = if r.strike then " strike=\"sngStrike\"" else "";
+  -- baseline is signed thousandths of a percent; these are PowerPoint's own
+  -- defaults for super/subscript.
+  let base = if r.vertAlign == "superscript" then " baseline=\"30000\""
+    else if r.vertAlign == "subscript" then " baseline=\"-25000\""
+    else "";
+  "${bold}${italic}${under}${strike}${base}"
+}
+
 pure func pptxTextBox(id: string, name: string, x: string, y: string, cx: string, cy: string, bodyContent: string) -> string =
   "<p:sp><p:nvSpPr><p:cNvPr id=\"${id}\" name=\"${xmlEscape(name)}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"${x}\" y=\"${y}\"/><a:ext cx=\"${cx}\" cy=\"${cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\"/><a:lstStyle/>${bodyContent}</p:txBody></p:sp>"
 

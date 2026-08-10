@@ -301,6 +301,34 @@ identified so far — `officeparser.odt` predates the image `src` field (stale
 golden, harmless), but **`test.tsv` reports `format: "csv"` where the golden says
 `"tsv"`, which is a real regression** and wants its own ticket.
 
+#### Phases 3–4 for PPTX (2026-08-10) — DONE
+
+DrawingML needed different code rather than a copy of the DOCX path, and this is
+the trap worth recording: **where WordprocessingML puts each run property in its
+own child element under `w:rPr`, DrawingML carries them as attributes on
+`a:rPr`** — `b="1" i="1" u="sng" strike="sngStrike" baseline="30000"`. None of the
+DOCX toggle logic transfers. `baseline` is signed thousandths of a percent, so
+positive is superscript and negative is subscript, and `u`/`strike` name a style
+where `"none"`/`"noStrike"` are the off states.
+
+Round-trip verified through python-pptx for all six formats. Two corpus files
+gained runs (`pandoc_basic.pptx` 8 blocks, `poi_comment.pptx` 9), each identical
+apart from the added field.
+
+`poi_sampleshow.pptx` has an italic run that correctly produces nothing: it sits
+in a `subTitle` placeholder, which maps to `HeadingBlock`. Same limitation as
+DOCX headings — noted again because it will keep coming up until `HeadingBlock`
+and `ListBlock` gain runs.
+
+Added `data/test_files/pptx_inline_formatting.pptx` + golden, since the corpus
+covered only bold. Office suite 100.0% across 60 files; `--eval` 60/60.
+
+**Field evidence for the `std/xml` whitespace bug (issue #646):** `poi_comment.pptx`
+extracts as `"Access toFinancefor Local Governments"` — the whitespace-only
+`<a:t> </a:t>` runs between words are dropped, producing empty runs and jammed
+words. This is a real corpus file, not a synthetic case, and it shows the bug
+corrupts output on both DOCX and PPTX paths.
+
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
 
 ## Definition of done
