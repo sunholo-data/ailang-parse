@@ -6,6 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
+import docparse/services/odf_text (odfText)
 import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODP Parser — converts OpenDocument Presentation to Block ADT.
@@ -138,7 +139,7 @@ pure func odpProcessTextElement(node: XmlNode) -> [Block] {
 
   -- Headings
   if tag == "text:h" then
-    let text = trim(getText(node)) in
+    let text = trim(odfText(node)) in
     let levelStr = getOrElse(getAttr(node, "text:outline-level"), "1") in
     let level = odpParseLevel(levelStr) in
     if length(text) > 0 then [mkHeading(text, level)]
@@ -146,7 +147,7 @@ pure func odpProcessTextElement(node: XmlNode) -> [Block] {
 
   -- Paragraphs
   else if tag == "text:p" then
-    let text = trim(getText(node)) in
+    let text = trim(odfText(node)) in
     if length(text) > 0 then [mkText(text, "normal", 0)]
     else []
 
@@ -188,14 +189,14 @@ pure func odpParseTableRow(tr: XmlNode) -> [TableCell] {
 
 -- Parse a table cell
 pure func odpParseTableCell(cell: XmlNode) -> TableCell {
-  let text = trim(getText(cell));
+  let text = trim(odfText(cell));
   {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: ""}
 }
 
 -- Parse a text:list
 pure func odpParseList(list: XmlNode) -> [Block] {
   let items = findAll(list, "text:list-item");
-  let texts = map(\item. trim(getText(item)), items);
+  let texts = map(\item. trim(odfText(item)), items);
   let nonEmpty = filter(\t. length(t) > 0, texts);
   if listLength(nonEmpty) > 0
   then [mkList(nonEmpty, false)]

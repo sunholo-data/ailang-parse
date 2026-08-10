@@ -1,6 +1,6 @@
 # Inline Runs — representing formatting inside a paragraph
 
-**Status**: PARTIAL (2026-08-10) — phases 1–4 done for DOCX, HTML and PPTX (text, headings and list items). ODT parses but does not generate, and its superscript/subscript does not resolve. Phase 5 (SDKs) not started. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
+**Status**: PARTIAL (2026-08-10) — phases 1–4 done for DOCX, HTML and PPTX (text, headings and list items). ODT parses but does not generate. Phase 5 (SDKs) not started. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
 **Theme**: `TextBlock` has no sub-paragraph structure, so bold-inside-a-sentence is unrepresentable. Add it additively, and stop silently discarding the formatting the DOCX parser already has in hand.
 **Follows**: [`v0_29_0_docx_generation_fidelity.md`](../v0_29_0/v0_29_0_docx_generation_fidelity.md) — P2 of that doc's scope, split out as promised because it is a data-model change rather than generator work.
 
@@ -386,20 +386,76 @@ per-span linear scan would have been O(spans x styles).
 Working on the real `officeparser.odt`: **bold, italic, bold-italic (nested
 composition), underline and strike** all extract correctly.
 
-**Known gap: superscript/subscript do not resolve in ODT.** The styles are
-present and correct in the file (`T10` = `style:text-position="super 66.6%"`,
-`T11` = `sub 66.6%`), and the mapping code reads that attribute, but those two
-runs come back unformatted where `T1`–`T9` resolve fine. The cause is not yet
-identified — a synthetic `findAll(root, "style:style")` probe returned 0 matches
-on hand-written namespaced XML, which suggests something about namespace
-handling, but that probe is not representative of the real document since most
-styles *do* resolve there. Recorded rather than guessed at; needs its own
-investigation.
+**The superscript/subscript gap reported here did not reproduce.** Re-checked on
+a clean tree at `bb34837`: `officeparser.odt` yields
+`{"text":"script","vertAlign":"superscript"}` and the matching `"subscript"`,
+and `odtBuildStyles` indexes all 626 `style:style` elements with no duplicate
+names. The earlier observation appears to have been made against an
+intermediate build. No code change was needed.
 
 Two further limitations, both deliberate: `style:parent-style-name` chains are
 not resolved (automatic styles — what LibreOffice and Word emit for direct
 formatting — carry properties inline, so the common case is covered), and ODT
 generation does not yet render runs.
+
+#### ODF whitespace elements (2026-08-10) — DONE
+
+Found while confirming the superscript report above: the same paragraph
+extracted as `"Here is somebold,italic,bold-italic,underlinedandstruck outtext."`
+**Every space was missing**, in `text` and in `runs` alike.
+
+ODF does not preserve whitespace in the XML (§6.1.2–6.1.4). Spaces, tabs and
+line breaks are carried as *elements*:
+
+```xml
+<text:p>Here is some<text:s/><text:span text:style-name="T5">bold,</text:span></text:p>
+```
+
+`std/xml.getText` concatenates descendant *text*, so `<text:s/>` contributes
+nothing and the words jam together. All three ODF parsers used raw `getText`, so
+all three were affected. LibreOffice emits `<text:s/>` at most span boundaries:
+`officeparser.odt` has 66 of them plus 17 `<text:tab/>`, `officeparser.odp` 8,
+`officeparser.ods` 1.
+
+**This is not ailang-core #646 and is not blocked on it.** #646 is about
+whitespace-only *text nodes* being dropped. Here the whitespace is an empty
+*element*, and no fix to `getText` could help — nothing about `<text:s/>` says
+"space" unless the caller knows ODF. Every space in the affected paragraph is a
+`text:s`, so this was fully fixable locally.
+
+New `docparse/services/odf_text` exports `odfText` (a drop-in `getText`
+replacement that maps `text:s` → *n* spaces per `text:c`, `text:tab` → tab,
+`text:line-break` → newline) and `odfWhitespace` (the same mapping for one node,
+so the run walker shares it rather than re-deriving it). Wired into
+`odt_parser` (headings, paragraphs, table cells, list items, and the run walk),
+`odp_parser` and `ods_parser`. Metadata lookups keep plain `getText` — ODF
+whitespace elements do not occur in `dc:title` and friends.
+
+Verified against an independent oracle rather than against itself: a Python
+reference implementation of ODF whitespace expansion agrees with the parser on
+**all 43** text/heading blocks of `officeparser.odt`.
+
+The two goldens that moved were updated **surgically** — only `text`, `runs`,
+`items` and `itemRuns` copied from the new output, everything else left alone —
+so the committed diff is provably whitespace-only (block counts, types and
+formatting flags all unchanged) and the unrelated image drift below stays
+visible rather than being silently baked in.
+
+New fixture `data/test_files/odt_whitespace.odt` + golden, because the corpus
+could not cover this: `text:tab` appears in `officeparser.odt` only inside the
+table-of-contents, which the parser skips, so tabs and line breaks had **zero**
+coverage. The fixture exercises `text:s`, `text:c="4"`, `text:tab`,
+`text:line-break`, whitespace inside formatted spans, list items and table cells.
+LibreOffice renders it as ground truth and the parser matches it exactly,
+including `'before\tafter a tab'` and `'item  two'`.
+
+Office suite 100.0% across 61 files; `--eval` 61/61; `verify_generated.py`
+all-pass including L2b; 36 modules clean.
+
+**Follow-up worth considering:** runs now fragment at every whitespace element —
+`"“Add Books”"[bold]` followed by `" "[bold]`. Correct but verbose, and DOCX/PPTX
+fragment the same way for their own reasons. Coalescing adjacent runs with
+identical formatting would be a cross-format change of its own.
 
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
 Note this now means two fields: `runs` on text/heading blocks and `itemRuns` on
@@ -451,37 +507,47 @@ but does not generate. Everything below is unstarted.
 
 ### In this doc's scope
 
-1. **ODT superscript/subscript don't resolve.** Highest-value next task because
-   it is a correctness bug rather than missing scope. `T10`/`T11` in
-   `data/test_files/officeparser.odt` carry
-   `style:text-position="super 66.6%"` / `"sub 66.6%"`, `odtVertAlign` reads
-   that attribute, and yet those runs come back unformatted while `T1`–`T9`
-   resolve. Start by confirming whether `odtBuildStyles` indexes T10/T11 at all
-   (probe `mapLookup` directly on a real parse); a synthetic
-   `findAll(root, "style:style")` probe returned 0 on hand-written namespaced
-   XML, which may or may not be relevant.
-2. **ODT generation** — `odt_generator` does not render runs. Needs the inverse
+1. **ODT generation** — `odt_generator` does not render runs. Needs the inverse
    of the parser: emit `<text:span>` plus matching `<style:style>` automatic
-   style definitions.
-3. **ODT list items** — `itemRuns` is not populated by `odt_parser`.
-4. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
+   style definitions. Note the generator must also emit `<text:s/>` for runs of
+   spaces, or generated ODT will lose whitespace the way parsing just did.
+2. **ODT list items** — `itemRuns` is not populated by `odt_parser`.
+3. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
    fields: `runs` on text/heading blocks, `itemRuns` on list blocks. The Go
    `Block` struct (`sdks/go/types.go`) is flat with `omitempty`, so this is
    genuinely additive.
-5. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
+4. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
    styles cover direct formatting).
-6. **Colour and highlight** were deliberately left out of `InlineRun`. The
+5. **Colour and highlight** were deliberately left out of `InlineRun`. The
    additive shape makes adding them cheap when wanted.
+6. **Coalescing adjacent same-formatting runs** — see the follow-up note in the
+   ODF whitespace section. Cross-format, affects DOCX/PPTX/HTML too.
+
+*(The former item 1, ODT superscript/subscript, did not reproduce — see the ODT
+parsing section above.)*
 
 ### Unrelated issues found along the way
 
 - **`test.tsv` reports `format: "csv"`** where its golden says `"tsv"` — a real
   format-detection regression, deliberately not fixed here. Wants its own ticket.
-- **Three stale goldens remain**: `lo_image_mimetype.odt`, `officeparser.odp`,
-  `pandoc_inline_images.docx`. The office benchmark scores *similarity*, not
-  byte-equality, so it reads 100.0% while these drift. (`gutenberg_alice`,
-  `gutenberg_moby_dick`, `image_vml` and `officeparser.odt` were resolved as
-  part of this work; `test.tsv` is the regression above.)
+- **ODF image data is no longer resolved** — and this is a regression, not
+  golden staleness, which is how two of the three drifted goldens below were
+  previously characterised. For ODT/ODP/ODS the `data` field now holds the
+  *href string* rather than the image bytes: `officeparser.odp` reports
+  `dataLength: 16` for `src: "media/image1.png"` (exactly `len(src)`), and
+  `lo_image_mimetype.odt` reports `53` for a 53-character `Pictures/….svg`
+  path. Their goldens recorded `2652`–`14968` and `8564`, so the bytes used to
+  be there. `mime` degrades with it (`application/octet-stream` → guessed from
+  the extension). Cause is identified: `orchestrator.ail` calls
+  `resolveBlockImages` only in `orchEpub` (line 246) — `orchOdt`/`orchOdp` do
+  not, while DOCX resolves properly (`image_vml.docx` = 19728 bytes). Confirmed
+  pre-existing at `bb34837` by stashing. Wants its own ticket.
+- **Two stale goldens remain**: `lo_image_mimetype.odt` and `officeparser.odp`
+  (both the image regression above), plus `pandoc_inline_images.docx`. The
+  office benchmark scores *similarity*, not byte-equality, so it reads 100.0%
+  while these drift. (`gutenberg_alice`, `gutenberg_moby_dick`, `image_vml` and
+  `officeparser.odt` were resolved as part of this work; `test.tsv` is the
+  regression above.)
 - **ailang-core [#646](https://github.com/sunholo/ailang/issues/646)** —
   `std/xml.getText` returns `""` for whitespace-only text nodes, so
   `<w:t xml:space="preserve"> </w:t>` is dropped and mixed-formatting paragraphs

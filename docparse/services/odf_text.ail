@@ -1,0 +1,59 @@
+module docparse/services/odf_text
+
+import std/xml (getText, getAttr, getChildren, getTag, nodeKind, KindElement, KindText, KindComment)
+import std/option (Some, None, getOrElse)
+import std/string (repeat, stringToInt, concat as strConcat)
+import std/list (map, length as listLength)
+
+-- ODF-aware text extraction, shared by the ODT/ODP/ODS parsers.
+--
+-- ODF does not preserve whitespace in the XML (§6.1.2–6.1.4). Spaces, tabs and
+-- line breaks are carried as *elements* rather than as text:
+--
+--   <text:p>Here is some<text:s/><text:span>bold</text:span></text:p>
+--
+-- std/xml.getText concatenates descendant *text* only, so every one of those
+-- elements contributes nothing and the paragraph extracts as
+-- "Here is somebold". Real-world ODF is full of them — LibreOffice emits a
+-- <text:s/> at most span boundaries — so raw getText silently jams words
+-- together throughout a document.
+--
+-- This is distinct from ailang-core #646 (whitespace-only *text nodes* being
+-- dropped): no fix to getText can help here, because getText cannot know that
+-- an empty <text:s/> element stands for a space.
+
+-- The text an ODF whitespace element stands for, or None if `node` is not one.
+-- Exported because run-level walks need the same mapping without re-deriving it.
+export pure func odfWhitespace(node: XmlNode) -> Option[string] {
+  let tag = getTag(node);
+  if tag == "text:s" then Some(repeat(" ", odfSpaceCount(node)))
+  else if tag == "text:tab" then Some("\t")
+  else if tag == "text:line-break" then Some("\n")
+  else None
+}
+
+-- text:c gives the number of spaces (ODF §19.763); absent means one.
+pure func odfSpaceCount(node: XmlNode) -> int =
+  match stringToInt(getOrElse(getAttr(node, "text:c"), "1")) {
+    Some(n) => if n > 0 then n else 1,
+    None => 1
+  }
+
+-- Drop-in replacement for std/xml.getText on ODF content nodes.
+export pure func odfText(node: XmlNode) -> string =
+  match nodeKind(node) {
+    KindText => getText(node),
+    KindComment => "",
+    KindElement =>
+      match odfWhitespace(node) {
+        Some(ws) => ws,
+        None => {
+          let children = getChildren(node);
+          -- An element with no child nodes still answers getText directly;
+          -- mirrors the leaf handling the run walkers already rely on.
+          if listLength(children) == 0
+          then getText(node)
+          else strConcat(map(odfText, children))
+        }
+      }
+  }

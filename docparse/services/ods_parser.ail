@@ -6,6 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim)
 import std/list (map, flatMap, filter, length as listLength)
+import docparse/services/odf_text (odfText)
 import docparse/types/document (mkText, Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkTable)
 
 -- ODS Parser — converts OpenDocument Spreadsheet to Block ADT.
@@ -95,7 +96,7 @@ pure func odsParseRow(tr: XmlNode) -> [TableCell] {
 -- Parse a table:table-cell
 -- Handles table:number-columns-repeated for repeated empty cells
 pure func odsParseCell(cell: XmlNode) -> TableCell {
-  let text = trim(getText(cell));
+  let text = trim(odfText(cell));
   let colSpanStr = getOrElse(getAttr(cell, "table:number-columns-spanned"), "1");
   let colSpan = odsParseSpan(colSpanStr);
   {text: text, colSpan: colSpan, rowSpan: 1, merged: false, scope: ""}
