@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, contains, startsWith, substring, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODT Parser — converts OpenDocument Text to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -37,10 +37,10 @@ export func parseOdt(filepath: string) -> [Block] ! {FS}
   };
 
   if length(xml) == 0
-  then [TextBlock({text: "ODT error: could not read content.xml", style: "error", level: 0})]
+  then [mkText("ODT error: could not read content.xml", "error", 0)]
   else match parseLenient(xml) {
     Ok(root) => odtExtractBody(root),
-    Err(e) => [TextBlock({text: "ODT XML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("ODT XML parse error: ${e}", "error", 0)]
   }
 }
 
@@ -134,7 +134,7 @@ pure func odtProcessNode(node: XmlNode) -> [Block] {
   else if tag == "text:p" then
     let text = trim(getText(node)) in
     let embeddedFrames = flatMap(odtProcessNode, filter(\c. getTag(c) == "draw:frame", getChildren(node))) in
-    let textBlocks = if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})] else [] in
+    let textBlocks = if length(text) > 0 then [mkText(text, "normal", 0)] else [] in
     concat(textBlocks, embeddedFrames)
 
   -- Tables: table:table

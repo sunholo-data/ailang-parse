@@ -14,7 +14,7 @@ import std/string (length, substring, find, split, join, trim, toLower, startsWi
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
 import std/option (Option, Some, None)
 import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
-import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
@@ -167,7 +167,7 @@ pure func emlFindHeader(headers: [EmlHeader], lowerName: string) -> string =
 
 -- Convert headers to TextBlock list for output (decode RFC 2047 encoded-words)
 pure func emlHeadersToBlocks(headers: [EmlHeader]) -> [Block] =
-  map(\h. TextBlock({text: "${h.name}: ${emlDecodeHeaderValue(h.value)}", style: "email-header", level: 0}), headers)
+  map(\h. mkText("${h.name}: ${emlDecodeHeaderValue(h.value)}", "email-header", 0), headers)
 
 -- Headers that carry semantic meaning for email intelligence
 -- (strips transport noise: Received, ARC-*, DKIM-*, X-*, etc.)
@@ -180,7 +180,7 @@ pure func emlIsKeyHeader(name: string) -> bool {
 
 -- Like emlHeadersToBlocks but only emits key headers
 pure func emlKeyHeadersToBlocks(headers: [EmlHeader]) -> [Block] =
-  map(\h. TextBlock({text: "${h.name}: ${emlDecodeHeaderValue(h.value)}", style: "email-header", level: 0}),
+  map(\h. mkText("${h.name}: ${emlDecodeHeaderValue(h.value)}", "email-header", 0),
       filter(\h. emlIsKeyHeader(h.name), headers))
 
 -- Extract display name from From header
@@ -207,7 +207,7 @@ pure func emlParseBody(body: string, contentType: string, encoding: string) -> [
   let lowerCt = toLower(contentType);
   if contains(lowerCt, "multipart/") then {
     let boundary = emlExtractBoundary(contentType);
-    if length(boundary) == 0 then [TextBlock({text: body, style: "Normal", level: 0})]
+    if length(boundary) == 0 then [mkText(body, "Normal", 0)]
     else {
       let parts = emlSplitMultipart(body, boundary);
       if contains(lowerCt, "multipart/alternative") then
@@ -220,7 +220,7 @@ pure func emlParseBody(body: string, contentType: string, encoding: string) -> [
     -- Single-part message
     let decoded = emlDecodeBody(body, encoding);
     if contains(lowerCt, "text/html") then parseHtml(decoded)
-    else [TextBlock({text: decoded, style: "Normal", level: 0})]
+    else [mkText(decoded, "Normal", 0)]
   }
 }
 
@@ -303,7 +303,7 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
       let headers = emlParseHeaders(sp.headers);
       let enc = emlGetHeader(headers, "content-transfer-encoding");
       let decoded = emlDecodeBody(sp.body, enc);
-      [TextBlock({text: decoded, style: "Normal", level: 0})]
+      [mkText(decoded, "Normal", 0)]
     },
     None => {
       let htmlPart = emlFindPartByMime(parts, "text/html");
@@ -322,7 +322,7 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
             let headers = emlParseHeaders(sp.headers);
             let enc = emlGetHeader(headers, "content-transfer-encoding");
             let decoded = emlDecodeBody(sp.body, enc);
-            [TextBlock({text: decoded, style: "Normal", level: 0})]
+            [mkText(decoded, "Normal", 0)]
           }
         }
       }
@@ -383,8 +383,8 @@ pure func emlParseAttachmentContent(decoded: string, mimeType: string) -> [Block
   else if mt == "text/html" then parseHtml(decoded)
   else if mt == "text/markdown" || mt == "text/x-markdown" then parseMarkdown(decoded)
   else if mt == "message/rfc822" then parseEml(decoded)
-  else if mt == "text/plain" then [TextBlock({text: decoded, style: "Normal", level: 0})]
-  else [TextBlock({text: decoded, style: "Normal", level: 0})]
+  else if mt == "text/plain" then [mkText(decoded, "Normal", 0)]
+  else [mkText(decoded, "Normal", 0)]
 }
 
 -- Parse a single MIME part (has its own headers + body)
@@ -404,27 +404,27 @@ pure func emlParseMimePart(part: string) -> [Block] {
       -- Text-based attachment: decode and parse inline
       let decoded = emlDecodeBody(splitResult.body, partEnc);
       let parsedBlocks = emlParseAttachmentContent(decoded, mimeType);
-      let metaBlock = TextBlock({text: "${filename} (${mimeType})", style: "attachment-meta", level: 0});
+      let metaBlock = mkText("${filename} (${mimeType})", "attachment-meta", 0);
       [SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks})]
     }
     else if emlIsResolvableMime(mimeType) then {
       -- Resolvable attachment (Office, PDF): preserve base64 for the second pass
       let rawBody = emlStripBodyWhitespace(splitResult.body);
       let ext = emlResolvableExtension(mimeType);
-      let metaBlock = TextBlock({text: "${filename} (${mimeType})", style: "attachment-meta", level: 0});
-      let dataBlock = TextBlock({text: rawBody, style: "attachment-data", level: 0});
-      let extBlock = TextBlock({text: ext, style: "attachment-ext", level: 0});
+      let metaBlock = mkText("${filename} (${mimeType})", "attachment-meta", 0);
+      let dataBlock = mkText(rawBody, "attachment-data", 0);
+      let extBlock = mkText(ext, "attachment-ext", 0);
       [SectionBlock({kind: "attachment", blocks: [metaBlock, dataBlock, extBlock]})]
     }
     else {
       -- Binary attachment: placeholder
-      [TextBlock({text: "[attachment: ${filename}, ${mimeType}]", style: "attachment", level: 0})]
+      [mkText("[attachment: ${filename}, ${mimeType}]", "attachment", 0)]
     }
   }
   else if contains(lowerCt, "multipart/") then {
     -- Nested multipart
     let boundary = emlExtractBoundary(partCt);
-    if length(boundary) == 0 then [TextBlock({text: splitResult.body, style: "Normal", level: 0})]
+    if length(boundary) == 0 then [mkText(splitResult.body, "Normal", 0)]
     else {
       let subParts = emlSplitMultipart(splitResult.body, boundary);
       if contains(lowerCt, "multipart/alternative") then
@@ -440,14 +440,14 @@ pure func emlParseMimePart(part: string) -> [Block] {
   }
   else if contains(lowerCt, "text/") then {
     let decoded = emlDecodeBody(splitResult.body, partEnc);
-    [TextBlock({text: decoded, style: "Normal", level: 0})]
+    [mkText(decoded, "Normal", 0)]
   }
   else {
     -- Binary/other content type
     let mimeType = emlExtractMimeType(partCt);
     let filename = emlExtractFilename(disposition, partCt);
     let label = if length(filename) > 0 then filename else mimeType;
-    [TextBlock({text: "[attachment: ${label}, ${mimeType}]", style: "attachment", level: 0})]
+    [mkText("[attachment: ${label}, ${mimeType}]", "attachment", 0)]
   }
 }
 
@@ -791,8 +791,8 @@ pure func emlStringInList(s: string, items: [string]) -> bool =
 
 -- Convert a thread group into SectionBlock output
 pure func emlThreadToSection(thread: { subject: string, participants: [string], messages: [EmlMsgPair] }) -> [Block] {
-  let subjectBlock = TextBlock({text: thread.subject, style: "thread-subject", level: 0});
-  let participantBlock = TextBlock({text: join(", ", thread.participants), style: "thread-participants", level: 0});
+  let subjectBlock = mkText(thread.subject, "thread-subject", 0);
+  let participantBlock = mkText(join(", ", thread.participants), "thread-participants", 0);
   let msgBlocks = flatMap(\p. emlParseThreadMessage(p.content), thread.messages);
   [SectionBlock({kind: "thread", blocks: subjectBlock :: participantBlock :: msgBlocks})]
 }
@@ -808,7 +808,7 @@ pure func emlParseThreadMessage(msgContent: string) -> [Block] {
 pure func emlStripQuotedBlock(block: Block) -> Block =
   match block {
     TextBlock(t) =>
-      if t.style == "Normal" then TextBlock({text: emlStripQuotedText(t.text), style: t.style, level: t.level})
+      if t.style == "Normal" then mkText(emlStripQuotedText(t.text), t.style, t.level)
       else block,
     SectionBlock(s) => SectionBlock({kind: s.kind, blocks: map(emlStripQuotedBlock, s.blocks)}),
     _ => block

@@ -247,6 +247,22 @@ export pure func mkTableFull(rows: [[TableCell]], headers: [TableCell], caption:
 -- Get text from a table cell
 export pure func cellText(cell: TableCell) -> string = cell.text
 
+-- Construct a TextBlock.
+--
+-- Prefer this over constructing TextBlock({...}) directly. TableBlock and
+-- ImageBlock have had mk* helpers since they gained optional fields, precisely
+-- so that adding a field doesn't have to touch every construction site;
+-- TextBlock never got one, which is why it has 75 direct constructors across 15
+-- modules. Routing them through here keeps the next field addition to this
+-- function.
+export pure func mkText(text: string, style: string, level: int) -> Block =
+  TextBlock({text: text, style: style, level: level})
+
+-- Construct a plain body paragraph — the overwhelmingly common case
+-- (style "normal", level 0).
+export pure func mkPara(text: string) -> Block =
+  mkText(text, "normal", 0)
+
 -- Construct an ImageBlock with default values for the extended HTML
 -- attributes (width, height, srcset, title, loading). Most parsers
 -- (DOCX/PPTX/ODT/EPUB/Markdown/TeX/AI) don't have these attributes to

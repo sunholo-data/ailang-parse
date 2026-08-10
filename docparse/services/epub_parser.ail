@@ -6,7 +6,7 @@ import std/result (Ok, Err)
 import std/option (Some, None, getOrElse)
 import std/string (length, trim, endsWith, contains, startsWith, split, find, substring)
 import std/list (map, flatMap, filter, concat, foldl, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, ImageBlock, SectionBlock, DocMetadata, mkImage)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, ImageBlock, SectionBlock, DocMetadata, mkImage)
 import docparse/services/html_parser (parseHtml)
 
 -- EPUB Parser — extracts structured content from EPUB ebooks.
@@ -38,7 +38,7 @@ export func parseEpub(filepath: string) -> [Block] ! {FS}
   };
 
   if listLength(entries) == 0
-  then [TextBlock({text: "EPUB error: could not read ZIP entries", style: "error", level: 0})]
+  then [mkText("EPUB error: could not read ZIP entries", "error", 0)]
   else {
     -- Step 2: Find OPF file path from container.xml
     let containerXml = match readEntry(filepath, "META-INF/container.xml") {

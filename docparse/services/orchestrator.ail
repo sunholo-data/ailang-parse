@@ -54,7 +54,7 @@ import std/io (println)
 import std/result (Ok, Err)
 import std/ai (AIError)
 
-import docparse/types/document (
+import docparse/types/document (mkText, 
   Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata,
   countBlocks, filterImages
 )
@@ -302,7 +302,7 @@ func orchRtf(filepath: string) -> ParseOutcome ! {FS} = {
 func orchText(filepath: string) -> ParseOutcome ! {FS} = {
   let content = readFile(filepath);
   mkOutcome("text", filepath, emptyMetadata(),
-    [TextBlock({text: content, style: "normal", level: 0})],
+    [mkText(content, "normal", 0)],
     ["Parsed as plain text (${show(length(content))} chars)"], [], 0)
 }
 
@@ -335,7 +335,7 @@ export func parseDocument(filepath: string, opts: ParseOptions)
     -- Deterministic path refused. AI-only formats (image/audio/video) are not
     -- yet routed here; surface the refusal rather than returning empty blocks.
     Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
-      [TextBlock({text: "Parse failed: ${msg}", style: "error", level: 0})],
+      [mkText("Parse failed: ${msg}", "error", 0)],
       [], [msg], 0))
   }
 }
@@ -494,7 +494,7 @@ func orchPdf(filepath: string, opts: ParseOptions)
     Err(msg) =>
       if length(opts.pdfBackend) > 0
         then Ok(mkOutcome("pdf", filepath, emptyMetadata(),
-          [TextBlock({text: "PDF extraction failed: ${msg}. If this is a scanned PDF, retry with pdfBackend=ai.", style: "error", level: 0})],
+          [mkText("PDF extraction failed: ${msg}. If this is a scanned PDF, retry with pdfBackend=ai.", "error", 0)],
           [], ["PDF backend '${backend}' failed: ${msg}"], 0))
         else match parsePdfResult(filepath) {
           Err(e) => Err(e),
@@ -573,7 +573,7 @@ func orchEmlResolveOneBlock(block: Block, counter: int, projectRoot: string)
             writeFileBytes(tmpPath, bytes);
             let parsedBlocks = orchEmlParseAttachment(tmpPath, ext, projectRoot);
             removeFile(tmpPath);
-            let metaBlock = TextBlock({text: meta, style: "attachment-meta", level: 0});
+            let metaBlock = mkText(meta, "attachment-meta", 0);
             { block: SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks}), count: 1 }
           },
           None => {
@@ -613,11 +613,11 @@ func orchEmlParseAttachment(filepath: string, ext: string, projectRoot: string)
       },
       Err(msg) => {
         println("    Warning: PDF attachment not readable: ${msg}");
-        [TextBlock({text: "[unreadable PDF attachment: ${msg}]", style: "error", level: 0})]
+        [mkText("[unreadable PDF attachment: ${msg}]", "error", 0)]
       }
     }
   }
-  else [TextBlock({text: "[unsupported attachment format: ${ext}]", style: "error", level: 0})]
+  else [mkText("[unsupported attachment format: ${ext}]", "error", 0)]
 }
 
 pure func orchEmlHasData(blocks: [Block]) -> bool =
@@ -712,7 +712,7 @@ export func parseDocumentAI(filepath: string, opts: ParseOptions)
   else match parseDocumentPure(filepath, opts) {
     Ok(outcome) => Ok(orchEnrich(filepath, outcome, opts)),
     Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
-      [TextBlock({text: "Parse failed: ${msg}", style: "error", level: 0})],
+      [mkText("Parse failed: ${msg}", "error", 0)],
       [], [msg], 0))
   }
 }

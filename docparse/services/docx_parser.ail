@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
@@ -42,7 +42,7 @@ export func parseDocx(filepath: string) -> [Block] ! {FS} {
   let xml = readDocxContent(filepath);
   match parseLenient(xml) {
     Ok(root) => extractBodyBlocks(root),
-    Err(e) => [TextBlock({text: "XML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
   }
 }
 
@@ -192,7 +192,7 @@ pure func parseParagraph(p: XmlNode) -> Block {
   then HeadingBlock({text: text, level: headingLevel})
   else if isListParagraph(p)
   then ListBlock({items: [text], ordered: isOrderedList(p)})
-  else TextBlock({text: text, style: style, level: 0})
+  else mkText(text, style, 0)
 }
 
 -- Extract all text from a paragraph by concatenating runs
@@ -743,7 +743,7 @@ export pure func parseDocxWithCommentsXml(documentXml: string, commentsXml: stri
       let placed = docxCommentsFromXml(commentsXml, extXml, walk.anchors);
       docxSpliceComments(walk.blocks, placed)
     },
-    Err(e) => [TextBlock({text: "XML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
   }
 
 -- Extract comments from a DOCX file (word/comments.xml), each anchored to the

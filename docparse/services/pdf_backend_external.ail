@@ -17,7 +17,7 @@ import std/list (map, length as listLength)
 import std/result (Result, Ok, Err)
 import std/string (length as strLength)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, simpleCell)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, simpleCell)
 import docparse/services/pdf_annotations (PdfWord)
 
 -- Output bundle from an external backend run.
@@ -69,7 +69,7 @@ pure func decodeBlock(j: Json) -> Block = {
   else {
     let style = getOrElse(getString(j, "style"), "Normal");
     let level = getOrElse(getInt(j, "level"), 0);
-    TextBlock({text: text, style: style, level: level})
+    mkText(text, style, level)
   }
 }
 

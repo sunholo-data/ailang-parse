@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable, mkAnchoredComment, mkUnanchoredComment)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
 -- XLSX Parser
@@ -40,10 +40,10 @@ export func parseXlsx(filepath: string) -> [Block] ! {FS} {
   -- Warn if shared strings were truncated
   if stringCount >= 50000
   then {
-    let warning = TextBlock({
-      text: "Warning: spreadsheet has more than 50,000 unique text values. Some cell text may be missing. For large datasets, consider CSV format.",
-      style: "warning", level: 0
-    });
+    let warning = mkText(
+      "Warning: spreadsheet has more than 50,000 unique text values. Some cell text may be missing. For large datasets, consider CSV format.",
+      "warning", 0
+    );
     warning :: sheetBlocks
   }
   else sheetBlocks

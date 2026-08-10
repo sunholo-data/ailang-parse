@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, length as listLength)
 import std/map (lookup)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -40,7 +40,7 @@ export pure func parseHtml(content: string) -> [Block]
 {
   match parse(content) {
     Ok(root) => htmlExtractBlocks(root),
-    Err(e) => [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("HTML parse error: ${e}", "error", 0)]
   }
 }
 
@@ -52,7 +52,7 @@ export pure func parseHtmlDoc(content: string) -> {blocks: [Block], metadata: Do
   match parse(content) {
     Ok(root) => {blocks: htmlExtractBlocks(root), metadata: htmlExtractMetadata(root)},
     Err(e) => {
-      blocks: [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})],
+      blocks: [mkText("HTML parse error: ${e}", "error", 0)],
       metadata: emptyMetadata()
     }
   }
@@ -183,7 +183,7 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
   match nodeKind(node) {
     KindText =>
       let text = trim(getText(node)) in
-      if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+      if length(text) > 0 then [mkText(text, "normal", 0)]
       else [],
     KindComment => [],
     KindElement => htmlProcessElement(node)
@@ -205,7 +205,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- Paragraphs
   else if tag == "p" then
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+    if length(text) > 0 then [mkText(text, "normal", 0)]
     else []
 
   -- Tables
@@ -253,7 +253,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     else
       -- No href: not really a link. Just produce inner content or text.
       if listLength(inner) > 0 then inner
-      else if length(linkText) > 0 then [TextBlock({text: linkText, style: "normal", level: 0})]
+      else if length(linkText) > 0 then [mkText(linkText, "normal", 0)]
       else []
 
   -- Semantic sections — recurse into children wrapped in SectionBlock
@@ -286,7 +286,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- TextBlock with the "caption" style so consumers can recognise it.
   else if tag == "figcaption" then
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "caption", level: 0})]
+    if length(text) > 0 then [mkText(text, "caption", 0)]
     else []
 
   -- <address>: contact info / authorship block. Treated as its own
@@ -296,7 +296,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     if listLength(blocks) > 0 then [SectionBlock({kind: "address", blocks: blocks})]
     else {
       let text = trim(htmlDeepText(node)) in
-      if length(text) > 0 then [TextBlock({text: text, style: "address", level: 0})]
+      if length(text) > 0 then [mkText(text, "address", 0)]
       else []
     }
 
@@ -330,7 +330,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   else if tag == "pre" then
     let text = htmlDeepText(node) in
     if length(text) > 0
-    then [TextBlock({text: text, style: htmlPreCodeStyle(node), level: 0})]
+    then [mkText(text, htmlPreCodeStyle(node), 0)]
     else []
 
   -- Definition lists
@@ -342,7 +342,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
           tag == "template" then []
 
   -- Horizontal rule → section break marker
-  else if tag == "hr" then [TextBlock({text: "---", style: "separator", level: 0})]
+  else if tag == "hr" then [mkText("---", "separator", 0)]
 
   -- Line break — skip (inline element)
   else if tag == "br" then []
@@ -350,7 +350,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- Fallback: try to extract text from inline elements
   else
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+    if length(text) > 0 then [mkText(text, "normal", 0)]
     else []
 }
 
@@ -693,8 +693,8 @@ pure func htmlParseDlChild(node: XmlNode) -> [Block] {
   let tag = getTag(node);
   let text = trim(htmlDeepText(node));
   if tag == "dt" && length(text) > 0
-    then [TextBlock({text: text, style: "dt", level: 0})]
+    then [mkText(text, "dt", 0)]
   else if tag == "dd" && length(text) > 0
-    then [TextBlock({text: text, style: "dd", level: 0})]
+    then [mkText(text, "dd", 0)]
   else []
 }

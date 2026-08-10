@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim)
 import std/list (map, flatMap, filter, length as listLength)
-import docparse/types/document (Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkTable)
 
 -- ODS Parser — converts OpenDocument Spreadsheet to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -31,10 +31,10 @@ export func parseOds(filepath: string) -> [Block] ! {FS}
   };
 
   if length(xml) == 0
-  then [TextBlock({text: "ODS error: could not read content.xml", style: "error", level: 0})]
+  then [mkText("ODS error: could not read content.xml", "error", 0)]
   else match parseLenient(xml) {
     Ok(root) => odsExtractSheets(root),
-    Err(e) => [TextBlock({text: "ODS XML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("ODS XML parse error: ${e}", "error", 0)]
   }
 }
 

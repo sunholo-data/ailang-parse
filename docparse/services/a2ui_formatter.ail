@@ -19,7 +19,7 @@ import std/list (map, foldl, concat, length as listLength, flatMap)
 import std/math (intToFloat)
 import std/option (getOrElse)
 import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable)
 
 -- Convert a full ParsedDocument to A2UI JSON string.
 -- When editable=true, content nodes use editable component variants
@@ -263,11 +263,11 @@ pure func a2ui_jsonToBlock(j: Json) -> Block {
       text: getOrElse(getString(j, "text"), "")
     })
   else
-    TextBlock({
-      text: getOrElse(getString(j, "text"), ""),
-      style: getOrElse(getString(j, "style"), ""),
-      level: getOrElse(getInt(j, "level"), 0)
-    })
+    mkText(
+      getOrElse(getString(j, "text"), ""),
+      getOrElse(getString(j, "style"), ""),
+      getOrElse(getInt(j, "level"), 0)
+    )
 }
 
 -- Decode table cells. Compact form: just a string. Expanded form: {text, colSpan, merged}.

@@ -5,7 +5,7 @@ import std/json (encode, jo, kv, js, decode, asArray, asString as jsonAsString, 
 import std/string (length, trim)
 import std/list (flatMap, length as listLength)
 import std/option (Some, None, getOrElse)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, simpleCell, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, simpleCell, mkTable)
 
 -- AI Document Generator — prompt → Block ADT via LLM.
 --
@@ -53,9 +53,9 @@ pure func aiParseResponse(response: string) -> [Block] {
   match decode(trimmed) {
     Ok(json) => match asArray(json) {
       Some(items) => aiParseBlockItems(items),
-      None => [TextBlock({text: trimmed, style: "ai-raw", level: 0})]
+      None => [mkText(trimmed, "ai-raw", 0)]
     },
-    Err(_) => [TextBlock({text: "AI generation failed: could not parse response as JSON. Raw: ${trimmed}", style: "error", level: 0})]
+    Err(_) => [mkText("AI generation failed: could not parse response as JSON. Raw: ${trimmed}", "error", 0)]
   }
 }
 
@@ -75,7 +75,7 @@ pure func aiParseOneBlock(json: Json) -> Option[Block] {
       None => None
     },
     Some("text") => match getString(json, "text") {
-      Some(text) => Some(TextBlock({text: text, style: "Normal", level: 0})),
+      Some(text) => Some(mkText(text, "Normal", 0)),
       None => None
     },
     Some("table") => {

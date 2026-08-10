@@ -8,7 +8,7 @@ import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
 import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, last_or)
 import std/fs (readFileBytes)
-import docparse/types/document (Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
 
 -- AI-powered layout understanding
 -- Uses LLM to handle complex document structure that pure XML parsing misses:
@@ -217,7 +217,7 @@ export func cleanExtractedText(blocks: [Block]) -> [Block] ! {AI}
   let response = call(
     "Clean up this extracted document text. Fix: broken paragraphs (merge lines that were split mid-sentence), remove OCR artifacts, fix obvious encoding issues. Return the cleaned text with paragraph breaks as \\n\\n.\n\n${rawText}"
   );
-  [TextBlock({text: response, style: "cleaned", level: 0})]
+  [mkText(response, "cleaned", 0)]
 }
 
 -- Enhance blocks using AI when quality issues are detected
