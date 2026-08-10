@@ -1,6 +1,6 @@
 # Inline Runs — representing formatting inside a paragraph
 
-**Status**: PARTIAL — phases 1–4 implemented for DOCX 2026-08-10; remaining parsers/generators and phase 5 planned
+**Status**: PARTIAL (2026-08-10) — phases 1–4 done for DOCX, HTML and PPTX (text, headings and list items). ODT parses but does not generate, and its superscript/subscript does not resolve. Phase 5 (SDKs) not started. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
 **Theme**: `TextBlock` has no sub-paragraph structure, so bold-inside-a-sentence is unrepresentable. Add it additively, and stop silently discarding the formatting the DOCX parser already has in hand.
 **Follows**: [`v0_29_0_docx_generation_fidelity.md`](../v0_29_0/v0_29_0_docx_generation_fidelity.md) — P2 of that doc's scope, split out as promised because it is a data-model change rather than generator work.
 
