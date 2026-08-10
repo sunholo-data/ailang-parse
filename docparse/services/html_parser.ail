@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, length as listLength)
 import std/map (lookup)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
+import docparse/types/document (mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -205,7 +205,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- Paragraphs
   else if tag == "p" then
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [mkText(text, "normal", 0)]
+    if length(text) > 0 then [mkTextRuns(text, "normal", 0, htmlRunsFor(node))]
     else []
 
   -- Tables
@@ -452,6 +452,88 @@ pure func htmlChildTextWithSpacing(node: XmlNode) -> string {
   else if htmlIsBlockTag(tag) then "\n${text}"
   else htmlInlineWrap(node, tag, text)
 }
+
+-- === Inline runs (P2 phase 3, HTML) =====================================
+--
+-- Runs are built ALONGSIDE the Markdown markers above, not instead of them.
+-- htmlInlineWrap's markers stay in TextBlock.text exactly as before — 11 golden
+-- files and the documented CommonMark/Pandoc/LLM compatibility promise depend
+-- on them — while runs carry the same formatting structurally, with clean text.
+--
+-- So for HTML, text and runs deliberately differ: text says "**bold**", the run
+-- says "bold" with bold: true. That divergence is the design (see InlineRun in
+-- types/document.ail), and it is what lets a generator emit real bold instead of
+-- four literal asterisks.
+type HtmlFmt = {
+  bold: bool, italic: bool, underline: bool,
+  strike: bool, code: bool, vertAlign: string
+}
+
+pure func htmlNoFmt() -> HtmlFmt =
+  {bold: false, italic: false, underline: false, strike: false, code: false, vertAlign: ""}
+
+-- Runs for a block-level node, or [] when nothing inside it is formatted —
+-- an unformatted paragraph gains nothing from a single plain run, and omitting
+-- it keeps output byte-identical for documents with no inline markup.
+pure func htmlRunsFor(node: XmlNode) -> [InlineRun] {
+  let runs = htmlCollectRuns(node, htmlNoFmt());
+  if htmlAnyFormatted(runs) then runs else []
+}
+
+pure func htmlAnyFormatted(runs: [InlineRun]) -> bool =
+  match runs {
+    [] => false,
+    r :: rest =>
+      if r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+      then true
+      else htmlAnyFormatted(rest)
+  }
+
+-- Formatting is inherited down the tree, so <strong><em>x</em></strong> yields a
+-- single run that is both bold and italic rather than two nested ones.
+pure func htmlCollectRuns(node: XmlNode, fmt: HtmlFmt) -> [InlineRun] {
+  let children = getChildren(node);
+  if listLength(children) == 0
+  then htmlLeafRun(getText(node), fmt)
+  else flatMap(\c. htmlChildRuns(c, fmt), children)
+}
+
+pure func htmlChildRuns(child: XmlNode, fmt: HtmlFmt) -> [InlineRun] =
+  match nodeKind(child) {
+    KindText => htmlLeafRun(getText(child), fmt),
+    KindComment => [],
+    KindElement => {
+      let tag = getTag(child);
+      -- <br> is a line break in the text stream; mirror it in the run stream so
+      -- runs and text stay describing the same content.
+      if tag == "br" then htmlLeafRun("\n", fmt)
+      else htmlCollectRuns(child, htmlApplyTag(fmt, tag))
+    }
+  }
+
+pure func htmlLeafRun(text: string, fmt: HtmlFmt) -> [InlineRun] =
+  if length(text) == 0 then []
+  else [{text: text, bold: fmt.bold, italic: fmt.italic, underline: fmt.underline,
+         strike: fmt.strike, code: fmt.code, vertAlign: fmt.vertAlign}]
+
+-- Tag -> formatting. Mirrors htmlInlineWrap's vocabulary so the two
+-- representations agree on what counts as emphasis.
+pure func htmlApplyTag(f: HtmlFmt, tag: string) -> HtmlFmt =
+  if tag == "strong" || tag == "b"
+  then {bold: true, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "em" || tag == "i"
+  then {bold: f.bold, italic: true, underline: f.underline, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "u" || tag == "ins"
+  then {bold: f.bold, italic: f.italic, underline: true, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "del" || tag == "s" || tag == "strike"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: true, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "code" || tag == "kbd" || tag == "samp" || tag == "tt"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: true, vertAlign: f.vertAlign}
+  else if tag == "sup"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: "superscript"}
+  else if tag == "sub"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: "subscript"}
+  else f
 
 -- Wrap a non-empty inline child with the appropriate markdown marker.
 -- Falls through to the plain text when the tag has no special inline

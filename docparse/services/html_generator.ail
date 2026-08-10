@@ -2,7 +2,7 @@ module docparse/services/html_generator
 
 import std/string (length, join, intToStr)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
@@ -49,14 +49,23 @@ pure func htmlBlockToStr(block: Block) -> string =
       "<${tag}>${xmlEscape(h.text)}</${tag}>\n",
 
     TextBlock(t) =>
-      if length(t.text) > 0
-      then if length(t.style) > 0 && t.style != "normal" && t.style != "Normal"
-        then "<p class=\"${xmlEscape(t.style)}\">${xmlEscape(t.text)}</p>\n"
-        else "<p>${xmlEscape(t.text)}</p>\n"
+      if listLength(t.runs) > 0 || length(t.text) > 0
+      then {
+        -- Prefer runs: they carry clean text plus structure, where `text` for
+        -- HTML-sourced blocks holds Markdown markers that would otherwise be
+        -- escaped and rendered as literal "**bold**".
+        let body = if listLength(t.runs) > 0
+          then htmlRunsToStr(t.runs)
+          else xmlEscape(t.text);
+        if length(t.style) > 0 && t.style != "normal" && t.style != "Normal"
+        then "<p class=\"${xmlEscape(t.style)}\">${body}</p>\n"
+        else "<p>${body}</p>\n"
+      }
       else "",
 
     TableBlock(t) =>
       htmlTableToStr(t.headers, t.rows),
+
 
     ListBlock(l) =>
       if l.ordered
@@ -108,6 +117,26 @@ pure func htmlHeadingTag(level: int) -> string =
   else if level == 5 then "h5"
   else if level == 6 then "h6"
   else "h2"
+
+-- Render inline runs as nested HTML inline elements.
+--
+-- Tags are emitted outermost-first in a fixed order so nesting is deterministic
+-- and the output round-trips back through html_parser to the same flags.
+-- <sup>/<sub> are innermost because they wrap the smallest span.
+pure func htmlRunsToStr(runs: [InlineRun]) -> string =
+  foldl(\acc r. "${acc}${htmlRunToStr(r)}", "", runs)
+
+pure func htmlRunToStr(r: InlineRun) -> string {
+  let inner = xmlEscape(r.text);
+  let withVert = if r.vertAlign == "superscript" then "<sup>${inner}</sup>"
+    else if r.vertAlign == "subscript" then "<sub>${inner}</sub>"
+    else inner;
+  let withCode = if r.code then "<code>${withVert}</code>" else withVert;
+  let withStrike = if r.strike then "<del>${withCode}</del>" else withCode;
+  let withUnder = if r.underline then "<u>${withStrike}</u>" else withStrike;
+  let withItalic = if r.italic then "<em>${withUnder}</em>" else withUnder;
+  if r.bold then "<strong>${withItalic}</strong>" else withItalic
+}
 
 -- Render table with headers and rows
 pure func htmlTableToStr(headers: [TableCell], rows: [[TableCell]]) -> string {

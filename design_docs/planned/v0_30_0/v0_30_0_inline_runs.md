@@ -254,6 +254,53 @@ runs), then `html_generator` (`<strong>`/`<em>`), then odt/pptx. Each falls back
 to today's plain-text path when `runs` is empty, so partial completion is a
 working state throughout.
 
+#### Phases 3–4 for HTML (2026-08-10) — DONE
+
+`html_parser` now emits runs **alongside** the existing Markdown markers, not
+instead of them. `htmlInlineWrap`'s output in `text` is untouched; runs carry the
+same formatting structurally with clean text. Formatting is inherited down the
+tree, so `<strong><em>x</em></strong>` yields one run that is both bold and
+italic rather than two nested ones. `html_generator` renders runs back as nested
+inline elements, preferring runs over `text` precisely because `text` holds
+markers that would otherwise be escaped into literal `**bold**`.
+
+This is the text/runs divergence the design predicted, working as intended:
+
+```
+text:  'plain then **bold** then *italic* then under then ~~struck~~ then `mono`'
+runs:  'plain then '(plain) 'bold'[bold] ' then '(plain) 'italic'[italic]
+       ' then '(plain) 'under'[underline] ' then '(plain) 'struck'[strike]
+       ' then '(plain) 'mono'[code]
+```
+
+Note `under` has no marker in `text` — `htmlInlineWrap` has no `<u>` case — but
+does carry `underline` in runs. Runs are strictly richer than the marker
+vocabulary, which is the point.
+
+**It closes the leak that motivated the whole P2 line.** HTML→DOCX previously
+delivered four literal asterisks to Word; it now produces real bold, italic,
+underline, strike, superscript and subscript. HTML→HTML emits semantic
+`<strong>`/`<em>`/`<del>`/`<code>`/`<sup>`/`<sub>` instead of escaped markers,
+and re-parsing the generated HTML yields byte-identical runs (19/19), so the
+round-trip is stable rather than merely lossy-in-one-direction.
+
+Six golden files changed, and every one is identical except for **added `runs`** —
+`text` and all structure verified unchanged. Two are EPUBs (which parse XHTML
+internally) and gained 183 and 256 formatted blocks, so this exercises real
+prose, not just the synthetic fixture.
+
+**`--eval` went 56/58 → 59/59, zero failures.** The two long-standing Gutenberg
+EPUB failures were never a recursion problem: their goldens predated the v0.15.0
+LinkBlock feature, so a block the parser now correctly types as `link` was still
+`text` in the golden. The misleading note in `bin/docparse` has been corrected.
+
+Six pre-existing drift files remain deliberately untouched, since this work did
+not affect them: `image_vml.docx`, `lo_image_mimetype.odt`, `officeparser.odp`,
+`officeparser.odt`, `pandoc_inline_images.docx`, `test.tsv`. Two causes
+identified so far — `officeparser.odt` predates the image `src` field (stale
+golden, harmless), but **`test.tsv` reports `format: "csv"` where the golden says
+`"tsv"`, which is a real regression** and wants its own ticket.
+
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
 
 ## Definition of done

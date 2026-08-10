@@ -246,11 +246,17 @@ do_eval() {
     #
     # NOTE: deliberately NOT raising --max-recursion-depth here. Phase 1 uses
     # 50000 for parsing, and mirroring that in the scoring loop was tried and
-    # reverted: it did not make the two Gutenberg EPUBs pass (they still score
-    # <100, just with rc=0 instead of RT_REC_003), and running 50k-frame
-    # interpreter stacks across every file is memory-hungry enough to hurt the
-    # host. A recursion failure here is a genuine result worth recording, not
-    # something to paper over with a bigger stack.
+    # reverted: running 50k-frame interpreter stacks across every file is
+    # memory-hungry enough to hurt the host. A recursion failure here is a
+    # genuine result worth recording, not something to paper over with a
+    # bigger stack.
+    #
+    # This note used to add that raising the depth "did not make the two
+    # Gutenberg EPUBs pass". That framing was wrong: they were not failing on
+    # recursion at all, they were being scored against goldens that predated
+    # the v0.15.0 LinkBlock feature, so a block the parser now correctly types
+    # as "link" was still "text" in the golden. Regenerating those two goldens
+    # took --eval from 56/58 to 59/59. Recursion depth was never the cause.
     if eval_out=$(ailang run --entry evalMain --caps IO,FS,Env \
          docparse/services/eval.ail "$golden" "$output_json" 2>&1)
     then eval_rc=0
