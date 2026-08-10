@@ -1,6 +1,6 @@
 # Inline Runs — representing formatting inside a paragraph
 
-**Status**: PARTIAL — phases 1–2 implemented 2026-08-10; phases 3–5 planned
+**Status**: PARTIAL — phases 1–4 implemented for DOCX 2026-08-10; remaining parsers/generators and phase 5 planned
 **Theme**: `TextBlock` has no sub-paragraph structure, so bold-inside-a-sentence is unrepresentable. Add it additively, and stop silently discarding the formatting the DOCX parser already has in hand.
 **Follows**: [`v0_29_0_docx_generation_fidelity.md`](../v0_29_0/v0_29_0_docx_generation_fidelity.md) — P2 of that doc's scope, split out as promised because it is a data-model change rather than generator work.
 
@@ -198,6 +198,56 @@ shippable, highest value first:
 3. `pptx_parser` — `a:rPr` (`b="1"`, `i="1"`).
 4. `odt_parser` — `text:span`, which needs automatic-style resolution to know
    what a style name means; genuinely harder, do it last.
+
+#### Phases 3–4 for DOCX (2026-08-10) — DONE
+
+Shipped together, per this doc's own risk note that phase 3 alone produces JSON
+nobody renders.
+
+`docx_parser` builds runs from `w:rPr`; `childNodeRuns` mirrors `childNodeText`'s
+tag handling exactly (same inclusions, same `w:del`/`w:moveFrom` skips) so `runs`
+and `text` describe the same content. Toggle semantics are honoured: a bare
+`<w:b/>` is ON but `<w:b w:val="0"/>` is OFF, and `w:u` is treated as a style
+name where `w:val="none"` is off — not as a toggle. `docx_generator` renders
+runs back as `w:rPr`, emitting children in the CT_RPr schema order
+(rFonts, b, i, strike, u, vertAlign) rather than the order they were written in.
+
+Full DOCX→DOCX round-trip, verified end to end in both directions:
+
+| | bold | italic | underline | strike | superscript | subscript |
+|---|---|---|---|---|---|---|
+| parsed to runs | yes | yes | yes | yes | yes | yes |
+| regenerated `w:rPr` | yes | yes | yes | yes | yes | yes |
+| python-docx reads back | yes | yes | yes | yes | yes | yes |
+| **LibreOffice renders** | yes | yes | yes | yes | yes | yes |
+
+`runs` is emitted only when a paragraph actually contains formatting, so all 58
+pre-existing golden-backed files remain byte-identical to the original
+pre-phase-1 baseline.
+
+**The corpus had no coverage for this.** Only two test files contain run
+formatting at all, and neither exercises the new path: `table_header_rowspan.docx`
+has all 17 instances inside table cells (`TableCell`, no runs field), and
+`image_vml.docx` has one in `w:pPr` (paragraph-mark properties, correctly
+ignored) and one inside a `Heading1` paragraph, which becomes a `HeadingBlock` —
+also no runs field. So the feature would have shipped with zero regression
+coverage. Added `data/test_files/inline_formatting.docx` + golden, covering all
+six formats plus an explicit `<w:b w:val="0"/>` that must NOT read as bold.
+Office suite is now 100.0% across 59 files.
+
+**Known limitation, unchanged:** only `TextBlock` carries runs, so formatting
+inside a heading or a list item is still discarded. Giving `HeadingBlock` and
+`ListBlock` runs is a further ADT change, deliberately not bundled here.
+
+**Unrelated stdlib bug found while building the test file:**
+`std/xml.getText` returns `""` for a whitespace-only text node, so
+`<w:t xml:space="preserve"> </w:t>` is dropped. Word splits runs at every
+formatting boundary and the separator space routinely lands in its own run, so
+mixed-formatting paragraphs extract as `"plain bolditalic"`. This is in
+unmodified text-extraction code and predates this work. Reported per policy
+rather than worked around: `msg_20260810_211710_b5373208`, GitHub issue #646.
+The test file attaches its spaces to adjacent runs so its golden tests runs
+rather than being hostage to that bug.
 
 **Phase 4 — generators, one per increment.** `docx_generator` first (`w:rPr` in
 runs), then `html_generator` (`<strong>`/`<em>`), then odt/pptx. Each falls back

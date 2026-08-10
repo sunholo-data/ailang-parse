@@ -5,7 +5,7 @@ import std/list (map, foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl, docxNs, docxRun, docxParagraph, docxStyledParagraph)
 
 -- DOCX Generator — converts Block ADT to a valid .docx file.
@@ -164,7 +164,9 @@ pure func docxBlockToXml(block: Block) -> string =
       docxStyledParagraph("Heading${intToStr(h.level)}", h.text),
 
     TextBlock(t) =>
-      if length(t.text) > 0
+      if listLength(t.runs) > 0
+      then docxParagraph(docxRunsToXml(t.runs))
+      else if length(t.text) > 0
       then docxParagraph(docxRun(t.text))
       else "",
 
@@ -201,6 +203,31 @@ pure func docxBlockToXml(block: Block) -> string =
     CommentBlock(c) =>
       docxParagraph(docxRun(commentText(c.author, c.text, c.anchorText, c.anchored)))
   }
+
+-- === Character formatting (P2 phase 4) ===================================
+
+pure func docxRunsToXml(runs: [InlineRun]) -> string =
+  foldl(\acc r. "${acc}${docxFormattedRun(r)}", "", runs)
+
+pure func docxFormattedRun(r: InlineRun) -> string =
+  "<w:r>${docxRunProps(r)}<w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
+
+-- Child order matters: CT_RPr is a sequence in the schema, not a choice, and
+-- rFonts/b/i/strike/u/vertAlign must appear in that order. Emitting w:u before
+-- w:strike produces a document Word may reject or silently repair.
+pure func docxRunProps(r: InlineRun) -> string {
+  -- DOCX has no "code" run property; a monospace font is its honest equivalent.
+  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
+  let bold = if r.bold then "<w:b/>" else "";
+  let italic = if r.italic then "<w:i/>" else "";
+  let strike = if r.strike then "<w:strike/>" else "";
+  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
+  let vert = if length(r.vertAlign) > 0
+    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
+    else "";
+  let inner = "${fonts}${bold}${italic}${strike}${under}${vert}";
+  if length(inner) > 0 then "<w:rPr>${inner}</w:rPr>" else ""
+}
 
 -- Counters threaded through the body walk. Images and links each need a
 -- relationship id, comments need an id shared with word/comments.xml, and

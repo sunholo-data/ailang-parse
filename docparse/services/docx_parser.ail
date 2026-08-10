@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
@@ -192,7 +192,9 @@ pure func parseParagraph(p: XmlNode) -> Block {
   then HeadingBlock({text: text, level: headingLevel})
   else if isListParagraph(p)
   then ListBlock({items: [text], ordered: isOrderedList(p)})
-  else mkText(text, style, 0)
+  -- Only TextBlock carries runs; HeadingBlock and ListBlock have no such field,
+  -- so character formatting inside a heading or list item is still dropped.
+  else mkTextRuns(text, style, 0, extractParagraphRuns(p))
 }
 
 -- Extract all text from a paragraph by concatenating runs
@@ -206,6 +208,100 @@ pure func extractParagraphText(p: XmlNode) -> string {
 -- Walk paragraph children, skipping deleted/moved-away content
 pure func extractTextFromChildren(nodes: [XmlNode]) -> string =
   join("", map(childNodeText, nodes))
+
+-- === Character formatting (ECMA-376 §17.3.2) =============================
+--
+-- w:rPr has been sitting in every run this parser walks, read only for font
+-- names, while bold/italic/underline were dropped on the floor. These build the
+-- InlineRun list that carries it.
+--
+-- childNodeRuns MUST mirror childNodeText's tag handling exactly — same
+-- inclusions, same skips — or `runs` and `text` describe different content for
+-- the same paragraph. They are permitted to differ in general (see InlineRun in
+-- types/document.ail), but for DOCX there are no Markdown markers involved, so
+-- any divergence here would be a bug rather than the intended split.
+pure func extractParagraphRuns(p: XmlNode) -> [InlineRun] {
+  let runs = flatMap(childNodeRuns, getChildren(p));
+  -- Emit nothing unless something is actually formatted. A plain paragraph
+  -- gains no information from a single unstyled run, and suppressing it keeps
+  -- the JSON for unformatted documents byte-identical to the pre-InlineRun
+  -- shape — which is most documents, and all but a handful of the goldens.
+  if any(docxRunIsFormatted, runs) then runs else []
+}
+
+pure func childNodeRuns(node: XmlNode) -> [InlineRun] {
+  let tag = getTag(node);
+  if tag == "w:r" then [extractRun(node)]
+  else if tag == "w:del" then []
+  else if tag == "w:moveFrom" then []
+  else if tag == "w:ins" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:moveTo" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:smartTag" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:hyperlink" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:sdt" then childNodeSdtRuns(node)
+  else if tag == "m:oMath" then [plainRun(renderOmml(node))]
+  else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
+  else []
+}
+
+pure func childNodeSdtRuns(sdt: XmlNode) -> [InlineRun] =
+  match findFirst(sdt, "w:sdtContent") {
+    Some(content) => map(extractRun, findAll(content, "w:r")),
+    None => []
+  }
+
+pure func extractRun(run: XmlNode) -> InlineRun {
+  let text = extractRunText(run);
+  match findFirst(run, "w:rPr") {
+    Some(rPr) => {
+      text: text,
+      bold: docxToggleProp(rPr, "w:b"),
+      italic: docxToggleProp(rPr, "w:i"),
+      underline: docxHasUnderline(rPr),
+      strike: docxToggleProp(rPr, "w:strike"),
+      -- DOCX has no "code" run property. Inferring one from a monospace font
+      -- would be a guess, so it stays false rather than fabricated.
+      code: false,
+      vertAlign: docxVertAlign(rPr)
+    },
+    None => plainRun(text)
+  }
+}
+
+pure func docxRunIsFormatted(r: InlineRun) -> bool =
+  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+
+-- ECMA-376 toggle properties: a bare <w:b/> means ON, but <w:b w:val="0"/>
+-- means OFF. Presence alone is not the signal — a paragraph that explicitly
+-- turns bold off would otherwise come back bold.
+pure func docxToggleProp(rPr: XmlNode, tag: string) -> bool =
+  match findFirst(rPr, tag) {
+    Some(el) => docxToggleOn(getOrElse(getAttr(el, "w:val"), "true")),
+    None => false
+  }
+
+pure func docxToggleOn(val: string) -> bool =
+  val != "0" && val != "false" && val != "off"
+
+-- w:u is not a toggle: it names an underline style, and w:val="none" is the
+-- off state.
+pure func docxHasUnderline(rPr: XmlNode) -> bool =
+  match findFirst(rPr, "w:u") {
+    Some(el) => {
+      let v = getOrElse(getAttr(el, "w:val"), "none");
+      v != "none" && length(v) > 0
+    },
+    None => false
+  }
+
+pure func docxVertAlign(rPr: XmlNode) -> string =
+  match findFirst(rPr, "w:vertAlign") {
+    Some(el) => {
+      let v = getOrElse(getAttr(el, "w:val"), "");
+      if v == "superscript" || v == "subscript" then v else ""
+    },
+    None => ""
+  }
 
 -- Extract text contribution from a single child node
 pure func childNodeText(node: XmlNode) -> string {
