@@ -21,6 +21,33 @@ export type TableCell = {
   scope: string
 }
 
+-- A span of text within a paragraph carrying character formatting.
+--
+-- TextBlock.text stays the authoritative *readable* form and is never rewritten
+-- to accommodate runs. text and runs are therefore ALLOWED TO DISAGREE, and
+-- this is deliberate — do not "fix" it:
+--
+--   html_parser encodes formatting into text as Markdown markers ("**bold**",
+--   "`code`", "~~del~~"), chosen for CommonMark/Pandoc/LLM compatibility, and
+--   11 golden files depend on that. A parser that populates runs may therefore
+--   emit text with markers AND runs with clean text for the same paragraph.
+--
+-- So: `text` is for reading, `runs` is for rendering. Nothing asserts that runs
+-- concatenate to text, and a contract claiming so would be wrong.
+--
+-- `runs` is empty whenever a parser has no formatting information — which is
+-- most of them today — and generators fall back to plain `text` in that case,
+-- so an empty list is the normal, valid state rather than missing data.
+export type InlineRun = {
+  text: string,
+  bold: bool,
+  italic: bool,
+  underline: bool,
+  strike: bool,
+  code: bool,
+  vertAlign: string   -- "" | "superscript" | "subscript"
+}
+
 -- A content block extracted from a document
 --
 -- LinkBlock represents an HTML anchor with href. Generators that don't
@@ -42,7 +69,7 @@ export type TableCell = {
 --                      "none"  (unresolvable; anchorText is empty)
 --   anchorBlockIndex:  index of the annotated block; -1 when unanchored
 --   parentId:          id of the comment this replies to; "" for top-level
-export type Block = TextBlock({text: string, style: string, level: int})
+export type Block = TextBlock({text: string, style: string, level: int, runs: [InlineRun]})
                   | TableBlock({rows: [[TableCell]], headers: [TableCell], caption: string})
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
@@ -256,7 +283,19 @@ export pure func cellText(cell: TableCell) -> string = cell.text
 -- modules. Routing them through here keeps the next field addition to this
 -- function.
 export pure func mkText(text: string, style: string, level: int) -> Block =
-  TextBlock({text: text, style: style, level: level})
+  TextBlock({text: text, style: style, level: level, runs: []})
+
+-- Construct a TextBlock carrying character formatting. Only for parsers that
+-- can actually resolve run properties (DOCX w:rPr, PPTX a:rPr, HTML inline
+-- tags); everything else should use mkText and leave runs empty.
+export pure func mkTextRuns(text: string, style: string, level: int, runs: [InlineRun]) -> Block =
+  TextBlock({text: text, style: style, level: level, runs: runs})
+
+-- A run with no formatting applied — the base to vary from, so call sites don't
+-- have to spell out every flag to set one.
+export pure func plainRun(text: string) -> InlineRun =
+  {text: text, bold: false, italic: false, underline: false,
+   strike: false, code: false, vertAlign: ""}
 
 -- Construct a plain body paragraph — the overwhelmingly common case
 -- (style "normal", level 0).

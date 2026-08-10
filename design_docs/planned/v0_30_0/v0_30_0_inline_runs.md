@@ -1,6 +1,6 @@
 # Inline Runs — representing formatting inside a paragraph
 
-**Status**: PLANNED (2026-08-10)
+**Status**: PARTIAL — phases 1–2 implemented 2026-08-10; phases 3–5 planned
 **Theme**: `TextBlock` has no sub-paragraph structure, so bold-inside-a-sentence is unrepresentable. Add it additively, and stop silently discarding the formatting the DOCX parser already has in hand.
 **Follows**: [`v0_29_0_docx_generation_fidelity.md`](../v0_29_0/v0_29_0_docx_generation_fidelity.md) — P2 of that doc's scope, split out as promised because it is a data-model change rather than generator work.
 
@@ -144,6 +144,50 @@ identical output, goldens must not move. Land and verify on its own.
 defaulting it to `[]`. Only `mkText` and `output_formatter` change. JSON gains
 `"runs"` only when non-empty (`omitempty` semantics), so goldens without
 formatting are byte-identical.
+
+#### Phases 1–2 outcome (2026-08-10) — DONE
+
+Both landed and the sequencing hypothesis held exactly: **phase 2's field
+addition broke one function.** The compiler flagged `mkText` and nothing else,
+where before phase 1 it would have flagged all 75 sites.
+
+Phase 1 migrated 72 sites mechanically and 3 multi-line ones by hand
+(`a2ui_formatter`, `xlsx_parser`, `pptx_parser`). `TextBlock` stays imported
+everywhere — it is still needed in `match` patterns.
+
+Behaviour-neutrality was measured, not assumed. Parsing all 58 golden-backed
+files before phase 1 and after phase 2:
+
+```
+baseline(pre-P1) vs post-P2   JSON identical: 58   differing: 0
+                              markdown identical: 58   differing: 0
+"runs" present in output:     0 files
+```
+
+Phase 2 also added `mkTextRuns` and `plainRun`, and the serialisation was
+exercised directly rather than left untested — a field that only ever
+round-trips empty proves nothing:
+
+```json
+{"type":"text","text":"no runs here","style":"normal","level":0}
+{"type":"text","text":"plain bold bit x2","style":"normal","level":0,
+ "runs":[{"text":"plain "},{"text":"bold bit","bold":true},
+         {"text":"2","vertAlign":"superscript"}]}
+```
+
+`runs` is omitted when empty and each flag only appears when true, so a plain
+paragraph costs nothing and the pre-InlineRun JSON shape is preserved exactly.
+
+Office suite 100.0%; `verify_generated.py` all-pass including L2b; 35 modules
+clean.
+
+**Unrelated finding worth its own ticket:** 8 of the 58 files already differ
+from their committed goldens on *unmodified* code — `gutenberg_alice`,
+`gutenberg_moby_dick`, `image_vml`, `lo_image_mimetype`, `officeparser.odp`,
+`officeparser.odt`, `pandoc_inline_images`, `test.tsv`. Pre-existing golden
+drift, not caused by this work, and invisible to the office benchmark (which
+scores similarity rather than byte-equality) — so the goldens are staler than
+the 100.0% headline suggests.
 
 **Phase 3 — parsers, one per increment.** Independent and individually
 shippable, highest value first:
