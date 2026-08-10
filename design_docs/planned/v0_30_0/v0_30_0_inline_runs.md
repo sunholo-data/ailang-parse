@@ -434,3 +434,61 @@ generator-side defects, so renderer verification is mandatory:
 - **AI-generated blocks.** `direct_ai_parser` and `ai_generator` construct
   `TextBlock`s from model output (8 and 3 sites); they should keep `runs: []`
   rather than being asked to invent formatting.
+
+## Open items — start here
+
+State as of 2026-08-10. Phases 1–4 are done for DOCX, HTML and PPTX; ODT parses
+but does not generate. Everything below is unstarted.
+
+**Coverage matrix** (parse / generate):
+
+| | text | heading | list |
+|---|---|---|---|
+| DOCX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| HTML | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| PPTX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| ODT  | ✓ / — | ✓ / — | — / — |
+
+### In this doc's scope
+
+1. **ODT superscript/subscript don't resolve.** Highest-value next task because
+   it is a correctness bug rather than missing scope. `T10`/`T11` in
+   `data/test_files/officeparser.odt` carry
+   `style:text-position="super 66.6%"` / `"sub 66.6%"`, `odtVertAlign` reads
+   that attribute, and yet those runs come back unformatted while `T1`–`T9`
+   resolve. Start by confirming whether `odtBuildStyles` indexes T10/T11 at all
+   (probe `mapLookup` directly on a real parse); a synthetic
+   `findAll(root, "style:style")` probe returned 0 on hand-written namespaced
+   XML, which may or may not be relevant.
+2. **ODT generation** — `odt_generator` does not render runs. Needs the inverse
+   of the parser: emit `<text:span>` plus matching `<style:style>` automatic
+   style definitions.
+3. **ODT list items** — `itemRuns` is not populated by `odt_parser`.
+4. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
+   fields: `runs` on text/heading blocks, `itemRuns` on list blocks. The Go
+   `Block` struct (`sdks/go/types.go`) is flat with `omitempty`, so this is
+   genuinely additive.
+5. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
+   styles cover direct formatting).
+6. **Colour and highlight** were deliberately left out of `InlineRun`. The
+   additive shape makes adding them cheap when wanted.
+
+### Unrelated issues found along the way
+
+- **`test.tsv` reports `format: "csv"`** where its golden says `"tsv"` — a real
+  format-detection regression, deliberately not fixed here. Wants its own ticket.
+- **Three stale goldens remain**: `lo_image_mimetype.odt`, `officeparser.odp`,
+  `pandoc_inline_images.docx`. The office benchmark scores *similarity*, not
+  byte-equality, so it reads 100.0% while these drift. (`gutenberg_alice`,
+  `gutenberg_moby_dick`, `image_vml` and `officeparser.odt` were resolved as
+  part of this work; `test.tsv` is the regression above.)
+- **ailang-core [#646](https://github.com/sunholo/ailang/issues/646)** —
+  `std/xml.getText` returns `""` for whitespace-only text nodes, so
+  `<w:t xml:space="preserve"> </w:t>` is dropped and mixed-formatting paragraphs
+  extract as `"plain bolditalic"`. Confirmed corrupting real corpus files on
+  both DOCX and PPTX paths (`poi_comment.pptx` →
+  `"Access toFinancefor Local Governments"`). Blocked upstream.
+- **ailang-core [#644](https://github.com/sunholo/ailang/issues/644)** —
+  `std/zip` has no in-memory archive builder, so browser-side document
+  generation is impossible. Blocks item 9 of
+  [`v0_29_0`](../v0_29_0/v0_29_0_docx_generation_fidelity.md).
