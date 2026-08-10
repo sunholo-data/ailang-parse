@@ -93,7 +93,19 @@ Performance:
     FAST:  docparse ~/Documents/        (same — folder expansion)
     SLOW:  for f in *.docx; do docparse "$f"; done  (recompiles each time)
 
+Conversion & generation:
+  docparse in.docx --convert out.html       Convert between formats
+  docparse notes.md --convert slides.pptx   Markdown to slides
+  docparse in.docx --convert out.qmd        To Quarto Markdown, then:
+                                              quarto render out.qmd --to pdf
+  docparse --generate report.docx --prompt "Q1 sales report with a revenue table"
+
+  Convert targets: html docx pptx xlsx odt odp ods md qmd
+
 Options:
+  --convert PATH    Convert the input to PATH (format from its extension)
+  --generate PATH   AI-generate a document at PATH (requires --prompt)
+  --prompt TEXT     Prompt for --generate
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
   --pdf-backend B   PDF backend: pdftotext (default, deterministic plain text),
@@ -300,6 +312,9 @@ PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-pdftotext}"
 EXTRA_FLAGS=()
 DEEP_REQUESTED=false
 THREADED_REQUESTED=false
+CONVERT_TARGET=""
+GENERATE_TARGET=""
+PROMPT_TEXT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -351,6 +366,36 @@ while [ $# -gt 0 ]; do
       OUTPUT_DIR="$2"
       shift 2
       ;;
+    # Module flags that take a value. Without explicit cases these hit the `-*`
+    # catch-all below and go to EXTRA_FLAGS (passed to `ailang`, ahead of the
+    # .ail file), while their VALUE falls to the `*)` case and is treated as an
+    # input document — so `--convert out.html` died with "File or folder not
+    # found: out.html" and still exited 0. Every example in
+    # docs/examples/cli/convert.sh was broken this way.
+    --convert)
+      if [ $# -lt 2 ]; then
+        echo "Error: --convert requires an output path (e.g. --convert out.docx)" >&2
+        exit 2
+      fi
+      CONVERT_TARGET="$2"
+      shift 2
+      ;;
+    --generate)
+      if [ $# -lt 2 ]; then
+        echo "Error: --generate requires an output path (e.g. --generate report.docx)" >&2
+        exit 2
+      fi
+      GENERATE_TARGET="$2"
+      shift 2
+      ;;
+    --prompt)
+      if [ $# -lt 2 ]; then
+        echo "Error: --prompt requires text (e.g. --prompt \"Q1 sales report\")" >&2
+        exit 2
+      fi
+      PROMPT_TEXT="$2"
+      shift 2
+      ;;
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
@@ -384,6 +429,26 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+# --- AI generation mode: no input document, needs AI + a prompt ---
+if [ -n "$GENERATE_TARGET" ]; then
+  if [ -z "$PROMPT_TEXT" ]; then
+    echo "Error: --generate requires --prompt (e.g. --generate report.docx --prompt \"Q1 sales report\")" >&2
+    exit 2
+  fi
+  if [[ ! "$GENERATE_TARGET" = /* ]]; then
+    GENERATE_TARGET="$(pwd)/$GENERATE_TARGET"
+  fi
+  cd "$PROJECT_DIR"
+  exec env GOOGLE_API_KEY="${GOOGLE_API_KEY:-}" ailang run --entry main \
+    --caps IO,FS,Env,AI --max-recursion-depth 50000 --ai "$AI_MODEL" \
+    "$MAIN_AIL" --generate "$GENERATE_TARGET" --prompt "$PROMPT_TEXT"
+fi
+
+if [ -n "$PROMPT_TEXT" ]; then
+  echo "Error: --prompt is only meaningful with --generate" >&2
+  exit 2
+fi
 
 if [ ${#FILES[@]} -eq 0 ]; then
   usage
@@ -510,6 +575,23 @@ if $DESCRIBE; then
 fi
 if $SUMMARIZE; then
   AILANG_ARGS+=(summarize)
+fi
+if [ -n "$CONVERT_TARGET" ]; then
+  # One output path cannot receive N inputs — in batch mode AILANG_ARGS is
+  # repeated per file, so every file would write over the same target and only
+  # the last would survive.
+  if $USE_BATCH; then
+    echo "Error: --convert takes a single input file (got ${#RESOLVED_FILES[@]})." >&2
+    echo "       Convert one at a time, or use --output-dir for batch parsing." >&2
+    exit 2
+  fi
+  # Must be absolute: we cd to PROJECT_DIR before running, so a relative target
+  # would land next to the sources instead of in the user's cwd.
+  if [[ ! "$CONVERT_TARGET" = /* ]]; then
+    CONVERT_TARGET="$(pwd)/$CONVERT_TARGET"
+  fi
+  mkdir -p "$(dirname "$CONVERT_TARGET")"
+  AILANG_ARGS+=(--convert "$CONVERT_TARGET")
 fi
 
 # --- Resolve output dir to absolute path before cd ---

@@ -58,12 +58,15 @@ export func generateDocx(doc: ParsedDocument, outputPath: string) -> string ! {F
       Err(e) => "Error generating DOCX: ${e}"
     }
   } else {
-    -- No images: use createArchive (simpler, no base64 overhead)
+    -- No images: use createArchive (simpler, no base64 overhead).
+    -- document.xml.rels is still required — it carries the styles relationship
+    -- that makes word/styles.xml reachable. See docxDocumentRels.
     let entries = [
       {name: "[Content_Types].xml", content: contentTypes},
       {name: "_rels/.rels", content: rootRels},
       {name: "word/document.xml", content: documentXml},
-      {name: "word/styles.xml", content: stylesXml}
+      {name: "word/styles.xml", content: stylesXml},
+      {name: "word/_rels/document.xml.rels", content: docxDocumentRels([])}
     ];
     let result = createArchive(outputPath, entries);
     match result {
@@ -308,9 +311,12 @@ pure func docxExtInList(parts: [string], ext: string) -> bool =
     p :: rest => if p == ext then true else docxExtInList(rest, ext)
   }
 
--- Minimal styles.xml with heading styles
+-- Minimal styles.xml with heading styles.
+-- Normal carries w:default="1": without it the part has no default paragraph
+-- style, and consumers report no style at all for unstyled paragraphs
+-- (python-docx returns None for paragraph.style).
 pure func docxMinimalStyles() -> string {
-  "${xmlDecl()}<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>${docxHeadingStyle(1, "28")}${docxHeadingStyle(2, "24")}${docxHeadingStyle(3, "20")}${docxHeadingStyle(4, "18")}${docxHeadingStyle(5, "16")}${docxHeadingStyle(6, "14")}</w:styles>"
+  "${xmlDecl()}<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>${docxHeadingStyle(1, "28")}${docxHeadingStyle(2, "24")}${docxHeadingStyle(3, "20")}${docxHeadingStyle(4, "18")}${docxHeadingStyle(5, "16")}${docxHeadingStyle(6, "14")}</w:styles>"
 }
 
 -- Build a heading style definition
@@ -351,10 +357,27 @@ pure func docxMimeToExt(mime: string) -> string =
   else if mime == "image/svg+xml" then "svg"
   else "png"
 
--- Build word/_rels/document.xml.rels with image relationships
+-- Build word/_rels/document.xml.rels: the styles relationship, plus one per image.
+--
+-- The styles relationship is NOT optional and must be present even when the
+-- document has no images. OPC resolves parts through the relationship graph, so
+-- declaring word/styles.xml in [Content_Types].xml is not enough — without a
+-- relationship pointing at it the part is unreachable, every
+-- <w:pStyle w:val="HeadingN"/> resolves to nothing, and all headings silently
+-- render as body text. LibreOffice and python-docx both drop them; pandoc only
+-- appeared to work because it pattern-matches the styleId heuristically instead
+-- of resolving the part, which is why this went unnoticed.
+--
+-- Image rIds are allocated from 1 (docxCollectImages(blocks, 1)), so the styles
+-- relationship uses a non-numeric id to stay clear of them.
 pure func docxDocumentRels(images: [DocxImage]) -> string {
-  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${docxImageRelsEntries(images)}</Relationships>"
+  let stylesRel = "<Relationship Id=\"${docxStylesRelId()}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>";
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${stylesRel}${docxImageRelsEntries(images)}</Relationships>"
 }
+
+-- Relationship id for word/styles.xml. Non-numeric so it cannot collide with the
+-- image rIds, which count up from rId1.
+pure func docxStylesRelId() -> string = "rIdStyles"
 
 pure func docxImageRelsEntries(images: [DocxImage]) -> string =
   match images {
