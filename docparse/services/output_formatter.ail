@@ -80,17 +80,9 @@ export pure func blocksToJson(blocks: [Block]) -> [Json]
 export pure func blockToJson(block: Block) -> Json =
   match block {
     TextBlock(b) => jo(textJsonFields(b)),
-    HeadingBlock(b) => jo([
-      kv("type", js("heading")),
-      kv("text", js(b.text)),
-      kv("level", jnum(intToFloat(b.level)))
-    ]),
+    HeadingBlock(b) => jo(headingJsonFields(b)),
     TableBlock(b) => jo(tableJsonFields(b)),
-    ListBlock(b) => jo([
-      kv("type", js("list")),
-      kv("items", ja(stringsToJson(b.items))),
-      kv("ordered", jb(b.ordered))
-    ]),
+    ListBlock(b) => jo(listJsonFields(b)),
     ImageBlock(b) => jo(imageJsonFields(b)),
     AudioBlock(b) => jo(mediaJsonFields("audio", b.data, b.transcription, "transcription", b.mime)),
     VideoBlock(b) => jo(mediaJsonFields("video", b.data, b.description, "description", b.mime)),
@@ -145,6 +137,32 @@ pure func textJsonFields(b: {text: string, style: string, level: int, runs: [Inl
   ];
   if listLength(b.runs) > 0
   then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
+  else base
+}
+
+-- Same omit-when-empty rule as TextBlock, so headings without character
+-- formatting serialise exactly as they did before InlineRun existed.
+pure func headingJsonFields(b: {text: string, level: int, runs: [InlineRun]}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("heading")),
+    kv("text", js(b.text)),
+    kv("level", jnum(intToFloat(b.level)))
+  ];
+  if listLength(b.runs) > 0
+  then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
+  else base
+}
+
+-- itemRuns is a parallel array to items (see mkListRuns). Emitted only when
+-- some item is actually formatted, so an ordinary list is unchanged.
+pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]]}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("list")),
+    kv("items", ja(stringsToJson(b.items))),
+    kv("ordered", jb(b.ordered))
+  ];
+  if listLength(b.itemRuns) > 0
+  then concat(base, [kv("itemRuns", ja(map(\rs. ja(runsToJson(rs)), b.itemRuns)))])
   else base
 }
 

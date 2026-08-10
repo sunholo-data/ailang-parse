@@ -329,7 +329,45 @@ extracts as `"Access toFinancefor Local Governments"` — the whitespace-only
 words. This is a real corpus file, not a synthetic case, and it shows the bug
 corrupts output on both DOCX and PPTX paths.
 
+#### HeadingBlock and ListBlock runs (2026-08-10) — DONE
+
+Prioritised ahead of ODT because the "only TextBlock carries runs" limitation had
+been hit three times running — DOCX headings, `image_vml.docx`, and
+`poi_sampleshow.pptx` — and headings and bullets are exactly where presentation
+formatting lives. Fixing it lit up all three formats already wired, where ODT
+would have added a fourth.
+
+Same phased approach: `mkHeading`/`mkList` added and all 33 construction sites
+migrated first (24 heading, 9 list), verified byte-identical across 60 files,
+then the fields added. `HeadingBlock` gains `runs: [InlineRun]`.
+
+`ListBlock` gains `itemRuns: [[InlineRun]]`, a **parallel array** to `items`:
+`itemRuns[i]` holds the runs for `items[i]`, and it is either empty or exactly
+the same length as `items`. A record-per-item would enforce that in the type, but
+`items: [string]` is consumed by the SDKs, `unstructured_compat`, `a2ui` and
+every generator, so changing its shape is breaking where a parallel field is
+additive. The invariant is documented on `mkListRuns` and both generators walk
+the two lists together rather than indexing, so a short or absent `itemRuns`
+degrades to plain text instead of mis-pairing formatting with the wrong item.
+
+The alignment hazard is real and was hit immediately: `htmlParseList` filters
+empty `<li>` elements, so building texts and runs as separate lists and filtering
+only the texts would silently shift `itemRuns` out of alignment the moment any
+item was blank. Text and runs are now carried together through the filter.
+
+Wired end to end: `docx_parser`, `html_parser` and `pptx_parser` populate
+heading/item runs; `docx_generator` and `html_generator` render them. The two
+cases that previously dropped formatting now carry it — `image_vml.docx`'s bold
+`Heading1` and `poi_sampleshow.pptx`'s italic `subTitle`.
+
+Three goldens changed, each verified identical apart from the added fields.
+`image_vml.docx`'s golden was also stale (`dataLength` 0 vs 19728 — it predates
+VML image extraction), so that drift is now resolved too. Office suite 100.0%
+across 60 files; `--eval` 60/60.
+
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
+Note this now means two fields: `runs` on text/heading blocks and `itemRuns` on
+list blocks.
 
 ## Definition of done
 

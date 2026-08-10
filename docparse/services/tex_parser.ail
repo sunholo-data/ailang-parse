@@ -3,7 +3,7 @@ module docparse/services/tex_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, replace, toLower, replaceMany)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (mkText, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable)
 
 -- LaTeX Parser — converts arXiv-style LaTeX source to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -253,7 +253,7 @@ pure func texEmitHeading(state: TexState, line: string, prefix: string, level: i
   let flushed = texFlushText(state);
   let inner = texExtractBalancedBrace(line, length(prefix) - 1);
   {
-    blocks: HeadingBlock({text: texCleanInline(inner), level: level}) :: flushed.blocks,
+    blocks: mkHeading(texCleanInline(inner), level) :: flushed.blocks,
     mode: "none",
     envName: "",
     buf: [],
@@ -292,7 +292,7 @@ pure func texHandleBeginEnv(state: TexState, t: string) -> TexState {
     let opt = texExtractOptionalAfterBegin(t, envName) in
     let heading = if length(opt) == 0 then label else "${label} (${opt})" in
     {
-      blocks: HeadingBlock({text: heading, level: 4}) :: flushed.blocks,
+      blocks: mkHeading(heading, 4) :: flushed.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -471,7 +471,7 @@ pure func texHandleListLine(state: TexState, line: string, t: string) -> TexStat
   if startsWith(t, "\\end{${state.envName}}") then
     let ordered = state.envName == "enumerate" in
     {
-      blocks: ListBlock({items: map(texCleanInline, reverse(state.listItems)), ordered: ordered}) :: state.blocks,
+      blocks: mkList(map(texCleanInline, reverse(state.listItems)), ordered) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],

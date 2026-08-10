@@ -5,7 +5,7 @@ import std/json (encode, jo, kv, js, decode, asArray, asString as jsonAsString, 
 import std/string (length, trim)
 import std/list (flatMap, length as listLength)
 import std/option (Some, None, getOrElse)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, simpleCell, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, ParsedDocument, DocMetadata, emptyMetadata, simpleCell, mkTable)
 
 -- AI Document Generator — prompt → Block ADT via LLM.
 --
@@ -71,7 +71,7 @@ pure func aiParseOneBlock(json: Json) -> Option[Block] {
   match getString(json, "type") {
     Some("heading") => match getString(json, "text") {
       Some(text) =>
-        Some(HeadingBlock({text: text, level: getOrElse(getInt(json, "level"), 1)})),
+        Some(mkHeading(text, getOrElse(getInt(json, "level"), 1))),
       None => None
     },
     Some("text") => match getString(json, "text") {
@@ -86,7 +86,7 @@ pure func aiParseOneBlock(json: Json) -> Option[Block] {
     Some("list") => {
       let items = getOrElse(getArray(json, "items"), []);
       let ordered = getOrElse(getBool(json, "ordered"), false);
-      Some(ListBlock({items: aiJsonToStrings(items), ordered: ordered}))
+      Some(mkList(aiJsonToStrings(items), ordered))
     },
     Some("section") => {
       let kind = getOrElse(getString(json, "kind"), "section");

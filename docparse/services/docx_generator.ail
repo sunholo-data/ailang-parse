@@ -5,7 +5,7 @@ import std/list (map, foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
-import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks)
+import docparse/types/document (mkList, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl, docxNs, docxRun, docxParagraph, docxStyledParagraph)
 
 -- DOCX Generator — converts Block ADT to a valid .docx file.
@@ -161,7 +161,9 @@ pure func docxHdrFtrRefs(parts: [DocxHdrFtr], kind: string) -> string =
 pure func docxBlockToXml(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
-      docxStyledParagraph("Heading${intToStr(h.level)}", h.text),
+      if listLength(h.runs) > 0
+      then docxParagraph("<w:pPr><w:pStyle w:val=\"Heading${intToStr(h.level)}\"/></w:pPr>${docxRunsToXml(h.runs)}")
+      else docxStyledParagraph("Heading${intToStr(h.level)}", h.text),
 
     TextBlock(t) =>
       if listLength(t.runs) > 0
@@ -174,7 +176,7 @@ pure func docxBlockToXml(block: Block) -> string =
       docxTableToXml(t.headers, t.rows),
 
     ListBlock(l) =>
-      docxListToXml(l.items, l.ordered),
+      docxListToXml(l.items, l.ordered, l.itemRuns),
 
     ImageBlock(i) =>
       if length(i.description) > 0
@@ -350,23 +352,27 @@ pure func docxDataCellToXml(cell: TableCell) -> string {
   }
 }
 
--- Lists as numbered/bulleted paragraphs
--- DOCX lists use <w:numPr> with numId reference. We use a simple approach:
--- bullet list items get a bullet character prefix, numbered get "N. " prefix.
--- Full list numbering would require word/numbering.xml (deferred).
-pure func docxListToXml(items: [string], ordered: bool) -> string =
-  docxListItemsToXml(items, if ordered then 2 else 1)
+-- Lists as real Word list paragraphs referencing word/numbering.xml
+-- (numId 1 = bullet, 2 = decimal).
+pure func docxListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> string =
+  docxListItemsToXml(items, itemRuns, if ordered then 2 else 1)
 
--- Real list paragraphs referencing word/numbering.xml (numId 1 = bullet,
--- 2 = decimal). Previously these were literal "\u2022 " / "N. " text prefixes, which
--- looked right on screen but were not lists: Word would not renumber, demote or
--- continue them, and the bullet was part of the paragraph text.
-pure func docxListItemsToXml(items: [string], numId: int) -> string =
+-- itemRuns is parallel to items but may be empty entirely (nothing formatted).
+-- Both lists are walked together so a short or absent itemRuns simply falls
+-- back to plain text per item rather than mis-pairing formatting with the
+-- wrong item.
+pure func docxListItemsToXml(items: [string], itemRuns: [[InlineRun]], numId: int) -> string =
   match items {
     [] => "",
     item :: rest =>
       let pPr = "<w:pPr><w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"${intToStr(numId)}\"/></w:numPr></w:pPr>" in
-      "${docxParagraph("${pPr}${docxRun(item)}")}${docxListItemsToXml(rest, numId)}"
+      match itemRuns {
+        [] =>
+          "${docxParagraph("${pPr}${docxRun(item)}")}${docxListItemsToXml(rest, [], numId)}",
+        r :: rrest =>
+          let body = if listLength(r) > 0 then docxRunsToXml(r) else docxRun(item) in
+          "${docxParagraph("${pPr}${body}")}${docxListItemsToXml(rest, rrest, numId)}"
+      }
   }
 
 -- Section blocks: render child blocks with a section label
@@ -663,7 +669,7 @@ pure func docxIsW3CDTF(value: string) -> bool =
 -- ============================================================
 
 -- Two abstract definitions, one instance each: numId 1 bullets, numId 2 decimal.
--- Single level only — ListBlock({items: [string], ordered: bool}) is flat, so
+-- Single level only — mkList([string], bool) is flat, so
 -- there is no nesting to represent. Nested lists need an ADT change.
 pure func docxNumbering() -> string {
   let bulletLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"•\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr></w:lvl>";

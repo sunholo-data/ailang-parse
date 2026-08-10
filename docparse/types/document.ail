@@ -74,8 +74,8 @@ export type Block = TextBlock({text: string, style: string, level: int, runs: [I
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
                   | VideoBlock({data: string, description: string, mime: string})
-                  | ListBlock({items: [string], ordered: bool})
-                  | HeadingBlock({text: string, level: int})
+                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]]})
+                  | HeadingBlock({text: string, level: int, runs: [InlineRun]})
                   | SectionBlock({kind: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
                   | LinkBlock({text: string, href: string, title: string})
@@ -296,6 +296,30 @@ export pure func mkTextRuns(text: string, style: string, level: int, runs: [Inli
 export pure func plainRun(text: string) -> InlineRun =
   {text: text, bold: false, italic: false, underline: false,
    strike: false, code: false, vertAlign: ""}
+
+-- Construct a HeadingBlock. Same rationale as mkText: route constructions
+-- through one function so field additions don't touch 25 call sites.
+export pure func mkHeading(text: string, level: int) -> Block =
+  HeadingBlock({text: text, level: level, runs: []})
+
+export pure func mkHeadingRuns(text: string, level: int, runs: [InlineRun]) -> Block =
+  HeadingBlock({text: text, level: level, runs: runs})
+
+-- Construct a ListBlock.
+export pure func mkList(items: [string], ordered: bool) -> Block =
+  ListBlock({items: items, ordered: ordered, itemRuns: []})
+
+-- ListBlock with per-item formatting.
+--
+-- itemRuns is a PARALLEL array to items: itemRuns[i] holds the runs for
+-- items[i]. It is either empty (nothing in the list is formatted) or exactly
+-- the same length as items. A record-per-item would enforce that in the type,
+-- but `items: [string]` is consumed by the SDKs, unstructured_compat, a2ui and
+-- every generator, so changing its shape would be a breaking change where a
+-- parallel field is additive. Consumers must tolerate an empty itemRuns and
+-- should not assume alignment without checking length.
+export pure func mkListRuns(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> Block =
+  ListBlock({items: items, ordered: ordered, itemRuns: itemRuns})
 
 -- Construct a plain body paragraph — the overwhelmingly common case
 -- (style "normal", level 0).

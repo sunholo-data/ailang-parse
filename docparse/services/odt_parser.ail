@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, contains, startsWith, substring, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODT Parser — converts OpenDocument Text to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -127,7 +127,7 @@ pure func odtProcessNode(node: XmlNode) -> [Block] {
   if tag == "text:h" then
     let text = trim(getText(node)) in
     let level = odtHeadingLevel(node) in
-    if length(text) > 0 then [HeadingBlock({text: text, level: level})]
+    if length(text) > 0 then [mkHeading(text, level)]
     else []
 
   -- Paragraphs: text:p (may contain embedded draw:frame children)
@@ -221,7 +221,7 @@ pure func odtParseList(list: XmlNode) -> [Block] {
   let texts = map(odtListItemText, items);
   let nonEmpty = filter(\t. length(t) > 0, texts);
   if listLength(nonEmpty) > 0
-  then [ListBlock({items: nonEmpty, ordered: false})]
+  then [mkList(nonEmpty, false)]
   else []
 }
 

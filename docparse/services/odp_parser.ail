@@ -6,7 +6,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, endsWith)
 import std/list (map, flatMap, filter, concat, length as listLength)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
 
 -- ODP Parser — converts OpenDocument Presentation to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -141,7 +141,7 @@ pure func odpProcessTextElement(node: XmlNode) -> [Block] {
     let text = trim(getText(node)) in
     let levelStr = getOrElse(getAttr(node, "text:outline-level"), "1") in
     let level = odpParseLevel(levelStr) in
-    if length(text) > 0 then [HeadingBlock({text: text, level: level})]
+    if length(text) > 0 then [mkHeading(text, level)]
     else []
 
   -- Paragraphs
@@ -198,7 +198,7 @@ pure func odpParseList(list: XmlNode) -> [Block] {
   let texts = map(\item. trim(getText(item)), items);
   let nonEmpty = filter(\t. length(t) > 0, texts);
   if listLength(nonEmpty) > 0
-  then [ListBlock({items: nonEmpty, ordered: false})]
+  then [mkList(nonEmpty, false)]
   else []
 }
 

@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkTable, mkAnchoredComment, mkUnanchoredComment)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
 -- XLSX Parser
@@ -353,7 +353,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
       Ok(acc2) => reverse(acc2.rows),
       Err(_) => []
     };
-    let heading = HeadingBlock({text: xlsxCleanSheetName(sheetName), level: 1});
+    let heading = mkHeading(xlsxCleanSheetName(sheetName), 1);
     match parsedRows {
       [] => [heading],
       firstRow :: dataRows => {

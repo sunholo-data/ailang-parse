@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
@@ -188,13 +188,15 @@ pure func parseParagraph(p: XmlNode) -> Block {
   let text = extractParagraphText(p);
   let style = extractParagraphStyle(p);
   let headingLevel = headingLevelFromStyle(style);
+  let runs = extractParagraphRuns(p);
   if headingLevel > 0
-  then HeadingBlock({text: text, level: headingLevel})
+  then mkHeadingRuns(text, headingLevel, runs)
   else if isListParagraph(p)
-  then ListBlock({items: [text], ordered: isOrderedList(p)})
-  -- Only TextBlock carries runs; HeadingBlock and ListBlock have no such field,
-  -- so character formatting inside a heading or list item is still dropped.
-  else mkTextRuns(text, style, 0, extractParagraphRuns(p))
+  -- One DOCX list paragraph is one item, so itemRuns is parallel with a single
+  -- entry. Kept empty when the item has no formatting, so the field only
+  -- appears where it carries information.
+  then mkListRuns([text], isOrderedList(p), if listLength(runs) > 0 then [runs] else [])
+  else mkTextRuns(text, style, 0, runs)
 }
 
 -- Extract all text from a paragraph by concatenating runs

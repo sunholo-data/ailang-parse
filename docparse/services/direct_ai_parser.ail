@@ -8,7 +8,7 @@ import std/json (decode, encode, jo, kv, js, jnum, ja, getString, getInt, getBoo
 import std/option (Some, None, getOrElse)
 import std/list (map, flatMap, concat, any, length as listLength)
 import std/result (Ok, Err)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImage, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImage, mkTable)
 import docparse/services/pdf_annotations (extractAnnotations, annotationsAsBlocks)
 import pkg/sunholo/gemini_files/upload (uploadFile, deleteFile, UploadedFile)
 
@@ -494,7 +494,7 @@ pure func parseOneBlock(json: Json) -> Option[Block] {
   match getString(json, "type") {
     Some("heading") => match getString(json, "text") {
       Some(text) =>
-        Some(HeadingBlock({text: text, level: getOrElse(getInt(json, "level"), 1)})),
+        Some(mkHeading(text, getOrElse(getInt(json, "level"), 1))),
       None => None
     },
     Some("text") => match getString(json, "text") {
@@ -510,7 +510,7 @@ pure func parseOneBlock(json: Json) -> Option[Block] {
     Some("list") => {
       let items = getOrElse(getArray(json, "items"), []);
       let ordered = getOrElse(getBool(json, "ordered"), false);
-      Some(ListBlock({items: aiExtractStrings(items), ordered: ordered}))
+      Some(mkList(aiExtractStrings(items), ordered))
     },
     Some("image") => match getString(json, "description") {
       Some(desc) => Some(mkImage("", desc, "image/unknown")),

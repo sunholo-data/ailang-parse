@@ -46,7 +46,8 @@ pure func htmlBlockToStr(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
       let tag = htmlHeadingTag(h.level) in
-      "<${tag}>${xmlEscape(h.text)}</${tag}>\n",
+      let body = if listLength(h.runs) > 0 then htmlRunsToStr(h.runs) else xmlEscape(h.text) in
+      "<${tag}>${body}</${tag}>\n",
 
     TextBlock(t) =>
       if listLength(t.runs) > 0 || length(t.text) > 0
@@ -68,9 +69,10 @@ pure func htmlBlockToStr(block: Block) -> string =
 
 
     ListBlock(l) =>
+      let body = htmlListItemsRuns(l.items, l.itemRuns) in
       if l.ordered
-      then "<ol>\n${htmlListItems(l.items)}</ol>\n"
-      else "<ul>\n${htmlListItems(l.items)}</ul>\n",
+      then "<ol>\n${body}</ol>\n"
+      else "<ul>\n${body}</ul>\n",
 
     ImageBlock(i) =>
       if length(i.data) > 0 && length(i.mime) > 0
@@ -137,6 +139,21 @@ pure func htmlRunToStr(r: InlineRun) -> string {
   let withItalic = if r.italic then "<em>${withUnder}</em>" else withUnder;
   if r.bold then "<strong>${withItalic}</strong>" else withItalic
 }
+
+-- List items, preferring per-item runs when present. itemRuns is parallel to
+-- items but may be empty; both are walked together so a short or absent
+-- itemRuns degrades to plain text rather than mis-pairing.
+pure func htmlListItemsRuns(items: [string], itemRuns: [[InlineRun]]) -> string =
+  match items {
+    [] => "",
+    item :: rest =>
+      match itemRuns {
+        [] => "<li>${xmlEscape(item)}</li>\n${htmlListItemsRuns(rest, [])}",
+        r :: rrest =>
+          let body = if listLength(r) > 0 then htmlRunsToStr(r) else xmlEscape(item) in
+          "<li>${body}</li>\n${htmlListItemsRuns(rest, rrest)}"
+      }
+  }
 
 -- Render table with headers and rows
 pure func htmlTableToStr(headers: [TableCell], rows: [[TableCell]]) -> string {
