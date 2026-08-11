@@ -119,6 +119,7 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         lists_out = []
 
         for el in elements:
+            section = el.metadata.get("section")
             if el.type == "text":
                 text_elements.append({"text": el.text, "style": el.metadata.get("source_type", "")})
             elif el.type == "heading":
@@ -154,13 +155,12 @@ class DocParseAdapter(OfficeDocBenchAdapter):
                 pass
 
             # Section-based features
-            section = el.metadata.get("section")
             if section == "comment":
-                author = ""
-                m = re.match(r"\[([^\]]+)\]", el.text)
-                if m:
-                    author = m.group(1)
-                comments.append({"author": author, "text": el.text})
+                # CommentBlock carries author as a field. The old regex parsed it
+                # out of a flattened "[Author] text" string that the parser has
+                # not produced since comments became structured, so it always
+                # returned "".
+                comments.append({"author": el.metadata.get("author", ""), "text": el.text})
             elif section == "textbox" and el.type == "text":
                 text_boxes.append({"text": el.text})
             elif section == "notes":
