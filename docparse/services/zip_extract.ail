@@ -171,6 +171,30 @@ pure func isSlideEntry(entry: string) -> bool {
   endsWith(entry, ".xml")
 }
 
+-- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml)
+export func findNotesSlideEntries(path: string) -> [string] ! {FS} {
+  match listEntries(path) {
+    Ok(entries) => filterNotesSlides(entries),
+    Err(_) => []
+  }
+}
+
+-- Filter entries to find notes slide XMLs
+pure func filterNotesSlides(entries: [string]) -> [string] =
+  match entries {
+    [] => [],
+    e :: rest =>
+      if isNotesSlideEntry(e)
+      then e :: filterNotesSlides(rest)
+      else filterNotesSlides(rest)
+  }
+
+-- Check if an entry is a notes slide XML
+pure func isNotesSlideEntry(entry: string) -> bool {
+  startsWith(entry, "ppt/notesSlides/notesSlide") &&
+  endsWith(entry, ".xml")
+}
+
 -- Find all worksheet entries in an XLSX ZIP (xl/worksheets/sheet*.xml)
 export func findSheetEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {

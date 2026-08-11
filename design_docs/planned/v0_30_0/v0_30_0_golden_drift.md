@@ -189,16 +189,19 @@ deterministically; they were simply added after the last generation run).
 With `challenge/` in scope the suite reads 99 goldens and scores **97.0%**. The
 100.0% was not a passing grade, it was 37 unread files. Newly visible:
 
-| file | score | first read |
+| file | score | status |
 |---|---|---|
-| `challenge_complex.html` | 0% | golden records `HTML parse error` — **stale**, the lenient parser fixed this; now 7 real blocks |
-| `challenge_speaker_notes.pptx` | 67% | **regression — feature deleted**, see below |
+| `challenge_speaker_notes.pptx` | 67% → **100%** | **fixed** — deleted feature restored, see below |
+| `challenge_complex.html` | 0% → **100%** | **fixed** — golden recorded `HTML parse error: element <meta> closed by </head>`, the strict-XML failure since fixed by `parseLenient`. Golden regenerated; 1 error block → 9 real blocks |
 | `challenge_comment_ranges.docx` | 60% | untriaged |
 | `challenge_comments.xlsx` | 67% | untriaged |
 | `challenge_fields.docx` | 75% | untriaged |
 | `challenge_hyperlinks.docx` | 75% | URL text `(https://…)` no longer appended; lost a `section-break` — untriaged |
 | `challenge_formulas.xlsx` | 80% | MERGE check — untriaged |
 | `challenge_merged_cells.xlsx` | 80% | MERGE check — untriaged |
+
+Suite: **97.0% → 98.4%** across 99 files, both gains from real fixes rather than
+golden edits that paper over a defect.
 
 **`challenge_speaker_notes.pptx` is the serious one: PPTX speaker-note
 extraction was deleted from the source.**
@@ -213,6 +216,22 @@ design docs. The golden proves it worked; nothing read the golden.
 This is the concrete damage behind the later "docs/ailang is registry-vendored,
 never hand-sync" rule — a feature silently deleted by a sync commit, four months
 undetected because the only test that covered it was never run.
+
+**Restored.** `findNotesSlideEntries` went back into `zip_extract`, and
+`pptxParseNotesSlides` / `pptxExtractNoteText` / `pptxFindNotesBodyText` /
+`pptxFindNotesTextInShapes` into `pptx_parser`, recovered from `e9de665^`. Every
+other helper they need (`getPlaceholderType`, `extractDrawingMLText`,
+`optFlatMap`) had survived. One deliberate change from the recovered original: it
+called `parse`, which this module no longer imports — it uses `parseLenient`
+throughout since the bare-ampersand fix, and notes XML is no more trustworthy
+than any other part.
+
+`challenge_speaker_notes.pptx` now parses **byte-identical to its four-month-old
+golden** — the strongest available evidence that the golden was right and the
+code had lost the feature. `poi_sampleshow.pptx` gains two real notes sections
+("I am the notes of the first slide", "These are the notes of the 2nd slide…")
+with every other section unchanged; that golden was regenerated, since it too had
+been written after the deletion.
 
 ### One harness bug, exposed by the same change
 

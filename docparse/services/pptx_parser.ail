@@ -6,7 +6,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
 import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment)
-import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget)
+import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget)
 import docparse/services/omml (renderOmml)
 
 -- PPTX Parser
@@ -51,7 +51,9 @@ export func parsePptx(filepath: string) -> [Block] ! {FS} {
   let slideEntries = findSlideEntries(filepath);
   let totalSlides = listLength(slideEntries);
   let cappedEntries = take(500, slideEntries);
-  let slideBlocks = parseSlides(filepath, cappedEntries);
+  -- Speaker notes follow the slides, as they did before e9de665 deleted them.
+  let notesBlocks = pptxParseNotesSlides(filepath, findNotesSlideEntries(filepath));
+  let slideBlocks = concat(parseSlides(filepath, cappedEntries), notesBlocks);
   if totalSlides > 500
   then {
     let warning = mkText(
@@ -542,3 +544,73 @@ pure func pptxBlockHasContent(b: Block) -> bool =
 
 pure func pptxParseIntOrDefault(s: string, default: int) -> int =
   getOrElse(stringToInt(s), default)
+
+-- ============================================================
+-- Speaker notes extraction (§19.3)
+-- ============================================================
+--
+-- Restored after e9de665 ("Sync source .ail modules with docs/ailang/ browser
+-- versions") overwrote this module with a reduced browser variant and deleted
+-- the whole section. The only test covering it was a golden no suite read.
+
+-- Parse all notes slide entries
+func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
+  match entries {
+    [] => [],
+    entry :: rest => {
+      let xml = readZipEntry(filepath, entry);
+      let noteText = pptxExtractNoteText(xml);
+      let moreBlocks = pptxParseNotesSlides(filepath, rest);
+      if length(trim(noteText)) > 0
+      then {
+        let noteBlock = SectionBlock({
+          kind: "notes",
+          blocks: [mkText(noteText, "speaker-notes", 0)]
+        });
+        noteBlock :: moreBlocks
+      }
+      else moreBlocks
+    }
+  }
+
+-- Extract speaker note text from a notesSlide XML
+-- Notes text lives in: p:notes/p:cSld/p:spTree/p:sp[ph@type="body"]/p:txBody
+pure func pptxExtractNoteText(xml: string) -> string {
+  if length(xml) == 0 then ""
+  else match parseLenient(xml) {
+    Ok(root) => pptxFindNotesBodyText(root),
+    Err(_) => ""
+  }
+}
+
+-- Find the body placeholder in the notes shape tree and extract its text
+pure func pptxFindNotesBodyText(root: XmlNode) -> string =
+  getOrElse(
+    optFlatMap(\csld.
+      optFlatMap(\spTree.
+        pptxFindNotesTextInShapes(getChildren(spTree)),
+        findFirst(csld, "p:spTree")),
+      findFirst(root, "p:cSld")),
+    "")
+
+-- Search shapes for the body placeholder (type="body") and extract text
+pure func pptxFindNotesTextInShapes(nodes: [XmlNode]) -> Option[string] =
+  match nodes {
+    [] => None,
+    sp :: rest => {
+      let tag = getTag(sp);
+      if tag == "p:sp" then {
+        let phType = getPlaceholderType(sp);
+        if phType == "body" then
+          match findFirst(sp, "p:txBody") {
+            Some(txBody) => {
+              let text = join("\n", map(extractDrawingMLText, findAll(txBody, "a:p")));
+              if length(trim(text)) > 0 then Some(text) else pptxFindNotesTextInShapes(rest)
+            },
+            None => pptxFindNotesTextInShapes(rest)
+          }
+        else pptxFindNotesTextInShapes(rest)
+      }
+      else pptxFindNotesTextInShapes(rest)
+    }
+  }
