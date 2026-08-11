@@ -221,6 +221,59 @@ def verify_roundtrip(path: Path) -> list[str]:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+# Sources deliberately chosen to carry SectionBlocks (DOCX comments/text boxes/
+# section breaks, XLSX sheet sections, HTML header/footer) — the shape that made
+# every non-presentation source hang on ->PPTX and ->ODP. Markdown has none,
+# which is why the advertised "notes.md --convert slides.pptx" path stayed green
+# while six other conversions were dead.
+CONVERSION_MATRIX_SOURCES = [
+    "inline_formatting.docx",
+    "unstructured_test.xlsx",
+    "test.html",
+    "test.md",
+]
+CONVERSION_TARGETS = ["html", "docx", "pptx", "xlsx", "odt", "odp", "ods", "md", "qmd"]
+
+
+def verify_conversion_matrix() -> bool:
+    """Every source format must convert to every target without hanging."""
+    import subprocess, tempfile
+
+    repo = Path(__file__).resolve().parent.parent
+    test_dir = repo / "data" / "test_files"
+    print("── conversion matrix ──")
+    failures = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for src in CONVERSION_MATRIX_SOURCES:
+            src_path = test_dir / src
+            if not src_path.exists():
+                continue
+            for tgt in CONVERSION_TARGETS:
+                out = Path(tmp) / f"{src_path.stem}__{tgt}.{tgt}"
+                try:
+                    r = subprocess.run(
+                        [str(repo / "bin" / "docparse"), str(src_path), "--convert", str(out)],
+                        capture_output=True, text=True, errors="replace",
+                        cwd=str(repo), timeout=120,
+                    )
+                except subprocess.TimeoutExpired:
+                    failures.append(f"{src} -> {tgt}: timed out"); continue
+                if r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+                    # Surface the real error, not whatever happened to print last.
+                    lines = ((r.stdout or "") + (r.stderr or "")).splitlines()
+                    err = next((l for l in reversed(lines) if "Error" in l or "error" in l),
+                               lines[-1] if lines else "no output")
+                    failures.append(f"{src} -> {tgt}: {err.strip()[:100]}")
+    total = len(CONVERSION_MATRIX_SOURCES) * len(CONVERSION_TARGETS)
+    if failures:
+        print(f"  L5 Conversions: FAIL ({len(failures)}/{total})")
+        for f in failures:
+            print(f"     ⚠ {f}")
+        return False
+    print(f"  L5 Conversions: PASS ({total}/{total})")
+    return True
+
+
 def main():
     print("=== DocParse Generated File Verification ===\n")
 
@@ -231,7 +284,8 @@ def main():
         print(f"No files found in {EXAMPLES_DIR}")
         sys.exit(1)
 
-    all_pass = True
+    all_pass = verify_conversion_matrix()
+    print()
     for path in files:
         print(f"── {path.name} ──")
 

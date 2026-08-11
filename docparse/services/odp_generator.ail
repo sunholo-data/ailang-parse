@@ -52,7 +52,11 @@ pure func odpCollectSlides(blocks: [Block]) -> [[Block]] {
 pure func odpHasSlideBlocks(blocks: [Block]) -> bool =
   match blocks {
     [] => false,
-    SectionBlock(s) :: _ => if s.kind == "slide" then true else odpHasSlideBlocks(blocks),
+    -- Recurse on `rest`, not `blocks`: a non-slide SectionBlock used to restart
+    -- the scan on the same list forever. PPTX hid it because its first section
+    -- IS a slide and returns immediately; DOCX has comment/textbox/section-break
+    -- sections, so DOCX -> ODP always blew the recursion limit.
+    SectionBlock(s) :: rest => if s.kind == "slide" then true else odpHasSlideBlocks(rest),
     _ :: rest => odpHasSlideBlocks(rest)
   }
 

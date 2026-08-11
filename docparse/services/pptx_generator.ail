@@ -90,7 +90,10 @@ pure func pptxCollectSlides(blocks: [Block]) -> [[Block]] {
 pure func pptxHasSlideBlocks(blocks: [Block]) -> bool =
   match blocks {
     [] => false,
-    SectionBlock(s) :: _ => if s.kind == "slide" then true else pptxHasSlideBlocks(blocks),
+    -- Recurse on `rest`, not `blocks` — the same infinite loop odp_generator
+    -- had. Hidden for the same reason: a PPTX's first section IS a slide, so it
+    -- returns before reaching the bug; any document source hangs.
+    SectionBlock(s) :: rest => if s.kind == "slide" then true else pptxHasSlideBlocks(rest),
     _ :: rest => pptxHasSlideBlocks(rest)
   }
 
