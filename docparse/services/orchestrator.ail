@@ -222,19 +222,24 @@ func orchOffice(filepath: string, ext: string, opts: ParseOptions)
 --
 -- ODT headers/footers live in styles.xml and are APPENDED (unlike DOCX, where
 -- headers lead) — this matches the CLI's long-standing behaviour.
+-- ODF images are stored as ZIP-internal paths (Pictures/…, media/…), so they
+-- must be resolved against the archive exactly as EPUB's are. Without this the
+-- ImageBlock's `data` keeps the href string and `dataLength` reports the length
+-- of the path rather than of the image.
 func orchOdf(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
   if ext == "odt" then {
-    let blocks = concat(parseOdt(filepath), parseOdtHeadersFooters(filepath));
+    let parsed = concat(parseOdt(filepath), parseOdtHeadersFooters(filepath));
+    let blocks = resolveBlockImages(filepath, parsed);
     mkOutcome("odt", filepath, parseOdtMetadata(filepath), blocks,
       ["Parsed ODT: ${show(countBlocks(blocks))} blocks"], [], 0)
   }
   else if ext == "odp" then {
-    let blocks = parseOdp(filepath);
+    let blocks = resolveBlockImages(filepath, parseOdp(filepath));
     mkOutcome("odp", filepath, parseOdpMetadata(filepath), blocks,
       ["Parsed ODP: ${show(countBlocks(blocks))} blocks"], [], 0)
   }
   else {
-    let blocks = parseOds(filepath);
+    let blocks = resolveBlockImages(filepath, parseOds(filepath));
     mkOutcome("ods", filepath, parseOdsMetadata(filepath), blocks,
       ["Parsed ODS: ${show(countBlocks(blocks))} blocks"], [], 0)
   }
@@ -260,10 +265,12 @@ func orchMarkdown(filepath: string) -> ParseOutcome ! {FS} = {
     ["Parsed Markdown: ${show(countBlocks(blocks))} blocks"], [], 0)
 }
 
+-- `ext` is "csv" or "tsv" — detectFormat routes both here because they share a
+-- parsing strategy, but the reported format must stay the one the user gave us.
 func orchCsv(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
   let delim = if ext == "tsv" then "\t" else ",";
   let blocks = parseCsv(readFile(filepath), delim);
-  mkOutcome("csv", filepath, emptyMetadata(), blocks,
+  mkOutcome(ext, filepath, emptyMetadata(), blocks,
     ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], [], 0)
 }
 

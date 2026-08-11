@@ -528,26 +528,14 @@ parsing section above.)*
 
 ### Unrelated issues found along the way
 
-- **`test.tsv` reports `format: "csv"`** where its golden says `"tsv"` — a real
-  format-detection regression, deliberately not fixed here. Wants its own ticket.
-- **ODF image data is no longer resolved** — and this is a regression, not
-  golden staleness, which is how two of the three drifted goldens below were
-  previously characterised. For ODT/ODP/ODS the `data` field now holds the
-  *href string* rather than the image bytes: `officeparser.odp` reports
-  `dataLength: 16` for `src: "media/image1.png"` (exactly `len(src)`), and
-  `lo_image_mimetype.odt` reports `53` for a 53-character `Pictures/….svg`
-  path. Their goldens recorded `2652`–`14968` and `8564`, so the bytes used to
-  be there. `mime` degrades with it (`application/octet-stream` → guessed from
-  the extension). Cause is identified: `orchestrator.ail` calls
-  `resolveBlockImages` only in `orchEpub` (line 246) — `orchOdt`/`orchOdp` do
-  not, while DOCX resolves properly (`image_vml.docx` = 19728 bytes). Confirmed
-  pre-existing at `bb34837` by stashing. Wants its own ticket.
-- **Two stale goldens remain**: `lo_image_mimetype.odt` and `officeparser.odp`
-  (both the image regression above), plus `pandoc_inline_images.docx`. The
-  office benchmark scores *similarity*, not byte-equality, so it reads 100.0%
-  while these drift. (`gutenberg_alice`, `gutenberg_moby_dick`, `image_vml` and
-  `officeparser.odt` were resolved as part of this work; `test.tsv` is the
-  regression above.)
+- **All golden drift is now resolved** — spun out into
+  [`v0_30_0_golden_drift.md`](./v0_30_0_golden_drift.md) and fixed there. Three
+  defects, none of them staleness: ODF images had stopped resolving (dropped in
+  the v0.28.0 `main.ail` → orchestrator refactor), `test.tsv` reported
+  `format: "csv"`, and `mediaMimeType` lacked `.svg`/`.webp`. **0 of 61** files
+  now differ from golden. Note the office benchmark reported 100.0% throughout,
+  before and after — it scores similarity, not byte-equality, so it was
+  structurally blind to every one of them.
 - **ailang-core [#646](https://github.com/sunholo/ailang/issues/646)** —
   `std/xml.getText` returns `""` for whitespace-only text nodes, so
   `<w:t xml:space="preserve"> </w:t>` is dropped and mixed-formatting paragraphs
