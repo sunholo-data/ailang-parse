@@ -1,6 +1,6 @@
 # Inline Runs — representing formatting inside a paragraph
 
-**Status**: PARTIAL (2026-08-11) — phases 1–4 done for DOCX, HTML, PPTX and ODT (text, headings and list items), parse and generate. Phase 5 (SDKs) not started. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
+**Status**: PARTIAL (2026-08-11) — phases 1–4 **complete**: DOCX, HTML, PPTX and ODT all parse *and* generate runs for text, headings and list items. Phase 5 (SDKs) is the only remaining phase. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
 **Theme**: `TextBlock` has no sub-paragraph structure, so bold-inside-a-sentence is unrepresentable. Add it additively, and stop silently discarding the formatting the DOCX parser already has in hand.
 **Follows**: [`v0_29_0_docx_generation_fidelity.md`](../v0_29_0/v0_29_0_docx_generation_fidelity.md) — P2 of that doc's scope, split out as promised because it is a data-model change rather than generator work.
 
@@ -184,10 +184,16 @@ clean.
 **Unrelated finding worth its own ticket:** 8 of the 58 files already differ
 from their committed goldens on *unmodified* code — `gutenberg_alice`,
 `gutenberg_moby_dick`, `image_vml`, `lo_image_mimetype`, `officeparser.odp`,
-`officeparser.odt`, `pandoc_inline_images`, `test.tsv`. Pre-existing golden
-drift, not caused by this work, and invisible to the office benchmark (which
-scores similarity rather than byte-equality) — so the goldens are staler than
-the 100.0% headline suggests.
+`officeparser.odt`, `pandoc_inline_images`, `test.tsv`. Not caused by this work,
+and invisible to the office benchmark, which scores similarity rather than
+byte-equality.
+
+> **Diagnosis corrected (2026-08-11).** This was filed as "golden drift" and read
+> as *the goldens are stale*. That was wrong, and the wrong word cost time: it
+> framed the fix as regenerating goldens when the actual job was fixing parser
+> code. Most of these were **live regressions**, and the goldens were right all
+> along — see [`v0_30_0_golden_drift.md`](./v0_30_0_golden_drift.md), where all 8
+> are resolved.
 
 **Phase 3 — parsers, one per increment.** Independent and individually
 shippable, highest value first:
@@ -504,6 +510,31 @@ loss.
 Office suite 100.0% across 61 files; `--eval` 61/61; `verify_generated.py`
 all-pass; 36 modules clean.
 
+#### ODT list items (2026-08-11) — DONE
+
+The last parse-side gap. `odtParseList` now builds `{text, runs}` pairs and
+filters them **together**, following the rule `html_parser` established: build
+texts and runs as separate lists, filter only the texts, and `itemRuns` shifts
+out of alignment the moment an item is blank.
+
+That hazard is not hypothetical here, so the fixture provokes it — a blank
+`<text:list-item>` sits third of seven. The parser drops it and the remaining
+six stay correctly paired, which the golden now locks in. The invariant is
+checked directly rather than by eye: **every item's runs concatenate to exactly
+that item's own text.**
+
+Plain lists keep emitting `mkList`, so a list with no formatting anywhere does
+not start carrying `[[],[],[]]`.
+
+New fixture `data/test_files/odt_inline_formatting.odt` + golden, since no
+corpus ODT had a formatted list item — `officeparser.odt` has 14 list items and
+**none** contains a span. LibreOffice validates the fixture, and ODT→ODT now
+round-trips list formatting: items identical, per-character formatting
+identical. LibreOffice reads all six formats back out of our generated file.
+
+Office suite 100.0% across 62 files; `--eval` 62/62; **0 of 62** goldens differ
+from current output; `verify_generated.py` all-pass; 36 modules clean.
+
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
 Note this now means two fields: `runs` on text/heading blocks and `itemRuns` on
 list blocks.
@@ -540,8 +571,8 @@ generator-side defects, so renderer verification is mandatory:
 
 ## Open items — start here
 
-State as of 2026-08-11. Phases 1–4 are done for DOCX, HTML, PPTX and ODT.
-Everything below is unstarted.
+State as of 2026-08-11. Phases 1–4 are complete across all four formats, both
+directions — the matrix below is full. Everything listed after it is unstarted.
 
 **Coverage matrix** (parse / generate):
 
@@ -550,22 +581,19 @@ Everything below is unstarted.
 | DOCX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
 | HTML | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
 | PPTX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
-| ODT  | ✓ / ✓ | ✓ / ✓ | — / ✓ |
+| ODT  | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
 
 ### In this doc's scope
 
-1. **ODT list items** — `itemRuns` is not populated by `odt_parser`. The ODT
-   *generator* renders `itemRuns` already, so this is the last parse-side gap;
-   until it lands, ODT→ODT drops list-item formatting while DOCX→ODT keeps it.
-2. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
+1. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
    fields: `runs` on text/heading blocks, `itemRuns` on list blocks. The Go
    `Block` struct (`sdks/go/types.go`) is flat with `omitempty`, so this is
    genuinely additive.
-3. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
+2. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
    styles cover direct formatting).
-4. **Colour and highlight** were deliberately left out of `InlineRun`. The
+3. **Colour and highlight** were deliberately left out of `InlineRun`. The
    additive shape makes adding them cheap when wanted.
-5. **Coalescing adjacent same-formatting runs** — see the follow-up note in the
+4. **Coalescing adjacent same-formatting runs** — see the follow-up note in the
    ODF whitespace section. Cross-format, affects DOCX/PPTX/HTML too.
 
 *(The former item 1, ODT superscript/subscript, did not reproduce — see the ODT

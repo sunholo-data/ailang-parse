@@ -249,7 +249,7 @@ pure func odtProcessNode(node: XmlNode, styles: Map[string, OdtFmt]) -> [Block] 
   else if tag == "table:table" then [odtParseTable(node)]
 
   -- Lists: text:list
-  else if tag == "text:list" then odtParseList(node)
+  else if tag == "text:list" then odtParseList(node, styles)
 
   -- Sections: text:section
   else if tag == "text:section" then
@@ -324,12 +324,22 @@ pure func odtParseSpan(s: string) -> int
 }
 
 -- Parse a text:list into a ListBlock
-pure func odtParseList(list: XmlNode) -> [Block] {
+pure func odtParseList(list: XmlNode, styles: Map[string, OdtFmt]) -> [Block] {
   let items = findAll(list, "text:list-item");
-  let texts = map(odtListItemText, items);
-  let nonEmpty = filter(\t. length(t) > 0, texts);
+  -- Text and runs are carried together through the empty-item filter. Building
+  -- them as separate lists and filtering only the texts would silently shift
+  -- itemRuns out of alignment with items the moment any item is blank.
+  let pairs = map(\i. {text: odtListItemText(i), runs: odtRunsFor(i, styles)}, items);
+  let nonEmpty = filter(\pr. length(pr.text) > 0, pairs);
   if listLength(nonEmpty) > 0
-  then [mkList(nonEmpty, false)]
+  then {
+    let texts = map(\pr. pr.text, nonEmpty);
+    let itemRuns = map(\pr. pr.runs, nonEmpty);
+    -- Plain lists keep the pre-runs shape rather than carrying [[],[],[]].
+    if any(\r. listLength(r) > 0, itemRuns)
+    then [mkListRuns(texts, false, itemRuns)]
+    else [mkList(texts, false)]
+  }
   else []
 }
 
