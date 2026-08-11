@@ -1,12 +1,13 @@
 module docparse/services/odp_generator
 
 import std/string (length, intToStr)
-import std/list (foldl, length as listLength)
+import std/list (foldl, flatMap, length as listLength)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
+import docparse/services/odf_runs (odfCollectRunStyles, odfRunsToXml)
 
 -- ODP Generator — converts Block ADT to a valid .odp file.
 -- ODP = OpenDocument Presentation. Uses draw:page elements for slides.
@@ -66,7 +67,10 @@ pure func odpSplitBySlides(blocks: [Block]) -> [[Block]] =
 
 -- Build content.xml with slides
 pure func odpBuildContent(slides: [[Block]]) -> string {
-  "${xmlDecl()}<office:document-content ${odpNs()} office:version=\"1.2\"><office:automatic-styles><style:style style:name=\"dp1\" style:family=\"drawing-page\"/><style:style style:name=\"tf1\" style:family=\"graphic\"><style:graphic-properties draw:auto-grow-height=\"true\"/></style:style></office:automatic-styles><office:body><office:presentation>${odpSlidesToXml(slides, 1)}</office:presentation></office:body></office:document-content>"
+  -- Run styles are document-wide in ODF, so they are collected across every
+  -- slide and emitted once alongside the page/frame styles.
+  let runStyles = odfCollectRunStyles(flatMap(\sl. sl, slides));
+  "${xmlDecl()}<office:document-content ${odpNs()} office:version=\"1.2\"><office:automatic-styles><style:style style:name=\"dp1\" style:family=\"drawing-page\"/><style:style style:name=\"tf1\" style:family=\"graphic\"><style:graphic-properties draw:auto-grow-height=\"true\"/></style:style>${runStyles}</office:automatic-styles><office:body><office:presentation>${odpSlidesToXml(slides, 1)}</office:presentation></office:body></office:document-content>"
 }
 
 pure func odpSlidesToXml(slides: [[Block]], idx: int) -> string =
@@ -84,17 +88,41 @@ pure func odpSlideContent(blocks: [Block], frameIdx: int) -> string =
       "${odpBlockToFrame(block, frameIdx)}${odpSlideContent(rest, frameIdx + 1)}"
   }
 
+-- Runs when present, plain encoded text otherwise.
+pure func odpInline(text: string, runs: [InlineRun]) -> string =
+  if listLength(runs) > 0 then odfRunsToXml(runs) else odfEncodeText(text)
+
+-- itemRuns is parallel to items but may be absent; walked together so a short
+-- or missing itemRuns degrades to plain text rather than mis-pairing.
+pure func odpListItems(items: [string], itemRuns: [[InlineRun]]) -> string =
+  match items {
+    [] => "",
+    item :: rest => {
+      let body = match itemRuns {
+        [] => odfEncodeText(item),
+        r :: _ => odpInline(item, r)
+      };
+      let restRuns = match itemRuns {
+        [] => [],
+        _ :: rr => rr
+      };
+      "<text:p>\u2022 ${body}</text:p>${odpListItems(rest, restRuns)}"
+    }
+  }
+
 pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
   let yPos = "${intToStr(frameIdx * 3)}cm";
   match block {
+    -- Titles stay bold by default; the run spans nest inside and compose with
+    -- it, which is how the ODT parser already reads nested spans.
     HeadingBlock(h) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p><text:span text:style-name=\"Bold\">${odfEncodeText(h.text)}</text:span></text:p>"),
+        "<text:p><text:span text:style-name=\"Bold\">${odpInline(h.text, h.runs)}</text:span></text:p>"),
 
     TextBlock(t) =>
       if length(t.text) > 0
       then odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>${odfEncodeText(t.text)}</text:p>")
+        "<text:p>${odpInline(t.text, t.runs)}</text:p>")
       else "",
 
     TableBlock(t) =>
@@ -103,7 +131,7 @@ pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
 
     ListBlock(l) =>
       odpTextFrame("2cm", yPos, "22cm", "3cm",
-        foldl(\acc item. "${acc}<text:p>\u2022 ${odfEncodeText(item)}</text:p>", "", l.items)),
+        odpListItems(l.items, l.itemRuns)),
 
     ImageBlock(i) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
