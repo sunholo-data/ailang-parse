@@ -1,11 +1,14 @@
 # Golden drift — regressions the benchmark could not see
 
-**Status**: DONE (2026-08-11). All 62 office-suite files match their goldens.
-**Theme**: Four defects sat in committed goldens for months. None of them was
-"staleness"; three were live regressions. Spun out of
+**Status**: DONE (2026-08-11, shipped in v0.30.0). Office suite **100.0% across
+99 files** — a real one, where the previous 100.0% was 37 unread goldens — and a
+byte-equality sweep of the whole golden directory reads **99/99 identical**.
+**Theme**: Nine defects sat in committed goldens for months. Almost none was
+"staleness": four were live regressions, and **five were features a bad sync had
+deleted outright** (§5). Spun out of
 [`v0_30_0_inline_runs.md`](./v0_30_0_inline_runs.md), where the first three were
-found; the fourth surfaced when the byte-equality sweep was widened past the 62
-files the office suite scores.
+found; the rest surfaced as the byte sweep and then the suite itself were widened
+past the 62 files that were being scored.
 
 ## Why they went unnoticed
 

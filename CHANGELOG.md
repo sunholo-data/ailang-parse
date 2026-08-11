@@ -9,7 +9,88 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.28.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.30.0...HEAD)
+
+## [v0.30.0](https://github.com/sunholo-data/ailang-parse/compare/v0.28.0...v0.30.0) — 2026-08-11
+
+### Inline runs — formatting inside a paragraph
+
+`TextBlock` was a flat string, so bold-inside-a-sentence was unrepresentable and
+every generator was capped by the type rather than by its own code. Blocks now
+carry `runs: [InlineRun]` (and `itemRuns` on lists), added additively: `text` is
+untouched, `runs` is omitted when empty, and a document with no formatting
+serialises byte-identically to before.
+
+Every format that can carry inline formatting now does, **in both directions**:
+
+| | text | heading | list |
+|---|---|---|---|
+| DOCX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| HTML | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| PPTX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| ODT | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| ODP | — / ✓ | — / ✓ | — / ✓ |
+| QMD | — / ✓ | — / ✓ | — / ✓ |
+
+Each dialect needed genuinely different code: WordprocessingML puts run
+properties in child elements, DrawingML in attributes on `a:rPr`, and ODF puts
+them in a named `<style:style>` the span merely references. XLSX/ODS stay out of
+scope — their cells are strings, not paragraphs.
+
+`text` and `runs` are allowed to diverge, and for HTML they deliberately do:
+`text` keeps Markdown markers for readability, `runs` carries the same
+formatting structurally. Generators prefer `runs` where present, which is what
+stops `**bold**` reaching Word as four literal asterisks.
+
+All four SDKs (Python, JS, Go, **R**) expose `runs` / `itemRuns`.
+
+### Five features restored that a bad sync had deleted
+
+`e9de665` (2026-03-30, *"Sync source .ail modules with docs/ailang/ browser
+versions"*) ran the sync in the wrong direction and overwrote six parsers with
+their reduced browser variants — **845 lines deleted, 38 kept**. The features
+went with them, silently, for four months:
+
+- **PPTX speaker notes** — gone entirely, while `docs/pptx-parsing.html` still
+  advertised them
+- **DOCX hyperlink URLs** — the whole rels subsystem, leaving
+  `readDocxRelationships` imported but never called
+- **DOCX field results** — `w:fldSimple`, so DATE/NUMPAGES/FILENAME rendered as
+  `"Total pages in document: "`
+- **DOCX section breaks** — the `w:sectPr` marker block
+- **XLSX merged cells** — the entire subsystem, including the gap filling that
+  emits the cells Excel omits inside a merge region
+
+Merged cells and track changes are the differentiator this project advertises
+over PDF conversion. Goldens covering every one of these had been committed the
+whole time; nothing read them.
+
+### The blind spot that hid them
+
+`generate_golden.sh` wrote goldens for `data/test_files/challenge/`, but
+`eval_office.py` scanned only the top level with a suffix list that excluded
+`.eml`/`.mbox` — so **37 of 99 goldens were generated and never read**. The
+suite reported 100.0% throughout. It now reads all 99, and the 100.0% is real.
+
+The office suite also scores *similarity*, not byte-equality, so it cannot fail
+on a file whose images stopped resolving. A byte sweep over the whole golden
+directory went 73/99 → **99/99 identical**.
+
+### Other fixes
+
+- **ODF whitespace** (§6.1.2–6.1.4) — spaces, tabs and line breaks are
+  *elements* in ODF, and `getText` dropped every one, so `officeparser.odt`
+  extracted as `"Here is somebold,italic,…"`. New `odf_text` handles both
+  directions; all three ODF parsers and generators use it. Distinct from
+  ailang-core #646 and not blocked on it.
+- **ODF images stopped resolving** — `orchOdf` never called
+  `resolveBlockImages`, dropped in the v0.28.0 orchestrator refactor, so `data`
+  held the ZIP href instead of the bytes.
+- **`test.tsv` reported `format: "csv"`**, and eml/mbox reported `"email"` —
+  `orchCsv`/`orchEmail` hardcoded the strategy name over the user's extension.
+- **`mediaMimeType` learned `.svg`/`.webp`**, which resolution would otherwise
+  have downgraded to `application/octet-stream`.
+
 
 ## [v0.28.0](https://github.com/sunholo-data/ailang-parse/compare/v0.27.0...v0.28.0) — 2026-08-07
 
