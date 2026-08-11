@@ -6,6 +6,7 @@ import std/zip (createArchive)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
+import docparse/services/odf_text (odfEncodeText)
 
 -- ODS Generator — converts Block ADT to a valid .ods file.
 -- ODS = OpenDocument Spreadsheet. Uses table:table elements for sheets.
@@ -138,7 +139,7 @@ pure func odsSheetToXml(sheet: OdsSheet) -> string {
 }
 
 pure func odsRowToXml(row: [string]) -> string =
-  "<table:table-row>${foldl(\acc cell. "${acc}<table:table-cell><text:p>${xmlEscape(cell)}</text:p></table:table-cell>", "", row)}</table:table-row>"
+  "<table:table-row>${foldl(\acc cell. "${acc}<table:table-cell><text:p>${odfEncodeText(cell)}</text:p></table:table-cell>", "", row)}</table:table-row>"
 
 -- Minimal styles
 pure func odsMinimalStyles() -> string =

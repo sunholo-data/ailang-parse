@@ -1,11 +1,13 @@
 module docparse/services/odt_generator
 
-import std/string (length, intToStr)
-import std/list (foldl, length as listLength)
+import std/string (length, intToStr, concat as strConcat)
+import std/list (foldl, map, filter, flatMap, length as listLength)
+import std/map (fromList as mapFromList, values as mapValues)
 import std/zip (createArchive)
 import std/result (Ok, Err)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
+import docparse/services/odf_text (odfEncodeText)
 
 -- ODT Generator — converts Block ADT to a valid .odt file.
 --
@@ -57,48 +59,122 @@ pure func odfNs() -> string =
 -- Build content.xml
 pure func odtBuildContent(blocks: [Block]) -> string {
   let body = foldl(\acc b. "${acc}${odtBlockToXml(b)}", "", blocks);
-  "${xmlDecl()}<office:document-content ${odfNs()} office:version=\"1.2\"><office:automatic-styles><style:style style:name=\"Bold\" style:family=\"text\"><style:text-properties fo:font-weight=\"bold\"/></style:style><style:style style:name=\"Italic\" style:family=\"text\"><style:text-properties fo:font-style=\"italic\"/></style:style></office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>"
+  let styles = odtCollectRunStyles(blocks);
+  "${xmlDecl()}<office:document-content ${odfNs()} office:version=\"1.2\"><office:automatic-styles>${styles}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>"
 }
+
+-- === Character formatting (ODF §16.27) ===================================
+--
+-- The inverse of the parser's problem. ODF cannot put formatting on the run:
+-- each distinct combination needs its own <style:style> in
+-- office:automatic-styles, and the run references it by name.
+--
+-- Style names are derived from the formatting itself, so the same combination
+-- always produces the same name. That means the set can be deduped with a map
+-- at the end instead of threading a counter through the whole block walk, and
+-- the generated XML is deterministic for a given document.
+
+pure func odtRunStyleName(r: InlineRun) -> string {
+  let b = if r.bold then "b" else "";
+  let i = if r.italic then "i" else "";
+  let u = if r.underline then "u" else "";
+  let s = if r.strike then "s" else "";
+  let c = if r.code then "c" else "";
+  let v = if r.vertAlign == "superscript" then "p"
+    else if r.vertAlign == "subscript" then "q"
+    else "";
+  "AR${b}${i}${u}${s}${c}${v}"
+}
+
+-- A run with no formatting needs no span at all, so it also needs no style.
+pure func odtRunIsPlain(r: InlineRun) -> bool =
+  r.bold == false && r.italic == false && r.underline == false &&
+  r.strike == false && r.code == false && length(r.vertAlign) == 0
+
+pure func odtRunStyleDef(r: InlineRun) -> string {
+  let bold = if r.bold then " fo:font-weight=\"bold\"" else "";
+  let italic = if r.italic then " fo:font-style=\"italic\"" else "";
+  -- Underline and strike name a line style, mirroring what the parser reads.
+  let under = if r.underline
+    then " style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\""
+    else "";
+  let strike = if r.strike then " style:text-line-through-style=\"solid\"" else "";
+  -- ODF has no "code" property either; a monospace family is its honest
+  -- equivalent, as Consolas is on the DOCX side.
+  let code = if r.code then " fo:font-family=\"Consolas, monospace\"" else "";
+  -- style:text-position is "super|sub <percent>"; 58% is the ODF default rise.
+  let vert = if r.vertAlign == "superscript" then " style:text-position=\"super 58%\""
+    else if r.vertAlign == "subscript" then " style:text-position=\"sub 58%\""
+    else "";
+  "<style:style style:name=\"${odtRunStyleName(r)}\" style:family=\"text\"><style:text-properties${bold}${italic}${under}${strike}${code}${vert}/></style:style>"
+}
+
+-- One <style:style> per distinct formatting combination used anywhere in the
+-- document. mapValues is sorted by key, so the output order is stable.
+pure func odtCollectRunStyles(blocks: [Block]) -> string {
+  let formatted = filter(\r. odtRunIsPlain(r) == false, flatMap(odtBlockRuns, blocks));
+  strConcat(mapValues(mapFromList(map(\r. (odtRunStyleName(r), odtRunStyleDef(r)), formatted))))
+}
+
+pure func odtBlockRuns(b: Block) -> [InlineRun] =
+  match b {
+    TextBlock(t) => t.runs,
+    HeadingBlock(h) => h.runs,
+    ListBlock(l) => flatMap(\rs. rs, l.itemRuns),
+    SectionBlock(s) => flatMap(odtBlockRuns, s.blocks),
+    _ => []
+  }
+
+pure func odtRunsToXml(runs: [InlineRun]) -> string =
+  foldl(\acc r. "${acc}${odtRunToXml(r)}", "", runs)
+
+pure func odtRunToXml(r: InlineRun) -> string =
+  if odtRunIsPlain(r)
+  then odfEncodeText(r.text)
+  else "<text:span text:style-name=\"${odtRunStyleName(r)}\">${odfEncodeText(r.text)}</text:span>"
 
 -- Convert a Block to ODF XML
 pure func odtBlockToXml(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
-      "<text:h text:outline-level=\"${intToStr(h.level)}\">${xmlEscape(h.text)}</text:h>",
+      let inner = if listLength(h.runs) > 0 then odtRunsToXml(h.runs) else odfEncodeText(h.text) in
+      "<text:h text:outline-level=\"${intToStr(h.level)}\">${inner}</text:h>",
 
     TextBlock(t) =>
       if length(t.text) > 0
-      then "<text:p text:style-name=\"Standard\">${xmlEscape(t.text)}</text:p>"
+      then
+        let inner = if listLength(t.runs) > 0 then odtRunsToXml(t.runs) else odfEncodeText(t.text) in
+        "<text:p text:style-name=\"Standard\">${inner}</text:p>"
       else "",
 
     TableBlock(t) =>
       odtTableToXml(t.headers, t.rows),
 
     ListBlock(l) =>
-      odtListToXml(l.items, l.ordered),
+      odtListToXml(l.items, l.ordered, l.itemRuns),
 
     ImageBlock(i) =>
-      "<text:p text:style-name=\"Standard\">[Image: ${xmlEscape(i.description)}]</text:p>",
+      "<text:p text:style-name=\"Standard\">[Image: ${odfEncodeText(i.description)}]</text:p>",
 
     AudioBlock(a) =>
-      "<text:p text:style-name=\"Standard\">[Audio: ${xmlEscape(a.transcription)}]</text:p>",
+      "<text:p text:style-name=\"Standard\">[Audio: ${odfEncodeText(a.transcription)}]</text:p>",
 
     VideoBlock(v) =>
-      "<text:p text:style-name=\"Standard\">[Video: ${xmlEscape(v.description)}]</text:p>",
+      "<text:p text:style-name=\"Standard\">[Video: ${odfEncodeText(v.description)}]</text:p>",
 
     SectionBlock(s) =>
       "<text:section text:name=\"${xmlEscape(s.kind)}\">${foldl(\acc b. "${acc}${odtBlockToXml(b)}", "", s.blocks)}</text:section>",
 
     ChangeBlock(c) =>
-      "<text:p text:style-name=\"Standard\">${xmlEscape(c.text)} (${xmlEscape(c.changeType)} by ${xmlEscape(c.author)}, ${xmlEscape(c.date)})</text:p>",
+      "<text:p text:style-name=\"Standard\">${odfEncodeText(c.text)} (${odfEncodeText(c.changeType)} by ${odfEncodeText(c.author)}, ${odfEncodeText(c.date)})</text:p>",
 
     LinkBlock(l) =>
-      "<text:p text:style-name=\"Standard\"><text:a xlink:type=\"simple\" xlink:href=\"${xmlEscape(l.href)}\">${xmlEscape(l.text)}</text:a></text:p>",
+      "<text:p text:style-name=\"Standard\"><text:a xlink:type=\"simple\" xlink:href=\"${xmlEscape(l.href)}\">${odfEncodeText(l.text)}</text:a></text:p>",
 
     -- Write-back of real ODF annotations (office:annotation) is out of scope
     -- for this read-only release; the pairing is preserved as text.
     CommentBlock(c) =>
-      "<text:p text:style-name=\"Standard\">${xmlEscape(commentText(c.author, c.text, c.anchorText, c.anchored))}</text:p>"
+      "<text:p text:style-name=\"Standard\">${odfEncodeText(commentText(c.author, c.text, c.anchorText, c.anchored))}</text:p>"
   }
 
 -- Build an ODF table
@@ -128,14 +204,30 @@ pure func odtTableCell(cell: TableCell) -> string {
     then " table:number-columns-spanned=\"${intToStr(cell.colSpan)}\""
     else "";
   if cell.merged then "<table:covered-table-cell/>"
-  else "<table:table-cell${spanAttr}><text:p>${xmlEscape(cell.text)}</text:p></table:table-cell>"
+  else "<table:table-cell${spanAttr}><text:p>${odfEncodeText(cell.text)}</text:p></table:table-cell>"
 }
 
--- Build an ODF list
-pure func odtListToXml(items: [string], ordered: bool) -> string {
-  let listItems = foldl(\acc item. "${acc}<text:list-item><text:p>${xmlEscape(item)}</text:p></text:list-item>", "", items);
-  "<text:list>${listItems}</text:list>"
-}
+-- Build an ODF list.
+-- itemRuns is parallel to items but may be absent entirely. Both lists are
+-- walked together so a short or missing itemRuns falls back to plain text per
+-- item rather than pairing formatting with the wrong item.
+pure func odtListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> string =
+  "<text:list>${odtListItemsToXml(items, itemRuns)}</text:list>"
+
+pure func odtListItemsToXml(items: [string], itemRuns: [[InlineRun]]) -> string =
+  match items {
+    [] => "",
+    item :: rest =>
+      match itemRuns {
+        [] => "${odtListItem(odfEncodeText(item))}${odtListItemsToXml(rest, [])}",
+        r :: rrest =>
+          let body = if listLength(r) > 0 then odtRunsToXml(r) else odfEncodeText(item) in
+          "${odtListItem(body)}${odtListItemsToXml(rest, rrest)}"
+      }
+  }
+
+pure func odtListItem(body: string) -> string =
+  "<text:list-item><text:p>${body}</text:p></text:list-item>"
 
 -- Minimal styles.xml
 pure func odtMinimalStyles() -> string =

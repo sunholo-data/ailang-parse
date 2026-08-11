@@ -6,6 +6,7 @@ import std/zip (createArchive)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
+import docparse/services/odf_text (odfEncodeText)
 
 -- ODP Generator — converts Block ADT to a valid .odp file.
 -- ODP = OpenDocument Presentation. Uses draw:page elements for slides.
@@ -88,12 +89,12 @@ pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
   match block {
     HeadingBlock(h) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p><text:span text:style-name=\"Bold\">${xmlEscape(h.text)}</text:span></text:p>"),
+        "<text:p><text:span text:style-name=\"Bold\">${odfEncodeText(h.text)}</text:span></text:p>"),
 
     TextBlock(t) =>
       if length(t.text) > 0
       then odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>${xmlEscape(t.text)}</text:p>")
+        "<text:p>${odfEncodeText(t.text)}</text:p>")
       else "",
 
     TableBlock(t) =>
@@ -102,34 +103,34 @@ pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
 
     ListBlock(l) =>
       odpTextFrame("2cm", yPos, "22cm", "3cm",
-        foldl(\acc item. "${acc}<text:p>\u2022 ${xmlEscape(item)}</text:p>", "", l.items)),
+        foldl(\acc item. "${acc}<text:p>\u2022 ${odfEncodeText(item)}</text:p>", "", l.items)),
 
     ImageBlock(i) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>[Image: ${xmlEscape(i.description)}]</text:p>"),
+        "<text:p>[Image: ${odfEncodeText(i.description)}]</text:p>"),
 
     AudioBlock(a) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>[Audio: ${xmlEscape(a.transcription)}]</text:p>"),
+        "<text:p>[Audio: ${odfEncodeText(a.transcription)}]</text:p>"),
 
     VideoBlock(v) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>[Video: ${xmlEscape(v.description)}]</text:p>"),
+        "<text:p>[Video: ${odfEncodeText(v.description)}]</text:p>"),
 
     SectionBlock(s) =>
       odpSlideContent(s.blocks, frameIdx),
 
     ChangeBlock(c) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>${xmlEscape(c.text)} (${xmlEscape(c.changeType)})</text:p>"),
+        "<text:p>${odfEncodeText(c.text)} (${xmlEscape(c.changeType)})</text:p>"),
 
     LinkBlock(l) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>${xmlEscape(l.text)} (${xmlEscape(l.href)})</text:p>"),
+        "<text:p>${odfEncodeText(l.text)} (${xmlEscape(l.href)})</text:p>"),
 
     CommentBlock(c) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
-        "<text:p>${xmlEscape(commentText(c.author, c.text, c.anchorText, c.anchored))}</text:p>")
+        "<text:p>${odfEncodeText(commentText(c.author, c.text, c.anchorText, c.anchored))}</text:p>")
   }
 }
 
@@ -139,10 +140,10 @@ pure func odpTextFrame(x: string, y: string, w: string, h: string, content: stri
 -- Table rendered as text inside a frame (ODP tables are complex, this is simpler)
 pure func odpTableInFrame(headers: [TableCell], rows: [[TableCell]]) -> string {
   let headerLine = if listLength(headers) > 0
-    then "<text:p>${foldl(\acc c. if length(acc) > 0 then "${acc} | ${xmlEscape(c.text)}" else xmlEscape(c.text), "", headers)}</text:p>"
+    then "<text:p>${foldl(\acc c. if length(acc) > 0 then "${acc} | ${odfEncodeText(c.text)}" else odfEncodeText(c.text), "", headers)}</text:p>"
     else "";
   let dataLines = foldl(\acc row.
-    "${acc}<text:p>${foldl(\a c. if length(a) > 0 then "${a} | ${xmlEscape(c.text)}" else xmlEscape(c.text), "", row)}</text:p>",
+    "${acc}<text:p>${foldl(\a c. if length(a) > 0 then "${a} | ${odfEncodeText(c.text)}" else odfEncodeText(c.text), "", row)}</text:p>",
     "", rows);
   "${headerLine}${dataLines}"
 }

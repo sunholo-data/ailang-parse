@@ -1,6 +1,6 @@
 # Inline Runs — representing formatting inside a paragraph
 
-**Status**: PARTIAL (2026-08-10) — phases 1–4 done for DOCX, HTML and PPTX (text, headings and list items). ODT parses but does not generate. Phase 5 (SDKs) not started. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
+**Status**: PARTIAL (2026-08-11) — phases 1–4 done for DOCX, HTML, PPTX and ODT (text, headings and list items), parse and generate. Phase 5 (SDKs) not started. **See [Open items](#open-items--start-here) at the end of this doc to pick up.**
 **Theme**: `TextBlock` has no sub-paragraph structure, so bold-inside-a-sentence is unrepresentable. Add it additively, and stop silently discarding the formatting the DOCX parser already has in hand.
 **Follows**: [`v0_29_0_docx_generation_fidelity.md`](../v0_29_0/v0_29_0_docx_generation_fidelity.md) — P2 of that doc's scope, split out as promised because it is a data-model change rather than generator work.
 
@@ -457,6 +457,53 @@ all-pass including L2b; 36 modules clean.
 fragment the same way for their own reasons. Coalescing adjacent runs with
 identical formatting would be a cross-format change of its own.
 
+#### ODT generation (2026-08-11) — DONE
+
+The third dialect again needed a third approach, and it is the inverse of the
+parser's problem: **ODF cannot put formatting on the run**. Each distinct
+combination needs its own `<style:style>` in `office:automatic-styles`, and the
+span references it by name.
+
+Rather than thread a counter through the block walk to mint `T1`, `T2`, …, the
+style name is **derived from the formatting itself** (`ARb`, `ARbi`, `ARp`…).
+The same combination therefore always yields the same name, so the set dedupes
+with a single `mapFromList` at the end, and — since `mapValues` is sorted by key
+— the generated XML is deterministic for a given document. The
+`office:automatic-styles` block previously held two hardcoded styles, `Bold` and
+`Italic`, that nothing referenced; they are gone.
+
+Wired for text, headings and list items. `itemRuns` is walked alongside `items`
+with the same degrade-to-plain-text rule the DOCX generator uses, so a short or
+absent `itemRuns` cannot mis-pair formatting with the wrong item.
+
+**Generation had the mirror image of the whitespace bug.** ODF collapses
+whitespace on read, so a leading, trailing or repeated space must be *written*
+as `<text:s/>`. Runs make this acute: splitting at formatting boundaries
+routinely leaves a run that is nothing but a space, which would vanish entirely.
+`odf_text` now carries `odfEncodeText` next to `odfText` — the same rules in
+both directions — and **all three ODF generators use it**, since ODP and ODS
+write `<text:p>` content too and had the identical exposure.
+
+Verified through an independent implementation rather than against ourselves.
+DOCX → our parser → our ODT generator → **LibreOffice** → DOCX → python-docx:
+
+| | bold | italic | underline | strike | superscript | subscript |
+|---|---|---|---|---|---|---|
+| survives LibreOffice | yes | yes | yes | yes | yes | yes |
+
+Whitespace round-trips byte-identically through **all three** ODF generators —
+4-space run, tab, line break and the double space in `'item  two'` — and
+LibreOffice reads our generated file exactly as it reads the hand-built fixture.
+
+**Run segmentation is not preserved, per-character formatting is.** Re-parsing
+our own output splits `'plain then '` into `'plain then'` + `' '`, because
+`<text:s/>` becomes its own run. Text is identical and per-character formatting
+is identical; only the boundaries move. That is the coalescing follow-up, not a
+loss.
+
+Office suite 100.0% across 61 files; `--eval` 61/61; `verify_generated.py`
+all-pass; 36 modules clean.
+
 **Phase 5 — SDKs.** Additive optional field in Python/JS/Go; no consumer breaks.
 Note this now means two fields: `runs` on text/heading blocks and `itemRuns` on
 list blocks.
@@ -493,8 +540,8 @@ generator-side defects, so renderer verification is mandatory:
 
 ## Open items — start here
 
-State as of 2026-08-10. Phases 1–4 are done for DOCX, HTML and PPTX; ODT parses
-but does not generate. Everything below is unstarted.
+State as of 2026-08-11. Phases 1–4 are done for DOCX, HTML, PPTX and ODT.
+Everything below is unstarted.
 
 **Coverage matrix** (parse / generate):
 
@@ -503,24 +550,22 @@ but does not generate. Everything below is unstarted.
 | DOCX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
 | HTML | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
 | PPTX | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
-| ODT  | ✓ / — | ✓ / — | — / — |
+| ODT  | ✓ / ✓ | ✓ / ✓ | — / ✓ |
 
 ### In this doc's scope
 
-1. **ODT generation** — `odt_generator` does not render runs. Needs the inverse
-   of the parser: emit `<text:span>` plus matching `<style:style>` automatic
-   style definitions. Note the generator must also emit `<text:s/>` for runs of
-   spaces, or generated ODT will lose whitespace the way parsing just did.
-2. **ODT list items** — `itemRuns` is not populated by `odt_parser`.
-3. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
+1. **ODT list items** — `itemRuns` is not populated by `odt_parser`. The ODT
+   *generator* renders `itemRuns` already, so this is the last parse-side gap;
+   until it lands, ODT→ODT drops list-item formatting while DOCX→ODT keeps it.
+2. **Phase 5, SDKs** — additive optional fields in Python/JS/Go. Now **two**
    fields: `runs` on text/heading blocks, `itemRuns` on list blocks. The Go
    `Block` struct (`sdks/go/types.go`) is flat with `omitempty`, so this is
    genuinely additive.
-4. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
+3. **`style:parent-style-name` chains** are not resolved (deliberate; automatic
    styles cover direct formatting).
-5. **Colour and highlight** were deliberately left out of `InlineRun`. The
+4. **Colour and highlight** were deliberately left out of `InlineRun`. The
    additive shape makes adding them cheap when wanted.
-6. **Coalescing adjacent same-formatting runs** — see the follow-up note in the
+5. **Coalescing adjacent same-formatting runs** — see the follow-up note in the
    ODF whitespace section. Cross-format, affects DOCX/PPTX/HTML too.
 
 *(The former item 1, ODT superscript/subscript, did not reproduce — see the ODT

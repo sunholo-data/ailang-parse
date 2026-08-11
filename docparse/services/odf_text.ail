@@ -2,10 +2,12 @@ module docparse/services/odf_text
 
 import std/xml (getText, getAttr, getChildren, getTag, nodeKind, KindElement, KindText, KindComment)
 import std/option (Some, None, getOrElse)
-import std/string (repeat, stringToInt, concat as strConcat)
+import std/string (repeat, stringToInt, concat as strConcat, split, join, length)
 import std/list (map, length as listLength)
+import docparse/services/xml_helpers (xmlEscape)
 
--- ODF-aware text extraction, shared by the ODT/ODP/ODS parsers.
+-- ODF text whitespace semantics, in both directions — shared by the ODT/ODP/ODS
+-- parsers (`odfText`) and generators (`odfEncodeText`).
 --
 -- ODF does not preserve whitespace in the XML (§6.1.2–6.1.4). Spaces, tabs and
 -- line breaks are carried as *elements* rather than as text:
@@ -37,6 +39,40 @@ pure func odfSpaceCount(node: XmlNode) -> int =
   match stringToInt(getOrElse(getAttr(node, "text:c"), "1")) {
     Some(n) => if n > 0 then n else 1,
     None => 1
+  }
+
+-- === Generation: the same rules, in reverse ==============================
+--
+-- ODF collapses whitespace on read, so a leading, trailing or repeated space
+-- must be *written* as <text:s/> or it is silently lost — the parse-side defect
+-- above, mirrored. Runs make this acute: splitting a paragraph at formatting
+-- boundaries routinely leaves a run that is nothing but a space, which would
+-- otherwise vanish entirely.
+--
+-- Escapes XML as it goes, so this replaces xmlEscape at ODF text-content sites
+-- (but not in attribute values, which are not whitespace-collapsed).
+export pure func odfEncodeText(s: string) -> string =
+  join("<text:line-break/>", map(odfEncodeTabs, split(s, "\n")))
+
+pure func odfEncodeTabs(s: string) -> string =
+  join("<text:tab/>", map(odfEncodeSpaces, split(s, "\t")))
+
+-- Splitting on " " puts an empty part either side of every collapsible space,
+-- so a gap needs <text:s/> exactly when one of its neighbours is empty. A lone
+-- interior space between two words survives as a literal, as LibreOffice writes
+-- it.
+pure func odfEncodeSpaces(s: string) -> string =
+  match split(s, " ") {
+    [] => "",
+    p :: rest => strConcat(xmlEscape(p) :: odfSpacePieces(p, rest))
+  }
+
+pure func odfSpacePieces(prev: string, parts: [string]) -> [string] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      (if length(prev) > 0 && length(p) > 0 then " " else "<text:s/>")
+        :: (xmlEscape(p) :: odfSpacePieces(p, rest))
   }
 
 -- Drop-in replacement for std/xml.getText on ODF content nodes.
