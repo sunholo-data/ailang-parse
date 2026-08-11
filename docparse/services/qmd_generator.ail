@@ -2,7 +2,7 @@ module docparse/services/qmd_generator
 
 import std/string (length, join, intToStr, split)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
 
 -- QMD Generator — converts Block ADT to Quarto Markdown (.qmd) format.
 -- Pure string concatenation: generates YAML front matter + Quarto-flavored Markdown.
@@ -65,20 +65,22 @@ pure func qmdBlocksToStr(blocks: [Block]) -> string =
 pure func qmdBlockToStr(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
-      "${qmdHeadingPrefix(h.level)}${h.text}\n\n",
+      "${qmdHeadingPrefix(h.level)}${qmdInline(h.text, h.runs)}\n\n",
 
     TextBlock(t) =>
       if length(t.text) > 0
-      then if length(t.style) > 0 && t.style != "normal" && t.style != "Normal"
-        then "${qmdStyledText(t.text, t.style)}\n\n"
-        else "${t.text}\n\n"
+      then if listLength(t.runs) > 0
+        then "${qmdRunsToStr(t.runs)}\n\n"
+        else if length(t.style) > 0 && t.style != "normal" && t.style != "Normal"
+          then "${qmdStyledText(t.text, t.style)}\n\n"
+          else "${t.text}\n\n"
       else "",
 
     TableBlock(t) =>
       "${qmdTableToStr(t.headers, t.rows)}\n",
 
     ListBlock(l) =>
-      "${qmdListToStr(l.items, l.ordered, 1)}\n",
+      "${qmdListToStr(l.items, l.ordered, 1, l.itemRuns)}\n",
 
     ImageBlock(i) =>
       qmdImageToStr(i.data, i.description, i.mime),
@@ -107,6 +109,37 @@ pure func qmdBlockToStr(block: Block) -> string =
       then "> ${c.anchorText}\n>\n> — **${c.author}**: ${c.text}\n\n"
       else "> — **${c.author}** (unanchored): ${c.text}\n\n"
   }
+
+-- === Inline runs → Markdown =============================================
+--
+-- Quarto is the one output format where the marker vocabulary is native, so a
+-- run maps straight onto syntax rather than onto a style definition.
+--
+-- When `runs` is present it is used INSTEAD of `text`, never alongside it —
+-- the same rule html_generator follows. html_parser writes markers into `text`
+-- already (`**bold**`), so rendering both would double-encode to `****bold****`.
+-- With no runs, `text` passes through exactly as before, markers and all,
+-- which is what the LLM-markdown convention depends on.
+pure func qmdRunsToStr(runs: [InlineRun]) -> string =
+  foldl(\acc r. "${acc}${qmdRunToStr(r)}", "", runs)
+
+-- Wrappers compose from the inside out in a fixed order, so the same set of
+-- flags always produces the same nesting.
+pure func qmdRunToStr(r: InlineRun) -> string {
+  let withCode = if r.code then "`${r.text}`" else r.text;
+  let withVert = if r.vertAlign == "superscript" then "^${withCode}^"
+    else if r.vertAlign == "subscript" then "~${withCode}~"
+    else withCode;
+  let withStrike = if r.strike then "~~${withVert}~~" else withVert;
+  let withItalic = if r.italic then "*${withStrike}*" else withStrike;
+  let withBold = if r.bold then "**${withItalic}**" else withItalic;
+  -- Markdown has no underline; Quarto's span syntax carries it.
+  if r.underline then "[${withBold}]{.underline}" else withBold
+}
+
+-- Paragraph/heading body: runs when present, today's text path otherwise.
+pure func qmdInline(text: string, runs: [InlineRun]) -> string =
+  if listLength(runs) > 0 then qmdRunsToStr(runs) else text
 
 -- Heading prefix from level
 pure func qmdHeadingPrefix(level: int) -> string =
@@ -245,11 +278,23 @@ pure func qmdSpaces(n: int) -> string =
   else " ${qmdSpaces(n - 1)}"
 
 -- Render list items
-pure func qmdListToStr(items: [string], ordered: bool, idx: int) -> string =
+-- itemRuns is parallel to items but may be absent. Both are walked together so
+-- a short or missing itemRuns degrades to plain text per item rather than
+-- pairing formatting with the wrong item.
+pure func qmdListToStr(items: [string], ordered: bool, idx: int, itemRuns: [[InlineRun]]) -> string =
   match items {
     [] => "",
-    item :: rest =>
+    item :: rest => {
+      let body = match itemRuns {
+        [] => item,
+        r :: _ => qmdInline(item, r)
+      };
+      let restRuns = match itemRuns {
+        [] => [],
+        _ :: rr => rr
+      };
       if ordered
-      then "${intToStr(idx)}. ${item}\n${qmdListToStr(rest, ordered, idx + 1)}"
-      else "- ${item}\n${qmdListToStr(rest, ordered, idx + 1)}"
+      then "${intToStr(idx)}. ${body}\n${qmdListToStr(rest, ordered, idx + 1, restRuns)}"
+      else "- ${body}\n${qmdListToStr(rest, ordered, idx + 1, restRuns)}"
+    }
   }
