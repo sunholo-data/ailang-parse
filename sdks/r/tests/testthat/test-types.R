@@ -95,3 +95,35 @@ test_that("ParseResult parses blocks + metadata + summary", {
   expect_equal(res$metadata$page_count, 3L)
   expect_equal(res$summary$total_blocks, 1L)
 })
+
+test_that("blocks decode inline runs and itemRuns", {
+  b <- ailangparse:::.block_from_list(list(
+    type = "text", text = "plain bold x2",
+    runs = list(
+      list(text = "plain "),
+      list(text = "bold", bold = TRUE),
+      list(text = "2", vertAlign = "superscript")
+    )
+  ))
+  expect_length(b$runs, 3L)
+  expect_equal(vapply(b$runs, function(r) r$text, character(1)),
+               c("plain ", "bold", "2"))
+  expect_true(b$runs[[2]]$bold)
+  expect_false(b$runs[[1]]$bold)
+  expect_equal(b$runs[[3]]$vert_align, "superscript")
+
+  # item_runs is parallel to items; an unformatted item has no runs
+  l <- ailangparse:::.block_from_list(list(
+    type = "list", items = list("one", "two"),
+    itemRuns = list(list(list(text = "one", italic = TRUE)), list())
+  ))
+  expect_length(l$item_runs, length(l$items))
+  expect_true(l$item_runs[[1]][[1]]$italic)
+  expect_length(l$item_runs[[2]], 0L)
+})
+
+test_that("blocks with no formatting keep the pre-InlineRun shape", {
+  plain <- ailangparse:::.block_from_list(list(type = "text", text = "nothing here"))
+  expect_length(plain$runs, 0L)
+  expect_length(plain$item_runs, 0L)
+})

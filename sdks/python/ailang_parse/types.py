@@ -92,6 +92,41 @@ class RetryPolicy:
 # ── Cell (for tables) ──
 
 @dataclass
+class InlineRun:
+    """A run of text with uniform character formatting inside a paragraph.
+
+    Populated for text/heading blocks (``runs``) and list items (``item_runs``)
+    by the DOCX, HTML, PPTX and ODT parsers. Empty when the source carried no
+    inline formatting, so a plain paragraph costs nothing.
+
+    ``text`` and the block's ``text`` are allowed to differ: HTML keeps Markdown
+    markers in ``text`` for readability while ``runs`` carries the same
+    formatting structurally. ``text`` is for reading, runs are for rendering.
+    """
+    text: str = ""
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strike: bool = False
+    code: bool = False
+    vert_align: str = ""
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "InlineRun":
+        if not isinstance(raw, dict):
+            return cls(text=str(raw))
+        return cls(
+            text=raw.get("text", ""),
+            bold=raw.get("bold", False),
+            italic=raw.get("italic", False),
+            underline=raw.get("underline", False),
+            strike=raw.get("strike", False),
+            code=raw.get("code", False),
+            vert_align=raw.get("vertAlign", ""),
+        )
+
+
+@dataclass
 class Cell:
     text: str = ""
     col_span: int = 1
@@ -129,6 +164,10 @@ class Block:
     # ListBlock
     items: List[str] = field(default_factory=list)
     ordered: bool = False
+    # Inline character formatting. `runs` applies to text/heading blocks;
+    # `item_runs` is parallel to `items` — same length, or empty.
+    runs: List[InlineRun] = field(default_factory=list)
+    item_runs: List[List[InlineRun]] = field(default_factory=list)
     # ImageBlock / AudioBlock / VideoBlock
     description: str = ""
     transcription: str = ""
@@ -174,6 +213,10 @@ class Block:
         b.anchor_block_index = d.get("anchorBlockIndex", -1)
         b.parent_id = d.get("parentId", "")
         b.resolved = d.get("resolved", False)
+
+        b.runs = [InlineRun.from_raw(r) for r in d.get("runs", [])]
+        b.item_runs = [[InlineRun.from_raw(r) for r in item]
+                       for item in d.get("itemRuns", [])]
 
         # Table
         b.headers = [Cell.from_raw(c) for c in d.get("headers", [])]

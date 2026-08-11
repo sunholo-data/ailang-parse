@@ -322,3 +322,36 @@ class TestResponseMeta:
         headers = {"X-DocParse-Quota-Remaining-Day": "not-a-number"}
         meta = ResponseMeta.from_headers(headers)
         assert meta.quota_remaining_day == -1
+
+
+def test_inline_runs_decode():
+    """runs / item_runs decode with the right flags, and stay empty when absent."""
+    from ailang_parse.types import Block, InlineRun
+
+    b = Block.from_dict({
+        "type": "text",
+        "text": "plain bold x2",
+        "runs": [
+            {"text": "plain "},
+            {"text": "bold", "bold": True},
+            {"text": "2", "vertAlign": "superscript"},
+        ],
+    })
+    assert [r.text for r in b.runs] == ["plain ", "bold", "2"]
+    assert [r.bold for r in b.runs] == [False, True, False]
+    assert b.runs[2].vert_align == "superscript"
+
+    # itemRuns is parallel to items; an unformatted item is an empty list
+    l = Block.from_dict({
+        "type": "list",
+        "items": ["one", "two"],
+        "itemRuns": [[{"text": "one", "italic": True}], []],
+    })
+    assert len(l.item_runs) == len(l.items)
+    assert l.item_runs[0][0].italic is True
+    assert l.item_runs[1] == []
+
+    # A block with no formatting keeps the pre-InlineRun shape
+    plain = Block.from_dict({"type": "text", "text": "nothing here"})
+    assert plain.runs == []
+    assert plain.item_runs == []

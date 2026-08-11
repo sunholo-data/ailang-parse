@@ -10,7 +10,7 @@ import { DocParse } from "../src/client.ts";
 import {
   DocParseError, AuthError, QuotaError,
   supportsFormat, isDeterministic,
-  type FormatsResult,
+  type FormatsResult, type Block,
 } from "../src/types.ts";
 import { UnstructuredClient } from "../src/compat.ts";
 
@@ -784,5 +784,39 @@ describe("structured dict error", () => {
         return true;
       },
     );
+  });
+});
+
+describe("InlineRun", () => {
+  it("decodes runs and itemRuns with the right flags", () => {
+    const b: Block = JSON.parse(`{
+      "type": "text",
+      "text": "plain bold x2",
+      "runs": [
+        {"text": "plain "},
+        {"text": "bold", "bold": true},
+        {"text": "2", "vertAlign": "superscript"}
+      ]
+    }`);
+    assert.deepEqual(b.runs?.map((r) => r.text), ["plain ", "bold", "2"]);
+    assert.equal(b.runs?.[1].bold, true);
+    assert.equal(b.runs?.[0].bold, undefined);
+    assert.equal(b.runs?.[2].vertAlign, "superscript");
+
+    // itemRuns is parallel to items; an unformatted item is an empty list
+    const l: Block = JSON.parse(`{
+      "type": "list",
+      "items": ["one", "two"],
+      "itemRuns": [[{"text": "one", "italic": true}], []]
+    }`);
+    assert.equal(l.itemRuns?.length, l.items?.length);
+    assert.equal(l.itemRuns?.[0][0].italic, true);
+    assert.deepEqual(l.itemRuns?.[1], []);
+  });
+
+  it("leaves runs absent when the source carried no formatting", () => {
+    const plain: Block = JSON.parse(`{"type":"text","text":"nothing here"}`);
+    assert.equal(plain.runs, undefined);
+    assert.equal(plain.itemRuns, undefined);
   });
 });

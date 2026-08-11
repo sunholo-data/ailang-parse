@@ -93,6 +93,25 @@ export interface Cell {
 
 // ── Block (discriminated union via type field) ──
 
+/**
+ * A run of text with uniform character formatting inside a paragraph.
+ * Populated by the DOCX, HTML, PPTX and ODT parsers; absent when the source
+ * carried no inline formatting.
+ *
+ * `text` and the block's `text` are allowed to differ: HTML keeps Markdown
+ * markers in `text` for readability while `runs` carries the same formatting
+ * structurally. `text` is for reading, runs are for rendering.
+ */
+export interface InlineRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  code?: boolean;
+  vertAlign?: string;
+}
+
 export interface Block {
   type: "text" | "heading" | "table" | "list" | "image" | "audio" | "video" | "section" | "change" | "link" | "comment";
   text: string;
@@ -108,6 +127,10 @@ export interface Block {
   // ListBlock
   items?: string[];
   ordered?: boolean;
+  // Inline character formatting. `runs` applies to text/heading blocks;
+  // `itemRuns` is parallel to `items` — same length, or absent.
+  runs?: InlineRun[];
+  itemRuns?: InlineRun[][];
   // ImageBlock / AudioBlock / VideoBlock
   description?: string;
   transcription?: string;

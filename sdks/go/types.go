@@ -7,6 +7,23 @@ import (
 )
 
 // Block represents a parsed content block (11 variants discriminated by Type).
+// InlineRun is a run of text with uniform character formatting inside a
+// paragraph. Populated by the DOCX, HTML, PPTX and ODT parsers; empty when the
+// source carried no inline formatting.
+//
+// Text and the block's Text are allowed to differ: HTML keeps Markdown markers
+// in Text for readability while Runs carries the same formatting structurally.
+// Text is for reading, runs are for rendering.
+type InlineRun struct {
+	Text      string `json:"text"`
+	Bold      bool   `json:"bold,omitempty"`
+	Italic    bool   `json:"italic,omitempty"`
+	Underline bool   `json:"underline,omitempty"`
+	Strike    bool   `json:"strike,omitempty"`
+	Code      bool   `json:"code,omitempty"`
+	VertAlign string `json:"vertAlign,omitempty"`
+}
+
 type Block struct {
 	Type string `json:"type"` // text, heading, table, list, image, audio, video, section, change, link, comment
 
@@ -27,6 +44,11 @@ type Block struct {
 	// ListBlock
 	Items   []string `json:"items,omitempty"`
 	Ordered bool     `json:"ordered,omitempty"`
+
+	// Inline character formatting. Runs applies to text/heading blocks;
+	// ItemRuns is parallel to Items — same length, or empty.
+	Runs     []InlineRun   `json:"runs,omitempty"`
+	ItemRuns [][]InlineRun `json:"itemRuns,omitempty"`
 
 	// ImageBlock / AudioBlock / VideoBlock
 	Description   string `json:"description,omitempty"`

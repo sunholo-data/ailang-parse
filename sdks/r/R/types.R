@@ -36,6 +36,26 @@ NULL
   list(text = as.character(raw), col_span = 1L, merged = FALSE)
 }
 
+# ── InlineRun ────────────────────────────────────────────────────────────────
+
+# A run of text with uniform character formatting inside a paragraph.
+# `text` and the block's `text` may differ: HTML keeps Markdown markers in
+# `text` while runs carry the same formatting structurally.
+.inline_run_from_raw <- function(raw) {
+  if (!is.list(raw)) return(list(text = as.character(raw), bold = FALSE,
+                                 italic = FALSE, underline = FALSE,
+                                 strike = FALSE, code = FALSE, vert_align = ""))
+  list(
+    text       = .s(raw$text),
+    bold       = .b(raw$bold),
+    italic     = .b(raw$italic),
+    underline  = .b(raw$underline),
+    strike     = .b(raw$strike),
+    code       = .b(raw$code),
+    vert_align = .s(raw$vertAlign)
+  )
+}
+
 # ── Block ────────────────────────────────────────────────────────────────────
 
 #' Convert a raw API block list into a typed Block S3 object.
@@ -65,6 +85,11 @@ NULL
     resolved      = .b(d$resolved),
     ordered       = .b(d$ordered),
     items         = if (is.null(d$items)) character() else vapply(d$items, .s, character(1)),
+    runs          = lapply(if (is.null(d$runs)) list() else d$runs, .inline_run_from_raw),
+    item_runs     = lapply(
+      if (is.null(d$itemRuns)) list() else d$itemRuns,
+      function(item) lapply(item, .inline_run_from_raw)
+    ),
     headers       = lapply(if (is.null(d$headers)) list() else d$headers, .cell_from_raw),
     rows          = lapply(
       if (is.null(d$rows)) list() else d$rows,
