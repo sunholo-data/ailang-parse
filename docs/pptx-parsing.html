@@ -120,11 +120,11 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "How do I parse a PPTX file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .pptx file to the AILANG Parse API or use the Python/JS/Go SDK. The parser reads PresentationML directly and returns structured JSON with slide content, speaker notes, tables, and metadata."}},
-    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Speaker notes from notesSlide XML are extracted as separate blocks associated with their slide. The notes content is fully preserved with formatting."}},
+    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Speaker notes from notesSlide XML are extracted as section blocks with kind \"notes\", each wrapping the note text with style \"speaker-notes\". Notes follow the slide sections in document order. The note text is preserved in full; character formatting inside a note is not currently carried."}},
     {"@type": "Question", "name": "How are tables in slides handled?", "acceptedAnswer": {"@type": "Answer", "text": "Tables within slides are extracted with full row/column structure, merged cells (gridSpan/vMerge), and cell content. They appear as table blocks within their parent slide section."}},
     {"@type": "Question", "name": "Does PPTX parsing preserve slide order?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Slides are parsed in presentation order as defined in presentation.xml. Each slide becomes a section block numbered by its position."}},
     {"@type": "Question", "name": "What about shapes and text boxes in slides?", "acceptedAnswer": {"@type": "Answer", "text": "All text-bearing shapes (titles, subtitles, content placeholders, freeform text boxes) are extracted. Shape text is ordered by placeholder type then position on the slide."}},
-    {"@type": "Question", "name": "How fast is PPTX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical presentations parse in under 50ms. The parser reads PresentationML directly with no rendering engine or LibreOffice dependency. 92.1% composite on OfficeDocBench."}}
+    {"@type": "Question", "name": "How fast is PPTX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical presentations parse in under 50ms. The parser reads PresentationML directly with no rendering engine or LibreOffice dependency. 92.3% composite on OfficeDocBench."}}
   ]
 }
 </script>
@@ -286,7 +286,7 @@ timeline: Q3 launch"
       </div>
 
       <h2 id="speaker-notes">Speaker Notes</h2>
-      <p>PPTX stores speaker notes in separate <code>notesSlide</code> XML files, one per slide. These contain the presenter's talking points, data sources, and context that doesn't appear on the projected slide. AILANG Parse extracts notes as text blocks with <code>style: "speaker-notes"</code>.</p>
+      <p>PPTX stores speaker notes in separate <code>notesSlide</code> XML files, one per slide. These contain the presenter's talking points, data sources, and context that doesn't appear on the projected slide. AILANG Parse extracts each note as a section block with <code>kind: "notes"</code>, wrapping the note text with <code>style: "speaker-notes"</code>. Notes follow the slide sections in document order.</p>
 
       <p>This is critical for AI applications: the notes often contain more actionable content than the slide bullet points. A training deck's slide says "Security Best Practices" &mdash; the notes contain the actual procedures and exceptions.</p>
 
@@ -294,8 +294,10 @@ timeline: Q3 launch"
   {"type": "heading", "level": 1, "text": "Security Best Practices"},
   {"type": "text", "text": "Follow the principle of least privilege"},
   {"type": "text", "text": "Rotate credentials every 90 days"},
-  {"type": "text", "style": "speaker-notes",
-   "text": "Exception: service accounts in prod-critical path use 180-day rotation per SEC-2024-003. Mention the incident from January if anyone pushes back on rotation frequency."}
+  {"type": "section", "kind": "notes", "blocks": [
+    {"type": "text", "style": "speaker-notes",
+     "text": "Exception: service accounts in prod-critical path use 180-day rotation per SEC-2024-003. Mention the incident from January if anyone pushes back on rotation frequency."}
+  ]}
 ]</code></pre>
 
       <h2 id="slide-tables">Tables in Slides</h2>
@@ -411,7 +413,7 @@ for block in result.blocks:
         </details>
         <details>
           <summary>How fast is PPTX parsing?</summary>
-          <div class="dp-faq-answer"><p>Typical presentations parse in under 50ms. No rendering engine or LibreOffice dependency. 92.1% composite on <a href="benchmarks.html">OfficeDocBench</a>.</p></div>
+          <div class="dp-faq-answer"><p>Typical presentations parse in under 50ms. No rendering engine or LibreOffice dependency. 92.3% composite on <a href="benchmarks.html">OfficeDocBench</a>.</p></div>
         </details>
       </div>
 

@@ -185,11 +185,11 @@
           });
           // Animate score counter after result appears.
           // Pull live value from window.BENCH_DATA (loaded async by bench-data.js).
-          // Falls back to the inline data-bench text (e.g. "92.1%") if fetch hasn't completed.
+          // Falls back to the inline data-bench text (e.g. "92.3%") if fetch hasn't completed.
           var scoreEl = document.getElementById('vs-eval-score');
           if (scoreEl) {
             setTimeout(function () {
-              var target = 92.1;
+              var target = 92.3;
               var bd = window.BENCH_DATA;
               if (bd && bd.adapters) {
                 var ap = bd.adapters.find(function (a) { return a.id === 'ailang_parse'; });

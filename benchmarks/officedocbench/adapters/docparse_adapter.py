@@ -194,8 +194,30 @@ class DocParseAdapter(OfficeDocBenchAdapter):
             "text_boxes": text_boxes,
             "images": images,
             "lists": lists_out,
+            "hyperlinks": self._extract_hyperlinks(blocks),
             "metadata": metadata,
         }
+
+    # DOCX surfaces a hyperlink inline as "anchor text (url)" rather than as a
+    # separate block, so the links are in the output but were never mapped into
+    # the benchmark's schema — the scorer saw actual_count 0 for a file whose
+    # URLs we extract correctly.
+    _LINK_RE = re.compile(r"([^()]+?)\s+\(((?:https?://|mailto:)[^\s)]+)\)")
+
+    def _extract_hyperlinks(self, blocks: list[dict]) -> list[dict]:
+        links: list[dict] = []
+
+        def walk(bs: list[dict]) -> None:
+            for b in bs:
+                if b.get("type") == "link" and b.get("href"):
+                    links.append({"url": b["href"], "text": b.get("text", "")})
+                for m in self._LINK_RE.finditer(b.get("text") or ""):
+                    links.append({"url": m.group(2), "text": m.group(1).strip()})
+                if b.get("blocks"):
+                    walk(b["blocks"])
+
+        walk(blocks)
+        return links
 
     def _extract_lists(self, blocks: list[dict]) -> list[dict]:
         """Extract list blocks from raw JSON."""
