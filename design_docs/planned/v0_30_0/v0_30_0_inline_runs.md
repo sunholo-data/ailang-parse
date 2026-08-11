@@ -302,10 +302,17 @@ LinkBlock feature, so a block the parser now correctly types as `link` was still
 
 Six pre-existing drift files remain deliberately untouched, since this work did
 not affect them: `image_vml.docx`, `lo_image_mimetype.odt`, `officeparser.odp`,
-`officeparser.odt`, `pandoc_inline_images.docx`, `test.tsv`. Two causes
-identified so far — `officeparser.odt` predates the image `src` field (stale
-golden, harmless), but **`test.tsv` reports `format: "csv"` where the golden says
-`"tsv"`, which is a real regression** and wants its own ticket.
+`officeparser.odt`, `pandoc_inline_images.docx`, `test.tsv`. One cause is already
+clear: **`test.tsv` reports `format: "csv"` where the golden says `"tsv"`, which
+is a real regression** and wants its own ticket.
+
+> **Correction (2026-08-11).** This section originally also called
+> `officeparser.odt` a stale golden predating the image `src` field, and judged
+> it "harmless". Both halves were wrong. Its golden had been *regenerated after*
+> ODF image resolution broke, so it recorded the broken value (`dataLength` 16 —
+> the length of the ZIP href, not the image) as though it were correct. It was
+> matching its golden precisely because both were wrong. See
+> [`v0_30_0_golden_drift.md`](./v0_30_0_golden_drift.md) §1.
 
 #### Phases 3–4 for PPTX (2026-08-10) — DONE
 
@@ -602,13 +609,20 @@ parsing section above.)*
 ### Unrelated issues found along the way
 
 - **All golden drift is now resolved** — spun out into
-  [`v0_30_0_golden_drift.md`](./v0_30_0_golden_drift.md) and fixed there. Three
-  defects, none of them staleness: ODF images had stopped resolving (dropped in
-  the v0.28.0 `main.ail` → orchestrator refactor), `test.tsv` reported
-  `format: "csv"`, and `mediaMimeType` lacked `.svg`/`.webp`. **0 of 61** files
-  now differ from golden. Note the office benchmark reported 100.0% throughout,
-  before and after — it scores similarity, not byte-equality, so it was
-  structurally blind to every one of them.
+  [`v0_30_0_golden_drift.md`](./v0_30_0_golden_drift.md) and fixed there. **Four**
+  defects, none of them staleness, three of them live regressions: ODF images had
+  stopped resolving (dropped in the v0.28.0 `main.ail` → orchestrator refactor),
+  `test.tsv` reported `format: "csv"`, `mediaMimeType` lacked `.svg`/`.webp`, and
+  `orchEmail` had the identical hardcode to the `test.tsv` one — eml/mbox
+  reported `format: "email"` against goldens saying `"eml"`/`"mbox"`. **0 of 62**
+  office-suite files now differ from golden.
+
+  Two separate blind spots let these live. The office benchmark reported 100.0%
+  throughout, before and after, because it scores similarity rather than
+  byte-equality. And the fourth was outside the suite altogether: **16 eml/mbox
+  goldens sit in `benchmarks/office/golden/` that no suite reads.** 12 of them
+  still differ and need triage — at least one looks like a further regression
+  (`MIME-Version` no longer emitted), so they must not be bulk-regenerated.
 - **ailang-core [#646](https://github.com/sunholo/ailang/issues/646)** —
   `std/xml.getText` returns `""` for whitespace-only text nodes, so
   `<w:t xml:space="preserve"> </w:t>` is dropped and mixed-formatting paragraphs
