@@ -52,6 +52,7 @@
     { name: 'docparse/services/tex_parser',       path: 'docparse/services/tex_parser.ail' },
     // ODF + EPUB structural parsers (run pure XML→Blocks via AILANG WASM;
     // JS only does ZIP extraction with JSZip).
+    { name: 'docparse/services/odf_text',         path: 'docparse/services/odf_text.ail' },
     { name: 'docparse/services/odt_parser',       path: 'docparse/services/odt_parser.ail' },
     { name: 'docparse/services/odp_parser',       path: 'docparse/services/odp_parser.ail' },
     { name: 'docparse/services/ods_parser',       path: 'docparse/services/ods_parser.ail' },
