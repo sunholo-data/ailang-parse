@@ -276,6 +276,10 @@ func orchCsv(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
 
 -- Shallow email parse. Attachment recursion (opts.deep) needs Process for the
 -- PDF backend ladder, so it lives in parseDocument.
+--
+-- `ext` is "eml" or "mbox" — as with orchCsv, detectFormat routes both here
+-- because they share a strategy, but the reported format must stay the one the
+-- user gave us.
 func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcome ! {FS} = {
   let content = readFile(filepath);
   let isMbox = ext == "mbox";
@@ -283,7 +287,7 @@ func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcom
                else if isMbox then parseMbox(content)
                else parseEml(content);
   let meta = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
-  mkOutcome("email", filepath, meta, blocks,
+  mkOutcome(ext, filepath, meta, blocks,
     ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], [], 0)
 }
 
