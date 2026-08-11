@@ -41,8 +41,19 @@ jobs:
       - name: Check WASM bindings (source ↔ wasm-demo.js ↔ vendor script)
         run: python3 docs/scripts/check-wasm-bindings.py
 
-      - name: Check WASM freshness (binary vs .ail source commits)
-        run: python3 docs/scripts/check-wasm-freshness.py
+      # check-wasm-freshness.py is deliberately NOT run here. It compares git
+      # commit timestamps, and actions/checkout defaults to a shallow clone, so
+      # every file reports the same commit and the comparison can never fire —
+      # it has never once failed. Locally it is the opposite problem: any .ail
+      # edit trips it, because editing a file does not imply using new syntax.
+      #
+      # The real coverage is two checks that do work, both above/below:
+      #   check-wasm-bindings.py  — version-FLOOR check on the loaded subset,
+      #                             i.e. does the pin actually support what we
+      #                             load (semantic, not chronological)
+      #   wasm-smoke job          — loads the pinned ailang.wasm and the
+      #                             vendored modules into real Chromium and
+      #                             parses a document
 
       - name: Check Claude Code install docs (commands match the live skill repo)
         run: python3 docs/scripts/check-install-docs.py

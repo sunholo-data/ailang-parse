@@ -12,8 +12,14 @@ We hit this on the v0.13 string-interpolation migration: CLI happily parsed
 `"${first}${join("", fixed)}"` but the pre-v0.13 WASM choked on the nested
 string literal inside `${...}`.
 
-This script fails CI when any .ail file served to the browser has a more
-recent commit timestamp than the WASM binary. If you see this fail:
+NOT WIRED INTO CI. The timestamp comparison cannot fire under a shallow
+clone (actions/checkout's default), so it never failed there; and locally it
+fires on every .ail edit, because editing a file does not imply using syntax
+newer than the pin. Kept as a manual "should I rebuild the WASM?" prompt.
+
+The checks that actually cover this are check-wasm-bindings.py (version-floor
+on the loaded subset) and the wasm-smoke CI job (real Chromium). If you run
+this by hand and see it fail:
 
     cd /path/to/ailang && make build-wasm
     cp bin/ailang.wasm /path/to/ailang-parse/docs/wasm/ailang.wasm
