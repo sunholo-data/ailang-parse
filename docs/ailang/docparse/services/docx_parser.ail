@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
@@ -40,10 +40,68 @@ import docparse/services/omml (renderOmml)
 -- Parse a DOCX file into content blocks
 export func parseDocx(filepath: string) -> [Block] ! {FS} {
   let xml = readDocxContent(filepath);
+  let rels = docxLoadRels(filepath);
   match parseLenient(xml) {
-    Ok(root) => extractBodyBlocks(root),
-    Err(e) => [TextBlock({text: "XML parse error: ${e}", style: "error", level: 0})]
+    Ok(root) => extractBodyBlocksWithRels(root, rels),
+    Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
   }
+}
+
+-- === Hyperlink targets (ECMA-376 §17.16.22) ==============================
+--
+-- A <w:hyperlink> carries only r:id; the URL lives in
+-- word/_rels/document.xml.rels. Resolving it needs FS, so the map is read once
+-- in parseDocx and threaded through the otherwise-pure walk — the same shape
+-- odt_parser uses for its automatic styles.
+--
+-- Deleted by e9de665 along with the rest of the rels subsystem, which left
+-- readDocxRelationships imported but never called. Without it a link reads
+-- "Sunholo Homepage" and the target is simply gone.
+type DocxRel = {id: string, target: string}
+
+func docxLoadRels(filepath: string) -> [DocxRel] ! {FS} {
+  let xml = readDocxRelationships(filepath);
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => docxParseRels(root),
+    Err(_) => []
+  }
+}
+
+pure func docxParseRels(root: XmlNode) -> [DocxRel] =
+  flatMap(docxExtractHyperlinkRel, findAll(root, "Relationship"))
+
+-- Only hyperlink relationships matter here; images and styles resolve elsewhere.
+pure func docxExtractHyperlinkRel(rel: XmlNode) -> [DocxRel] {
+  let relType = getOrElse(getAttr(rel, "Type"), "");
+  if contains(relType, "hyperlink")
+  then [{id: getOrElse(getAttr(rel, "Id"), ""),
+         target: getOrElse(getAttr(rel, "Target"), "")}]
+  else []
+}
+
+pure func docxRelTarget(rels: [DocxRel], rId: string) -> string =
+  match rels {
+    [] => "",
+    r :: rest => if r.id == rId then r.target else docxRelTarget(rest, rId)
+  }
+
+-- Rendered as "text (url)", matching how this parser has always surfaced a
+-- link target inline rather than as a separate block.
+pure func docxHyperlinkSuffixRuns(node: XmlNode, rels: [DocxRel]) -> [InlineRun] {
+  let suffix = docxHyperlinkSuffix(node, rels);
+  if length(suffix) > 0 then [plainRun(suffix)] else []
+}
+
+-- Only when the link HAS text. A <w:hyperlink> can wrap an image instead
+-- (pandoc_inline_images.docx links an identicon), and appending a bare URL
+-- where there is no anchor text injects it mid-sentence:
+-- "Here is one that (http://www.google.com) links."
+pure func docxHyperlinkSuffix(node: XmlNode, rels: [DocxRel]) -> string {
+  let url = docxRelTarget(rels, getOrElse(getAttr(node, "r:id"), ""));
+  if length(url) > 0 && length(extractNestedRunText(node)) > 0
+  then " (${url})"
+  else ""
 }
 
 -- Extract metadata from a DOCX file
@@ -103,12 +161,15 @@ func parseSectionEntries(filepath: string, entries: [string], kind: string) -> [
   }
 
 -- Parse XML from a header/footer/footnote part into blocks
+-- Headers, footers, footnotes and endnotes each have their own rels part
+-- (word/_rels/headerN.xml.rels …) which is not loaded, so hyperlink targets
+-- inside them stay unresolved rather than being resolved against the wrong map.
 export pure func parseSectionXml(xml: string) -> [Block] {
   if length(xml) == 0 then []
   else match parseLenient(xml) {
     Ok(root) => {
       let children = getChildren(root);
-      processBodyChildren(children)
+      processBodyChildren(children, [])
     },
     Err(_) => []
   }
@@ -132,83 +193,196 @@ pure func blockHasContent(b: Block) -> bool =
   }
 
 -- Navigate to w:body and extract blocks from its children
-export pure func extractBodyBlocks(root: XmlNode) -> [Block] {
+-- Kept at this arity for docparse_browser, which parses a bare document.xml
+-- with no access to the ZIP's rels part.
+export pure func extractBodyBlocks(root: XmlNode) -> [Block] =
+  extractBodyBlocksWithRels(root, [])
+
+export pure func extractBodyBlocksWithRels(root: XmlNode, rels: [DocxRel]) -> [Block] {
   match findFirst(root, "w:body") {
     Some(body) => {
       let children = getChildren(body);
-      processBodyChildren(children)
+      processBodyChildren(children, rels)
     },
     None => []
   }
 }
 
 -- Process children of w:body (paragraphs and tables)
-pure func processBodyChildren(nodes: [XmlNode]) -> [Block] =
-  flatMap(processBodyNode, nodes)
+pure func processBodyChildren(nodes: [XmlNode], rels: [DocxRel]) -> [Block] =
+  flatMap(\n. processBodyNode(n, rels), nodes)
 
 -- Process a single body-level node
-pure func processBodyNode(node: XmlNode) -> [Block] {
+pure func processBodyNode(node: XmlNode, rels: [DocxRel]) -> [Block] {
   let tag = getTag(node);
   if tag == "w:p" then {
-    let mainBlock = parseParagraph(node);
+    let mainBlock = parseParagraph(node, rels);
     let changeBlocks = extractParagraphChanges(node);
-    let textBoxBlocks = extractTextBoxes(node);
+    let textBoxBlocks = extractTextBoxes(node, rels);
     mainBlock :: concat(changeBlocks, textBoxBlocks)
   }
-  else if tag == "w:tbl" then [parseTable(node)]
-  else if tag == "w:sdt" then extractSdtBodyBlocks(node)
+  else if tag == "w:tbl" then [parseTable(node, rels)]
+  else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels)
+  -- A body-level w:sectPr is a section break. Emitted as an empty marker block
+  -- so consumers can see where a section ends; also deleted by e9de665.
+  else if tag == "w:sectPr" then [SectionBlock({kind: "section-break", blocks: []})]
   else []
 }
 
 -- Extract blocks from a body-level structured document tag (w:sdt)
 -- SDTs can wrap paragraphs, tables, and nested SDTs at the body level
-pure func extractSdtBodyBlocks(sdt: XmlNode) -> [Block] =
+pure func extractSdtBodyBlocks(sdt: XmlNode, rels: [DocxRel]) -> [Block] =
   match findFirst(sdt, "w:sdtContent") {
-    Some(content) => processBodyChildren(getChildren(content)),
+    Some(content) => processBodyChildren(getChildren(content), rels),
     None => []
   }
 
 -- Extract text from text boxes (wps:txbx / w:txbxContent) inside a node
 -- Text boxes appear inside drawings within paragraphs
-pure func extractTextBoxes(node: XmlNode) -> [Block] {
+pure func extractTextBoxes(node: XmlNode, rels: [DocxRel]) -> [Block] {
   let txbxContents = findAll(node, "w:txbxContent");
-  extractTextBoxContent(txbxContents)
+  extractTextBoxContent(txbxContents, rels)
 }
 
 -- Parse text box content nodes into blocks wrapped in a SectionBlock
-pure func extractTextBoxContent(nodes: [XmlNode]) -> [Block] =
+pure func extractTextBoxContent(nodes: [XmlNode], rels: [DocxRel]) -> [Block] =
   flatMap(\txbx.
-    let blocks = processBodyChildren(getChildren(txbx)) in
+    let blocks = processBodyChildren(getChildren(txbx), rels) in
     if hasContent(blocks) then [SectionBlock({kind: "textbox", blocks: blocks})]
     else [],
     nodes)
 
 -- Parse a w:p (paragraph) element into a Block
-pure func parseParagraph(p: XmlNode) -> Block {
-  let text = extractParagraphText(p);
+pure func parseParagraph(p: XmlNode, rels: [DocxRel]) -> Block {
+  let text = extractParagraphText(p, rels);
   let style = extractParagraphStyle(p);
   let headingLevel = headingLevelFromStyle(style);
+  let runs = extractParagraphRuns(p, rels);
   if headingLevel > 0
-  then HeadingBlock({text: text, level: headingLevel})
+  then mkHeadingRuns(text, headingLevel, runs)
   else if isListParagraph(p)
-  then ListBlock({items: [text], ordered: isOrderedList(p)})
-  else TextBlock({text: text, style: style, level: 0})
+  -- One DOCX list paragraph is one item, so itemRuns is parallel with a single
+  -- entry. Kept empty when the item has no formatting, so the field only
+  -- appears where it carries information.
+  then mkListRuns([text], isOrderedList(p), if listLength(runs) > 0 then [runs] else [])
+  else mkTextRuns(text, style, 0, runs)
 }
 
 -- Extract all text from a paragraph by concatenating runs
 -- Handles track changes: includes w:ins and w:moveTo text,
 -- skips w:del and w:moveFrom (deleted/moved-away text)
-pure func extractParagraphText(p: XmlNode) -> string {
+pure func extractParagraphText(p: XmlNode, rels: [DocxRel]) -> string {
   let children = getChildren(p);
-  extractTextFromChildren(children)
+  extractTextFromChildren(children, rels)
 }
 
 -- Walk paragraph children, skipping deleted/moved-away content
-pure func extractTextFromChildren(nodes: [XmlNode]) -> string =
-  join("", map(childNodeText, nodes))
+pure func extractTextFromChildren(nodes: [XmlNode], rels: [DocxRel]) -> string =
+  join("", map(\n. childNodeText(n, rels), nodes))
+
+-- === Character formatting (ECMA-376 §17.3.2) =============================
+--
+-- w:rPr has been sitting in every run this parser walks, read only for font
+-- names, while bold/italic/underline were dropped on the floor. These build the
+-- InlineRun list that carries it.
+--
+-- childNodeRuns MUST mirror childNodeText's tag handling exactly — same
+-- inclusions, same skips — or `runs` and `text` describe different content for
+-- the same paragraph. They are permitted to differ in general (see InlineRun in
+-- types/document.ail), but for DOCX there are no Markdown markers involved, so
+-- any divergence here would be a bug rather than the intended split.
+pure func extractParagraphRuns(p: XmlNode, rels: [DocxRel]) -> [InlineRun] {
+  let runs = flatMap(\n. childNodeRuns(n, rels), getChildren(p));
+  -- Emit nothing unless something is actually formatted. A plain paragraph
+  -- gains no information from a single unstyled run, and suppressing it keeps
+  -- the JSON for unformatted documents byte-identical to the pre-InlineRun
+  -- shape — which is most documents, and all but a handful of the goldens.
+  if any(docxRunIsFormatted, runs) then runs else []
+}
+
+pure func childNodeRuns(node: XmlNode, rels: [DocxRel]) -> [InlineRun] {
+  let tag = getTag(node);
+  if tag == "w:r" then [extractRun(node)]
+  else if tag == "w:del" then []
+  else if tag == "w:moveFrom" then []
+  else if tag == "w:ins" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:moveTo" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:smartTag" then map(extractRun, findAll(node, "w:r"))
+  -- The URL suffix is a plain run so `runs` still concatenates to `text`.
+  else if tag == "w:hyperlink" then
+    concat(map(extractRun, findAll(node, "w:r")),
+           docxHyperlinkSuffixRuns(node, rels))
+  -- w:fldSimple wraps the field's cached result run (DATE, NUMPAGES, FILENAME).
+  -- Deleted by e9de665; without it the result text vanishes and a paragraph
+  -- reads "Total pages in document: ".
+  else if tag == "w:fldSimple" then map(extractRun, findAll(node, "w:r"))
+  else if tag == "w:sdt" then childNodeSdtRuns(node)
+  else if tag == "m:oMath" then [plainRun(renderOmml(node))]
+  else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
+  else []
+}
+
+pure func childNodeSdtRuns(sdt: XmlNode) -> [InlineRun] =
+  match findFirst(sdt, "w:sdtContent") {
+    Some(content) => map(extractRun, findAll(content, "w:r")),
+    None => []
+  }
+
+pure func extractRun(run: XmlNode) -> InlineRun {
+  let text = extractRunText(run);
+  match findFirst(run, "w:rPr") {
+    Some(rPr) => {
+      text: text,
+      bold: docxToggleProp(rPr, "w:b"),
+      italic: docxToggleProp(rPr, "w:i"),
+      underline: docxHasUnderline(rPr),
+      strike: docxToggleProp(rPr, "w:strike"),
+      -- DOCX has no "code" run property. Inferring one from a monospace font
+      -- would be a guess, so it stays false rather than fabricated.
+      code: false,
+      vertAlign: docxVertAlign(rPr)
+    },
+    None => plainRun(text)
+  }
+}
+
+pure func docxRunIsFormatted(r: InlineRun) -> bool =
+  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+
+-- ECMA-376 toggle properties: a bare <w:b/> means ON, but <w:b w:val="0"/>
+-- means OFF. Presence alone is not the signal — a paragraph that explicitly
+-- turns bold off would otherwise come back bold.
+pure func docxToggleProp(rPr: XmlNode, tag: string) -> bool =
+  match findFirst(rPr, tag) {
+    Some(el) => docxToggleOn(getOrElse(getAttr(el, "w:val"), "true")),
+    None => false
+  }
+
+pure func docxToggleOn(val: string) -> bool =
+  val != "0" && val != "false" && val != "off"
+
+-- w:u is not a toggle: it names an underline style, and w:val="none" is the
+-- off state.
+pure func docxHasUnderline(rPr: XmlNode) -> bool =
+  match findFirst(rPr, "w:u") {
+    Some(el) => {
+      let v = getOrElse(getAttr(el, "w:val"), "none");
+      v != "none" && length(v) > 0
+    },
+    None => false
+  }
+
+pure func docxVertAlign(rPr: XmlNode) -> string =
+  match findFirst(rPr, "w:vertAlign") {
+    Some(el) => {
+      let v = getOrElse(getAttr(el, "w:val"), "");
+      if v == "superscript" || v == "subscript" then v else ""
+    },
+    None => ""
+  }
 
 -- Extract text contribution from a single child node
-pure func childNodeText(node: XmlNode) -> string {
+pure func childNodeText(node: XmlNode, rels: [DocxRel]) -> string {
   let tag = getTag(node);
   if tag == "w:r" then extractRunText(node)
   else if tag == "w:del" then ""
@@ -216,7 +390,9 @@ pure func childNodeText(node: XmlNode) -> string {
   else if tag == "w:ins" then extractNestedRunText(node)
   else if tag == "w:moveTo" then extractNestedRunText(node)
   else if tag == "w:smartTag" then extractNestedRunText(node)
-  else if tag == "w:hyperlink" then extractNestedRunText(node)
+  else if tag == "w:hyperlink" then
+    "${extractNestedRunText(node)}${docxHyperlinkSuffix(node, rels)}"
+  else if tag == "w:fldSimple" then extractNestedRunText(node)
   else if tag == "w:sdt" then extractSdtText(node)
   else if tag == "m:oMath" then renderOmml(node)
   else if tag == "m:oMathPara" then renderOmml(node)
@@ -393,9 +569,9 @@ pure func isOrderedList(p: XmlNode) -> bool =
 
 -- Parse a w:tbl (table) element into a TableBlock
 -- Handles merged cells via gridSpan (horizontal) and vMerge (vertical)
-pure func parseTable(tbl: XmlNode) -> Block {
+pure func parseTable(tbl: XmlNode, rels: [DocxRel]) -> Block {
   let rows = findAll(tbl, "w:tr");
-  let parsedRows = parseTableRows(rows);
+  let parsedRows = parseTableRows(rows, rels);
   match parsedRows {
     [] => mkTable([], []),
     firstRow :: dataRows =>
@@ -407,29 +583,29 @@ pure func parseTable(tbl: XmlNode) -> Block {
 -- Contract: result has the same row count as the input rows. The `ensures`
 -- form is omitted because of ailang-core issue #236 (v0.19.2 property-test
 -- generator emits invalid _test.ail for pure funcs with ensures).
-pure func parseTableRows(rows: [XmlNode]) -> [[TableCell]]
+pure func parseTableRows(rows: [XmlNode], rels: [DocxRel]) -> [[TableCell]]
 {
-  map(parseTableRow, rows)
+  map(\r. parseTableRow(r, rels), rows)
 }
 
 -- Parse a single table row into TableCells with span info
-pure func parseTableRow(tr: XmlNode) -> [TableCell] {
+pure func parseTableRow(tr: XmlNode, rels: [DocxRel]) -> [TableCell] {
   let cells = findAll(tr, "w:tc");
-  parseCells(cells)
+  parseCells(cells, rels)
 }
 
 -- Extract TableCells from all cells in a row
 -- Contract: result has the same cell count as the input cells. The `ensures`
 -- form is omitted because of ailang-core issue #236.
-pure func parseCells(cells: [XmlNode]) -> [TableCell]
+pure func parseCells(cells: [XmlNode], rels: [DocxRel]) -> [TableCell]
 {
-  map(parseCell, cells)
+  map(\c. parseCell(c, rels), cells)
 }
 
 -- Parse a single w:tc into a TableCell with merge info
 -- Reads w:tcPr for gridSpan and vMerge attributes
-pure func parseCell(tc: XmlNode) -> TableCell {
-  let text = getCellText(tc);
+pure func parseCell(tc: XmlNode, rels: [DocxRel]) -> TableCell {
+  let text = getCellText(tc, rels);
   let cs = getCellGridSpan(tc);
   let vm = getCellVMerge(tc);
   if vm == "continue"
@@ -466,14 +642,14 @@ pure func parseIntOrDefault(s: string, default: int) -> int =
   getOrElse(stringToInt(s), default)
 
 -- Get text from a table cell (concatenate all paragraph text within)
-pure func getCellText(tc: XmlNode) -> string {
+pure func getCellText(tc: XmlNode, rels: [DocxRel]) -> string {
   let paragraphs = findAll(tc, "w:p");
-  joinParagraphTexts(paragraphs)
+  joinParagraphTexts(paragraphs, rels)
 }
 
 -- Concatenate text from multiple paragraphs
-pure func joinParagraphTexts(ps: [XmlNode]) -> string =
-  join("\n", map(extractParagraphText, ps))
+pure func joinParagraphTexts(ps: [XmlNode], rels: [DocxRel]) -> string =
+  join("\n", map(\pp. extractParagraphText(pp, rels), ps))
 
 -- Extract metadata from core.xml
 export pure func extractMetadata(root: XmlNode) -> DocMetadata {
@@ -552,9 +728,12 @@ type DocxWalk = {
 -- the position of its paragraph in the emitted block list, which only this
 -- walk knows) and avoids parsing document.xml twice.
 export pure func docxWalkBodyRoot(root: XmlNode) -> DocxWalk =
+  docxWalkBodyRootWithRels(root, [])
+
+export pure func docxWalkBodyRootWithRels(root: XmlNode, rels: [DocxRel]) -> DocxWalk =
   match findFirst(root, "w:body") {
     Some(body) => {
-      let st = docxWalkNodes(getChildren(body), docxEmptyWalk());
+      let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels);
       { blocks: reverse(st.blocks), anchors: reverse(st.anchors),
         open: st.open, count: st.count }
     },
@@ -564,25 +743,25 @@ export pure func docxWalkBodyRoot(root: XmlNode) -> DocxWalk =
 pure func docxEmptyWalk() -> DocxWalk =
   { blocks: [], anchors: [], open: [], count: 0 }
 
-pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk) -> DocxWalk =
+pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk, rels: [DocxRel]) -> DocxWalk =
   match nodes {
     [] => st,
-    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st))
+    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st, rels), rels)
   }
 
 -- Process one body-level node: emit its blocks (reusing processBodyNode so
 -- block extraction stays in one place) and scan it for comment markers.
-pure func docxWalkNode(node: XmlNode, st: DocxWalk) -> DocxWalk {
+pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: [DocxRel]) -> DocxWalk {
   let tag = getTag(node);
   if tag == "w:sdt" then
     -- SDTs emit their content's blocks, so recurse rather than counting them
     -- as one node; the recursion keeps the index accounting correct.
     match findFirst(node, "w:sdtContent") {
-      Some(content) => docxWalkNodes(getChildren(content), st),
+      Some(content) => docxWalkNodes(getChildren(content), st, rels),
       None => st
     }
   else {
-    let emitted = processBodyNode(node);
+    let emitted = processBodyNode(node, rels);
     let scanned =
       if tag == "w:p" then docxScanParagraph(node, st)
       else if tag == "w:tbl" then docxScanParagraphs(findAll(node, "w:p"), st)
@@ -610,7 +789,9 @@ pure func docxScanParagraphs(ps: [XmlNode], st: DocxWalk) -> DocxWalk =
 
 -- Scan one paragraph's children in document order, then close the paragraph
 pure func docxScanParagraph(p: XmlNode, st: DocxWalk) -> DocxWalk {
-  let paraText = extractParagraphText(p);
+  -- Anchor text is matched against comment ranges, so it deliberately stays
+  -- rels-free: appending a URL here would shift every anchor that spans a link.
+  let paraText = extractParagraphText(p, []);
   let scanned = docxScanChildren(getChildren(p), paraText, st);
   docxEndParagraph(scanned)
 }
@@ -637,7 +818,7 @@ pure func docxScanChild(node: XmlNode, paraText: string, st: DocxWalk) -> DocxWa
     }
   else {
     let withRefs = docxScanRefs(findAll(node, "w:commentReference"), paraText, st);
-    let text = childNodeText(node);
+    let text = childNodeText(node, []);
     if length(text) == 0 then withRefs
     else docxAppendOpen(text, withRefs)
   }
@@ -725,9 +906,10 @@ type DocxPlacedComment = {
 -- order) meets each comment beside its target. Comments whose anchor could not
 -- be resolved go in a trailing group, explicitly labelled unanchored.
 export func parseDocxWithComments(filepath: string) -> [Block] ! {FS} =
-  parseDocxWithCommentsXml(readDocxContent(filepath),
-                           readComments(filepath),
-                           readCommentsExtended(filepath))
+  parseDocxWithCommentsXmlRels(readDocxContent(filepath),
+                               readComments(filepath),
+                               readCommentsExtended(filepath),
+                               docxLoadRels(filepath))
 
 -- Pure core of the anchored parse, over raw XML strings.
 --
@@ -737,13 +919,19 @@ export func parseDocxWithComments(filepath: string) -> [Block] ! {FS} =
 -- browser demo would be worse than either being consistently unanchored.
 export pure func parseDocxWithCommentsXml(documentXml: string, commentsXml: string,
                                            extXml: string) -> [Block] =
+  parseDocxWithCommentsXmlRels(documentXml, commentsXml, extXml, [])
+
+-- Same, with hyperlink relationships resolved. The CLI reads document.xml.rels
+-- and uses this; the browser has no rels part and uses the arity-3 form above.
+export pure func parseDocxWithCommentsXmlRels(documentXml: string, commentsXml: string,
+                                              extXml: string, rels: [DocxRel]) -> [Block] =
   match parseLenient(documentXml) {
     Ok(root) => {
-      let walk = docxWalkBodyRoot(root);
+      let walk = docxWalkBodyRootWithRels(root, rels);
       let placed = docxCommentsFromXml(commentsXml, extXml, walk.anchors);
       docxSpliceComments(walk.blocks, placed)
     },
-    Err(e) => [TextBlock({text: "XML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
   }
 
 -- Extract comments from a DOCX file (word/comments.xml), each anchored to the

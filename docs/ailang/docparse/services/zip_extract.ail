@@ -171,6 +171,30 @@ pure func isSlideEntry(entry: string) -> bool {
   endsWith(entry, ".xml")
 }
 
+-- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml)
+export func findNotesSlideEntries(path: string) -> [string] ! {FS} {
+  match listEntries(path) {
+    Ok(entries) => filterNotesSlides(entries),
+    Err(_) => []
+  }
+}
+
+-- Filter entries to find notes slide XMLs
+pure func filterNotesSlides(entries: [string]) -> [string] =
+  match entries {
+    [] => [],
+    e :: rest =>
+      if isNotesSlideEntry(e)
+      then e :: filterNotesSlides(rest)
+      else filterNotesSlides(rest)
+  }
+
+-- Check if an entry is a notes slide XML
+pure func isNotesSlideEntry(entry: string) -> bool {
+  startsWith(entry, "ppt/notesSlides/notesSlide") &&
+  endsWith(entry, ".xml")
+}
+
 -- Find all worksheet entries in an XLSX ZIP (xl/worksheets/sheet*.xml)
 export func findSheetEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
@@ -319,6 +343,8 @@ export pure func mediaMimeType(filename: string) -> string
     ("image6.tiff", "image/tiff"),
     ("image7.emf", "image/emf"),
     ("image8.wmf", "image/wmf"),
+    ("image9.svg", "image/svg+xml"),
+    ("image10.webp", "image/webp"),
     ("unknown.xyz", "application/octet-stream")
   ]
 {
@@ -330,6 +356,10 @@ export pure func mediaMimeType(filename: string) -> string
   else if endsWith(filename, ".tiff") then "image/tiff"
   else if endsWith(filename, ".emf") then "image/emf"
   else if endsWith(filename, ".wmf") then "image/wmf"
+  -- svg/webp are what ODF actually ships; without them resolving an image
+  -- downgrades the parser's own correct guess to application/octet-stream.
+  else if endsWith(filename, ".svg") then "image/svg+xml"
+  else if endsWith(filename, ".webp") then "image/webp"
   else "application/octet-stream"
 }
 

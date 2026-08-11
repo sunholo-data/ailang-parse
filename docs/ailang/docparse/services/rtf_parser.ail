@@ -4,7 +4,7 @@ import std/string (length, foldChars, trim, join, charAt, charCode, startsWith, 
 import std/list (reverse, length as listLength)
 import std/option (Some, None)
 import std/bytes (fromInts, toString)
-import docparse/types/document (Block, TextBlock)
+import docparse/types/document (mkText, Block, TextBlock)
 
 -- RTF Parser — extracts text from Rich Text Format (.rtf) files.
 -- Pure AILANG implementation, no external dependencies.
@@ -173,7 +173,7 @@ pure func rtfFlushPara(state: RtfState) -> RtfState {
       { state |
         paraBuf: [],
         paraEmpty: true,
-        blocks: TextBlock({text: text, style: "normal", level: 0}) :: state.blocks }
+        blocks: mkText(text, "normal", 0) :: state.blocks }
   }
 }
 

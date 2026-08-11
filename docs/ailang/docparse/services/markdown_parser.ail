@@ -3,7 +3,7 @@ module docparse/services/markdown_parser
 import std/string (split, trim, length, startsWith, substring, find, contains, charAt)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, simpleCell, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, simpleCell, mkTable)
 
 -- Markdown Parser — converts Markdown text to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -70,32 +70,32 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- Heading: # through ######
   else if startsWith(trimmedLine, "######") then
     let s = flushToState(state) in
-    { blocks: HeadingBlock({text: trim(substring(trimmedLine, 6, length(trimmedLine))), level: 6}) :: s.blocks,
+    { blocks: mkHeading(trim(substring(trimmedLine, 6, length(trimmedLine))), 6) :: s.blocks,
       listItems: [], listOrdered: false, tableRows: [], textLines: [] }
 
   else if startsWith(trimmedLine, "#####") then
     let s = flushToState(state) in
-    { blocks: HeadingBlock({text: trim(substring(trimmedLine, 5, length(trimmedLine))), level: 5}) :: s.blocks,
+    { blocks: mkHeading(trim(substring(trimmedLine, 5, length(trimmedLine))), 5) :: s.blocks,
       listItems: [], listOrdered: false, tableRows: [], textLines: [] }
 
   else if startsWith(trimmedLine, "####") then
     let s = flushToState(state) in
-    { blocks: HeadingBlock({text: trim(substring(trimmedLine, 4, length(trimmedLine))), level: 4}) :: s.blocks,
+    { blocks: mkHeading(trim(substring(trimmedLine, 4, length(trimmedLine))), 4) :: s.blocks,
       listItems: [], listOrdered: false, tableRows: [], textLines: [] }
 
   else if startsWith(trimmedLine, "###") then
     let s = flushToState(state) in
-    { blocks: HeadingBlock({text: trim(substring(trimmedLine, 3, length(trimmedLine))), level: 3}) :: s.blocks,
+    { blocks: mkHeading(trim(substring(trimmedLine, 3, length(trimmedLine))), 3) :: s.blocks,
       listItems: [], listOrdered: false, tableRows: [], textLines: [] }
 
   else if startsWith(trimmedLine, "##") then
     let s = flushToState(state) in
-    { blocks: HeadingBlock({text: trim(substring(trimmedLine, 2, length(trimmedLine))), level: 2}) :: s.blocks,
+    { blocks: mkHeading(trim(substring(trimmedLine, 2, length(trimmedLine))), 2) :: s.blocks,
       listItems: [], listOrdered: false, tableRows: [], textLines: [] }
 
   else if startsWith(trimmedLine, "#") then
     let s = flushToState(state) in
-    { blocks: HeadingBlock({text: trim(substring(trimmedLine, 1, length(trimmedLine))), level: 1}) :: s.blocks,
+    { blocks: mkHeading(trim(substring(trimmedLine, 1, length(trimmedLine))), 1) :: s.blocks,
       listItems: [], listOrdered: false, tableRows: [], textLines: [] }
 
   -- Unordered list item: - or *
@@ -148,7 +148,7 @@ pure func flushText(state: MdParseState) -> MdParseState
   if listLength(state.textLines) == 0 then state
   else {
     let text = mdJoinLines(state.textLines);
-    { blocks: TextBlock({text: text, style: "normal", level: 0}) :: state.blocks,
+    { blocks: mkText(text, "normal", 0) :: state.blocks,
       listItems: [], listOrdered: state.listOrdered,
       tableRows: state.tableRows, textLines: [] }
   }
@@ -161,7 +161,7 @@ pure func flushList(state: MdParseState) -> MdParseState
 {
   if listLength(state.listItems) == 0 then state
   else {
-    { blocks: ListBlock({items: state.listItems, ordered: state.listOrdered}) :: state.blocks,
+    { blocks: mkList(state.listItems, state.listOrdered) :: state.blocks,
       listItems: [], listOrdered: false,
       tableRows: state.tableRows, textLines: state.textLines }
   }

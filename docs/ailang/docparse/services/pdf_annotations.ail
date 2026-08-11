@@ -11,13 +11,13 @@ module docparse/services/pdf_annotations
 -- compressed /ObjStm streams need raw zlib inflate (ailang#223); for those we
 -- bail out cleanly instead of returning partial data.
 
-import std/string (length, substring, find, contains, startsWith, intToStr, charAt, charCode, trim, replace, split)
+import std/string (length, substring, find, contains, startsWith, intToStr, charAt, charCode, trim, replace, split, stringToFloat)
 import std/list (map, filter, foldl, reverse, length as listLength, concat as listConcat)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/bytes (fromInts, toString as bytesToString)
 import std/fs (readFile)
-import docparse/types/document (Block, TextBlock, SectionBlock)
+import docparse/types/document (Block, TextBlock, SectionBlock, CommentBlock)
 
 -- ============================================================
 -- Public API
@@ -29,17 +29,51 @@ export type Annotation = {
   author: string,     -- /T value ("" if absent)
   modified: string,   -- /M value, raw PDF date string
   page: int,          -- 1-based page number, 0 if unmappable
-  objNum: int         -- annotation object number (for page mapping)
+  objNum: int,        -- annotation object number (for page mapping)
+  quads: [float]      -- /QuadPoints, flat [x1 y1 x2 y2 x3 y3 x4 y4] per quad,
+                      -- in PDF user space. Empty for annotation types that
+                      -- mark a point rather than a text region.
 }
 
--- Read a PDF and extract all recognised annotations.
--- Empty list on read error or on PDFs that compress objects into /ObjStm.
-export func extractAnnotations(filepath: string) -> [Annotation] ! {FS} {
-  let content = readFile(filepath);
-  if length(content) == 0 then []
-  else if pdfannHasCompressedObjects(content) then []
-  else pdfannScanAndMap(content)
+-- A word with its position on the page, in PDF user space (origin bottom-left)
+export type PdfWord = {
+  page: int,
+  x0: float,
+  y0: float,
+  x1: float,
+  y1: float,
+  text: string
 }
+
+-- Result of scanning a PDF for annotations.
+-- `mayBeIncomplete` is true when the file also packs objects into compressed
+-- /ObjStm streams, which this scanner cannot see inside.
+export type AnnotationScan = {
+  annotations: [Annotation],
+  mayBeIncomplete: bool
+}
+
+-- Read a PDF and extract all recognised annotations, reporting whether the
+-- result might be partial.
+--
+-- Object streams are common (any Word or LaTeX export uses them), but the
+-- annotations themselves usually are NOT inside one: Preview and Acrobat append
+-- highlights as plain objects in an incremental save. Refusing to scan a file
+-- merely because it contains an /ObjStm somewhere therefore throws away
+-- annotations that are sitting in plain sight. We scan regardless and flag the
+-- possibility of more we cannot reach, which beats silently returning none.
+export func scanAnnotations(filepath: string) -> AnnotationScan ! {FS} {
+  let content = readFile(filepath);
+  if length(content) == 0 then {annotations: [], mayBeIncomplete: false}
+  else {
+    annotations: pdfannScanAndMap(content),
+    mayBeIncomplete: pdfannHasCompressedObjects(content)
+  }
+}
+
+-- Annotations only, for callers that don't surface the completeness warning.
+export func extractAnnotations(filepath: string) -> [Annotation] ! {FS} =
+  scanAnnotations(filepath).annotations
 
 -- Convert annotations to Comment-style SectionBlocks for merging into a
 -- parsed Document. Pure; effect-free.
@@ -148,7 +182,7 @@ pure func pdfannIsAnnot(block: string) -> bool =
 pure func pdfannParseAnnotation(block: string) -> Annotation {
   let subtype = pdfannExtractSubtype(block);
   if not pdfannIsRecognisedSubtype(subtype) then {
-    {subtype: "", contents: "", author: "", modified: "", page: 0, objNum: 0}
+    {subtype: "", contents: "", author: "", modified: "", page: 0, objNum: 0, quads: []}
   }
   else {
     let objNum = pdfannExtractObjNum(block);
@@ -162,7 +196,8 @@ pure func pdfannParseAnnotation(block: string) -> Annotation {
       author: author,
       modified: modified,
       page: 0,
-      objNum: objNum
+      objNum: objNum,
+      quads: pdfannExtractQuadPoints(block)
     }
   }
 }
@@ -572,8 +607,12 @@ pure func pdfannCollectPages(segments: [string], fullContent: string, pageIdx: i
     }
   }
 
+-- Careful: "/Type /Page" is a PREFIX of "/Type /Pages", the page-tree node
+-- every PDF has. A plain `contains` counts that node as a page and shifts every
+-- real page number by one — so require a name terminator after "Page".
 pure func pdfannIsPage(block: string) -> bool =
-  contains(block, "/Type /Page") || contains(block, "/Type/Page")
+  pdfannFindCompleteKey(block, "/Type /Page", 0) >= 0 ||
+  pdfannFindCompleteKey(block, "/Type/Page", 0) >= 0
 
 -- Extract annotation object numbers from a page's /Annots field. Two shapes:
 --   /Annots [ N1 0 R N2 0 R ... ]     -- inline array
@@ -701,18 +740,173 @@ pure func pdfannApplyPageMapHelper(
   }
 
 -- ============================================================
+-- QuadPoints → highlighted text
+-- ============================================================
+--
+-- A text-markup annotation stores WHERE it sits, never WHAT it covers: a
+-- /Highlight is a set of quadrilaterals in PDF user space, and the words
+-- underneath belong to the page's content stream. Recovering "which clause did
+-- the reviewer highlight" therefore means intersecting the quads with word
+-- positions, which `pdftotext -bbox` supplies (adapter.py, backend "words").
+--
+-- Both sides are in PDF user space with a bottom-left origin — the adapter
+-- flips pdftotext's top-left coordinates once, at the boundary, so nothing
+-- downstream has to remember which convention it is holding.
+
+-- Parse "/QuadPoints [x1 y1 x2 y2 …]" into a flat float list.
+-- Returns [] when absent or malformed; a malformed quad must degrade to an
+-- unanchored annotation, never to a half-parsed region.
+pure func pdfannExtractQuadPoints(block: string) -> [float] {
+  let i = pdfannFindCompleteKey(block, "/QuadPoints", 0);
+  if i < 0 then []
+  else {
+    let after = substring(block, i + 11, length(block));
+    let open = find(after, "[");
+    if open < 0 then []
+    else {
+      let fromOpen = substring(after, open + 1, length(after));
+      let close = find(fromOpen, "]");
+      if close < 0 then []
+      else pdfannParseFloats(substring(fromOpen, 0, close))
+    }
+  }
+}
+
+pure func pdfannParseFloats(s: string) -> [float] =
+  pdfannCollectFloats(split(trim(s), " "), [])
+
+pure func pdfannCollectFloats(parts: [string], acc: [float]) -> [float] =
+  match parts {
+    [] => reverse(acc),
+    p :: rest => {
+      let t = trim(p);
+      if length(t) == 0 then pdfannCollectFloats(rest, acc)
+      else match stringToFloat(t) {
+        Some(f) => pdfannCollectFloats(rest, f :: acc),
+        None => pdfannCollectFloats(rest, acc)
+      }
+    }
+  }
+
+-- The bounding box of every quad in an annotation, as {x0,y0,x1,y1}.
+-- Quads come in groups of 8 (four corners); a trailing partial group is
+-- ignored rather than guessed at.
+pure func pdfannQuadBounds(quads: [float]) -> Option[{x0: float, y0: float, x1: float, y1: float}] {
+  let xs = pdfannEveryOther(quads, 0);
+  let ys = pdfannEveryOther(quads, 1);
+  match xs {
+    [] => None,
+    _ => match ys {
+      [] => None,
+      _ => Some({x0: pdfannMinOf(xs), y0: pdfannMinOf(ys),
+                 x1: pdfannMaxOf(xs), y1: pdfannMaxOf(ys)})
+    }
+  }
+}
+
+-- Take every second element starting at `offset` (x values at 0, y at 1)
+pure func pdfannEveryOther(xs: [float], offset: int) -> [float] =
+  pdfannEveryOtherHelper(xs, offset, 0, [])
+
+pure func pdfannEveryOtherHelper(xs: [float], offset: int, idx: int, acc: [float]) -> [float] =
+  match xs {
+    [] => reverse(acc),
+    x :: rest =>
+      if idx % 2 == offset
+      then pdfannEveryOtherHelper(rest, offset, idx + 1, x :: acc)
+      else pdfannEveryOtherHelper(rest, offset, idx + 1, acc)
+  }
+
+pure func pdfannMinOf(xs: [float]) -> float =
+  match xs {
+    [] => 0.0,
+    x :: rest => foldl(\a b. if b < a then b else a, x, rest)
+  }
+
+pure func pdfannMaxOf(xs: [float]) -> float =
+  match xs {
+    [] => 0.0,
+    x :: rest => foldl(\a b. if b > a then b else a, x, rest)
+  }
+
+-- Does a word sit inside the highlighted region?
+--
+-- Tested by centre point rather than by overlap: a highlight drawn slightly
+-- wide catches the neighbouring word's edge, and any-overlap would then pull in
+-- a word the reviewer never marked. Requiring the centre inside the region
+-- keeps a one-word-too-many error from being the default failure.
+pure func pdfannWordInBounds(w: PdfWord, b: {x0: float, y0: float, x1: float, y1: float}) -> bool {
+  let cx = (w.x0 + w.x1) / 2.0;
+  let cy = (w.y0 + w.y1) / 2.0;
+  cx >= b.x0 && cx <= b.x1 && cy >= b.y0 && cy <= b.y1
+}
+
+-- The text a single annotation covers, "" when it covers nothing resolvable.
+export pure func pdfannAnchorText(a: Annotation, words: [PdfWord]) -> string =
+  match pdfannQuadBounds(a.quads) {
+    None => "",
+    Some(b) => {
+      let onPage = filter(\w. a.page == 0 || w.page == a.page, words);
+      let hits = filter(\w. pdfannWordInBounds(w, b), onPage);
+      trim(pdfannJoinWords(hits))
+    }
+  }
+
+pure func pdfannJoinWords(ws: [PdfWord]) -> string =
+  pdfannJoinWordsHelper(ws, "")
+
+pure func pdfannJoinWordsHelper(ws: [PdfWord], acc: string) -> string =
+  match ws {
+    [] => acc,
+    w :: rest =>
+      if length(acc) == 0
+      then pdfannJoinWordsHelper(rest, w.text)
+      else pdfannJoinWordsHelper(rest, "${acc} ${w.text}")
+  }
+
+-- Annotations as blocks, anchored to the words their quads cover.
+-- Falls back to the unanchored shape for anything that cannot be resolved:
+-- a point annotation with no quads, a highlight over an image, a page whose
+-- words were not extracted.
+export pure func annotationsAsBlocksAnchored(anns: [Annotation], words: [PdfWord]) -> [Block] =
+  map(\a. pdfannToBlockAnchored(a, pdfannAnchorText(a, words)), anns)
+
+-- ============================================================
 -- Block conversion
 -- ============================================================
 
--- Render an annotation as a SectionBlock(kind: "annotation") matching the
--- existing DOCX comment shape — author and page surfaced in the text prefix.
-pure func pdfannToBlock(a: Annotation) -> Block {
-  let pageStr = if a.page > 0 then ", page ${intToStr(a.page)}" else "";
-  let prefix = "[${a.author}${pageStr}, ${a.subtype}]";
-  let body = if length(a.contents) == 0 then prefix
-             else "${prefix} ${a.contents}";
+-- Render an annotation as a CommentBlock, the same shape DOCX/XLSX/PPTX
+-- comments use, so a consumer reads review commentary uniformly across formats.
+--
+-- Unanchored variant: used when no word positions are available (no `words`
+-- backend, an image-only page) so the page number is all we can honestly give.
+pure func pdfannToBlock(a: Annotation) -> Block =
+  pdfannToBlockAnchored(a, "")
+
+-- Anchored variant. `highlighted` is the text the annotation's quads cover, ""
+-- when nothing resolvable sits under them. An empty result stays
+-- `anchored: false` with the page as a locator rather than being dressed up as
+-- a span — the same rule the DOCX side follows.
+pure func pdfannToBlockAnchored(a: Annotation, highlighted: string) -> Block {
+  let pageStr = if a.page > 0 then "page ${intToStr(a.page)}" else "";
+  let body = if length(a.contents) == 0 then "[${a.subtype}]" else a.contents;
+  let hasAnchor = length(highlighted) > 0;
+  let anchorText = if hasAnchor
+    then (if length(pageStr) > 0 then "${pageStr}: ${highlighted}" else highlighted)
+    else pageStr;
   SectionBlock({
     kind: "annotation",
-    blocks: [TextBlock({text: body, style: "Annotation", level: 0})]
+    blocks: [CommentBlock({
+      id: "",
+      author: a.author,
+      date: a.modified,
+      text: body,
+      anchorText: anchorText,
+      anchorKind: if hasAnchor then "range" else "none",
+      anchored: hasAnchor,
+      anchorBlockIndex: 0 - 1,
+      parentId: "",
+      resolved: false
+    })]
   })
 }

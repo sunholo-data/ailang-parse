@@ -5,9 +5,9 @@ import std/xml (findAll, findFirst, getText, getAttr, getChildren, getTag, getAt
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
-import std/list (map, flatMap, filter, concat, length as listLength)
+import std/list (map, flatMap, filter, concat, any, length as listLength)
 import std/map (lookup)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
+import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -40,7 +40,7 @@ export pure func parseHtml(content: string) -> [Block]
 {
   match parse(content) {
     Ok(root) => htmlExtractBlocks(root),
-    Err(e) => [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})]
+    Err(e) => [mkText("HTML parse error: ${e}", "error", 0)]
   }
 }
 
@@ -52,7 +52,7 @@ export pure func parseHtmlDoc(content: string) -> {blocks: [Block], metadata: Do
   match parse(content) {
     Ok(root) => {blocks: htmlExtractBlocks(root), metadata: htmlExtractMetadata(root)},
     Err(e) => {
-      blocks: [TextBlock({text: "HTML parse error: ${e}", style: "error", level: 0})],
+      blocks: [mkText("HTML parse error: ${e}", "error", 0)],
       metadata: emptyMetadata()
     }
   }
@@ -183,7 +183,7 @@ pure func htmlProcessNode(node: XmlNode) -> [Block] {
   match nodeKind(node) {
     KindText =>
       let text = trim(getText(node)) in
-      if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+      if length(text) > 0 then [mkText(text, "normal", 0)]
       else [],
     KindComment => [],
     KindElement => htmlProcessElement(node)
@@ -195,17 +195,17 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   let tag = getTag(node);
 
   -- Headings (rare per node but block-level elements).
-  if tag == "h1" then [HeadingBlock({text: htmlDeepText(node), level: 1})]
-  else if tag == "h2" then [HeadingBlock({text: htmlDeepText(node), level: 2})]
-  else if tag == "h3" then [HeadingBlock({text: htmlDeepText(node), level: 3})]
-  else if tag == "h4" then [HeadingBlock({text: htmlDeepText(node), level: 4})]
-  else if tag == "h5" then [HeadingBlock({text: htmlDeepText(node), level: 5})]
-  else if tag == "h6" then [HeadingBlock({text: htmlDeepText(node), level: 6})]
+  if tag == "h1" then [mkHeadingRuns(htmlDeepText(node), 1, htmlRunsFor(node))]
+  else if tag == "h2" then [mkHeadingRuns(htmlDeepText(node), 2, htmlRunsFor(node))]
+  else if tag == "h3" then [mkHeadingRuns(htmlDeepText(node), 3, htmlRunsFor(node))]
+  else if tag == "h4" then [mkHeadingRuns(htmlDeepText(node), 4, htmlRunsFor(node))]
+  else if tag == "h5" then [mkHeadingRuns(htmlDeepText(node), 5, htmlRunsFor(node))]
+  else if tag == "h6" then [mkHeadingRuns(htmlDeepText(node), 6, htmlRunsFor(node))]
 
   -- Paragraphs
   else if tag == "p" then
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+    if length(text) > 0 then [mkTextRuns(text, "normal", 0, htmlRunsFor(node))]
     else []
 
   -- Tables
@@ -253,7 +253,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     else
       -- No href: not really a link. Just produce inner content or text.
       if listLength(inner) > 0 then inner
-      else if length(linkText) > 0 then [TextBlock({text: linkText, style: "normal", level: 0})]
+      else if length(linkText) > 0 then [mkText(linkText, "normal", 0)]
       else []
 
   -- Semantic sections — recurse into children wrapped in SectionBlock
@@ -286,7 +286,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- TextBlock with the "caption" style so consumers can recognise it.
   else if tag == "figcaption" then
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "caption", level: 0})]
+    if length(text) > 0 then [mkText(text, "caption", 0)]
     else []
 
   -- <address>: contact info / authorship block. Treated as its own
@@ -296,7 +296,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     if listLength(blocks) > 0 then [SectionBlock({kind: "address", blocks: blocks})]
     else {
       let text = trim(htmlDeepText(node)) in
-      if length(text) > 0 then [TextBlock({text: text, style: "address", level: 0})]
+      if length(text) > 0 then [mkText(text, "address", 0)]
       else []
     }
 
@@ -312,7 +312,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- heading so it stands out from the details body.
   else if tag == "summary" then
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [HeadingBlock({text: text, level: 3})]
+    if length(text) > 0 then [mkHeading(text, 3)]
     else []
 
   -- <picture> for responsive images: HTML5 picks one <source srcset>
@@ -330,7 +330,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   else if tag == "pre" then
     let text = htmlDeepText(node) in
     if length(text) > 0
-    then [TextBlock({text: text, style: htmlPreCodeStyle(node), level: 0})]
+    then [mkText(text, htmlPreCodeStyle(node), 0)]
     else []
 
   -- Definition lists
@@ -342,7 +342,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
           tag == "template" then []
 
   -- Horizontal rule → section break marker
-  else if tag == "hr" then [TextBlock({text: "---", style: "separator", level: 0})]
+  else if tag == "hr" then [mkText("---", "separator", 0)]
 
   -- Line break — skip (inline element)
   else if tag == "br" then []
@@ -350,7 +350,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- Fallback: try to extract text from inline elements
   else
     let text = trim(htmlDeepText(node)) in
-    if length(text) > 0 then [TextBlock({text: text, style: "normal", level: 0})]
+    if length(text) > 0 then [mkText(text, "normal", 0)]
     else []
 }
 
@@ -452,6 +452,88 @@ pure func htmlChildTextWithSpacing(node: XmlNode) -> string {
   else if htmlIsBlockTag(tag) then "\n${text}"
   else htmlInlineWrap(node, tag, text)
 }
+
+-- === Inline runs (P2 phase 3, HTML) =====================================
+--
+-- Runs are built ALONGSIDE the Markdown markers above, not instead of them.
+-- htmlInlineWrap's markers stay in TextBlock.text exactly as before — 11 golden
+-- files and the documented CommonMark/Pandoc/LLM compatibility promise depend
+-- on them — while runs carry the same formatting structurally, with clean text.
+--
+-- So for HTML, text and runs deliberately differ: text says "**bold**", the run
+-- says "bold" with bold: true. That divergence is the design (see InlineRun in
+-- types/document.ail), and it is what lets a generator emit real bold instead of
+-- four literal asterisks.
+type HtmlFmt = {
+  bold: bool, italic: bool, underline: bool,
+  strike: bool, code: bool, vertAlign: string
+}
+
+pure func htmlNoFmt() -> HtmlFmt =
+  {bold: false, italic: false, underline: false, strike: false, code: false, vertAlign: ""}
+
+-- Runs for a block-level node, or [] when nothing inside it is formatted —
+-- an unformatted paragraph gains nothing from a single plain run, and omitting
+-- it keeps output byte-identical for documents with no inline markup.
+pure func htmlRunsFor(node: XmlNode) -> [InlineRun] {
+  let runs = htmlCollectRuns(node, htmlNoFmt());
+  if htmlAnyFormatted(runs) then runs else []
+}
+
+pure func htmlAnyFormatted(runs: [InlineRun]) -> bool =
+  match runs {
+    [] => false,
+    r :: rest =>
+      if r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+      then true
+      else htmlAnyFormatted(rest)
+  }
+
+-- Formatting is inherited down the tree, so <strong><em>x</em></strong> yields a
+-- single run that is both bold and italic rather than two nested ones.
+pure func htmlCollectRuns(node: XmlNode, fmt: HtmlFmt) -> [InlineRun] {
+  let children = getChildren(node);
+  if listLength(children) == 0
+  then htmlLeafRun(getText(node), fmt)
+  else flatMap(\c. htmlChildRuns(c, fmt), children)
+}
+
+pure func htmlChildRuns(child: XmlNode, fmt: HtmlFmt) -> [InlineRun] =
+  match nodeKind(child) {
+    KindText => htmlLeafRun(getText(child), fmt),
+    KindComment => [],
+    KindElement => {
+      let tag = getTag(child);
+      -- <br> is a line break in the text stream; mirror it in the run stream so
+      -- runs and text stay describing the same content.
+      if tag == "br" then htmlLeafRun("\n", fmt)
+      else htmlCollectRuns(child, htmlApplyTag(fmt, tag))
+    }
+  }
+
+pure func htmlLeafRun(text: string, fmt: HtmlFmt) -> [InlineRun] =
+  if length(text) == 0 then []
+  else [{text: text, bold: fmt.bold, italic: fmt.italic, underline: fmt.underline,
+         strike: fmt.strike, code: fmt.code, vertAlign: fmt.vertAlign}]
+
+-- Tag -> formatting. Mirrors htmlInlineWrap's vocabulary so the two
+-- representations agree on what counts as emphasis.
+pure func htmlApplyTag(f: HtmlFmt, tag: string) -> HtmlFmt =
+  if tag == "strong" || tag == "b"
+  then {bold: true, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "em" || tag == "i"
+  then {bold: f.bold, italic: true, underline: f.underline, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "u" || tag == "ins"
+  then {bold: f.bold, italic: f.italic, underline: true, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "del" || tag == "s" || tag == "strike"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: true, code: f.code, vertAlign: f.vertAlign}
+  else if tag == "code" || tag == "kbd" || tag == "samp" || tag == "tt"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: true, vertAlign: f.vertAlign}
+  else if tag == "sup"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: "superscript"}
+  else if tag == "sub"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: "subscript"}
+  else f
 
 -- Wrap a non-empty inline child with the appropriate markdown marker.
 -- Falls through to the plain text when the tag has no special inline
@@ -674,10 +756,19 @@ pure func htmlParseIntDefault(s: string) -> int
 -- Contract: produces exactly one ListBlock if items exist
 pure func htmlParseList(list: XmlNode, ordered: bool) -> [Block] {
   let items = findAll(list, "li");
-  let texts = map(htmlDeepText, items);
-  let nonEmpty = filter(\t. length(trim(t)) > 0, texts);
+  -- Text and runs are carried together through the empty-item filter. Building
+  -- them as separate lists and filtering only the texts would silently shift
+  -- itemRuns out of alignment with items the moment any <li> is blank.
+  let pairs = map(\li. {text: trim(htmlDeepText(li)), runs: htmlRunsFor(li)}, items);
+  let nonEmpty = filter(\pr. length(pr.text) > 0, pairs);
   if listLength(nonEmpty) > 0
-  then [ListBlock({items: map(trim, nonEmpty), ordered: ordered})]
+  then {
+    let texts = map(\pr. pr.text, nonEmpty);
+    let itemRuns = map(\pr. pr.runs, nonEmpty);
+    if any(\r. listLength(r) > 0, itemRuns)
+    then [mkListRuns(texts, ordered, itemRuns)]
+    else [mkList(texts, ordered)]
+  }
   else []
 }
 
@@ -693,8 +784,8 @@ pure func htmlParseDlChild(node: XmlNode) -> [Block] {
   let tag = getTag(node);
   let text = trim(htmlDeepText(node));
   if tag == "dt" && length(text) > 0
-    then [TextBlock({text: text, style: "dt", level: 0})]
+    then [mkText(text, "dt", 0)]
   else if tag == "dd" && length(text) > 0
-    then [TextBlock({text: text, style: "dd", level: 0})]
+    then [mkText(text, "dd", 0)]
   else []
 }

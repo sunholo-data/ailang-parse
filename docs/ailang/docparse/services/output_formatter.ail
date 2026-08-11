@@ -5,7 +5,7 @@ import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
 import std/string (length)
 import std/math (intToFloat)
 import std/list (map, foldl, filter, length as listLength, forEachE, concat)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
 
 -- Output Formatter
 -- Converts ParsedDocument to structured JSON output with validation.
@@ -79,23 +79,10 @@ export pure func blocksToJson(blocks: [Block]) -> [Json]
 -- Convert a single Block to JSON
 export pure func blockToJson(block: Block) -> Json =
   match block {
-    TextBlock(b) => jo([
-      kv("type", js("text")),
-      kv("text", js(b.text)),
-      kv("style", js(b.style)),
-      kv("level", jnum(intToFloat(b.level)))
-    ]),
-    HeadingBlock(b) => jo([
-      kv("type", js("heading")),
-      kv("text", js(b.text)),
-      kv("level", jnum(intToFloat(b.level)))
-    ]),
+    TextBlock(b) => jo(textJsonFields(b)),
+    HeadingBlock(b) => jo(headingJsonFields(b)),
     TableBlock(b) => jo(tableJsonFields(b)),
-    ListBlock(b) => jo([
-      kv("type", js("list")),
-      kv("items", ja(stringsToJson(b.items))),
-      kv("ordered", jb(b.ordered))
-    ]),
+    ListBlock(b) => jo(listJsonFields(b)),
     ImageBlock(b) => jo(imageJsonFields(b)),
     AudioBlock(b) => jo(mediaJsonFields("audio", b.data, b.transcription, "transcription", b.mime)),
     VideoBlock(b) => jo(mediaJsonFields("video", b.data, b.description, "description", b.mime)),
@@ -136,6 +123,66 @@ export pure func blockToJson(block: Block) -> Json =
 -- string (populated by HTML parser from <caption> elements; empty
 -- for tables emitted by other parsers). Omitted from output when
 -- empty so non-HTML parsers' JSON stays byte-identical.
+-- TextBlock JSON. `runs` is omitted entirely when empty, which is the case for
+-- every parser that cannot resolve character formatting — i.e. most of them
+-- today. That keeps the output for unformatted documents byte-identical to the
+-- pre-InlineRun shape, so the 93 golden files, the SDKs and the hosted API
+-- contract are all unaffected by the field existing.
+pure func textJsonFields(b: {text: string, style: string, level: int, runs: [InlineRun]}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("text")),
+    kv("text", js(b.text)),
+    kv("style", js(b.style)),
+    kv("level", jnum(intToFloat(b.level)))
+  ];
+  if listLength(b.runs) > 0
+  then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
+  else base
+}
+
+-- Same omit-when-empty rule as TextBlock, so headings without character
+-- formatting serialise exactly as they did before InlineRun existed.
+pure func headingJsonFields(b: {text: string, level: int, runs: [InlineRun]}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("heading")),
+    kv("text", js(b.text)),
+    kv("level", jnum(intToFloat(b.level)))
+  ];
+  if listLength(b.runs) > 0
+  then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
+  else base
+}
+
+-- itemRuns is a parallel array to items (see mkListRuns). Emitted only when
+-- some item is actually formatted, so an ordinary list is unchanged.
+pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]]}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("list")),
+    kv("items", ja(stringsToJson(b.items))),
+    kv("ordered", jb(b.ordered))
+  ];
+  if listLength(b.itemRuns) > 0
+  then concat(base, [kv("itemRuns", ja(map(\rs. ja(runsToJson(rs)), b.itemRuns)))])
+  else base
+}
+
+-- Flags are emitted only when true, for the same reason: a run that is merely
+-- plain text should not cost six false booleans in every paragraph.
+pure func runsToJson(runs: [InlineRun]) -> [Json] =
+  map(\r. jo(runJsonFields(r)), runs)
+
+pure func runJsonFields(r: InlineRun) -> [{key: string, value: Json}] {
+  let base = [kv("text", js(r.text))];
+  let withBold = if r.bold then concat(base, [kv("bold", jb(true))]) else base;
+  let withItalic = if r.italic then concat(withBold, [kv("italic", jb(true))]) else withBold;
+  let withUnder = if r.underline then concat(withItalic, [kv("underline", jb(true))]) else withItalic;
+  let withStrike = if r.strike then concat(withUnder, [kv("strike", jb(true))]) else withUnder;
+  let withCode = if r.code then concat(withStrike, [kv("code", jb(true))]) else withStrike;
+  if length(r.vertAlign) > 0
+  then concat(withCode, [kv("vertAlign", js(r.vertAlign))])
+  else withCode
+}
+
 pure func tableJsonFields(b: {rows: [[TableCell]], headers: [TableCell], caption: string}) -> [{key: string, value: Json}] {
   let base = [
     kv("type", js("table")),

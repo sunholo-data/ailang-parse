@@ -3,7 +3,7 @@ module docparse/services/tex_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, replace, toLower, replaceMany)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable)
 
 -- LaTeX Parser — converts arXiv-style LaTeX source to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -253,7 +253,7 @@ pure func texEmitHeading(state: TexState, line: string, prefix: string, level: i
   let flushed = texFlushText(state);
   let inner = texExtractBalancedBrace(line, length(prefix) - 1);
   {
-    blocks: HeadingBlock({text: texCleanInline(inner), level: level}) :: flushed.blocks,
+    blocks: mkHeading(texCleanInline(inner), level) :: flushed.blocks,
     mode: "none",
     envName: "",
     buf: [],
@@ -292,7 +292,7 @@ pure func texHandleBeginEnv(state: TexState, t: string) -> TexState {
     let opt = texExtractOptionalAfterBegin(t, envName) in
     let heading = if length(opt) == 0 then label else "${label} (${opt})" in
     {
-      blocks: HeadingBlock({text: heading, level: 4}) :: flushed.blocks,
+      blocks: mkHeading(heading, 4) :: flushed.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -376,7 +376,7 @@ pure func texEnterEquation(state: TexState, opener: string, t: string) -> TexSta
     let eqEnd = find(afterOpener, closer) in
     let eqText = substring(afterOpener, 0, eqEnd) in
     {
-      blocks: TextBlock({text: "${opener}${eqText}${closer}", style: "equation-display", level: 0}) :: flushed.blocks,
+      blocks: mkText("${opener}${eqText}${closer}", "equation-display", 0) :: flushed.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -411,7 +411,7 @@ pure func texHandleEquationLine(state: TexState, line: string, t: string) -> Tex
     -- buf is stored reversed (prepend O(1)) — reverse before joining.
     let raw = texJoinLines(reverse([line] ++ state.buf)) in
     {
-      blocks: TextBlock({text: raw, style: "equation-display", level: 0}) :: state.blocks,
+      blocks: mkText(raw, "equation-display", 0) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -441,7 +441,7 @@ pure func texHandleVerbatimLine(state: TexState, line: string, t: string) -> Tex
   if startsWith(t, "\\end{${state.envName}}") then
     let raw = texJoinLines(reverse(state.buf)) in
     {
-      blocks: TextBlock({text: raw, style: "verbatim", level: 0}) :: state.blocks,
+      blocks: mkText(raw, "verbatim", 0) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -471,7 +471,7 @@ pure func texHandleListLine(state: TexState, line: string, t: string) -> TexStat
   if startsWith(t, "\\end{${state.envName}}") then
     let ordered = state.envName == "enumerate" in
     {
-      blocks: ListBlock({items: map(texCleanInline, reverse(state.listItems)), ordered: ordered}) :: state.blocks,
+      blocks: mkList(map(texCleanInline, reverse(state.listItems)), ordered) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -652,7 +652,7 @@ pure func texHandleAbstractLine(state: TexState, line: string, t: string) -> Tex
   if startsWith(t, "\\end{abstract}") then {
     let text = texCleanInline(texJoinLines(reverse(state.buf))) in
     {
-      blocks: SectionBlock({kind: "abstract", blocks: [TextBlock({text: text, style: "abstract", level: 0})]}) :: state.blocks,
+      blocks: SectionBlock({kind: "abstract", blocks: [mkText(text, "abstract", 0)]}) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -681,7 +681,7 @@ pure func texHandleAbstractLine(state: TexState, line: string, t: string) -> Tex
 -- ---------------------------------------------------------------------------
 pure func texHandleBiblioLine(state: TexState, line: string, t: string) -> TexState {
   if startsWith(t, "\\end{thebibliography}") then
-    let entries = map(\s. TextBlock({text: texCleanInline(s), style: "bibitem", level: 0}), reverse(state.listItems)) in
+    let entries = map(\s. mkText(texCleanInline(s), "bibitem", 0), reverse(state.listItems)) in
     {
       blocks: SectionBlock({kind: "bibliography", blocks: entries}) :: state.blocks,
       mode: "none",
@@ -780,7 +780,7 @@ pure func texFlushText(state: TexState) -> TexState
       figPath: state.figPath,
       figCaption: state.figCaption
     } else {
-      blocks: TextBlock({text: text, style: "paragraph", level: 0}) :: state.blocks,
+      blocks: mkText(text, "paragraph", 0) :: state.blocks,
       mode: state.mode,
       envName: state.envName,
       buf: state.buf,
