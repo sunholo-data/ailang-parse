@@ -110,6 +110,7 @@ MODULES=(
   "services/rtf_parser.ail"
   "services/eml_parser.ail"
   "services/tex_parser.ail"
+  "services/xml_helpers.ail"
   "services/odf_text.ail"
   "services/odt_parser.ail"
   "services/odp_parser.ail"
