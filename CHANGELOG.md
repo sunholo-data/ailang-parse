@@ -9,7 +9,55 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.30.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.31.0...HEAD)
+
+## [v0.31.0](https://github.com/sunholo-data/ailang-parse/compare/v0.30.0...v0.31.0) — 2026-08-11
+
+### Six conversion paths were hanging
+
+`odpHasSlideBlocks` and `pptxHasSlideBlocks` recursed on the list they were
+already matching instead of its tail, so any source containing a non-slide
+`SectionBlock` looped until the 50000-recursion limit. Presentations hid it —
+their first section *is* a slide, so the function returns before reaching the
+faulty branch — and Markdown hid it too, because it produces no sections at all.
+That left the documented `notes.md --convert slides.pptx` path green while these
+were dead:
+
+```
+inline_formatting.docx -> pptx, odp
+unstructured_test.xlsx -> pptx, odp
+test.html              -> pptx, odp
+```
+
+`verify_generated.py` gained an L5 conversion-matrix check (4 sources × 9
+targets) covering the shape that triggers this, since nothing exercised
+cross-format conversion before.
+
+### Runs are coalesced
+
+Parsers split runs wherever the source does, which is finer than the formatting
+requires: Word starts a new run at property changes and at many non-changes, ODF
+splits at every `<text:s/>`. `coalesceRuns` (newly exported from
+`docparse/types/document`) merges neighbours whose formatting matches, applied
+inside `mkTextRuns` / `mkHeadingRuns` / `mkListRuns` so no parser can forget it.
+
+Formatting is the merge key, so nothing renders differently — verified by
+expanding runs to per-character `(char, flags)` pairs across DOCX, HTML, PPTX
+and ODT and finding them byte-identical before and after. **JSON output does
+change**: run boundaries move and ~89 redundant entries disappear across the
+corpus. DOCX → ODT → re-parse now reproduces run segmentation exactly, closing
+the limitation recorded in v0.30.0.
+
+### Benchmark honesty (not shipped, but worth recording)
+
+Three OfficeDocBench ground truths encoded the behaviour of a broken or older
+parser, so correct output scored worse: `challenge_speaker_notes.pptx` declared
+`speaker_notes: present=false` for the file named after them,
+`challenge_hyperlinks.docx` listed 4 links where the document declares 7 (three
+of its URLs appear nowhere in the file), and `comments.docx` expected the
+`[Author] text` prefix that the pre-structured-comment parser used to emit. All
+three were `verified: false`. Composite 92.1% → 92.6%.
+
 
 ## [v0.30.0](https://github.com/sunholo-data/ailang-parse/compare/v0.28.0...v0.30.0) — 2026-08-11
 
