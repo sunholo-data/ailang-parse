@@ -1,0 +1,239 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Lab — browser-side DOCX generation</title>
+
+<!--
+  UNLINKED LAB PAGE. Not in any nav, not in the sitemap, noindex.
+
+  Purpose: settle whether browser-side DOCX generation is viable, with numbers
+  rather than reasoning. See design_docs/planned/v0_32_0/v0_32_0_generation_surfaces.md.
+
+  The route under test: AILANG builds every OPC part as a string (docxPartsFor,
+  which is pure), JavaScript zips them. std/zip.createArchive needs a filesystem
+  and has no in-memory variant (ailang-core #644), but only the ZIP step does —
+  every byte of XML still comes from the same generator the CLI uses.
+-->
+
+<style>
+  :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --line:#30363d; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fff; --fg:#1f2328; --dim:#656d76; --accent:#0969da; --ok:#1a7f37; --warn:#9a6700; --line:#d0d7de; }
+  }
+  body { background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         max-width:860px; margin:0 auto; padding:2rem 1.25rem 4rem; }
+  h1 { font-size:1.5rem; margin:0 0 .25rem; }
+  .sub { color:var(--dim); margin:0 0 2rem; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:1rem 1.25rem; margin:1rem 0; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:.55rem 1rem;
+           font-size:.95rem; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  table { border-collapse:collapse; width:100%; margin:.5rem 0; }
+  th,td { text-align:left; padding:.4rem .6rem; border-bottom:1px solid var(--line); font-size:.9rem; }
+  th { color:var(--dim); font-weight:600; }
+  td.n { font-variant-numeric:tabular-nums; text-align:right; }
+  code { background:rgba(127,127,127,.15); padding:.1rem .35rem; border-radius:4px; font-size:.85em; }
+  #log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--dim);
+         white-space:pre-wrap; max-height:16rem; overflow:auto; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); }
+  .metric { font-size:1.6rem; font-variant-numeric:tabular-nums; }
+</style>
+
+<h1>Lab — browser-side DOCX generation</h1>
+<p class="sub">
+  Unlinked validation page. Does generating a Word document entirely in the browser
+  cost more than it is worth?
+</p>
+
+<div class="card">
+  <p style="margin-top:0">
+    Drop any supported document (or use the sample). It is parsed in the browser,
+    the blocks are handed back to AILANG's DOCX generator, and the resulting OPC
+    parts are zipped here in JavaScript — no server, no upload.
+  </p>
+  <input type="file" id="file">
+  <button id="sample">Use sample</button>
+  <button id="run" disabled>Generate .docx</button>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:0 0 .75rem">Measurements</h2>
+  <table>
+    <tr><th>Module payload</th><td class="n" id="m-bundle">—</td><td class="dim" id="m-bundle-note"></td></tr>
+    <tr><th>WASM runtime</th><td class="n" id="m-wasm">—</td><td class="dim">paid once, shared with parsing</td></tr>
+    <tr><th>Parse time</th><td class="n" id="m-parse">—</td><td class="dim">document → blocks</td></tr>
+    <tr><th>Generate time</th><td class="n" id="m-gen">—</td><td class="dim">blocks → OPC parts (AILANG)</td></tr>
+    <tr><th>Zip time</th><td class="n" id="m-zip">—</td><td class="dim">parts → .docx (JS)</td></tr>
+    <tr><th>Output size</th><td class="n" id="m-out">—</td><td class="dim" id="m-parts"></td></tr>
+    <tr><th>Peak JS heap</th><td class="n" id="m-mem">—</td><td class="dim">where the browser reports it</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="font-size:1rem;margin:0 0 .5rem">Log</h2>
+  <div id="log">idle</div>
+</div>
+
+<script src="../js/wasm-demo.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $('log'), lines = [];
+  function log(msg, cls) {
+    lines.push(cls ? '<span class="' + cls + '">' + msg + '</span>' : msg);
+    logEl.innerHTML = lines.join('\n'); logEl.scrollTop = logEl.scrollHeight;
+  }
+  function fmtBytes(n) {
+    return n < 1024 ? n + ' B'
+         : n < 1024 * 1024 ? (n / 1024).toFixed(1) + ' KB'
+         : (n / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  // ── Minimal ZIP writer ────────────────────────────────────────────────
+  // Stored (no compression). DOCX readers accept stored entries, and it keeps
+  // this dependency-free — the point is to measure the AILANG side, not to
+  // benchmark deflate. Swap in CompressionStream('deflate-raw') if size matters.
+  var CRC_TABLE = (function () {
+    var t = new Uint32Array(256);
+    for (var i = 0; i < 256; i++) {
+      var c = i;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    var c = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zip(entries) {
+    var enc = new TextEncoder(), chunks = [], central = [], offset = 0;
+    function u16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
+    function u32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+
+    entries.forEach(function (e) {
+      var nameBytes = enc.encode(e.name);
+      var data = e.bytes;
+      var crc = crc32(data);
+      var local = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+                            u32(crc), u32(data.length), u32(data.length),
+                            u16(nameBytes.length), u16(0));
+      chunks.push(new Uint8Array(local), nameBytes, data);
+      central.push({ name: nameBytes, crc: crc, size: data.length, offset: offset });
+      offset += local.length + nameBytes.length + data.length;
+    });
+
+    var cdStart = offset, cd = [];
+    central.forEach(function (c) {
+      var hdr = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+                          u32(c.crc), u32(c.size), u32(c.size),
+                          u16(c.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(c.offset));
+      cd.push(new Uint8Array(hdr), c.name);
+      offset += hdr.length + c.name.length;
+    });
+    var end = [].concat(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length),
+                        u32(offset - cdStart), u32(cdStart), u16(0));
+    return new Blob(chunks.concat(cd, [new Uint8Array(end)]), {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    });
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  // ── Wiring ────────────────────────────────────────────────────────────
+  var pendingFile = null, engine = null;
+
+  function heap() {
+    return (performance.memory && performance.memory.usedJSHeapSize) || 0;
+  }
+
+  log('booting WASM…');
+  window.docparseWasm.ready().then(function (e) {
+    engine = e;
+    var mods = window.docparseWasm.modules();
+    $('m-bundle-note').textContent = mods.length + ' modules';
+    log('engine ready, ' + mods.length + ' modules loaded', 'ok');
+    $('run').disabled = false;
+    // Payload sizes are informational; fetch them without blocking.
+    Promise.all(mods.map(function (m) {
+      return fetch('../ailang/' + m.path, { method: 'HEAD' })
+        .then(function (r) { return +(r.headers.get('content-length') || 0); })
+        .catch(function () { return 0; });
+    })).then(function (sizes) {
+      var total = sizes.reduce(function (a, b) { return a + b; }, 0);
+      if (total) $('m-bundle').textContent = fmtBytes(total);
+    });
+    fetch('../wasm/ailang.wasm', { method: 'HEAD' })
+      .then(function (r) { $('m-wasm').textContent = fmtBytes(+(r.headers.get('content-length') || 0)); })
+      .catch(function () {});
+  }).catch(function (err) { log('engine failed: ' + err.message, 'warn'); });
+
+  $('file').addEventListener('change', function (ev) { pendingFile = ev.target.files[0]; log('selected ' + pendingFile.name); });
+  $('sample').addEventListener('click', function () { pendingFile = null; log('using built-in sample blocks'); });
+
+  $('run').addEventListener('click', async function () {
+    $('run').disabled = true;
+    try {
+      var memStart = heap();
+      var blocksJson;
+
+      if (pendingFile) {
+        var t0 = performance.now();
+        // Reuse the workbench's own parse path so this measures the real thing.
+        await window.handleDocParseFile(pendingFile);
+        $('m-parse').textContent = (performance.now() - t0).toFixed(0) + ' ms';
+        blocksJson = window.__docparseLastBlocksJson || null;
+        if (!blocksJson) { log('parse produced no blocks JSON — using sample instead', 'warn'); }
+      }
+      if (!blocksJson) {
+        blocksJson = JSON.stringify([
+          { type: 'heading', text: 'Generated in your browser', level: 1 },
+          { type: 'text', text: 'plain then bold then italic', style: 'normal', level: 0,
+            runs: [ { text: 'plain then ' }, { text: 'bold', bold: true },
+                    { text: ' then ' }, { text: 'italic', italic: true } ] },
+          { type: 'list', items: ['no server', 'no upload'], ordered: false }
+        ]);
+        $('m-parse').textContent = 'n/a (sample)';
+      }
+
+      var t1 = performance.now();
+      var r = engine.call('generateDocxParts', blocksJson, 'Browser Generated', 'AILANG Parse');
+      var genMs = performance.now() - t1;
+      if (!r.success) throw new Error(r.error);
+      $('m-gen').textContent = genMs.toFixed(0) + ' ms';
+
+      var payload = typeof r.result === 'string' ? JSON.parse(r.result) : r.result;
+      if (payload.error) throw new Error(payload.error);
+      log('AILANG returned ' + payload.parts.length + ' OPC parts, ' + payload.images.length + ' image(s)', 'ok');
+
+      var enc = new TextEncoder();
+      var entries = payload.parts.map(function (p) { return { name: p.name, bytes: enc.encode(p.content) }; })
+        .concat(payload.images.map(function (im) { return { name: im.name, bytes: b64ToBytes(im.base64) }; }));
+
+      var t2 = performance.now();
+      var blob = zip(entries);
+      $('m-zip').textContent = (performance.now() - t2).toFixed(0) + ' ms';
+      $('m-out').textContent = fmtBytes(blob.size);
+      $('m-parts').textContent = entries.length + ' zip entries';
+      var peak = heap() - memStart;
+      $('m-mem').textContent = peak > 0 ? fmtBytes(peak) : 'not reported';
+
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = 'browser-generated.docx'; a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+      log('downloaded browser-generated.docx — open it in Word to check fidelity', 'ok');
+    } catch (err) {
+      log('FAILED: ' + err.message, 'warn');
+      console.error(err);
+    } finally {
+      $('run').disabled = false;
+    }
+  });
+})();
+</script>

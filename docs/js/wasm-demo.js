@@ -62,6 +62,7 @@
     // A2UI: vendored package + formatter (dependencies before dependents)
     { name: 'pkg/sunholo/a2ui/components',        path: 'pkg/sunholo/a2ui/components.ail' },
     { name: 'docparse/services/a2ui_formatter',   path: 'docparse/services/a2ui_formatter.ail' },
+    { name: 'docparse/services/docx_generator',   path: 'docparse/services/docx_generator.ail' },
     { name: 'docparse/services/docparse_browser', path: 'docparse/services/docparse_browser.ail' },
   ];
 
@@ -377,6 +378,13 @@
       document.head.appendChild(script);
     });
   }
+
+  // Exposed for docs/lab/* pages, which need the same engine rather than a
+  // second copy of this bootstrap. Returns the engine once init has completed.
+  window.docparseWasm = {
+    ready: function () { return initWasm().then(function () { return engine; }); },
+    modules: function () { return MODULES_TO_LOAD.slice(); }
+  };
 
   // ── File handling ──
   window.handleDocParseFile = async function (file) {

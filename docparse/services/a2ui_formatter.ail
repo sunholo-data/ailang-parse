@@ -19,7 +19,7 @@ import std/list (map, foldl, concat, length as listLength, flatMap)
 import std/math (intToFloat)
 import std/option (getOrElse)
 import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
-import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable)
+import docparse/types/document (InlineRun, mkHeadingRuns, mkListRuns, mkTextRuns, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable)
 
 -- Convert a full ParsedDocument to A2UI JSON string.
 -- When editable=true, content nodes use editable component variants
@@ -218,13 +218,33 @@ export pure func a2ui_jsonToBlockList(jsonVal: Json) -> [Block] {
 pure func a2ui_jsonArrayToBlocks(arr: [Json]) -> [Block] =
   map(a2ui_jsonToBlock, arr)
 
+-- Inline formatting must survive a JSON round-trip, or every consumer that
+-- rebuilds blocks from JSON silently flattens the document. That includes
+-- browser-side generation, which parses to JSON and generates from it.
+pure func a2ui_jsonToRuns(j: Json, key: string) -> [InlineRun] =
+  a2ui_jsonArrayToRuns(getOrElse(getArray(j, key), []))
+
+pure func a2ui_jsonArrayToRuns(arr: [Json]) -> [InlineRun] =
+  map(a2ui_jsonToRun, arr)
+
+pure func a2ui_jsonToRun(j: Json) -> InlineRun = {
+  text: getOrElse(getString(j, "text"), ""),
+  bold: getOrElse(getBool(j, "bold"), false),
+  italic: getOrElse(getBool(j, "italic"), false),
+  underline: getOrElse(getBool(j, "underline"), false),
+  strike: getOrElse(getBool(j, "strike"), false),
+  code: getOrElse(getBool(j, "code"), false),
+  vertAlign: getOrElse(getString(j, "vertAlign"), "")
+}
+
 -- Decode a single Json object into a Block ADT value
 pure func a2ui_jsonToBlock(j: Json) -> Block {
   let t = getOrElse(getString(j, "type"), "text");
   if t == "heading" then
-    mkHeading(
+    mkHeadingRuns(
       getOrElse(getString(j, "text"), ""),
-      getOrElse(getInt(j, "level"), 1)
+      getOrElse(getInt(j, "level"), 1),
+      a2ui_jsonToRuns(j, "runs")
     )
   else if t == "table" then
     mkTable(
@@ -232,9 +252,11 @@ pure func a2ui_jsonToBlock(j: Json) -> Block {
       a2ui_jsonToCells(getOrElse(getArray(j, "headers"), []))
     )
   else if t == "list" then
-    mkList(
+    mkListRuns(
       getStringArrayOrEmpty(j, "items"),
-      getOrElse(getBool(j, "ordered"), false)
+      getOrElse(getBool(j, "ordered"), false),
+      map(\ir. a2ui_jsonArrayToRuns(getOrElse(asArray(ir), [])),
+          getOrElse(getArray(j, "itemRuns"), []))
     )
   else if t == "image" then
     mkImage("", getOrElse(getString(j, "description"), ""), getOrElse(getString(j, "mime"), ""))
@@ -263,10 +285,11 @@ pure func a2ui_jsonToBlock(j: Json) -> Block {
       text: getOrElse(getString(j, "text"), "")
     })
   else
-    mkText(
+    mkTextRuns(
       getOrElse(getString(j, "text"), ""),
       getOrElse(getString(j, "style"), ""),
-      getOrElse(getInt(j, "level"), 0)
+      getOrElse(getInt(j, "level"), 0),
+      a2ui_jsonToRuns(j, "runs")
     )
 }
 
