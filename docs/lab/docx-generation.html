@@ -1,3 +1,5 @@
+<!DOCTYPE html>
+<html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
@@ -156,19 +158,20 @@
   window.docparseWasm.ready().then(function (e) {
     engine = e;
     var mods = window.docparseWasm.modules();
+    var base = window.docparseWasm.assetBase();
     $('m-bundle-note').textContent = mods.length + ' modules';
     log('engine ready, ' + mods.length + ' modules loaded', 'ok');
     $('run').disabled = false;
     // Payload sizes are informational; fetch them without blocking.
     Promise.all(mods.map(function (m) {
-      return fetch('../ailang/' + m.path, { method: 'HEAD' })
+      return fetch(base + 'ailang/' + m.path, { method: 'HEAD' })
         .then(function (r) { return +(r.headers.get('content-length') || 0); })
         .catch(function () { return 0; });
     })).then(function (sizes) {
       var total = sizes.reduce(function (a, b) { return a + b; }, 0);
       if (total) $('m-bundle').textContent = fmtBytes(total);
     });
-    fetch('../wasm/ailang.wasm', { method: 'HEAD' })
+    fetch(base + 'wasm/ailang.wasm', { method: 'HEAD' })
       .then(function (r) { $('m-wasm').textContent = fmtBytes(+(r.headers.get('content-length') || 0)); })
       .catch(function () {});
   }).catch(function (err) { log('engine failed: ' + err.message, 'warn'); });
@@ -237,3 +240,4 @@
   });
 })();
 </script>
+</html>

@@ -25,8 +25,24 @@
   // docs/wasm/.ailang-version. The checked-in value reflects whatever pin was
   // current at the last commit; CI rewrites it to match the deployed pin so a
   // stale browser cache can never serve a mismatched ailang.wasm.
-  var WASM_BINARY_URL = 'wasm/ailang.wasm?v=v0.30.0';
-  var MODULE_BASE = 'ailang/';
+  // Asset paths are resolved against THIS SCRIPT's URL, not the page's.
+  // Page-relative paths only work for pages at the site root: a page under
+  // /lab/ resolved 'wasm/wasm_exec.js' to /lab/wasm/wasm_exec.js and failed to
+  // boot. wasm-demo.js always lives at <base>/js/wasm-demo.js, so stripping
+  // that suffix gives a base that is correct from any depth.
+  var ASSET_BASE = (function () {
+    var el = document.currentScript;
+    if (!el) {
+      var all = document.getElementsByTagName('script');
+      for (var i = all.length - 1; i >= 0; i--) {
+        if (all[i].src && /js\/wasm-demo\.js/.test(all[i].src)) { el = all[i]; break; }
+      }
+    }
+    return el && el.src ? el.src.replace(/js\/wasm-demo\.js.*$/, '') : '';
+  })();
+
+  var WASM_BINARY_URL = ASSET_BASE + 'wasm/ailang.wasm?v=v0.30.0';
+  var MODULE_BASE = ASSET_BASE + 'ailang/';
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
   var MAX_XML_SIZE = 5 * 1024 * 1024;
   var MAX_SLIDES = 50;
@@ -208,9 +224,9 @@
           throw new Error('WebAssembly not supported in this browser');
         }
 
-        await loadScript('wasm/wasm_exec.js');
+        await loadScript(ASSET_BASE + 'wasm/wasm_exec.js');
         emitProgress('script', 'Runtime scripts loaded', 8);
-        await loadScript('wasm/ailang-repl.js');
+        await loadScript(ASSET_BASE + 'wasm/ailang-repl.js');
         emitProgress('script', 'Runtime scripts loaded', 12);
 
         if (typeof AilangREPL === 'undefined') {
@@ -383,7 +399,8 @@
   // second copy of this bootstrap. Returns the engine once init has completed.
   window.docparseWasm = {
     ready: function () { return initWasm().then(function () { return engine; }); },
-    modules: function () { return MODULES_TO_LOAD.slice(); }
+    modules: function () { return MODULES_TO_LOAD.slice(); },
+    assetBase: function () { return ASSET_BASE; }
   };
 
   // ── File handling ──
