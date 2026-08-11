@@ -265,6 +265,11 @@ def run_batch(test_files: list[Path]) -> tuple[float, bool]:
              "docparse/main.ail"] + [str(f) for f in test_files],
             capture_output=True, text=True, cwd=str(REPO_DIR),
             timeout=300,
+            # Only the exit code is used here; stdout is progress chatter. Some
+            # corpus files (EML attachments with non-UTF-8 bytes) make a strict
+            # decode raise, which would fail the whole batch on a detail this
+            # function does not even look at.
+            errors="replace",
         )
     except subprocess.TimeoutExpired:
         elapsed_ms = round((time.time() - start) * 1000, 1)
@@ -402,10 +407,19 @@ def main():
             if p.suffix in allowed_suffixes
         ) if STRESS_TEST_DIR.exists() else []
     else:
+        # data/test_files/challenge/ has goldens too, and this scan never read
+        # them, so nothing checked them — 37 of 99 goldens were generated but
+        # unread. The eml ones sat stale for three months across two deliberate
+        # eml_parser fixes. Generation and checking must cover the same corpus.
+        challenge_dir = TEST_DIR / "challenge"
+        challenge_files = sorted(
+            p for p in challenge_dir.iterdir()
+            if p.suffix in allowed_suffixes + (".eml", ".mbox")
+        ) if challenge_dir.exists() else []
         test_files = sorted(
             p for p in TEST_DIR.iterdir()
             if p.suffix in allowed_suffixes
-        )
+        ) + challenge_files
 
     golden_dir = STRESS_GOLDEN_DIR if args.stress else GOLDEN_DIR
 

@@ -153,6 +153,74 @@ will not survive CI on another machine.
 The 12 eml files that still differ are unrelated to anything here and split into
 at least two causes needing their own triage — see [Follow-up](#follow-up).
 
+## 5. The goldens nothing read — 37 of 99
+
+The eml blind spot was a symptom. `generate_golden.sh` globs
+`data/test_files/challenge/` and writes goldens for everything it finds there,
+but `eval_office.py` scanned `TEST_DIR` **non-recursively** with a suffix list
+excluding `.eml`/`.mbox`. Generation and checking covered different corpora, so
+**37 of 99 goldens were written and never read.**
+
+Fixed by scanning `challenge/` too. The suite goes from 62 → 99 files.
+
+### The 12 eml diffs: all stale, none regressions
+
+The `MIME-Version` disappearance looked like a regression and was not. Both
+causes trace to one commit, [`7ee1d97`](https://github.com/sunholo-data/ailang-parse/commit/7ee1d97)
+(2026-05-02, *strip transport headers + fix multipart/alternative duplication*):
+
+1. **10 files** — `emlIsKeyHeader` is an allowlist that deliberately drops
+   transport noise, `MIME-Version` and `Content-Transfer-Encoding` among it.
+   Proven exhaustive rather than assumed: deleting exactly the stripped-header
+   blocks from each golden makes it **identical** to current output, so nothing
+   else moved in any of the ten.
+2. **`challenge_multipart_alt.eml`** — the same commit's second fix. The golden
+   contains the body **twice**, once as text and again as a `mime-part` section
+   holding the HTML alternative. Now one part is selected. 16 blocks → 8.
+3. **`challenge_html_only.eml`** — `[here](https://example.com/track)` where the
+   golden has bare `here.`; the link target used to be discarded.
+
+All 12 regenerated, plus 2 files that had no golden at all
+(`challenge_encoded_filenames.eml`, `challenge_pdf_attachment.eml` — both parse
+deterministically; they were simply added after the last generation run).
+
+### Eight failures the suite had never reported
+
+With `challenge/` in scope the suite reads 99 goldens and scores **97.0%**. The
+100.0% was not a passing grade, it was 37 unread files. Newly visible:
+
+| file | score | first read |
+|---|---|---|
+| `challenge_complex.html` | 0% | golden records `HTML parse error` — **stale**, the lenient parser fixed this; now 7 real blocks |
+| `challenge_speaker_notes.pptx` | 67% | **regression — feature deleted**, see below |
+| `challenge_comment_ranges.docx` | 60% | untriaged |
+| `challenge_comments.xlsx` | 67% | untriaged |
+| `challenge_fields.docx` | 75% | untriaged |
+| `challenge_hyperlinks.docx` | 75% | URL text `(https://…)` no longer appended; lost a `section-break` — untriaged |
+| `challenge_formulas.xlsx` | 80% | MERGE check — untriaged |
+| `challenge_merged_cells.xlsx` | 80% | MERGE check — untriaged |
+
+**`challenge_speaker_notes.pptx` is the serious one: PPTX speaker-note
+extraction was deleted from the source.**
+[`e9de665`](https://github.com/sunholo-data/ailang-parse/commit/e9de665)
+(2026-03-30, *Sync source .ail modules with docs/ailang/ browser versions*) ran
+the sync in the wrong direction and overwrote `pptx_parser.ail` with a reduced
+browser variant, taking `findNotesSlideEntries`, `pptxParseNotesSlides` and the
+`kind: "notes"` section with it. `notesSlide` survives today only in
+`docs/pptx-parsing.html`, which still advertises the feature, and in three
+design docs. The golden proves it worked; nothing read the golden.
+
+This is the concrete damage behind the later "docs/ailang is registry-vendored,
+never hand-sync" rule — a feature silently deleted by a sync commit, four months
+undetected because the only test that covered it was never run.
+
+### One harness bug, exposed by the same change
+
+Including the email corpus made the batch runner crash: `subprocess.run(...,
+text=True)` strict-decodes stdout, and an EML attachment carries non-UTF-8
+bytes. The batch only uses the exit code, so it now decodes with
+`errors="replace"` rather than failing on output it does not read.
+
 ## Follow-up
 
 - **Add a byte-equality check to the office suite**, reported alongside the
@@ -164,18 +232,9 @@ at least two causes needing their own triage — see [Follow-up](#follow-up).
   how #4 was found.
 - **Stop baking absolute paths into goldens.** 95 of 97 embed
   `/Users/mark/…`; they are machine-specific and cannot be verified in CI.
-- **16 eml/mbox goldens are scored by no suite at all.** They sit in
-  `benchmarks/office/golden/` beside the 62 the office suite reads, and nothing
-  reads them. That is a blind spot of a different kind from the similarity score,
-  and a strictly worse one: not a weak check, but no check. Defect #4 lived there
-  for months in consequence.
-- **Triage the 12 remaining eml diffs.** Two distinct causes seen so far, and
-  they need opposite responses: `MIME-Version: 1.0` is no longer emitted as an
-  `email-header` block (looks like a **regression** — the header is present in
-  the source), while `challenge_html_only.eml` now renders `[here](https://…)`
-  where the golden has bare `here.` (looks like an **improvement**, from the
-  LinkBlock/marker work). Do not bulk-regenerate: that would bake the first in
-  while appearing to fix everything.
+- ~~16 eml/mbox goldens are scored by no suite at all~~ — **done, and it was
+  worse than 16.** See §5 below.
+- ~~Triage the 12 remaining eml diffs~~ — **done**, all 12 explained. See §5.
 - **Consolidate the two mime guessers.** `odtGuessMime` and `mediaMimeType`
   disagree on coverage and fallback (`image/unknown` vs
   `application/octet-stream`), and resolution silently prefers the weaker one.
