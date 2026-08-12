@@ -21,6 +21,8 @@ type InlineRun struct {
 	Underline bool   `json:"underline,omitempty"`
 	Strike    bool   `json:"strike,omitempty"`
 	Code      bool   `json:"code,omitempty"`
+	// Href is the link target; empty when the run is not a link.
+	Href      string `json:"href,omitempty"`
 	VertAlign string `json:"vertAlign,omitempty"`
 }
 

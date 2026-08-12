@@ -104,12 +104,36 @@ export interface Cell {
  */
 export interface InlineRun {
   text: string;
+  /** Link target; absent when the run is not a link. */
+  href?: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
   strike?: boolean;
   code?: boolean;
   vertAlign?: string;
+}
+
+/**
+ * A converted document from `POST /api/v1/convert`.
+ *
+ * `content` is always decoded bytes regardless of how the wire encoded it —
+ * base64 for the container targets, UTF-8 for html/md/qmd. Branching on
+ * `encoding` is the SDK's job, not the caller's.
+ */
+export interface ConvertResult {
+  content: Uint8Array;
+  filename: string;
+  contentType: string;
+  target: string;
+  sourceFormat: string;
+  sourceSubtype: string;
+  sizeBytes: number;
+  status: string;
+  requestId: string;
+  /** The document as text. Only meaningful for html/md/qmd targets. */
+  text(): string;
+  responseMeta?: ResponseMeta;
 }
 
 export interface Block {

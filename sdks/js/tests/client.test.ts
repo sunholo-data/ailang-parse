@@ -820,3 +820,46 @@ describe("InlineRun", () => {
     assert.equal(plain.itemRuns, undefined);
   });
 });
+
+describe("convert", () => {
+  it("decodes base64 targets to bytes and echoes metadata", async () => {
+    const zip = Buffer.from("PK\u0003\u0004fakezip");
+    setMock(200, {
+      result: JSON.stringify({
+        status: "success", request_id: "req_c1", source_format: "zip-office",
+        source_subtype: "docx", target: "pptx", filename: "report.pptx",
+        content_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        encoding: "base64", size_bytes: zip.length, content: zip.toString("base64"),
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.convert("report.docx", { target: "pptx" });
+    assert.deepEqual(Buffer.from(r.content), zip);
+    assert.equal(r.filename, "report.pptx");
+    assert.equal(r.target, "pptx");
+    assert.equal(r.sourceSubtype, "docx");
+    assert.equal(r.sizeBytes, zip.length);
+    assert.equal(lastRequestBody.target, "pptx");
+  });
+
+  it("decodes utf8 targets without base64", async () => {
+    // encoding is load-bearing: html/md/qmd come back as readable UTF-8.
+    setMock(200, {
+      result: JSON.stringify({
+        status: "success", target: "md", filename: "a.md",
+        content_type: "text/markdown", encoding: "utf8",
+        size_bytes: 7, content: "# Hello",
+      }),
+    });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    const r = await c.convert("a.docx", { target: "md" });
+    assert.equal(r.text(), "# Hello");
+  });
+
+  it("sends the target verbatim so the server can normalise it", async () => {
+    setMock(200, { result: JSON.stringify({ status: "success", target: "html", encoding: "utf8", content: "<p/>" }) });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.convert("x.docx", { target: "MARKDOWN" });
+    assert.equal(lastRequestBody.target, "MARKDOWN");
+  });
+});

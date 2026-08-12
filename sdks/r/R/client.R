@@ -107,6 +107,56 @@ DocParse <- R6::R6Class(
       result
     },
 
+    #' @description Convert a document to another format.
+    #' @param filepath Sample ID or server-side path (omit when using
+    #'   \code{source_url} or \code{gcs_ref}).
+    #' @param target One of \code{html md qmd docx pptx xlsx odt odp ods}.
+    #'   Normalised server-side, so it is deliberately not validated here — a
+    #'   new target must not require an SDK release.
+    #' @param source_url Fetch the source from this URL instead of a path.
+    #' @param gcs_ref \code{gs://bucket/path}, Business tier only.
+    #' @param pdf_backend One of \code{"" pdftotext docling liteparse ai}.
+    #' @return An \code{ailang_convert_result} S3 list. \code{$content} is a
+    #'   raw vector regardless of how the wire encoded it.
+    convert = function(filepath = NULL, target, source_url = NULL,
+                       gcs_ref = NULL, pdf_backend = NULL) {
+      body <- list(target = jsonlite::unbox(target))
+      if (!is.null(filepath)) body$filepath <- jsonlite::unbox(filepath)
+      if (!is.null(source_url)) body$sourceUrl <- jsonlite::unbox(source_url)
+      if (!is.null(gcs_ref)) body$gcsRef <- jsonlite::unbox(gcs_ref)
+      if (!is.null(pdf_backend)) body$pdfBackend <- jsonlite::unbox(pdf_backend)
+      if (nzchar(self$api_key)) body$apiKey <- jsonlite::unbox(self$api_key)
+      req <- .build_request(self$base_url, "/api/v1/convert",
+                            self$api_key, self$timeout)
+      req <- httr2::req_body_json(req, body, auto_unbox = FALSE)
+      req <- .req_with_retry(req, self$retry)
+      resp <- .perform(req)
+      result <- .build_convert_result(.unwrap(resp$body))
+      attr(result, "response_meta") <- .response_meta_from_headers(resp$headers)
+      result
+    },
+
+    #' @description Upload a local file (multipart) and convert it.
+    #' @param filepath Path to a local file.
+    #' @param target Target format; see \code{convert}.
+    #' @return An \code{ailang_convert_result} S3 list.
+    convert_file = function(filepath, target) {
+      stopifnot(file.exists(filepath))
+      req <- .build_request(self$base_url, "/api/v1/convert",
+                            self$api_key, self$timeout)
+      req <- httr2::req_body_multipart(
+        req,
+        filepath = curl::form_file(filepath, name = basename(filepath)),
+        target   = target,
+        apiKey   = self$api_key
+      )
+      req <- .req_with_retry(req, self$retry)
+      resp <- .perform(req)
+      result <- .build_convert_result(.unwrap(resp$body))
+      attr(result, "response_meta") <- .response_meta_from_headers(resp$headers)
+      result
+    },
+
     #' @description Upload a local file (multipart) and parse it.
     #' @param filepath Path to a local file.
     #' @param output_format One of \code{"blocks"}, \code{"markdown"},

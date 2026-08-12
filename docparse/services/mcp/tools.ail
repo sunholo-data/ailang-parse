@@ -51,6 +51,27 @@ export func mcpParse(filepath: string, outputFormat: string, apiKey: string, req
     mcpParseLocal(filepath, outputFormat)
 }
 
+-- Hosted mode: POST to /api/v1/convert instead of converting locally.
+--
+-- Until this existed, hosted mode demanded an API key and then did the work on
+-- the caller's own machine — the key gated nothing, because there was no
+-- server-side conversion to call.
+--
+-- The response carries the document inline: `content` encoded per `encoding`
+-- (base64 for the container targets, utf8 for html/md/qmd), plus `filename` and
+-- `content_type` for saving it. Returned verbatim so the MCP client can decode
+-- with the metadata rather than guessing from the target.
+func mcpConvertHosted(input: string, outputFormat: string, apiKey: string) -> string ! {Env, Net} {
+  let baseUrl = getEnvOr("DOCPARSE_API_URL", "https://docparse.ailang.sunholo.com");
+  -- Target is normalised server-side; passing it through means a new target
+  -- needs no change here.
+  let target = toLower(outputFormat);
+  let body = if contains(input, ".")
+    then "{\"filepath\":\"${input}\",\"target\":\"${target}\",\"apiKey\":\"${apiKey}\"}"
+    else "{\"filepath\":\"${input}\",\"target\":\"${target}\",\"apiKey\":\"${apiKey}\"}";
+  httpPost("${baseUrl}/api/v1/convert", body)
+}
+
 -- Hosted mode: call the docparse API with auth.
 func mcpParseHosted(filepath: string, outputFormat: string, apiKey: string, requestId: string) -> string ! {Env, Net} {
   if length(apiKey) == 0 then
@@ -169,6 +190,8 @@ export func mcpConvert(input: string, outputFormat: string, outputPath: string, 
       kv("message", js("An API key is required for hosted conversion. Use mcpAuth to get one via device authorization.")),
       kv("suggested_fix", js("Call mcpAuth to start device authorization and get an API key."))
     ]))
+  else if mode == "hosted" then
+    mcpConvertHosted(input, outputFormat, apiKey)
   else {
   -- Resolve sample IDs
   let resolved = if contains(input, ".") then input

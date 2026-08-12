@@ -36,6 +36,51 @@ NULL
   list(text = as.character(raw), col_span = 1L, merged = FALSE)
 }
 
+# ── ConvertResult ────────────────────────────────────────────────────────────
+
+# Build a convert result. `encoding` is load-bearing: base64 for the container
+# targets, UTF-8 for html/md/qmd. Decode on it, never on the target.
+.build_convert_result <- function(d) {
+  encoding <- .s(d$encoding)
+  if (!nzchar(encoding)) encoding <- "base64"
+  content <- if (identical(encoding, "base64")) {
+    jsonlite::base64_dec(.s(d$content))
+  } else {
+    charToRaw(.s(d$content))
+  }
+  size <- .i(d$size_bytes)
+  if (identical(size, 0L)) size <- length(content)
+  structure(
+    list(
+      content        = content,
+      filename       = .s(d$filename),
+      content_type   = .s(d$content_type),
+      target         = .s(d$target),
+      source_format  = .s(d$source_format),
+      source_subtype = .s(d$source_subtype),
+      size_bytes     = size,
+      status         = .s(d$status),
+      request_id     = .s(d$request_id)
+    ),
+    class = "ailang_convert_result"
+  )
+}
+
+#' The converted document as text. Only meaningful for html/md/qmd targets.
+#' @param x An \code{ailang_convert_result}.
+#' @export
+convert_text <- function(x) rawToChar(x$content)
+
+#' Write a converted document to disk.
+#' @param x An \code{ailang_convert_result}.
+#' @param path Destination; defaults to the server's suggested filename.
+#' @export
+convert_save <- function(x, path = NULL) {
+  if (is.null(path)) path <- x$filename
+  writeBin(x$content, path)
+  invisible(path)
+}
+
 # ── InlineRun ────────────────────────────────────────────────────────────────
 
 # A run of text with uniform character formatting inside a paragraph.
@@ -52,6 +97,7 @@ NULL
     underline  = .b(raw$underline),
     strike     = .b(raw$strike),
     code       = .b(raw$code),
+    href       = .s(raw$href),
     vert_align = .s(raw$vertAlign)
   )
 }

@@ -355,3 +355,38 @@ def test_inline_runs_decode():
     plain = Block.from_dict({"type": "text", "text": "nothing here"})
     assert plain.runs == []
     assert plain.item_runs == []
+
+
+def test_convert_result_decodes_both_encodings():
+    """encoding is load-bearing: base64 for containers, utf8 for html/md/qmd."""
+    import base64
+    from ailang_parse.types import ConvertResult
+
+    zip_bytes = b"PK\x03\x04fakezip"
+    r = ConvertResult.from_dict({
+        "status": "success", "request_id": "req_c1",
+        "source_format": "zip-office", "source_subtype": "docx",
+        "target": "pptx", "filename": "report.pptx",
+        "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "encoding": "base64", "size_bytes": len(zip_bytes),
+        "content": base64.b64encode(zip_bytes).decode(),
+    })
+    assert r.content == zip_bytes
+    assert r.filename == "report.pptx"
+    assert r.source_subtype == "docx"
+    assert r.size_bytes == len(zip_bytes)
+
+    t = ConvertResult.from_dict({
+        "status": "success", "target": "md", "filename": "a.md",
+        "encoding": "utf8", "content": "# Hello",
+    })
+    assert t.text == "# Hello"
+    assert t.content == b"# Hello"
+
+
+def test_inline_run_href():
+    from ailang_parse.types import Block
+    b = Block.from_dict({"type": "text", "runs": [
+        {"text": "docs", "href": "https://example.com"}, {"text": " plain"}]})
+    assert b.runs[0].href == "https://example.com"
+    assert b.runs[1].href == ""

@@ -127,3 +127,36 @@ test_that("blocks with no formatting keep the pre-InlineRun shape", {
   expect_length(plain$runs, 0L)
   expect_length(plain$item_runs, 0L)
 })
+
+test_that("convert results decode both wire encodings", {
+  zip <- as.raw(c(0x50, 0x4b, 0x03, 0x04, 0x7a, 0x69, 0x70))
+  r <- ailangparse:::.build_convert_result(list(
+    status = "success", target = "pptx", filename = "report.pptx",
+    content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    source_format = "zip-office", source_subtype = "docx",
+    encoding = "base64", size_bytes = length(zip),
+    content = jsonlite::base64_enc(zip)
+  ))
+  expect_s3_class(r, "ailang_convert_result")
+  expect_equal(r$content, zip)
+  expect_equal(r$filename, "report.pptx")
+  expect_equal(r$source_subtype, "docx")
+
+  # encoding is load-bearing: html/md/qmd come back as readable UTF-8
+  t <- ailangparse:::.build_convert_result(list(
+    status = "success", target = "md", filename = "a.md", encoding = "utf8",
+    content = "# Hello"
+  ))
+  expect_equal(convert_text(t), "# Hello")
+  expect_equal(t$size_bytes, 7L)
+})
+
+test_that("inline runs decode href", {
+  b <- ailangparse:::.block_from_list(list(
+    type = "text", text = "docs",
+    runs = list(list(text = "docs", href = "https://example.com"))
+  ))
+  expect_equal(b$runs[[1]]$href, "https://example.com")
+  expect_equal(ailangparse:::.block_from_list(
+    list(type = "text", runs = list(list(text = "plain"))))$runs[[1]]$href, "")
+})

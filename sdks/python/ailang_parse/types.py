@@ -109,6 +109,8 @@ class InlineRun:
     underline: bool = False
     strike: bool = False
     code: bool = False
+    #: Link target, "" when the run is not a link.
+    href: str = ""
     vert_align: str = ""
 
     @classmethod
@@ -122,6 +124,7 @@ class InlineRun:
             underline=raw.get("underline", False),
             strike=raw.get("strike", False),
             code=raw.get("code", False),
+            href=raw.get("href", ""),
             vert_align=raw.get("vertAlign", ""),
         )
 
@@ -292,6 +295,58 @@ class Section:
 
 
 # ── Response metadata (HTTP headers) ──
+
+@dataclass
+class ConvertResult:
+    """A converted document from ``POST /api/v1/convert``.
+
+    ``content`` is always decoded bytes regardless of how the wire encoded it —
+    base64 for the container targets, UTF-8 for html/md/qmd. Branching on
+    ``encoding`` is the SDK's job, not the caller's.
+    """
+    content: bytes = b""
+    filename: str = ""
+    content_type: str = ""
+    target: str = ""
+    source_format: str = ""
+    source_subtype: str = ""
+    size_bytes: int = 0
+    status: str = ""
+    request_id: str = ""
+    response_meta: Optional["ResponseMeta"] = None
+
+    @property
+    def text(self) -> str:
+        """The document as text. Only meaningful for html/md/qmd targets."""
+        return self.content.decode("utf-8")
+
+    def save(self, path: str = "") -> str:
+        """Write the document to disk, defaulting to the server's filename."""
+        target_path = path or self.filename
+        with open(target_path, "wb") as f:
+            f.write(self.content)
+        return target_path
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ConvertResult":
+        import base64
+        raw = d.get("content", "")
+        encoding = d.get("encoding", "base64")
+        # encoding is load-bearing: the three text targets come back as readable
+        # UTF-8, everything else as base64. Never infer it from the target.
+        content = base64.b64decode(raw) if encoding == "base64" else raw.encode("utf-8")
+        return cls(
+            content=content,
+            filename=d.get("filename", ""),
+            content_type=d.get("content_type", ""),
+            target=d.get("target", ""),
+            source_format=d.get("source_format", ""),
+            source_subtype=d.get("source_subtype", ""),
+            size_bytes=d.get("size_bytes", len(content)),
+            status=d.get("status", ""),
+            request_id=d.get("request_id", ""),
+        )
+
 
 @dataclass
 class ResponseMeta:

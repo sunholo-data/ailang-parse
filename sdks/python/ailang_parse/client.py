@@ -53,7 +53,7 @@ from ._credentials import (
 )
 from .types import (
     DocParseError, AuthError, QuotaError,
-    ParseResult, ResponseMeta, HealthResult, FormatsResult,
+    ParseResult, ConvertResult, ResponseMeta, HealthResult, FormatsResult,
     RetryPolicy,
 )
 
@@ -383,6 +383,66 @@ class DocParse:
         meta = ResponseMeta.from_headers(dict(resp.headers))
         result = self._build_parse_result(self._unwrap(resp.json()), output_format)
         result.response_meta = meta
+        return result
+
+    def convert(self, filepath: str = "", *, target: str = "",
+                source_url: str = "", gcs_ref: str = "",
+                pdf_backend: str = "") -> ConvertResult:
+        """Convert a document to another format via ``POST /api/v1/convert``.
+
+        Targets: ``html md qmd docx pptx xlsx odt odp ods``. The target is
+        normalised server-side (case-insensitive, leading dot stripped,
+        ``markdown``/``htm``/``quarto`` aliased), so it is deliberately not
+        validated here — a new target must not require an SDK release.
+
+        For uploading a local file use :meth:`convert_file`.
+
+        Usage::
+
+            result = client.convert("sample_docx_formatting", target="pptx")
+            result.save()                      # writes report.pptx
+            print(client.convert("notes.md", target="html").text)
+        """
+        url = self.base_url + "/api/v1/convert"
+        body: Dict[str, Any] = {"target": target}
+        if filepath:
+            body["filepath"] = filepath
+        if self.api_key:
+            body["apiKey"] = self.api_key
+        if source_url:
+            body["sourceUrl"] = source_url
+        if gcs_ref:
+            body["gcsRef"] = gcs_ref
+        if pdf_backend:
+            body["pdfBackend"] = pdf_backend
+        resp = self._post(url, json=body, timeout=self.timeout)
+        self._raise_for_response(resp)
+        result = ConvertResult.from_dict(self._unwrap(resp.json()))
+        result.response_meta = ResponseMeta.from_headers(dict(resp.headers))
+        return result
+
+    def convert_file(self, filepath: str, *, target: str = "",
+                     pdf_backend: str = "") -> ConvertResult:
+        """Upload a local file and convert it. Returns the document as bytes.
+
+        Usage::
+
+            client.convert_file("report.docx", target="pptx").save("deck.pptx")
+        """
+        url = self.base_url + "/api/v1/convert"
+        data: Dict[str, Any] = {"target": target, "apiKey": self.api_key}
+        if pdf_backend:
+            data["pdfBackend"] = pdf_backend
+        with open(filepath, "rb") as f:
+            resp = self._post(
+                url,
+                files={"filepath": (Path(filepath).name, f)},
+                data=data,
+                timeout=self.timeout,
+            )
+        self._raise_for_response(resp)
+        result = ConvertResult.from_dict(self._unwrap(resp.json()))
+        result.response_meta = ResponseMeta.from_headers(dict(resp.headers))
         return result
 
     @staticmethod

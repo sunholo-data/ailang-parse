@@ -3,7 +3,7 @@
  * and persistent credential storage.
  */
 
-import type { ParseResult, HealthResult, FormatsResult, DocParseOptions, ResponseMeta, RetryPolicy } from "./types.js";
+import type { ParseResult, ConvertResult, HealthResult, FormatsResult, DocParseOptions, ResponseMeta, RetryPolicy } from "./types.js";
 import { DocParseError, AuthError, QuotaError } from "./types.js";
 import { KeyManager } from "./keys.js";
 
@@ -190,6 +190,67 @@ export class DocParse {
     const result = DocParse._buildParseResult(this._unwrap(await resp.json()), outputFormat);
     result.responseMeta = meta;
     return result;
+  }
+
+  /**
+   * Convert a document to another format.
+   *
+   * Targets: `html md qmd docx pptx xlsx odt odp ods`. Normalised server-side
+   * (case-insensitive, leading dot stripped, `markdown`/`htm`/`quarto` aliased),
+   * so deliberately not validated here — a new target must not require an SDK
+   * release.
+   *
+   * ```ts
+   * const r = await client.convert("sample_docx_formatting", { target: "pptx" });
+   * await fs.writeFile(r.filename, r.content);
+   * console.log((await client.convert("notes.md", { target: "html" })).text());
+   * ```
+   */
+  async convert(filepath: string, opts: { target: string; sourceUrl?: string; gcsRef?: string; pdfBackend?: string }): Promise<ConvertResult> {
+    const url = this.baseUrl + "/api/v1/convert";
+    const body: Record<string, string> = { target: opts.target };
+    if (filepath) body.filepath = filepath;
+    if (this.apiKey) body.apiKey = this.apiKey;
+    if (opts.sourceUrl) body.sourceUrl = opts.sourceUrl;
+    if (opts.gcsRef) body.gcsRef = opts.gcsRef;
+    if (opts.pdfBackend) body.pdfBackend = opts.pdfBackend;
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiKey) headers["x-api-key"] = this.apiKey;
+    const payload = JSON.stringify(body);
+
+    const resp = await this._sendWithRetry(() => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeout);
+      return fetch(url, { method: "POST", headers, body: payload, signal: controller.signal })
+        .finally(() => clearTimeout(timer));
+    });
+    await DocParse._raiseForResponse(resp);
+    const meta = DocParse._extractMeta(resp.headers);
+    const result = DocParse._buildConvertResult(this._unwrap(await resp.json()));
+    result.responseMeta = meta;
+    return result;
+  }
+
+  /** Decode the wire payload into bytes. `encoding` is load-bearing: never infer it. */
+  private static _buildConvertResult(d: any): ConvertResult {
+    const encoding = d.encoding ?? "base64";
+    const raw: string = d.content ?? "";
+    const content = encoding === "base64"
+      ? Uint8Array.from(atob(raw), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(raw);
+    return {
+      content,
+      filename: d.filename ?? "",
+      contentType: d.content_type ?? "",
+      target: d.target ?? "",
+      sourceFormat: d.source_format ?? "",
+      sourceSubtype: d.source_subtype ?? "",
+      sizeBytes: d.size_bytes ?? content.length,
+      status: d.status ?? "",
+      requestId: d.request_id ?? "",
+      text() { return new TextDecoder().decode(this.content); },
+    };
   }
 
   /** Parse a document from a URL. Convenience wrapper around {@link parse}. */
