@@ -119,6 +119,50 @@ Three numbers decide whether this ships:
 If the bundle cost is unacceptable, the fallback is a second lazily-fetched
 bundle for generation only — worth knowing before, not after.
 
+## Lab results (2026-08-12) — it works, and the constraint is not what we expected
+
+Browser generation works end to end: 12 demo documents in the picker, all
+generating valid DOCX that passes `zipfile.testzip()`, that python-docx reads
+with formatted runs intact, and that LibreOffice renders to PDF.
+
+```
+formatting.docx     39ms parse   39ms gen    6.7 KB
+real-world.docx     81ms parse   44ms gen   12.1 KB
+guide.html         190ms parse   66ms gen   28.3 KB
+```
+
+**Bundle delta was never the constraint.** The generator adds 40.9 KB behind a
+40.1 MB WASM runtime that parsing already downloads — 0.1%. The lazily-fetched
+second bundle this doc hedged about is unnecessary for size reasons.
+
+**The real constraint is the WASM type-checker's 2-second budget, and it is
+wall-clock.** Whether a module loads depends on the visitor's hardware, so the
+same deployed bytes work on a fast desktop and fail on a mid-range laptop.
+Measured with CDP CPU throttling:
+
+| slowdown | modules failing the budget |
+|---|---|
+| 1× | none — but several modules already sit at half the budget |
+| 2× | 4, **including the main demo's own** `output_formatter` and `docparse_browser` |
+| 3× | 8 |
+| 4× | 10 |
+
+Two consequences for this doc's decision:
+
+1. **Generation is loaded on demand.** `docx_generator` alone costs ~1.0s of the
+   2s budget, so it is not in the default module set; `docparse_generate` exists
+   precisely so `docparse_browser` does not import it. Only pages that generate
+   pay.
+2. **Browser generation cannot be the only route.** It fails on hardware that is
+   ~2× slower than a fast desktop, which is ordinary. That strengthens rather
+   than weakens the recommendation above: the API endpoint is the dependable
+   surface, and the browser is a demo that degrades on slow machines.
+
+Reported upstream as ailang-core #662 — a wall-clock limit makes shipped
+correctness hardware-dependent and is untestable in CI, since our own
+Chromium-on-a-fast-runner smoke test passes on commits that fail for real users
+on Firefox. Asked for a configurable or deterministic budget.
+
 ## Definition of done
 
 - `/api/v1/convert` accepts a document plus target format, returns the generated
