@@ -637,6 +637,32 @@
     return blocks;
   }
 
+  // Embedded images live in the ZIP, not in document.xml, so body parsing never
+  // sees them: the CLI appends them via a separate FS pass (parseDocxImages ->
+  // findMediaEntries). JS owns the ZIP here, so it does the same job — without
+  // this, a document's pictures are silently absent from parsed blocks and from
+  // anything generated out of them.
+  var MEDIA_MIME = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    bmp: 'image/bmp', tiff: 'image/tiff', svg: 'image/svg+xml', webp: 'image/webp',
+    emf: 'image/emf', wmf: 'image/wmf',
+  };
+
+  async function extractMediaBlocks(zip, prefix) {
+    var names = Object.keys(zip.files)
+      .filter(function (n) { return n.indexOf(prefix) === 0 && !zip.files[n].dir; })
+      .sort();
+    var out = [];
+    for (var i = 0; i < names.length; i++) {
+      var ext = (names[i].split('.').pop() || '').toLowerCase();
+      var mime = MEDIA_MIME[ext];
+      if (!mime) continue;                       // skip non-image media (audio, video)
+      var b64 = await zip.file(names[i]).async('base64');
+      out.push({ type: 'image', description: '', mime: mime, data: b64, dataLength: b64.length });
+    }
+    return out;
+  }
+
   // ── DOCX parsing ──
   async function parseDocxZip(zip) {
     var allBlocks = [];
@@ -664,6 +690,13 @@
           pipelineLog('xml', blocks.length + ' body blocks');
         }
       }
+    }
+
+    // Embedded images (word/media/*), appended as the CLI orchestrator does.
+    var mediaBlocks = await extractMediaBlocks(zip, 'word/media/');
+    if (mediaBlocks.length > 0) {
+      allBlocks = allBlocks.concat(mediaBlocks);
+      pipelineLog('xml', mediaBlocks.length + ' embedded image(s)');
     }
 
     // Headers

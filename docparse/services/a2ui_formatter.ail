@@ -260,7 +260,12 @@ pure func a2ui_jsonToBlock(j: Json) -> Block {
           getOrElse(getArray(j, "itemRuns"), []))
     )
   else if t == "image" then
-    mkImage("", getOrElse(getString(j, "description"), ""), getOrElse(getString(j, "mime"), ""))
+    -- `data` is the base64 payload. Discarding it here meant every JSON -> blocks
+    -- round-trip silently dropped the picture itself, keeping only its
+    -- description and mime — the same shape of loss the runs fields had.
+    mkImage(getOrElse(getString(j, "data"), ""),
+            getOrElse(getString(j, "description"), ""),
+            getOrElse(getString(j, "mime"), ""))
   else if t == "audio" then
     AudioBlock({
       data: "",
