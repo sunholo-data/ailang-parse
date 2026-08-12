@@ -38,7 +38,6 @@ import docparse/services/ods_parser (odsExtractSheets, odsParseMetadata)
 import docparse/services/epub_parser (epubFindOpfPath, epubExtractSpine, epubParseOpfMetadata)
 import docparse/services/tex_parser (parseLatex)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
-import docparse/services/docx_generator (docxPartsFor, docxImageEntriesFor)
 import docparse/services/a2ui_formatter (convertBlocksJsonToA2UI as a2uiConvert, documentToA2UI, a2ui_jsonToBlockList)
 
 -- Parse DOCX body XML (word/document.xml) -> JSON array of blocks
@@ -339,41 +338,3 @@ pure func xlsxBrowserBuildMap(strings: [string], idx: int) -> Map[int, string] =
     [] => emptyMap(),
     s :: rest => mapInsert(xlsxBrowserBuildMap(rest, idx + 1), idx, s)
   }
-
--- === Browser-side DOCX generation ========================================
---
--- The browser has no filesystem, and std/zip.createArchive takes an output
--- path with no in-memory variant (ailang-core #644). That blocks generateDocx
--- here, but not generation itself: every OPC part is built by pure string
--- code, and only the ZIP needs a file.
---
--- So AILANG returns the parts and JavaScript zips them. Every byte of XML —
--- the OPC wiring, w:rPr runs, numbering, styles, headers — still comes from
--- the same generator the CLI uses; JS does container packaging only.
---
--- Input is the block JSON this module's parsers already emit, so parse and
--- generate compose in the browser without a round trip.
-export pure func generateDocxParts(blocksJson: string, title: string, author: string) -> string =
-  match decode(blocksJson) {
-    Ok(v) => {
-      let doc = {
-        format: "docx",
-        filename: "generated.docx",
-        metadata: {title: title, author: author, created: "", modified: "", pageCount: 0},
-        blocks: a2ui_jsonToBlockList(v)
-      };
-      encode(jo([
-        kv("parts", ja(map(browserPartToJson, docxPartsFor(doc)))),
-        kv("images", ja(map(browserImageToJson, docxImageEntriesFor(doc))))
-      ]))
-    },
-    Err(e) => encode(jo([kv("error", js("invalid blocks JSON: ${e}"))]))
-  }
-
-pure func browserPartToJson(p: {name: string, content: string}) -> Json =
-  jo([kv("name", js(p.name)), kv("content", js(p.content))])
-
--- Image data is already base64 — JS decodes it before adding the entry.
-pure func browserImageToJson(p: {name: string, data: string}) -> Json =
-  jo([kv("name", js(p.name)), kv("base64", js(p.data))])
-

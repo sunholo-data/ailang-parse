@@ -248,6 +248,18 @@ def main() -> int:
         vendor_set = {f"docparse/{m}" for m in vendor_modules}
         loaded_set = {path for _, path in modules if not path.startswith("pkg/")}
 
+        # Modules loaded on demand by docs/lab/* are vendored but deliberately
+        # absent from MODULES_TO_LOAD: the WASM type-checker's 2s per-module
+        # budget is tight, so pages that do not generate documents must not pay
+        # to type-check the generator. They are still "loaded", just later.
+        lazy = set()
+        lab_dir = DOCS_DIR / "lab"
+        if lab_dir.is_dir():
+            for page in lab_dir.rglob("*.html"):
+                lazy |= set(re.findall(r"loadExtraModule\(\s*'[^']+'\s*,\s*'([^']+)'",
+                                       page.read_text(encoding="utf-8")))
+        loaded_set |= lazy
+
         loaded_not_vendored = loaded_set - vendor_set
         vendored_not_loaded = vendor_set - loaded_set
 

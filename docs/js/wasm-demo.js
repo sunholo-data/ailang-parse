@@ -78,7 +78,6 @@
     // A2UI: vendored package + formatter (dependencies before dependents)
     { name: 'pkg/sunholo/a2ui/components',        path: 'pkg/sunholo/a2ui/components.ail' },
     { name: 'docparse/services/a2ui_formatter',   path: 'docparse/services/a2ui_formatter.ail' },
-    { name: 'docparse/services/docx_generator',   path: 'docparse/services/docx_generator.ail' },
     { name: 'docparse/services/docparse_browser', path: 'docparse/services/docparse_browser.ail' },
   ];
 
@@ -280,6 +279,14 @@
             if (!r.success) return { success: false, error: r.error };
             return { success: true, result: parseWasmResult(r.result) };
           },
+          // Call into a module other than docparse_browser (lab pages load
+          // extra modules on demand).
+          callIn: function (moduleName, func) {
+            var args = Array.prototype.slice.call(arguments, 2);
+            var r = repl.call(moduleName, func, ...args);
+            if (!r.success) return { success: false, error: r.error };
+            return { success: true, result: parseWasmResult(r.result) };
+          },
           callAsync: async function (func) {
             var args = Array.prototype.slice.call(arguments, 1);
             var r;
@@ -400,7 +407,21 @@
   window.docparseWasm = {
     ready: function () { return initWasm().then(function () { return engine; }); },
     modules: function () { return MODULES_TO_LOAD.slice(); },
-    assetBase: function () { return ASSET_BASE; }
+    assetBase: function () { return ASSET_BASE; },
+    // The blocks from the most recent parse, or null if nothing parsed yet.
+    lastBlocks: function () { return (lastOutput && lastOutput.blocks) || null; },
+    parseFile: function (file) { return window.handleDocParseFile(file); },
+    // Load an extra module on demand. The WASM type-checker has a 2s per-module
+    // budget and docx_generator alone eats over half of it, so it is not in the
+    // default set — only pages that generate documents pay for it.
+    loadExtraModule: async function (name, path) {
+      var resp = await fetch(MODULE_BASE + path + '?v=' + Date.now());
+      if (!resp.ok) throw new Error('failed to fetch ' + path);
+      if (!engine || !engine.repl) throw new Error('engine not ready');
+      var r = engine.repl.loadModule(name, await resp.text());
+      if (!r.success) throw new Error('module ' + name + ' failed: ' + r.error);
+      return true;
+    }
   };
 
   // ── File handling ──
@@ -1053,6 +1074,10 @@
     }
     lastOutput.a2ui = JSON.stringify(a2uiNodes, null, 2);
     lastOutput.a2uiNodes = a2uiNodes;
+
+    // Keep the final block list reachable. docs/lab/* generate documents FROM
+    // these blocks, and there was previously no way to get at them.
+    lastOutput.blocks = blocks;
 
     // Blocks view
     if (panelBlocks) {

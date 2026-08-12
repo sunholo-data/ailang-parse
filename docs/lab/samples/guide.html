@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Getting Started with AILANG Parse</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2em auto; line-height: 1.6; color: #1a1a2e; }
+    h1 { color: #16213e; border-bottom: 3px solid #0f3460; padding-bottom: 0.3em; }
+    h2 { color: #0f3460; margin-top: 2em; }
+    h3 { color: #533483; }
+    code { background: #f0f0f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+    pre { background: #1a1a2e; color: #e0e0e0; padding: 1em; border-radius: 8px; overflow-x: auto; }
+    pre code { background: none; color: inherit; }
+    blockquote { border-left: 4px solid #0f3460; margin: 1em 0; padding: 0.5em 1em; background: #f8f9ff; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+    th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+    th { background: #0f3460; color: white; }
+    tr:nth-child(even) { background: #f8f9ff; }
+    .highlight { background: #fff3cd; padding: 1em; border-radius: 8px; border-left: 4px solid #ffc107; }
+    figure { margin: 1.5em 0; text-align: center; }
+    figcaption { font-style: italic; color: #666; margin-top: 0.5em; }
+    dl { margin: 1em 0; }
+    dt { font-weight: bold; color: #0f3460; margin-top: 0.5em; }
+    dd { margin-left: 2em; margin-bottom: 0.5em; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+    .badge-det { background: #d4edda; color: #155724; }
+    .badge-ai { background: #fff3cd; color: #856404; }
+  </style>
+</head>
+<body>
+
+<h1>Getting Started with AILANG Parse</h1>
+
+<p><strong>AILANG Parse</strong> is an open-source document parsing engine that converts
+   office documents, PDFs, emails, and media files into a unified
+   <em>Block ADT</em> (Algebraic Data Type). It runs natively, in the browser via WASM,
+   and as a cloud API.</p>
+
+<div class="highlight">
+  <strong>Why AILANG Parse?</strong> Most document parsers are format-specific black boxes.
+  AILANG Parse gives you <em>one structured output</em> for 16+ formats —
+  deterministic for office files, AI-powered for PDFs and media — with
+  typed errors, cost metadata, and full replayability.
+</div>
+
+<h2>Quick Start</h2>
+
+<h3>1. Install the SDK</h3>
+
+<p>Choose your language:</p>
+
+<pre><code># Python
+pip install ailang-parse
+
+# JavaScript / TypeScript
+npm install @sunholo/ailang-parse
+
+# Go
+go get github.com/sunholo-data/ailang-parse-go</code></pre>
+
+<h3>2. Parse Your First Document</h3>
+
+<pre><code># Python example
+from ailang_parse import parse
+
+result = parse("quarterly_report.docx", output="markdown")
+print(result.text)        # Markdown output
+print(result.blocks)      # Structured Block ADT
+print(result.metadata)    # Page count, word count, images found</code></pre>
+
+<blockquote>
+  <p><strong>Tip:</strong> For deterministic formats (DOCX, XLSX, PPTX, HTML, CSV, Markdown),
+     no API key is needed. AI-powered formats (PDF, images, audio, video) require
+     a Gemini or Anthropic API key.</p>
+</blockquote>
+
+<h2>The Block ADT</h2>
+
+<p>Every parsed document becomes a list of <strong>Blocks</strong>. There are 9 block variants:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Block Type</th>
+      <th>Description</th>
+      <th>Key Fields</th>
+      <th>Example Source</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>Text</code></td>
+      <td>Paragraph or body text</td>
+      <td>content, style</td>
+      <td>Word paragraphs, email body</td>
+    </tr>
+    <tr>
+      <td><code>Heading</code></td>
+      <td>Section heading (levels 1–6)</td>
+      <td>content, level</td>
+      <td>HTML &lt;h1&gt;–&lt;h6&gt;, DOCX styles</td>
+    </tr>
+    <tr>
+      <td><code>Table</code></td>
+      <td>Tabular data with rows and cells</td>
+      <td>rows, headers, merged_cells</td>
+      <td>Excel sheets, HTML tables</td>
+    </tr>
+    <tr>
+      <td><code>Image</code></td>
+      <td>Embedded image with optional caption</td>
+      <td>path, alt_text, mime_type</td>
+      <td>DOCX images, PPTX shapes</td>
+    </tr>
+    <tr>
+      <td><code>Audio</code></td>
+      <td>Audio content with transcription</td>
+      <td>path, transcript, duration</td>
+      <td>MP3 files, embedded audio</td>
+    </tr>
+    <tr>
+      <td><code>Video</code></td>
+      <td>Video content with description</td>
+      <td>path, description, duration</td>
+      <td>MP4 files, embedded video</td>
+    </tr>
+    <tr>
+      <td><code>List</code></td>
+      <td>Ordered or unordered list</td>
+      <td>items, ordered, nested</td>
+      <td>Bullet points, numbered steps</td>
+    </tr>
+    <tr>
+      <td><code>Section</code></td>
+      <td>Logical grouping of blocks</td>
+      <td>title, children</td>
+      <td>EPUB chapters, PPTX slides</td>
+    </tr>
+    <tr>
+      <td><code>Change</code></td>
+      <td>Tracked revision (insert/delete)</td>
+      <td>content, author, type, date</td>
+      <td>DOCX track changes</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Supported Formats</h2>
+
+<h3>Deterministic Parsers <span class="badge badge-det">No AI needed</span></h3>
+
+<p>These parsers produce identical output for the same input, every time:</p>
+
+<ol>
+  <li><strong>DOCX</strong> — Word documents with full fidelity
+    <ul>
+      <li>Tables with merged cells and styles</li>
+      <li>Track changes (insertions, deletions, moves)</li>
+      <li>Comments with author attribution</li>
+      <li>Headers, footers, and footnotes</li>
+      <li>Embedded images (PNG, JPEG, EMF, WMF)</li>
+    </ul>
+  </li>
+  <li><strong>PPTX</strong> — PowerPoint presentations
+    <ul>
+      <li>Slide content with speaker notes</li>
+      <li>Tables and shapes</li>
+      <li>Master slide layouts</li>
+    </ul>
+  </li>
+  <li><strong>XLSX</strong> — Excel spreadsheets
+    <ul>
+      <li>Multiple sheets as sections</li>
+      <li>Formulas (cached values)</li>
+      <li>Merged cells and number formats</li>
+    </ul>
+  </li>
+  <li><strong>HTML</strong> — Web pages and email HTML</li>
+  <li><strong>CSV / TSV</strong> — Delimited data files</li>
+  <li><strong>Markdown</strong> — Documentation and notes</li>
+  <li><strong>EPUB</strong> — E-books with chapter structure</li>
+  <li><strong>ODT / ODP / ODS</strong> — OpenDocument formats</li>
+  <li><strong>EML / MBOX</strong> — Email messages with attachments</li>
+</ol>
+
+<h3>AI-Powered Parsers <span class="badge badge-ai">API key required</span></h3>
+
+<p>These use multimodal AI (Gemini or Claude) for extraction:</p>
+
+<ul>
+  <li><strong>PDF</strong> — Scanned documents, complex layouts, equations</li>
+  <li><strong>Images</strong> — Photos, diagrams, screenshots, handwriting</li>
+  <li><strong>Audio</strong> — Speech transcription, speaker identification</li>
+  <li><strong>Video</strong> — Visual + audio understanding, slide extraction</li>
+</ul>
+
+<h2>Architecture</h2>
+
+<figure>
+  <img src="architecture.png" alt="AILANG Parse architecture diagram showing document input flowing through format detection, parser selection, and Block ADT output" width="600"/>
+  <figcaption>Figure 1: Document processing pipeline — from raw file to structured blocks</figcaption>
+</figure>
+
+<p>The processing pipeline has four stages:</p>
+
+<dl>
+  <dt>1. Format Detection</dt>
+  <dd>Identifies the input format by MIME type and file extension. ZIP-based formats
+      (DOCX, PPTX, XLSX, EPUB, ODT) are detected by inspecting archive contents.</dd>
+
+  <dt>2. Parser Selection</dt>
+  <dd>Routes to the appropriate parser module. Deterministic parsers handle
+      structured formats; AI parsers handle visual/audio content.</dd>
+
+  <dt>3. Block Extraction</dt>
+  <dd>The parser converts format-specific structures (XML elements, table cells,
+      slide shapes) into the universal Block ADT.</dd>
+
+  <dt>4. Output Formatting</dt>
+  <dd>Blocks are serialized to the requested output format: JSON (structured),
+      Markdown (human-readable), HTML (web-ready), or
+      <a href="https://sunholo.com/ailang-parse/a2ui">A2UI</a> (agent-friendly).</dd>
+</dl>
+
+<h2>Output Formats</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Format</th>
+      <th>Content-Type</th>
+      <th>Best For</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>JSON (blocks)</td>
+      <td><code>application/json</code></td>
+      <td>Programmatic access, pipelines, indexing</td>
+    </tr>
+    <tr>
+      <td>Markdown</td>
+      <td><code>text/markdown</code></td>
+      <td>LLM context, documentation, human reading</td>
+    </tr>
+    <tr>
+      <td>HTML</td>
+      <td><code>text/html</code></td>
+      <td>Web display, email rendering</td>
+    </tr>
+    <tr>
+      <td>A2UI</td>
+      <td><code>application/json</code></td>
+      <td>Agent-to-UI protocol, MCP tools, rich rendering</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>API Usage</h2>
+
+<p>The cloud API at <code>docparse.ailang.sunholo.com</code> provides all parsing
+   capabilities behind a simple REST interface:</p>
+
+<pre><code>curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Authorization: Bearer dp_your_api_key" \
+  -F "file=@report.docx" \
+  -F "output=markdown"</code></pre>
+
+<h3>Key Endpoints</h3>
+
+<ol>
+  <li><code>GET /api/v1/capabilities</code> — Machine-readable capability manifest</li>
+  <li><code>GET /api/v1/formats</code> — Supported input formats</li>
+  <li><code>GET /api/v1/samples</code> — Sample files for testing</li>
+  <li><code>POST /api/v1/parse</code> — Parse a document</li>
+  <li><code>POST /api/v1/estimate</code> — Cost and latency estimation</li>
+</ol>
+
+<section>
+  <h2>Next Steps</h2>
+  <p>Ready to start parsing? Here are some resources:</p>
+  <ul>
+    <li>Browse the <a href="https://sunholo.com/ailang-parse/">full documentation</a></li>
+    <li>Try the <a href="https://sunholo.com/ailang-parse/#demo">WASM demo</a> in your browser</li>
+    <li>Get an API key from the <a href="https://sunholo.com/docparse/dashboard.html">dashboard</a></li>
+    <li>Read the <a href="https://github.com/sunholo-data/ailang-parse">source code on GitHub</a></li>
+  </ul>
+</section>
+
+<footer>
+  <hr/>
+  <p><small>AILANG Parse v0.8.0 — Open-source document parsing for humans and machines.
+  Built with <a href="https://sunholo.com/ailang">AILANG</a>.</small></p>
+</footer>
+
+</body>
+</html>

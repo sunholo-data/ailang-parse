@@ -1,0 +1,51 @@
+module docparse/services/docparse_generate
+
+import std/json (encode, decode, jo, kv, js, ja)
+import std/list (map)
+import std/result (Ok, Err)
+import docparse/services/docx_generator (docxPartsFor, docxImageEntriesFor)
+import docparse/services/a2ui_formatter (a2ui_jsonToBlockList)
+
+-- Browser-side document GENERATION, kept out of docparse_browser deliberately.
+--
+-- The WASM type-checker has a 2-second wall-clock budget per module. Pulling
+-- docx_generator into docparse_browser made the module every visitor loads more
+-- expensive to check, for a capability only the lab page uses. Here, the main
+-- demo never touches it and pages that generate load this module on demand.
+
+-- === Browser-side DOCX generation ========================================
+--
+-- The browser has no filesystem, and std/zip.createArchive takes an output
+-- path with no in-memory variant (ailang-core #644). That blocks generateDocx
+-- here, but not generation itself: every OPC part is built by pure string
+-- code, and only the ZIP needs a file.
+--
+-- So AILANG returns the parts and JavaScript zips them. Every byte of XML —
+-- the OPC wiring, w:rPr runs, numbering, styles, headers — still comes from
+-- the same generator the CLI uses; JS does container packaging only.
+--
+-- Input is the block JSON this module's parsers already emit, so parse and
+-- generate compose in the browser without a round trip.
+export pure func generateDocxParts(blocksJson: string, title: string, author: string) -> string =
+  match decode(blocksJson) {
+    Ok(v) => {
+      let doc = {
+        format: "docx",
+        filename: "generated.docx",
+        metadata: {title: title, author: author, created: "", modified: "", pageCount: 0},
+        blocks: a2ui_jsonToBlockList(v)
+      };
+      encode(jo([
+        kv("parts", ja(map(browserPartToJson, docxPartsFor(doc)))),
+        kv("images", ja(map(browserImageToJson, docxImageEntriesFor(doc))))
+      ]))
+    },
+    Err(e) => encode(jo([kv("error", js("invalid blocks JSON: ${e}"))]))
+  }
+
+pure func browserPartToJson(p: {name: string, content: string}) -> Json =
+  jo([kv("name", js(p.name)), kv("content", js(p.content))])
+
+-- Image data is already base64 — JS decodes it before adding the entry.
+pure func browserImageToJson(p: {name: string, data: string}) -> Json =
+  jo([kv("name", js(p.name)), kv("base64", js(p.data))])

@@ -53,9 +53,35 @@
     the blocks are handed back to AILANG's DOCX generator, and the resulting OPC
     parts are zipped here in JavaScript — no server, no upload.
   </p>
-  <input type="file" id="file">
-  <button id="sample">Use sample</button>
-  <button id="run" disabled>Generate .docx</button>
+  <p style="margin:.75rem 0 .35rem;color:var(--dim);font-size:.9rem">
+    Demo documents — these are the same files the samples API serves. DOCX is the
+    only <em>output</em> format for now; the input can be anything the browser
+    parser handles, so the non-DOCX entries exercise cross-format conversion.
+  </p>
+  <select id="sample" style="padding:.5rem;border-radius:6px;min-width:22rem;
+      background:var(--bg);color:var(--fg);border:1px solid var(--line)">
+    <option value="">— built-in synthetic blocks —</option>
+    <optgroup label="DOCX → DOCX (round-trip fidelity)">
+      <option value="formatting.docx">formatting — bold/italic/underline runs</option>
+      <option value="tables.docx">tables — merged cells</option>
+      <option value="comments.docx">comments — structured, with authors</option>
+      <option value="track-changes.docx">track changes — insertions and moves</option>
+      <option value="footnotes.docx">footnotes</option>
+      <option value="hyperlinks.docx">hyperlinks — 7 targets incl. mailto</option>
+      <option value="real-world.docx">real world — mixed everything</option>
+    </optgroup>
+    <optgroup label="other formats → DOCX (cross-format)">
+      <option value="speaker-notes.pptx">PPTX — slides + speaker notes</option>
+      <option value="merged-cells.xlsx">XLSX — merged cells</option>
+      <option value="table-styles.odt">ODT — table styles</option>
+      <option value="guide.html">HTML — headings, lists, tables</option>
+      <option value="architecture.md">Markdown</option>
+    </optgroup>
+  </select>
+  <div style="margin-top:.75rem">
+    <input type="file" id="file">
+    <button id="run" disabled>Generate .docx</button>
+  </div>
 </div>
 
 <div class="card">
@@ -76,6 +102,11 @@
   <div id="log">idle</div>
 </div>
 
+<!-- JSZip unzips DOCX/PPTX/XLSX before AILANG parses the XML inside. The
+     workbench loads it too; without it every ZIP-based upload fails with
+     "JSZip is not defined". -->
+<script src="../vendor/jszip.min.js"></script>
+<script src="../js/docparse-blocks.js"></script>
 <script src="../js/wasm-demo.js"></script>
 <script>
 (function () {
@@ -161,7 +192,23 @@
     var base = window.docparseWasm.assetBase();
     $('m-bundle-note').textContent = mods.length + ' modules';
     log('engine ready, ' + mods.length + ' modules loaded', 'ok');
-    $('run').disabled = false;
+    // The generator is not in the default set — the WASM type-checker's 2s
+    // per-module budget is tight, so only this page pays for it.
+    log('loading docx_generator…');
+    // Order matters: docparse_generate imports docx_generator.
+    window.docparseWasm.loadExtraModule('docparse/services/docx_generator',
+                                        'docparse/services/docx_generator.ail')
+      .then(function () {
+        return window.docparseWasm.loadExtraModule('docparse/services/docparse_generate',
+                                                   'docparse/services/docparse_generate.ail');
+      })
+      .then(function () { log('generator ready', 'ok'); $('run').disabled = false; })
+      .catch(function (e) {
+        log('generator failed to load: ' + e.message, 'warn');
+        log('If this says "type-checker budget exceeded", this browser is too slow ' +
+            'for browser-side generation — the limit is wall-clock, so it is ' +
+            'hardware-dependent. See the note at the bottom of the design doc.', 'warn');
+      });
     // Payload sizes are informational; fetch them without blocking.
     Promise.all(mods.map(function (m) {
       return fetch(base + 'ailang/' + m.path, { method: 'HEAD' })
@@ -176,8 +223,27 @@
       .catch(function () {});
   }).catch(function (err) { log('engine failed: ' + err.message, 'warn'); });
 
-  $('file').addEventListener('change', function (ev) { pendingFile = ev.target.files[0]; log('selected ' + pendingFile.name); });
-  $('sample').addEventListener('click', function () { pendingFile = null; log('using built-in sample blocks'); });
+  $('file').addEventListener('change', function (ev) {
+    pendingFile = ev.target.files[0];
+    $('sample').value = '';
+    log('selected ' + pendingFile.name);
+  });
+  $('sample').addEventListener('change', function () {
+    pendingFile = null;
+    $('file').value = '';
+    log($('sample').value ? 'sample: ' + $('sample').value : 'using built-in synthetic blocks');
+  });
+
+  // Fetch a demo document and hand it to the same parse path the workbench uses.
+  async function blocksFromFile(file) {
+    var t0 = performance.now();
+    await window.docparseWasm.parseFile(file);
+    $('m-parse').textContent = (performance.now() - t0).toFixed(0) + ' ms';
+    var blocks = window.docparseWasm.lastBlocks();
+    if (!blocks || !blocks.length) throw new Error('parse produced no blocks for ' + file.name);
+    log('parsed ' + file.name + ' → ' + blocks.length + ' blocks', 'ok');
+    return JSON.stringify(blocks);
+  }
 
   $('run').addEventListener('click', async function () {
     $('run').disabled = true;
@@ -185,13 +251,14 @@
       var memStart = heap();
       var blocksJson;
 
+      var chosen = $('sample').value;
       if (pendingFile) {
-        var t0 = performance.now();
-        // Reuse the workbench's own parse path so this measures the real thing.
-        await window.handleDocParseFile(pendingFile);
-        $('m-parse').textContent = (performance.now() - t0).toFixed(0) + ' ms';
-        blocksJson = window.__docparseLastBlocksJson || null;
-        if (!blocksJson) { log('parse produced no blocks JSON — using sample instead', 'warn'); }
+        blocksJson = await blocksFromFile(pendingFile);
+      } else if (chosen) {
+        var resp = await fetch('samples/' + chosen);
+        if (!resp.ok) throw new Error('could not fetch sample ' + chosen);
+        var buf = await resp.blob();
+        blocksJson = await blocksFromFile(new File([buf], chosen));
       }
       if (!blocksJson) {
         blocksJson = JSON.stringify([
@@ -205,7 +272,7 @@
       }
 
       var t1 = performance.now();
-      var r = engine.call('generateDocxParts', blocksJson, 'Browser Generated', 'AILANG Parse');
+      var r = engine.callIn('docparse/services/docparse_generate', 'generateDocxParts', blocksJson, 'Browser Generated', 'AILANG Parse');
       var genMs = performance.now() - t1;
       if (!r.success) throw new Error(r.error);
       $('m-gen').textContent = genMs.toFixed(0) + ' ms';
