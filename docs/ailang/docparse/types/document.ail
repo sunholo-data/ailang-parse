@@ -45,6 +45,10 @@ export type InlineRun = {
   underline: bool,
   strike: bool,
   code: bool,
+  -- Link target, "" when the run is not a link. Markdown markers in `text`
+  -- cannot carry a URL into a generator: HTML→DOCX leaked a literal
+  -- "[A2UI](https://…)" into Word until this existed.
+  href: string,
   vertAlign: string   -- "" | "superscript" | "subscript"
 }
 
@@ -298,7 +302,7 @@ export pure func mkTextRuns(text: string, style: string, level: int, runs: [Inli
 -- have to spell out every flag to set one.
 export pure func plainRun(text: string) -> InlineRun =
   {text: text, bold: false, italic: false, underline: false,
-   strike: false, code: false, vertAlign: ""}
+   strike: false, code: false, href: "", vertAlign: ""}
 
 -- Merge adjacent runs that carry identical formatting.
 --
@@ -324,14 +328,19 @@ pure func docCoalesceStep(runs: [InlineRun], cur: InlineRun, acc: [InlineRun]) -
       if docRunFmtEq(cur, r)
       then docCoalesceStep(rest, {text: "${cur.text}${r.text}", bold: cur.bold,
                                   italic: cur.italic, underline: cur.underline,
-                                  strike: cur.strike, code: cur.code,
+                                  strike: cur.strike, code: cur.code, href: "",
                                   vertAlign: cur.vertAlign}, acc)
       else docCoalesceStep(rest, r, cur :: acc)
   }
 
+-- href is part of the identity: two runs with identical emphasis but different
+-- targets are different links, and merging them would silently drop one. This
+-- is the trap every new InlineRun field walks into — omit it here and the field
+-- survives parsing but vanishes before any generator sees it.
 pure func docRunFmtEq(a: InlineRun, b: InlineRun) -> bool =
   a.bold == b.bold && a.italic == b.italic && a.underline == b.underline &&
-  a.strike == b.strike && a.code == b.code && a.vertAlign == b.vertAlign
+  a.strike == b.strike && a.code == b.code && a.vertAlign == b.vertAlign &&
+  a.href == b.href
 
 -- Construct a HeadingBlock. Same rationale as mkText: route constructions
 -- through one function so field additions don't touch 25 call sites.

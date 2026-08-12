@@ -178,9 +178,14 @@ pure func runJsonFields(r: InlineRun) -> [{key: string, value: Json}] {
   let withUnder = if r.underline then concat(withItalic, [kv("underline", jb(true))]) else withItalic;
   let withStrike = if r.strike then concat(withUnder, [kv("strike", jb(true))]) else withUnder;
   let withCode = if r.code then concat(withStrike, [kv("code", jb(true))]) else withStrike;
-  if length(r.vertAlign) > 0
-  then concat(withCode, [kv("vertAlign", js(r.vertAlign))])
-  else withCode
+  let withVert = if length(r.vertAlign) > 0
+    then concat(withCode, [kv("vertAlign", js(r.vertAlign))])
+    else withCode;
+  -- Only when set, like every other run field: a plain run stays byte-identical
+  -- to the pre-href JSON shape.
+  if length(r.href) > 0
+  then concat(withVert, [kv("href", js(r.href))])
+  else withVert
 }
 
 pure func tableJsonFields(b: {rows: [[TableCell]], headers: [TableCell], caption: string}) -> [{key: string, value: Json}] {

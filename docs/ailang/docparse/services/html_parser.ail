@@ -466,11 +466,11 @@ pure func htmlChildTextWithSpacing(node: XmlNode) -> string {
 -- four literal asterisks.
 type HtmlFmt = {
   bold: bool, italic: bool, underline: bool,
-  strike: bool, code: bool, vertAlign: string
+  strike: bool, code: bool, href: string, vertAlign: string
 }
 
 pure func htmlNoFmt() -> HtmlFmt =
-  {bold: false, italic: false, underline: false, strike: false, code: false, vertAlign: ""}
+  {bold: false, italic: false, underline: false, strike: false, code: false, href: "", vertAlign: ""}
 
 -- Runs for a block-level node, or [] when nothing inside it is formatted —
 -- an unformatted paragraph gains nothing from a single plain run, and omitting
@@ -484,7 +484,8 @@ pure func htmlAnyFormatted(runs: [InlineRun]) -> bool =
   match runs {
     [] => false,
     r :: rest =>
-      if r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+      if r.bold || r.italic || r.underline || r.strike || r.code
+         || length(r.vertAlign) > 0 || length(r.href) > 0
       then true
       else htmlAnyFormatted(rest)
   }
@@ -507,32 +508,46 @@ pure func htmlChildRuns(child: XmlNode, fmt: HtmlFmt) -> [InlineRun] =
       -- <br> is a line break in the text stream; mirror it in the run stream so
       -- runs and text stay describing the same content.
       if tag == "br" then htmlLeafRun("\n", fmt)
-      else htmlCollectRuns(child, htmlApplyTag(fmt, tag))
+      else htmlCollectRuns(child, htmlApplyTag(fmt, tag, child))
     }
   }
 
 pure func htmlLeafRun(text: string, fmt: HtmlFmt) -> [InlineRun] =
   if length(text) == 0 then []
   else [{text: text, bold: fmt.bold, italic: fmt.italic, underline: fmt.underline,
-         strike: fmt.strike, code: fmt.code, vertAlign: fmt.vertAlign}]
+         strike: fmt.strike, code: fmt.code, href: fmt.href, vertAlign: fmt.vertAlign}]
 
 -- Tag -> formatting. Mirrors htmlInlineWrap's vocabulary so the two
 -- representations agree on what counts as emphasis.
-pure func htmlApplyTag(f: HtmlFmt, tag: string) -> HtmlFmt =
+-- `node` is needed for <a>: the target lives in an attribute, not the tag.
+pure func htmlApplyTag(f: HtmlFmt, tag: string, node: XmlNode) -> HtmlFmt =
+  if tag == "a"
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike,
+        code: f.code, href: htmlRunHref(node), vertAlign: f.vertAlign}
+  else htmlApplyTagPlain(f, tag)
+
+-- Anchor-only hrefs (#section) are navigation within a page, not a document
+-- link; htmlInlineAnchor drops them from the marker text for the same reason.
+pure func htmlRunHref(node: XmlNode) -> string {
+  let href = getOrElse(getAttr(node, "href"), "");
+  if length(href) == 0 || htmlIsAnchorOnly(href) then "" else href
+}
+
+pure func htmlApplyTagPlain(f: HtmlFmt, tag: string) -> HtmlFmt =
   if tag == "strong" || tag == "b"
-  then {bold: true, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  then {bold: true, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, href: f.href, vertAlign: f.vertAlign}
   else if tag == "em" || tag == "i"
-  then {bold: f.bold, italic: true, underline: f.underline, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  then {bold: f.bold, italic: true, underline: f.underline, strike: f.strike, code: f.code, href: f.href, vertAlign: f.vertAlign}
   else if tag == "u" || tag == "ins"
-  then {bold: f.bold, italic: f.italic, underline: true, strike: f.strike, code: f.code, vertAlign: f.vertAlign}
+  then {bold: f.bold, italic: f.italic, underline: true, strike: f.strike, code: f.code, href: f.href, vertAlign: f.vertAlign}
   else if tag == "del" || tag == "s" || tag == "strike"
-  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: true, code: f.code, vertAlign: f.vertAlign}
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: true, code: f.code, href: f.href, vertAlign: f.vertAlign}
   else if tag == "code" || tag == "kbd" || tag == "samp" || tag == "tt"
-  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: true, vertAlign: f.vertAlign}
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: true, href: f.href, vertAlign: f.vertAlign}
   else if tag == "sup"
-  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: "superscript"}
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, href: f.href, vertAlign: "superscript"}
   else if tag == "sub"
-  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, vertAlign: "subscript"}
+  then {bold: f.bold, italic: f.italic, underline: f.underline, strike: f.strike, code: f.code, href: f.href, vertAlign: "subscript"}
   else f
 
 -- Wrap a non-empty inline child with the appropriate markdown marker.
@@ -783,9 +798,11 @@ pure func htmlParseDl(dl: XmlNode) -> [Block] {
 pure func htmlParseDlChild(node: XmlNode) -> [Block] {
   let tag = getTag(node);
   let text = trim(htmlDeepText(node));
+  -- Definition lists carry inline formatting like any other block: a <dd> with
+  -- a link in it was the one place a markdown marker still reached Word.
   if tag == "dt" && length(text) > 0
-    then [mkText(text, "dt", 0)]
+    then [mkTextRuns(text, "dt", 0, htmlRunsFor(node))]
   else if tag == "dd" && length(text) > 0
-    then [mkText(text, "dd", 0)]
+    then [mkTextRuns(text, "dd", 0, htmlRunsFor(node))]
   else []
 }

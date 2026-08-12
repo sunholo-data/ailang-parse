@@ -234,7 +234,26 @@ pure func docxBlockToXml(block: Block) -> string =
 -- === Character formatting (P2 phase 4) ===================================
 
 pure func docxRunsToXml(runs: [InlineRun]) -> string =
-  foldl(\acc r. "${acc}${docxFormattedRun(r)}", "", runs)
+  foldl(\acc r. "${acc}${docxRunMaybeLinked(r)}", "", runs)
+
+-- A run carrying an href becomes a real clickable link.
+--
+-- Uses w:fldSimple with a HYPERLINK instruction rather than w:hyperlink + r:id:
+-- the field form embeds the target inline, so it needs no relationship entry
+-- and no id bookkeeping threaded through the block walk. Word, LibreOffice and
+-- Pages all render it, and docx_parser reads w:fldSimple back, so it
+-- round-trips.
+--
+-- Without this, HTML→DOCX put the literal Markdown "[text](url)" into Word:
+-- the URL only ever lived in the marker text, and runs had nowhere to keep it.
+pure func docxRunMaybeLinked(r: InlineRun) -> string =
+  if length(r.href) > 0
+  then "<w:fldSimple w:instr=\" HYPERLINK &quot;${xmlAttrEscape(r.href)}&quot; \">${docxLinkedRun(r)}</w:fldSimple>"
+  else docxFormattedRun(r)
+
+-- Same run, plus the Hyperlink character style so it looks like a link.
+pure func docxLinkedRun(r: InlineRun) -> string =
+  "<w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/>${docxRunPropsInner(r)}</w:rPr><w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
 
 pure func docxFormattedRun(r: InlineRun) -> string =
   "<w:r>${docxRunProps(r)}<w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
@@ -252,8 +271,21 @@ pure func docxRunProps(r: InlineRun) -> string {
   let vert = if length(r.vertAlign) > 0
     then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
     else "";
-  let inner = "${fonts}${bold}${italic}${strike}${under}${vert}";
+  let inner = docxRunPropsInner(r);
   if length(inner) > 0 then "<w:rPr>${inner}</w:rPr>" else ""
+}
+
+-- The rPr children alone, so a linked run can prepend w:rStyle to them.
+pure func docxRunPropsInner(r: InlineRun) -> string {
+  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
+  let bold = if r.bold then "<w:b/>" else "";
+  let italic = if r.italic then "<w:i/>" else "";
+  let strike = if r.strike then "<w:strike/>" else "";
+  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
+  let vert = if length(r.vertAlign) > 0
+    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
+    else "";
+  "${fonts}${bold}${italic}${strike}${under}${vert}"
 }
 
 -- Counters threaded through the body walk. Images and links each need a
@@ -340,40 +372,62 @@ pure func docxInlineImage(imgIdx: int, description: string) -> string {
 }
 
 -- Build a DOCX table: <w:tbl> with <w:tr>/<w:tc>
+-- Usable width of a US Letter page with 1" margins, in twips. Word auto-fits a
+-- table with no explicit widths, but that is Word being forgiving: ECMA-376
+-- §17.4.49 makes w:tblGrid part of the table's definition, and a reader that
+-- follows the spec (Pages, for one) collapses every column to its minimum —
+-- one character per line.
+pure func docxContentWidthTwips() -> int = 9360
+
 pure func docxTableToXml(headers: [TableCell], rows: [[TableCell]]) -> string {
-  let tblPr = "<w:tblPr><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr>";
+  let cols = docxTableColCount(headers, rows);
+  let colW = if cols > 0 then docxContentWidthTwips() / cols else docxContentWidthTwips();
+  let tblPr = "<w:tblPr><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders><w:tblW w:w=\"${intToStr(docxContentWidthTwips())}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>";
+  let grid = "<w:tblGrid>${docxGridCols(cols, colW)}</w:tblGrid>";
   let headerRow = if listLength(headers) > 0
-    then "<w:tr>${docxHeaderCellsToXml(headers)}</w:tr>"
+    then "<w:tr>${docxHeaderCellsToXml(headers, colW)}</w:tr>"
     else "";
-  let dataRows = foldl(\acc row. "${acc}<w:tr>${docxDataCellsToXml(row)}</w:tr>", "", rows);
-  "<w:tbl>${tblPr}${headerRow}${dataRows}</w:tbl>"
+  let dataRows = foldl(\acc row. "${acc}<w:tr>${docxDataCellsToXml(row, colW)}</w:tr>", "", rows);
+  "<w:tbl>${tblPr}${grid}${headerRow}${dataRows}</w:tbl>"
 }
 
--- Header cells as bold <w:tc>
-pure func docxHeaderCellsToXml(cells: [TableCell]) -> string =
-  foldl(\acc c. "${acc}${docxHeaderCellToXml(c)}", "", cells)
+-- Widest row wins, counting a spanned cell as the columns it covers.
+pure func docxTableColCount(headers: [TableCell], rows: [[TableCell]]) -> int =
+  foldl(\acc row. { let n = docxRowSpanWidth(row) in if n > acc then n else acc },
+        docxRowSpanWidth(headers), rows)
 
-pure func docxHeaderCellToXml(cell: TableCell) -> string {
-  if cell.merged then "<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>"
+pure func docxRowSpanWidth(cells: [TableCell]) -> int =
+  foldl(\acc c. acc + (if c.colSpan > 1 then c.colSpan else 1), 0, cells)
+
+pure func docxGridCols(n: int, w: int) -> string =
+  if n <= 0 then ""
+  else "<w:gridCol w:w=\"${intToStr(w)}\"/>${docxGridCols(n - 1, w)}"
+
+-- Header cells as bold <w:tc>
+pure func docxHeaderCellsToXml(cells: [TableCell], colW: int) -> string =
+  foldl(\acc c. "${acc}${docxHeaderCellToXml(c, colW)}", "", cells)
+
+pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
+  if cell.merged then "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/><w:vMerge/></w:tcPr><w:p/></w:tc>"
   else {
     let spanPr = if cell.colSpan > 1
       then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
       else "";
-    "<w:tc><w:tcPr>${spanPr}</w:tcPr><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r></w:p></w:tc>"
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r></w:p></w:tc>"
   }
 }
 
 -- Data cells as normal <w:tc>
-pure func docxDataCellsToXml(cells: [TableCell]) -> string =
-  foldl(\acc c. "${acc}${docxDataCellToXml(c)}", "", cells)
+pure func docxDataCellsToXml(cells: [TableCell], colW: int) -> string =
+  foldl(\acc c. "${acc}${docxDataCellToXml(c, colW)}", "", cells)
 
-pure func docxDataCellToXml(cell: TableCell) -> string {
-  if cell.merged then "<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>"
+pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
+  if cell.merged then "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/><w:vMerge/></w:tcPr><w:p/></w:tc>"
   else {
     let spanPr = if cell.colSpan > 1
       then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
       else "";
-    "<w:tc><w:tcPr>${spanPr}</w:tcPr>${docxParagraph(docxRun(cell.text))}</w:tc>"
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph(docxRun(cell.text))}</w:tc>"
   }
 }
 
