@@ -9,7 +9,83 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.31.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.32.0...HEAD)
+
+## [v0.32.0](https://github.com/sunholo-data/ailang-parse/compare/v0.31.0...v0.32.0) — 2026-08-12
+
+### Generation reaches the SDKs
+
+`POST /api/v1/convert` is live, so all four SDKs gain `convert()` and
+`convert_file()`. Each returns **decoded bytes** with metadata alongside: the
+wire uses base64 for `docx pptx xlsx odt odp ods` and UTF-8 for `html md qmd`,
+and branching on that belongs to the SDK, not to every user's code.
+
+Targets are passed verbatim — the server normalises case, a leading dot and the
+`markdown`/`htm`/`quarto` aliases — so a future target needs no SDK release.
+
+`mcpConvert`'s hosted branch now calls the endpoint. It previously demanded an
+API key and then converted **locally**, gating work that ran on the caller's own
+machine.
+
+### Hyperlinks survive into generated documents
+
+`InlineRun` gains `href`. The URL previously existed only inside the Markdown
+marker in `text`, so generators rendering from runs dropped the target and
+generators rendering from text leaked raw Markdown — HTML→DOCX put a literal
+`[A2UI](https://…)` into Word.
+
+DOCX emits `w:fldSimple` with a HYPERLINK instruction rather than
+`w:hyperlink` + `r:id`: the field form carries the target inline, needing no
+relationship entry, and `docx_parser` reads `w:fldSimple` back, so it
+round-trips. `<dt>`/`<dd>` carry runs now too — a definition list was the last
+place a marker reached Word.
+
+### DOCX tables have column widths
+
+`docxTableToXml` emitted no `<w:tblGrid>` and no cell widths. Word auto-fits and
+forgives it; ECMA-376 §17.4.49 makes `tblGrid` part of the table's definition,
+so spec-following readers (Pages) collapsed every column to one character per
+line. Now emits `tblGrid`, per-cell `w:tcW` scaled by `gridSpan`, `tblW` in dxa
+and a fixed layout.
+
+### Browser-side generation
+
+`docxPartsFor` and `docxImageEntriesFor` expose every OPC part as pure strings,
+so a caller that can ZIP for itself does not need `std/zip`'s filesystem-bound
+`createArchive` (ailang-core #644). New `docparse_generate` module keeps the
+generator out of the default browser module set — the WASM type-checker's
+2-second budget is wall-clock and tight.
+
+### Fixes
+
+- **JSON→blocks flattened all formatting.** `a2ui_jsonToBlock` rebuilt blocks
+  with the non-runs constructors, so any round-trip through JSON silently lost
+  bold/italic/links. Affects the a2ui consumer, not only browser generation.
+- **Adjacent runs are coalesced** by identical formatting — including `href`,
+  which every new `InlineRun` field must join or it vanishes before a generator
+  sees it.
+- **Infinite recursion in two generators** killed six conversion paths
+  (DOCX/XLSX/HTML → PPTX and → ODP). `verify_generated.py` gained an L5
+  conversion-matrix check.
+- **PPTX speaker notes, DOCX hyperlink URLs, field results, section breaks and
+  XLSX merged cells** restored — all deleted by one bad sync in March.
+
+### Known conformance gap
+
+ODF `mimetype` entries are DEFLATED where OASIS ODF 1.2 part 3 §3.3 requires
+STORED. `std/zip.createArchive` takes no compression method, so no generator can
+currently satisfy it. LibreOffice, python-docx/pptx and openpyxl all accept the
+files; strict ODF validators and `file(1)` magic sniffing will not.
+
+### Upgrading
+
+**0.31.0 onward is a breaking change for record literals.** `TextBlock`/
+`HeadingBlock` carry `runs`, `ListBlock` carries `itemRuns`, and `InlineRun` now
+carries `href`, so code constructing those literals directly fails to
+type-check. Use `mkText`/`mkHeading`/`mkList`/`mkTextRuns` — the type error
+points at the literal rather than at the constructor, which makes this easy to
+misread.
+
 
 ## [v0.31.0](https://github.com/sunholo-data/ailang-parse/compare/v0.30.0...v0.31.0) — 2026-08-11
 
