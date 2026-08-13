@@ -1,6 +1,6 @@
 module docparse/services/docx_generator
 
-import std/string (length, intToStr, split, contains)
+import std/string (length, intToStr, split, contains, startsWith)
 import std/list (map, foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
@@ -191,7 +191,9 @@ pure func docxBlockToXml(block: Block) -> string =
       else docxStyledParagraph("Heading${intToStr(h.level)}", h.text),
 
     TextBlock(t) =>
-      if listLength(t.runs) > 0
+      if t.style == "hr" then docxHorizontalRule()
+      else if docxIsCodeStyle(t.style) then docxCodeBlock(t.text)
+      else if listLength(t.runs) > 0
       then docxParagraph(docxRunsToXml(t.runs))
       else if length(t.text) > 0
       then docxParagraph(docxRun(t.text))
@@ -232,6 +234,23 @@ pure func docxBlockToXml(block: Block) -> string =
   }
 
 -- === Character formatting (P2 phase 4) ===================================
+
+-- A fenced code block. Word has no code block, so each source line becomes its
+-- own monospaced paragraph — which preserves the line structure that a single
+-- paragraph with embedded newlines would lose.
+pure func docxIsCodeStyle(style: string) -> bool =
+  style == "code" || startsWith(style, "code:")
+
+pure func docxCodeBlock(text: string) -> string =
+  foldl(\acc line. "${acc}${docxParagraph(docxMonoRun(line))}", "", split(text, "\n"))
+
+pure func docxMonoRun(text: string) -> string =
+  "<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
+
+-- A thematic break. Word has no <hr> element — the idiom is an empty paragraph
+-- carrying a bottom border, which is what Word itself writes for one.
+pure func docxHorizontalRule() -> string =
+  docxParagraph("<w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr>")
 
 pure func docxRunsToXml(runs: [InlineRun]) -> string =
   foldl(\acc r. "${acc}${docxRunMaybeLinked(r)}", "", runs)

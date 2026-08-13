@@ -1,6 +1,6 @@
 module docparse/services/qmd_generator
 
-import std/string (length, join, intToStr, split)
+import std/string (length, join, intToStr, split, startsWith, substring)
 import std/list (map, foldl, length as listLength)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
 
@@ -68,7 +68,10 @@ pure func qmdBlockToStr(block: Block) -> string =
       "${qmdHeadingPrefix(h.level)}${qmdInline(h.text, h.runs)}\n\n",
 
     TextBlock(t) =>
-      if length(t.text) > 0
+      if t.style == "hr" then "---\n\n"
+      else if t.style == "code" || startsWith(t.style, "code:")
+      then "```${qmdCodeLang(t.style)}\n${t.text}\n```\n\n"
+      else if length(t.text) > 0
       then if listLength(t.runs) > 0
         then "${qmdRunsToStr(t.runs)}\n\n"
         else if length(t.style) > 0 && t.style != "normal" && t.style != "Normal"
@@ -109,6 +112,10 @@ pure func qmdBlockToStr(block: Block) -> string =
       then "> ${c.anchorText}\n>\n> — **${c.author}**: ${c.text}\n\n"
       else "> — **${c.author}** (unanchored): ${c.text}\n\n"
   }
+
+-- The info string of a fenced code block, carried as the "code:<lang>" style.
+pure func qmdCodeLang(style: string) -> string =
+  if startsWith(style, "code:") then substring(style, 5, length(style)) else ""
 
 -- === Inline runs → Markdown =============================================
 --

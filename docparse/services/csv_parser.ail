@@ -1,7 +1,7 @@
 module docparse/services/csv_parser
 
-import std/string (split, trim, length, find, substring, chars, join)
-import std/list (map, head, tail, filter, length as listLength)
+import std/string (split, trim, length, contains, foldChars, join)
+import std/list (map, filter, reverse, length as listLength)
 import std/option (Some, None)
 import docparse/types/document (Block, TableBlock, TableCell, simpleCell, mkTable)
 
@@ -11,8 +11,8 @@ import docparse/types/document (Block, TableBlock, TableCell, simpleCell, mkTabl
 -- Supports:
 --   - Comma-separated (CSV) and tab-separated (TSV) formats
 --   - First row as header detection (heuristic)
---   - Quoted fields with embedded delimiters
---   - Trimming of whitespace
+--   - RFC 4180 quoting: delimiters, newlines and "" escapes inside quoted fields
+--   - Trimming of whitespace on unquoted fields only
 --
 -- Usage:
 --   let blocks = parseCsv(content, ",")   -- CSV
@@ -26,41 +26,116 @@ export pure func parseCsv(content: string, delimiter: string) -> [Block]
   let trimmed = trim(content);
   if length(trimmed) == 0 then []
   else {
-    let lines = filter(\l. length(trim(l)) > 0, split(trimmed, "\n"));
-    if listLength(lines) == 0 then []
-    else {
-      let allRows = map(\line. csvParseLine(line, delimiter), lines);
-      -- First row becomes headers, rest become data rows
-      match allRows {
-        [] => [],
-        headerCells :: dataRows =>
-          [mkTable(map(\row. map(simpleCell, row), dataRows), map(simpleCell, headerCells))]
-      }
+    -- A file with no quote character anywhere cannot have quoted fields, so the
+    -- line-oriented split is exactly equivalent and much cheaper than folding
+    -- over every character. Most CSVs take this path.
+    let allRows = if contains(trimmed, "\"")
+      then csvParseQuoted(trimmed, delimiter)
+      else csvParseSimple(trimmed, delimiter);
+    -- First row becomes headers, rest become data rows
+    match allRows {
+      [] => [],
+      headerCells :: dataRows =>
+        [mkTable(map(\row. map(simpleCell, row), dataRows), map(simpleCell, headerCells))]
     }
   }
 }
 
--- Parse a single CSV line into a list of field strings
--- Handles basic quoting: "field with, comma" is one field
+-- === Unquoted fast path ==================================================
+
+pure func csvParseSimple(content: string, delimiter: string) -> [[string]] {
+  let lines = filter(\l. length(trim(l)) > 0, split(content, "\n"));
+  map(\line. csvParseLine(line, delimiter), lines)
+}
+
+-- Parse a single CSV line into a list of field strings.
+-- Only used when the content contains no quote characters at all.
 -- Contract: always produces at least one field per non-empty line
 pure func csvParseLine(line: string, delimiter: string) -> [string]
   ensures { listLength(result) >= 1 }
 {
-  let raw = split(line, delimiter);
-  map(trim, map(csvStripQuotes, raw))
+  map(trim, split(line, delimiter))
 }
 
--- Strip surrounding quotes from a field
--- Contract: result is never longer than input (stripping only removes chars)
-pure func csvStripQuotes(field: string) -> string
-  ensures { length(result) <= length(field) }
-{
-  let t = trim(field);
-  let len = length(t);
-  if len >= 2 then
-    let firstChar = substring(t, 0, 1) in
-    let lastChar = substring(t, len - 1, len) in
-    if firstChar == "\"" && lastChar == "\"" then substring(t, 1, len - 1)
-    else t
-  else t
+-- === RFC 4180 state machine ==============================================
+--
+-- Splitting on the delimiter cannot work once quoting is in play: a quoted
+-- field may contain the delimiter, a newline, or an escaped quote, and none of
+-- those are field or record boundaries. The only correct reading is
+-- character-by-character with the quote state carried along.
+--
+--   rows   completed records, reversed
+--   cells  completed fields of the current record, reversed
+--   buf    characters of the current field, reversed
+--   inQ    currently inside a quoted field
+--   wasQ   current field was quoted (its whitespace is significant)
+--   pendQ  last character was a quote while inQ — it either escapes the next
+--          quote ("" -> ") or closes the field, and only the next character says which
+type CsvState = {
+  rows: [[string]],
+  cells: [string],
+  buf: [string],
+  inQ: bool,
+  wasQ: bool,
+  pendQ: bool
+}
+
+pure func csvEmptyState() -> CsvState = {
+  rows: [], cells: [], buf: [], inQ: false, wasQ: false, pendQ: false
+}
+
+pure func csvParseQuoted(content: string, delimiter: string) -> [[string]] {
+  let final = foldChars(\st c. csvStep(st, c, delimiter), csvEmptyState(), content);
+  csvFinish(final)
+}
+
+pure func csvStep(st: CsvState, c: string, delimiter: string) -> CsvState =
+  if st.pendQ then
+    -- "" inside a quoted field is a literal quote; anything else means the
+    -- field's closing quote has just been seen, so re-dispatch c unquoted.
+    if c == "\"" then { st | buf: "\"" :: st.buf, pendQ: false }
+    else csvStepPlain({ st | inQ: false, pendQ: false }, c, delimiter)
+  else if st.inQ then
+    if c == "\"" then { st | pendQ: true }
+    else if c == "\r" then st
+    else { st | buf: c :: st.buf }
+  else csvStepPlain(st, c, delimiter)
+
+pure func csvStepPlain(st: CsvState, c: string, delimiter: string) -> CsvState =
+  if c == "\"" then { st | inQ: true, wasQ: true }
+  else if c == delimiter then csvFlushField(st)
+  else if c == "\n" then csvFlushRow(st)
+  else if c == "\r" then st
+  else { st | buf: c :: st.buf }
+
+-- Quoted fields keep their whitespace — it was deliberate enough to quote.
+-- Unquoted fields are trimmed, which is what the line-split path has always done.
+pure func csvFlushField(st: CsvState) -> CsvState {
+  let raw = join("", reverse(st.buf));
+  let value = if st.wasQ then raw else trim(raw);
+  { st | cells: value :: st.cells, buf: [], wasQ: false }
+}
+
+-- A record ends. An entirely empty line produces one empty field and is
+-- dropped, matching the blank-line filtering of the unquoted path; a line of
+-- empty fields (",,") is real data and is kept.
+pure func csvFlushRow(st: CsvState) -> CsvState {
+  let flushed = csvFlushField(st);
+  let row = reverse(flushed.cells);
+  if csvRowIsEmptyLine(row)
+  then { flushed | cells: [] }
+  else { flushed | rows: row :: flushed.rows, cells: [] }
+}
+
+pure func csvRowIsEmptyLine(row: [string]) -> bool =
+  match row {
+    cell :: [] => length(cell) == 0,
+    _ => false
+  }
+
+pure func csvFinish(st: CsvState) -> [[string]] {
+  let done = if listLength(st.buf) == 0 && listLength(st.cells) == 0
+    then st
+    else csvFlushRow(st);
+  reverse(done.rows)
 }

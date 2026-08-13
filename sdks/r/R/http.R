@@ -11,7 +11,7 @@ NULL
 .build_request <- function(base_url, path, api_key = NULL, timeout = 60) {
   req <- httr2::request(paste0(sub("/$", "", base_url), path))
   req <- httr2::req_timeout(req, timeout)
-  req <- httr2::req_user_agent(req, "ailangparse-r/0.10.0")
+  req <- httr2::req_user_agent(req, "ailangparse-r/0.11.0")
   req <- httr2::req_error(req, is_error = function(resp) FALSE)
   if (!is.null(api_key) && nzchar(api_key)) {
     req <- httr2::req_headers(req, `x-api-key` = api_key)

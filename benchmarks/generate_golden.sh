@@ -18,9 +18,14 @@ cd "$REPO_DIR"
 
 # Collect all test files (stress tests live in data/test_files/stress/ and are excluded by path)
 FILES=()
+# The challenge/ office files are scored by the suite but were missing from
+# this list, so their goldens could not be refreshed here at all — they had to
+# be hand-edited or left stale. Globbed on the same extensions as the top level.
 for f in "$TEST_DIR"/*.docx "$TEST_DIR"/*.pptx "$TEST_DIR"/*.xlsx \
          "$TEST_DIR"/*.odt "$TEST_DIR"/*.odp "$TEST_DIR"/*.ods \
          "$TEST_DIR"/*.epub "$TEST_DIR"/*.html "$TEST_DIR"/*.csv "$TEST_DIR"/*.tsv "$TEST_DIR"/*.md \
+         "$TEST_DIR"/challenge/*.docx "$TEST_DIR"/challenge/*.pptx "$TEST_DIR"/challenge/*.xlsx \
+         "$TEST_DIR"/challenge/*.html \
          "$TEST_DIR"/challenge/*.eml "$TEST_DIR"/challenge/*.mbox; do
   [ -f "$f" ] || continue
   FILES+=("$f")

@@ -122,6 +122,7 @@ convert_save <- function(x, path = NULL) {
     mime          = .s(d$mime),
     data_length   = .i(d$dataLength),
     kind          = .s(d$kind),
+    name          = .s(d$name),
     id            = .s(d$id),
     anchor_text   = .s(d$anchorText),
     anchor_kind   = .s(d$anchorKind),

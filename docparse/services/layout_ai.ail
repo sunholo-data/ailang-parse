@@ -8,7 +8,7 @@ import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
 import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, last_or)
 import std/fs (readFileBytes)
-import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable, mkNamedSection)
 
 -- AI-powered layout understanding
 -- Uses LLM to handle complex document structure that pure XML parsing misses:
@@ -80,7 +80,7 @@ func layoutDescribeOne(baseDir: string, b: Block) -> {block: Block, warnings: [s
       },
     SectionBlock(s) => {
       let inner = layoutDescribeList(baseDir, s.blocks);
-      { block: SectionBlock({kind: s.kind, blocks: inner.blocks}), warnings: inner.warnings, aiCalls: inner.aiCalls }
+      { block: mkNamedSection(s.kind, s.name, inner.blocks), warnings: inner.warnings, aiCalls: inner.aiCalls }
     },
     _ => { block: b, warnings: [], aiCalls: 0 }
   }
@@ -238,7 +238,7 @@ func enhanceOneBlock(b: Block) -> Block ! {AI} =
       else b,
     SectionBlock(s) => {
       let innerEnhanced = mapE(enhanceOneBlock, s.blocks);
-      SectionBlock({kind: s.kind, blocks: innerEnhanced})
+      mkNamedSection(s.kind, s.name, innerEnhanced)
     },
     _ => b
   }

@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr, split)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
-import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
 -- XLSX Parser
@@ -485,7 +485,7 @@ func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Ma
 
 -- Keep the SectionBlock(kind: "comment") wrapper used by every other format
 pure func xlsxWrapComment(b: Block) -> Block =
-  SectionBlock({kind: "comment", blocks: [b]})
+  mkSection("comment", [b])
 
 -- Parse a single worksheet's XML into blocks
 -- Emits a HeadingBlock with the sheet name followed by the table data.
@@ -510,7 +510,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
       [] => [heading],
       firstRow :: dataRows => {
         let tableBlock = mkTable(dataRows, firstRow);
-        let section = SectionBlock({kind: "sheet", blocks: [heading, tableBlock]});
+        let section = mkNamedSection("sheet", xlsxCleanSheetName(sheetName), [heading, tableBlock]);
         [section]
       }
     }

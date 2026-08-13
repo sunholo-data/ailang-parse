@@ -70,8 +70,10 @@ type Block struct {
 	ParentID         string `json:"parentId,omitempty"` // set on threaded replies
 	Resolved         bool   `json:"resolved,omitempty"`
 
-	// SectionBlock (recursive)
+	// SectionBlock (recursive). Name is the container's own identity (sheet
+	// name, slide title, chapter); empty for sections with no name of their own.
 	Kind     string  `json:"kind,omitempty"`
+	Name     string  `json:"name,omitempty"`
 	Children []Block `json:"blocks,omitempty"`
 }
 

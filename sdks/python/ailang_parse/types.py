@@ -176,8 +176,12 @@ class Block:
     transcription: str = ""
     mime: str = ""
     data_length: int = 0
-    # SectionBlock
+    # SectionBlock. `name` is the container's own identity — a sheet name, a
+    # slide title, a chapter — which used to be packed into `kind` as
+    # "sheet:Q1" and could not be read back out reliably. Empty for sections
+    # that have no name of their own (header, footer, textbox, comment).
     kind: str = ""
+    name: str = ""
     children: List["Block"] = field(default_factory=list)
     # CommentBlock. anchor_text is the span of document text this comment
     # annotates. When anchored is False the anchor could not be resolved and
@@ -207,6 +211,7 @@ class Block:
         b.mime = d.get("mime", "")
         b.data_length = d.get("dataLength", 0)
         b.kind = d.get("kind", "")
+        b.name = d.get("name", "")
         b.ordered = d.get("ordered", False)
         b.items = d.get("items", [])
         b.id = d.get("id", "")
@@ -702,7 +707,7 @@ def _flatten_blocks(blocks: List["Block"], policy: FlattenPolicy,
         elif bt == "section" or bt == "SectionBlock":
             # Recurse with section_path extended by the section's "kind"
             # or by an inferred heading from children.
-            label = b.kind or _section_label(b)
+            label = b.name or b.kind or _section_label(b)
             new_path = section_path + [label] if (policy.section_path and label) \
                 else section_path
             out.extend(_flatten_blocks(b.children, policy, new_path, counter))
@@ -721,7 +726,10 @@ def _flatten_blocks(blocks: List["Block"], policy: FlattenPolicy,
 
 
 def _section_label(b: "Block") -> str:
-    """Best-effort label for a SectionBlock: the first heading child's text."""
+    """Best-effort label for a SectionBlock: the first heading child's text.
+
+    Only reached when the section carries neither a name nor a kind.
+    """
     for child in b.children:
         if (child.type in ("heading", "HeadingBlock")) and child.text:
             return child.text

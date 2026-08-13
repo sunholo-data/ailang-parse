@@ -8,7 +8,7 @@ import std/result (Ok, Err)
 import std/string (length, trim, contains, startsWith, substring, endsWith)
 import std/list (map, flatMap, filter, concat, any, length as listLength)
 import docparse/services/odf_text (odfText, odfWhitespace)
-import docparse/types/document (mkHeadingRuns, mkTextRuns, mkListRuns, InlineRun, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable)
+import docparse/types/document (mkHeadingRuns, mkTextRuns, mkListRuns, InlineRun, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable, mkSection)
 
 -- ODT Parser — converts OpenDocument Text to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -73,14 +73,14 @@ pure func odtExtractMasterPage(mp: XmlNode, styles: Map[string, OdtFmt]) -> [Blo
   let headers = match findFirst(mp, "style:header") {
     Some(h) =>
       let blocks = odtProcessChildren(getChildren(h), styles) in
-      if listLength(blocks) > 0 then [SectionBlock({kind: "header", blocks: blocks})]
+      if listLength(blocks) > 0 then [mkSection("header", blocks)]
       else [],
     None => []
   };
   let footers = match findFirst(mp, "style:footer") {
     Some(f) =>
       let blocks = odtProcessChildren(getChildren(f), styles) in
-      if listLength(blocks) > 0 then [SectionBlock({kind: "footer", blocks: blocks})]
+      if listLength(blocks) > 0 then [mkSection("footer", blocks)]
       else [],
     None => []
   };
@@ -255,7 +255,7 @@ pure func odtProcessNode(node: XmlNode, styles: Map[string, OdtFmt]) -> [Block] 
   else if tag == "text:section" then
     let blocks = odtProcessChildren(getChildren(node), styles) in
     let name = getOrElse(getAttr(node, "text:name"), "section") in
-    if listLength(blocks) > 0 then [SectionBlock({kind: name, blocks: blocks})]
+    if listLength(blocks) > 0 then [mkSection(name, blocks)]
     else []
 
   -- Frames: draw:frame (may contain images or text boxes)
@@ -353,7 +353,7 @@ pure func odtProcessFrame(frame: XmlNode, styles: Map[string, OdtFmt]) -> [Block
   match findFirst(frame, "draw:text-box") {
     Some(textBox) =>
       let blocks = odtProcessChildren(getChildren(textBox), styles) in
-      if listLength(blocks) > 0 then [SectionBlock({kind: "textbox", blocks: blocks})]
+      if listLength(blocks) > 0 then [mkSection("textbox", blocks)]
       else [],
     None =>
       -- Check for image (draw:image with xlink:href)

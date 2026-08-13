@@ -54,10 +54,7 @@ import std/io (println)
 import std/result (Ok, Err)
 import std/ai (AIError)
 
-import docparse/types/document (mkText, 
-  Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata,
-  countBlocks, filterImages
-)
+import docparse/types/document (mkText, Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterImages, mkSection, mkNamedSection)
 import docparse/services/format_router (detectFormat, getExtension, officeType)
 
 -- Deterministic parsers (all ! {FS} or pure)
@@ -585,7 +582,7 @@ func orchEmlResolveOneBlock(block: Block, counter: int, projectRoot: string)
             let parsedBlocks = orchEmlParseAttachment(tmpPath, ext, projectRoot);
             removeFile(tmpPath);
             let metaBlock = mkText(meta, "attachment-meta", 0);
-            { block: SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks}), count: 1 }
+            { block: mkSection("attachment", metaBlock :: parsedBlocks), count: 1 }
           },
           None => {
             println("  Warning: Failed to decode base64 for attachment");
@@ -595,7 +592,7 @@ func orchEmlResolveOneBlock(block: Block, counter: int, projectRoot: string)
       }
       else {
         let inner = orchEmlResolveAttachments(s.blocks, counter, projectRoot);
-        { block: SectionBlock({kind: s.kind, blocks: inner.blocks}), count: inner.count }
+        { block: mkNamedSection(s.kind, s.name, inner.blocks), count: inner.count }
       }
     },
     _ => { block: block, count: 0 }

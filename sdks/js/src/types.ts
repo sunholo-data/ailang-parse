@@ -171,8 +171,10 @@ export interface Block {
   anchorBlockIndex?: number;
   parentId?: string; // set on threaded replies
   resolved?: boolean;
-  // SectionBlock
+  // SectionBlock. `name` is the container's own identity (sheet name, slide
+  // title, chapter); absent for sections that have no name of their own.
   kind?: string;
+  name?: string;
   blocks?: Block[];
 }
 

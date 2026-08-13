@@ -6,7 +6,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
@@ -148,7 +148,7 @@ func parseSectionEntries(filepath: string, entries: [string], kind: string) -> [
       let moreBlocks = parseSectionEntries(filepath, rest, kind);
       if hasContent(blocks)
       then {
-        let section = SectionBlock({kind: kind, blocks: blocks});
+        let section = mkSection(kind, blocks);
         section :: moreBlocks
       }
       else moreBlocks
@@ -220,7 +220,7 @@ pure func processBodyNode(node: XmlNode, rels: Map[string, string]) -> [Block] {
   else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels)
   -- A body-level w:sectPr is a section break. Emitted as an empty marker block
   -- so consumers can see where a section ends; also deleted by e9de665.
-  else if tag == "w:sectPr" then [SectionBlock({kind: "section-break", blocks: []})]
+  else if tag == "w:sectPr" then [mkSection("section-break", [])]
   else []
 }
 
@@ -243,7 +243,7 @@ pure func extractTextBoxes(node: XmlNode, rels: Map[string, string]) -> [Block] 
 pure func extractTextBoxContent(nodes: [XmlNode], rels: Map[string, string]) -> [Block] =
   flatMap(\txbx.
     let blocks = processBodyChildren(getChildren(txbx), rels) in
-    if hasContent(blocks) then [SectionBlock({kind: "textbox", blocks: blocks})]
+    if hasContent(blocks) then [mkSection("textbox", blocks)]
     else [],
     nodes)
 
@@ -1072,7 +1072,7 @@ pure func docxInheritOne(p: DocxPlacedComment, bodies: [DocxCommentBody],
 -- Keep the SectionBlock(kind: "comment") wrapper so consumers written against
 -- the pre-anchoring shape still find comments where they expect them.
 pure func docxWrapComment(b: Block) -> Block =
-  SectionBlock({kind: "comment", blocks: [b]})
+  mkSection("comment", [b])
 
 -- Place each comment directly after the block its span ends in; anything
 -- unanchored (or pointing past the end of the body) trails the document.

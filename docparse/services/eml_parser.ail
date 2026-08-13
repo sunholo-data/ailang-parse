@@ -14,7 +14,7 @@ import std/string (length, substring, find, split, join, trim, toLower, startsWi
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
 import std/option (Option, Some, None)
 import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata, mkSection, mkNamedSection)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
@@ -41,7 +41,7 @@ export pure func parseEml(content: string) -> [Block]
 
   -- Header section as a block (key headers only — strips transport noise)
   let headerBlocks = emlKeyHeadersToBlocks(headers);
-  let headerSection = SectionBlock({kind: "email-headers", blocks: headerBlocks});
+  let headerSection = mkSection("email-headers", headerBlocks);
 
   -- Body parsing depends on Content-Type
   let bodyBlocks = emlParseBody(parts.body, contentType, encoding);
@@ -405,7 +405,7 @@ pure func emlParseMimePart(part: string) -> [Block] {
       let decoded = emlDecodeBody(splitResult.body, partEnc);
       let parsedBlocks = emlParseAttachmentContent(decoded, mimeType);
       let metaBlock = mkText("${filename} (${mimeType})", "attachment-meta", 0);
-      [SectionBlock({kind: "attachment", blocks: metaBlock :: parsedBlocks})]
+      [mkNamedSection("attachment", filename, metaBlock :: parsedBlocks)]
     }
     else if emlIsResolvableMime(mimeType) then {
       -- Resolvable attachment (Office, PDF): preserve base64 for the second pass
@@ -414,7 +414,7 @@ pure func emlParseMimePart(part: string) -> [Block] {
       let metaBlock = mkText("${filename} (${mimeType})", "attachment-meta", 0);
       let dataBlock = mkText(rawBody, "attachment-data", 0);
       let extBlock = mkText(ext, "attachment-ext", 0);
-      [SectionBlock({kind: "attachment", blocks: [metaBlock, dataBlock, extBlock]})]
+      [mkNamedSection("attachment", filename, [metaBlock, dataBlock, extBlock])]
     }
     else {
       -- Binary attachment: placeholder
@@ -436,7 +436,7 @@ pure func emlParseMimePart(part: string) -> [Block] {
   else if contains(lowerCt, "text/html") then {
     let decoded = emlDecodeBody(splitResult.body, partEnc);
     let htmlBlocks = parseHtml(decoded);
-    [SectionBlock({kind: "mime-part", blocks: htmlBlocks})]
+    [mkSection("mime-part", htmlBlocks)]
   }
   else if contains(lowerCt, "text/") then {
     let decoded = emlDecodeBody(splitResult.body, partEnc);
@@ -639,7 +639,7 @@ pure func emlAccumulateMboxMessages(lines: [string], current: string, acc: [stri
 -- Parse a single MBOX message into a SectionBlock wrapping EML blocks
 pure func emlParseMboxMessage(msgContent: string) -> [Block] {
   let emlBlocks = parseEml(msgContent);
-  [SectionBlock({kind: "mbox-message", blocks: emlBlocks})]
+  [mkSection("mbox-message", emlBlocks)]
 }
 
 -- ============================================================
@@ -794,14 +794,14 @@ pure func emlThreadToSection(thread: { subject: string, participants: [string], 
   let subjectBlock = mkText(thread.subject, "thread-subject", 0);
   let participantBlock = mkText(join(", ", thread.participants), "thread-participants", 0);
   let msgBlocks = flatMap(\p. emlParseThreadMessage(p.content), thread.messages);
-  [SectionBlock({kind: "thread", blocks: subjectBlock :: participantBlock :: msgBlocks})]
+  [mkSection("thread", subjectBlock :: participantBlock :: msgBlocks)]
 }
 
 -- Parse a single thread message with quote stripping
 pure func emlParseThreadMessage(msgContent: string) -> [Block] {
   let blocks = parseEml(msgContent);
   let strippedBlocks = map(emlStripQuotedBlock, blocks);
-  [SectionBlock({kind: "thread-message", blocks: strippedBlocks})]
+  [mkSection("thread-message", strippedBlocks)]
 }
 
 -- Strip quoted text from a Block (only affects TextBlocks)
@@ -810,7 +810,7 @@ pure func emlStripQuotedBlock(block: Block) -> Block =
     TextBlock(t) =>
       if t.style == "Normal" then mkText(emlStripQuotedText(t.text), t.style, t.level)
       else block,
-    SectionBlock(s) => SectionBlock({kind: s.kind, blocks: map(emlStripQuotedBlock, s.blocks)}),
+    SectionBlock(s) => mkNamedSection(s.kind, s.name, map(emlStripQuotedBlock, s.blocks)),
     _ => block
   }
 

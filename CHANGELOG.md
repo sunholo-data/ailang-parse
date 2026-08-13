@@ -9,7 +9,86 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.32.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.33.0...HEAD)
+
+## [v0.33.0](https://github.com/sunholo-data/ailang-parse/compare/v0.32.0...v0.33.0) — 2026-08-13
+
+### Structure stops being smuggled through text
+
+Four round-trip defects were reported against 0.32.0. They were one defect:
+structure serialised into a plain-text field, then recovered by splitting that
+text on a character the data also contains. Generalising the class found nine
+more, two of which deleted data outright. See
+[`v0_33_0_inband_structure.md`](design_docs/implemented/v0_33_0/v0_33_0_inband_structure.md).
+
+**CSV is now RFC 4180.** The delimiter split is replaced by a quote-aware state
+machine: quoted delimiters, `""` escapes and newlines inside quoted fields all
+survive. `"Smith, John"` was becoming two columns; a quoted field containing a
+newline was becoming two rows.
+
+**Markdown is no longer a lossy pivot.** It is the format every `--convert`
+passes through, and its writer and reader were not inverses:
+
+- Cell newlines and pipes are escaped (`<br>`, `\|`) and restored on read. A
+  DOCX cell holding two paragraphs used to shatter the table into three lines
+  of broken syntax, and re-importing produced a degenerate 1x1 table.
+- Empty cells are preserved. `| 1 |  | 3 |` read back as `["1","3"]`, silently
+  filing the `3` under the second header.
+- Separator rows are detected structurally. Any row *containing* `---` was
+  classified as a separator and **deleted** — `| 2024---2025 | fiscal |`
+  vanished.
+- Escaped pipes no longer split cells; short rows are padded to the header
+  width (by colSpan, not cell count); wide rows are left intact rather than
+  truncated, because truncating deleted content.
+- `{colspan=N}` / `{merged}` finally have a reader, so span topology survives
+  instead of leaking as literal text.
+
+**Inline formatting reaches the generators.** The markdown parser produced zero
+`InlineRun`s, so every generator was starved rather than incapable: `**bold**`
+arrived in Word as six characters plus a word. It now parses bold, italic,
+code, strikethrough, links and images, honours CommonMark's intraword `_` rule
+(so `snake_case` stays `snake_case`), reads fenced code blocks, and turns `---`
+into a real horizontal rule. Links were being lost too, despite `InlineRun.href`
+and DOCX hyperlink generation both already existing.
+
+### `SectionBlock` gains `name` — API-visible
+
+A container's identity was packed into its kind (`"sheet:Q1"`), which every
+consumer matched by exact equality and therefore never matched. ODS sheets and
+ODP slides rendered with **no boundary at all**, running a whole workbook
+together into one stream, while XLSX carried a hardcoded `### Sheet` label that
+discarded the real name and sat three levels below the heading inside it.
+
+```
+{"kind": "sheet:Formats"}  ->  {"kind": "sheet", "name": "Formats"}
+```
+
+`name` is omitted when empty, so every other section serialises byte-identically.
+All four SDKs expose it. Code matching `kind == "sheet:X"` must move to the
+pair — but that match could never have been reliable.
+
+### Verification the suite could not do
+
+The office suite scores JSON goldens and no golden is markdown, so nothing
+scored the markdown writer at all; it read 100.0% throughout every defect above.
+`benchmarks/roundtrip_check.py` closes that: parse → markdown → parse, asserting
+table dimensions, cell text and heading sequence. **0 failures across 101 files**,
+where it failed on every file with a table before. It immediately found three
+further instances of the same class, including a PPTX title containing a newline
+that ended its own heading early.
+
+`generate_golden.sh` never globbed `challenge/*.{docx,pptx,xlsx,html}`, so those
+goldens could not be refreshed by the tool meant to refresh them and five test
+files had no golden at all. The suite now scores **104 files at 100.0%**.
+
+### Performance
+
+`charAt` is O(i) in AILANG, so the first inline scanner — written with index
+arithmetic — was quadratic and took a 41KB document from 2.0s to 16.9s. A
+per-character `foldChars` machine was no better. The shipped scanner peels one
+marker token at a time with `split`, keeping the hot loop in native code: 4.2s.
+`mdJoinLines` now uses `join` rather than folding with string interpolation, and
+per-line `listLength(...) == 0` checks became O(1) pattern matches.
 
 ## [v0.32.0](https://github.com/sunholo-data/ailang-parse/compare/v0.31.0...v0.32.0) — 2026-08-12
 

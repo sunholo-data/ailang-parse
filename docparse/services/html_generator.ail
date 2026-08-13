@@ -1,6 +1,6 @@
 module docparse/services/html_generator
 
-import std/string (length, join, intToStr)
+import std/string (length, join, intToStr, startsWith)
 import std/list (map, foldl, length as listLength)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape)
@@ -50,7 +50,10 @@ pure func htmlBlockToStr(block: Block) -> string =
       "<${tag}>${body}</${tag}>\n",
 
     TextBlock(t) =>
-      if listLength(t.runs) > 0 || length(t.text) > 0
+      if t.style == "hr" then "<hr>\n"
+      else if t.style == "code" || startsWith(t.style, "code:")
+      then "<pre><code>${xmlEscape(t.text)}</code></pre>\n"
+      else if listLength(t.runs) > 0 || length(t.text) > 0
       then {
         -- Prefer runs: they carry clean text plus structure, where `text` for
         -- HTML-sourced blocks holds Markdown markers that would otherwise be
@@ -92,7 +95,7 @@ pure func htmlBlockToStr(block: Block) -> string =
       else "<p><em>[Video]</em></p>\n",
 
     SectionBlock(s) =>
-      htmlSectionToStr(s.kind, s.blocks),
+      htmlSectionToStr(s.kind, s.name, s.blocks),
 
     ChangeBlock(c) =>
       htmlChangeToStr(c.changeType, c.author, c.date, c.text),
@@ -194,7 +197,7 @@ pure func htmlListItems(items: [string]) -> string =
   foldl(\acc item. "${acc}<li>${xmlEscape(item)}</li>\n", "", items)
 
 -- Render section block with appropriate CSS class
-pure func htmlSectionToStr(kind: string, blocks: [Block]) -> string {
+pure func htmlSectionToStr(kind: string, name: string, blocks: [Block]) -> string {
   let cssClass = if kind == "slide" then "section-slide"
     else if kind == "sheet" then "section-sheet"
     else if kind == "header" then "section-header"
@@ -203,7 +206,11 @@ pure func htmlSectionToStr(kind: string, blocks: [Block]) -> string {
     else if kind == "endnote" then "section-endnote"
     else if kind == "textbox" then "section-textbox"
     else "section-other";
-  "<section class=\"${cssClass}\">\n${htmlBlocksToStr(blocks)}</section>\n"
+  -- The container's own name (sheet, slide, chapter) belongs in the markup, not
+  -- only in the JSON — without it every sheet of a workbook renders as an
+  -- anonymous <section>.
+  let titleAttr = if length(name) > 0 then " title=\"${xmlEscape(name)}\"" else "";
+  "<section class=\"${cssClass}\"${titleAttr}>\n${htmlBlocksToStr(blocks)}</section>\n"
 }
 
 -- Render track change as <ins> or <del> with attribution
