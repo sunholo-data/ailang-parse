@@ -5,7 +5,7 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
-import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment)
+import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection)
 import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget)
 import docparse/services/omml (renderOmml)
 
@@ -94,7 +94,7 @@ func pptxParseSlidesFrom(filepath: string, entries: [string], slideNo: int) -> [
       let moreBlocks = pptxParseSlidesFrom(filepath, rest, slideNo + 1);
       if pptxHasContent(blocks)
       then {
-        let section = SectionBlock({kind: "slide", blocks: blocks});
+        let section = mkSection("slide", blocks);
         section :: concat(comments, moreBlocks)
       }
       else concat(comments, moreBlocks)
@@ -563,10 +563,7 @@ func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS}
       let moreBlocks = pptxParseNotesSlides(filepath, rest);
       if length(trim(noteText)) > 0
       then {
-        let noteBlock = SectionBlock({
-          kind: "notes",
-          blocks: [mkText(noteText, "speaker-notes", 0)]
-        });
+        let noteBlock = mkSection("notes", [mkText(noteText, "speaker-notes", 0)]);
         noteBlock :: moreBlocks
       }
       else moreBlocks

@@ -2,7 +2,7 @@ module docparse/services/output_formatter
 
 import std/io (println)
 import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
-import std/string (length)
+import std/string (length, replaceMany, startsWith, substring)
 import std/math (intToFloat)
 import std/list (map, foldl, filter, length as listLength, forEachE, concat)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
@@ -86,11 +86,7 @@ export pure func blockToJson(block: Block) -> Json =
     ImageBlock(b) => jo(imageJsonFields(b)),
     AudioBlock(b) => jo(mediaJsonFields("audio", b.data, b.transcription, "transcription", b.mime)),
     VideoBlock(b) => jo(mediaJsonFields("video", b.data, b.description, "description", b.mime)),
-    SectionBlock(b) => jo([
-      kv("type", js("section")),
-      kv("kind", js(b.kind)),
-      kv("blocks", ja(blocksToJson(b.blocks)))
-    ]),
+    SectionBlock(b) => jo(sectionJsonFields(b)),
     ChangeBlock(b) => jo([
       kv("type", js("change")),
       kv("changeType", js(b.changeType)),
@@ -118,6 +114,20 @@ export pure func blockToJson(block: Block) -> Json =
       kv("resolved", jb(b.resolved))
     ])
   }
+
+-- `name` follows the same omit-when-empty rule as every other optional field,
+-- so sections that have no name (the overwhelming majority) serialise exactly
+-- as they did before the field existed.
+pure func sectionJsonFields(b: {kind: string, name: string, blocks: [Block]}) -> [{key: string, value: Json}] {
+  let base = [
+    kv("type", js("section")),
+    kv("kind", js(b.kind))
+  ];
+  let withName = if length(b.name) > 0
+    then concat(base, [kv("name", js(b.name))])
+    else base;
+  concat(withName, [kv("blocks", ja(blocksToJson(b.blocks)))])
+}
 
 -- JSON serialization for TableBlock. Adds the optional `caption`
 -- string (populated by HTML parser from <caption> elements; empty
@@ -446,9 +456,11 @@ pure func renderBlocksMd(blocks: [Block]) -> string =
 pure func renderBlockMd(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
-      "${headingPrefix(h.level)}${h.text}\n\n",
+      "${headingPrefix(h.level)}${mdOneLine(h.text)}\n\n",
     TextBlock(t) =>
-      if length(t.text) > 0 then "${t.text}\n\n"
+      if t.style == "hr" then "---\n\n"
+      else if isCodeStyle(t.style) then "```${codeStyleLang(t.style)}\n${t.text}\n```\n\n"
+      else if length(t.text) > 0 then "${t.text}\n\n"
       else "",
     TableBlock(t) =>
       "${renderTableMd(t.headers, t.rows)}\n",
@@ -467,7 +479,7 @@ pure func renderBlockMd(block: Block) -> string =
       then "[Video: ${v.description}]\n\n"
       else "[Video]\n\n",
     SectionBlock(s) =>
-      renderSectionMd(s.kind, s.blocks),
+      renderSectionMd(s.kind, s.name, s.blocks),
     ChangeBlock(b) =>
       renderChangeMd(b.changeType, b.author, b.date, b.text),
     LinkBlock(b) =>
@@ -487,6 +499,15 @@ pure func renderCommentMd(author: string, date: string, text: string,
   else "> **Comment (${byline}, unanchored):** ${text}\n\n"
 }
 
+-- A fenced code block is carried as a TextBlock whose style is "code" or
+-- "code:<lang>". Keeping the fence as a style rather than as literal backticks
+-- in `text` is what stops the inline reader from eating them on the way back.
+export pure func isCodeStyle(style: string) -> bool =
+  style == "code" || startsWith(style, "code:")
+
+export pure func codeStyleLang(style: string) -> string =
+  if startsWith(style, "code:") then substring(style, 5, length(style)) else ""
+
 pure func headingPrefix(level: int) -> string
   ensures { length(result) >= 2 }
 {
@@ -499,17 +520,37 @@ pure func headingPrefix(level: int) -> string
   else "## "
 }
 
-pure func renderSectionMd(kind: string, blocks: [Block]) -> string {
-  let label = if kind == "slide" then "---\n\n"
-    else if kind == "sheet" then "---\n\n### Sheet\n\n"
+-- A container renders as a rule separating it from what came before, plus a
+-- heading naming it.
+--
+-- The name comes from the section, not from the kind string: sheets used to be
+-- labelled with a hardcoded "### Sheet" that both discarded the real sheet name
+-- and sat three levels below the level-1 heading inside it, while ODS sheets,
+-- ODP slides and EPUB chapters — whose names were packed into the kind as
+-- "sheet:Q1" — matched no branch at all and rendered with no boundary
+-- whatsoever, running every sheet of a workbook together into one stream.
+--
+-- When the section's first block is already a heading, that heading is the
+-- label; adding another would restate it.
+pure func renderSectionMd(kind: string, name: string, blocks: [Block]) -> string {
+  let isDivision = kind == "slide" || kind == "sheet" || kind == "chapter";
+  let rule = if isDivision then "---\n\n" else "";
+  let label = if isDivision && length(name) > 0 && not startsWithHeading(blocks)
+    then "${headingPrefix(2)}${name}\n\n"
     else if kind == "header" then "*Header:*\n"
     else if kind == "footer" then "*Footer:*\n"
     else if kind == "footnote" then "*Footnote:*\n"
     else if kind == "endnote" then "*Endnote:*\n"
     else if kind == "textbox" then "> "
     else "";
-  "${label}${renderBlocksMd(blocks)}"
+  "${rule}${label}${renderBlocksMd(blocks)}"
 }
+
+pure func startsWithHeading(blocks: [Block]) -> bool =
+  match blocks {
+    [] => false,
+    b :: _ => match b { HeadingBlock(_) => true, _ => false }
+  }
 
 -- Render a track change annotation as markdown
 -- Uses a blockquote with an attribution prefix:
@@ -548,13 +589,28 @@ pure func renderCellsMd(cells: [TableCell]) -> string =
 -- the table topology from the markdown alone:
 --   "Total {colspan=2}"      -- spans two columns
 --   "Header {merged}"        -- continuation of a merged region
+-- markdown_parser reads both back, so a table survives the round trip.
 pure func cellTextMd(cell: TableCell) -> string {
   let suffix = if cell.colSpan > 1
     then " {colspan=${show(cell.colSpan)}}"
     else if cell.merged then " {merged}"
     else "";
-  "${cell.text}${suffix}"
+  "${mdEscapeCell(cell.text)}${suffix}"
 }
+
+-- A markdown table row is one line, with cells separated by pipes. Cell text
+-- that contains either breaks the grammar: a DOCX cell holding two paragraphs
+-- used to split the row across three lines and shatter the table, and a pipe
+-- inside a cell silently invented a column. Both are escaped on the way out
+-- and restored by markdown_parser on the way back in.
+-- A heading or a list item is one line by definition. Text carrying a newline
+-- — a PPTX title split across two lines, say — would otherwise end the
+-- construct early and leave the remainder as a stray paragraph.
+pure func mdOneLine(text: string) -> string =
+  replaceMany(text, [("\r\n", " "), ("\r", " "), ("\n", " ")])
+
+pure func mdEscapeCell(text: string) -> string =
+  replaceMany(text, [("\\", "\\\\"), ("|", "\\|"), ("\r\n", "<br>"), ("\r", "<br>"), ("\n", "<br>")])
 
 pure func renderSepMd(cells: [TableCell]) -> string =
   match cells {
@@ -572,6 +628,6 @@ pure func renderListMd(items: [string], ordered: bool, idx: int) -> string =
     [] => "",
     item :: rest =>
       if ordered
-      then "${show(idx)}. ${item}\n${renderListMd(rest, ordered, idx + 1)}"
-      else "- ${item}\n${renderListMd(rest, ordered, idx + 1)}"
+      then "${show(idx)}. ${mdOneLine(item)}\n${renderListMd(rest, ordered, idx + 1)}"
+      else "- ${mdOneLine(item)}\n${renderListMd(rest, ordered, idx + 1)}"
   }

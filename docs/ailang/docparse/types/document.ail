@@ -80,7 +80,7 @@ export type Block = TextBlock({text: string, style: string, level: int, runs: [I
                   | VideoBlock({data: string, description: string, mime: string})
                   | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]]})
                   | HeadingBlock({text: string, level: int, runs: [InlineRun]})
-                  | SectionBlock({kind: string, blocks: [Block]})
+                  | SectionBlock({kind: string, name: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
                   | LinkBlock({text: string, href: string, title: string})
                   | CommentBlock({id: string, author: string, date: string, text: string,
@@ -376,6 +376,20 @@ export pure func mkPara(text: string) -> Block =
 -- (DOCX/PPTX/ODT/EPUB/Markdown/TeX/AI) don't have these attributes to
 -- extract, so this helper avoids forcing every constructor site to
 -- pass empty strings / zeros.
+-- Construct a SectionBlock. `kind` says what sort of container it is; `name`
+-- is the container's own identity — a sheet name, a slide title, a chapter.
+--
+-- The name used to be packed into the kind ("sheet:Q1 Revenue"), which meant
+-- every consumer matched on kind by exact equality and therefore matched
+-- nothing: ODS sheets and ODP slides rendered with no label at all, while a
+-- colon in the name would have split it in the middle. Callers with no name
+-- use mkSection and `name` stays empty, keeping the JSON byte-identical.
+export pure func mkSection(kind: string, blocks: [Block]) -> Block =
+  SectionBlock({kind: kind, name: "", blocks: blocks})
+
+export pure func mkNamedSection(kind: string, name: string, blocks: [Block]) -> Block =
+  SectionBlock({kind: kind, name: name, blocks: blocks})
+
 export pure func mkImage(data: string, description: string, mime: string) -> Block =
   ImageBlock({
     data: data,

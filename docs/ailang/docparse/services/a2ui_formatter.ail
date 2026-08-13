@@ -19,7 +19,7 @@ import std/list (map, foldl, concat, length as listLength, flatMap)
 import std/math (intToFloat)
 import std/option (getOrElse)
 import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
-import docparse/types/document (InlineRun, mkHeadingRuns, mkListRuns, mkTextRuns, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable)
+import docparse/types/document (InlineRun, mkHeadingRuns, mkListRuns, mkTextRuns, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable, mkNamedSection)
 
 -- Convert a full ParsedDocument to A2UI JSON string.
 -- When editable=true, content nodes use editable component variants
@@ -71,7 +71,10 @@ pure func a2uiFlattenOne(acc: FlatResult, block: Block) -> FlatResult {
       -- Recursively flatten child blocks (preserve editable flag)
       let childResult = a2uiFlattenBlocks(s.blocks, idx + 1, editable);
       let childIds = childResult.topIds;
-      let baseSection = a2uiLabeledContainer(id, s.kind, childIds);
+      -- Label with the container's own name when it has one (sheet, slide,
+      -- chapter); the kind alone renders every sheet as "sheet".
+      let sectionLabel = if length(s.name) > 0 then "${s.kind}: ${s.name}" else s.kind;
+      let baseSection = a2uiLabeledContainer(id, sectionLabel, childIds);
       let sectionNode = if editable then a2uiFmtr_withBlockIndex(baseSection, idx) else baseSection;
       {
         nodes: concat(concat(acc.nodes, [sectionNode]), childResult.nodes),
@@ -279,10 +282,11 @@ pure func a2ui_jsonToBlock(j: Json) -> Block {
       mime: getOrElse(getString(j, "mime"), "")
     })
   else if t == "section" then
-    SectionBlock({
-      kind: getOrElse(getString(j, "kind"), ""),
-      blocks: a2ui_jsonArrayToBlocks(getOrElse(getArray(j, "blocks"), []))
-    })
+    mkNamedSection(
+      getOrElse(getString(j, "kind"), ""),
+      getOrElse(getString(j, "name"), ""),
+      a2ui_jsonArrayToBlocks(getOrElse(getArray(j, "blocks"), []))
+    )
   else if t == "change" then
     ChangeBlock({
       changeType: getOrElse(getString(j, "changeType"), ""),

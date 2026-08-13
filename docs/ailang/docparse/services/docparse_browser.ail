@@ -19,8 +19,7 @@ import std/result (Ok, Err)
 import std/option (Some, None, getOrElse, map as optMap)
 import std/list (map)
 import std/map (empty as emptyMap, insert as mapInsert)
-import docparse/types/document (Block, TextBlock, SectionBlock, DocMetadata, emptyMetadata,
-    countBlocks, filterHeadings, filterTables, filterImages)
+import docparse/types/document (Block, TextBlock, SectionBlock, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkSection)
 import docparse/services/format_router (detectFormat, getExtension, officeType,
     needsAI, strategyDescription)
 import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml,
@@ -52,7 +51,7 @@ export pure func parseDocxBody(xml: string) -> string {
 export pure func parseDocxSection(xml: string, kind: string) -> string {
   let blocks = parseSectionXml(xml);
   if hasContent(blocks)
-  then encode(ja(blocksToJson([SectionBlock({kind: kind, blocks: blocks})])))
+  then encode(ja(blocksToJson([mkSection(kind, blocks)])))
   else encode(ja([]))
 }
 
@@ -71,7 +70,7 @@ export pure func parsePptxSlide(slideXml: string) -> string {
     Ok(root) => {
       let blocks = extractSlideBlocks(root);
       if hasContent(blocks)
-      then encode(ja(blocksToJson([SectionBlock({kind: "slide", blocks: blocks})])))
+      then encode(ja(blocksToJson([mkSection("slide", blocks)])))
       else encode(ja([]))
     },
     Err(_) => encode(ja([]))

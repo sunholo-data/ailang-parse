@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (length, trim)
 import std/list (map, flatMap, filter, length as listLength)
 import docparse/services/odf_text (odfText)
-import docparse/types/document (mkText, Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkTable)
+import docparse/types/document (mkText, Block, TextBlock, TableBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkTable, mkNamedSection)
 
 -- ODS Parser — converts OpenDocument Spreadsheet to Block ADT.
 -- Pure AILANG implementation using std/zip + std/xml.
@@ -83,7 +83,7 @@ pure func odsParseSheet(table: XmlNode) -> [Block] {
       firstRow :: dataRows =>
         mkTable(dataRows, firstRow)
     };
-    [SectionBlock({kind: "sheet:${sheetName}", blocks: [tableBlock]})]
+    [mkNamedSection("sheet", sheetName, [tableBlock])]
   }
 }
 

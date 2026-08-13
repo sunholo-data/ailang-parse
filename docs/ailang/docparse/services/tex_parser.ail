@@ -3,7 +3,7 @@ module docparse/services/tex_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, replace, toLower, replaceMany)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (mkHeading, mkList, mkText, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable)
+import docparse/types/document (mkHeading, mkList, mkText, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, TableCell, SectionBlock, ImageBlock, simpleCell, mkImage, mkTable, mkSection)
 
 -- LaTeX Parser — converts arXiv-style LaTeX source to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -652,7 +652,7 @@ pure func texHandleAbstractLine(state: TexState, line: string, t: string) -> Tex
   if startsWith(t, "\\end{abstract}") then {
     let text = texCleanInline(texJoinLines(reverse(state.buf))) in
     {
-      blocks: SectionBlock({kind: "abstract", blocks: [mkText(text, "abstract", 0)]}) :: state.blocks,
+      blocks: mkSection("abstract", [mkText(text, "abstract", 0)]) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],
@@ -683,7 +683,7 @@ pure func texHandleBiblioLine(state: TexState, line: string, t: string) -> TexSt
   if startsWith(t, "\\end{thebibliography}") then
     let entries = map(\s. mkText(texCleanInline(s), "bibitem", 0), reverse(state.listItems)) in
     {
-      blocks: SectionBlock({kind: "bibliography", blocks: entries}) :: state.blocks,
+      blocks: mkSection("bibliography", entries) :: state.blocks,
       mode: "none",
       envName: "",
       buf: [],

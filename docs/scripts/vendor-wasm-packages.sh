@@ -121,11 +121,29 @@ MODULES=(
   "services/docx_generator.ail"
   "services/docparse_generate.ail"
   "services/docparse_browser.ail"
+  # Not used by the browser bundle, but present in docs/ailang/docparse and
+  # therefore compiled by the registry validator, which type-checks the whole
+  # checkout. A vendored copy left behind here goes stale against the canonical
+  # tree and fails the publish — which is exactly what v0.33.0 hit.
+  "services/qmd_generator.ail"
+  "services/pdf_annotations.ail"
 )
 for m in "${MODULES[@]}"; do
   cp "$ROOT/docparse/$m" "$MODULES_DIR/$m"
 done
 echo "→ Copied ${#MODULES[@]} parser modules from source"
+
+# Guard the invariant that just broke: every .ail under docs/ailang/docparse
+# must be refreshed by this script, or it silently rots.
+ORPHANS=$(cd "$MODULES_DIR" && find . -name '*.ail' | sed 's|^\./||' | sort > /tmp/vendored.$$ && \
+  printf '%s\n' "${MODULES[@]}" | sort > /tmp/listed.$$ && \
+  comm -23 /tmp/vendored.$$ /tmp/listed.$$; rm -f /tmp/vendored.$$ /tmp/listed.$$)
+if [ -n "$ORPHANS" ]; then
+  echo "✗ Vendored modules not in the MODULES list (they will go stale):"
+  echo "$ORPHANS" | sed 's/^/    /'
+  echo "  Add them above, or delete them from docs/ailang/docparse/."
+  exit 1
+fi
 
 # ── 3. Vendor sunholo/a2ui from registry cache (if available) ────────────
 # Resolve the version from ailang.lock (source of truth). Hardcoding the

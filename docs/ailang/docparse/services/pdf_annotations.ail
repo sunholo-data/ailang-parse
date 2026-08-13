@@ -17,7 +17,7 @@ import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/bytes (fromInts, toString as bytesToString)
 import std/fs (readFile)
-import docparse/types/document (Block, TextBlock, SectionBlock, CommentBlock)
+import docparse/types/document (Block, TextBlock, SectionBlock, CommentBlock, mkSection)
 
 -- ============================================================
 -- Public API
@@ -894,9 +894,7 @@ pure func pdfannToBlockAnchored(a: Annotation, highlighted: string) -> Block {
   let anchorText = if hasAnchor
     then (if length(pageStr) > 0 then "${pageStr}: ${highlighted}" else highlighted)
     else pageStr;
-  SectionBlock({
-    kind: "annotation",
-    blocks: [CommentBlock({
+  mkSection("annotation", [CommentBlock({
       id: "",
       author: a.author,
       date: a.modified,
@@ -907,6 +905,5 @@ pure func pdfannToBlockAnchored(a: Annotation, highlighted: string) -> Block {
       anchorBlockIndex: 0 - 1,
       parentId: "",
       resolved: false
-    })]
-  })
+    })])
 }

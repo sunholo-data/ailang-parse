@@ -7,7 +7,7 @@ import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, any, length as listLength)
 import std/map (lookup)
-import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull)
+import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull, mkSection)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -260,13 +260,13 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   else if tag == "article" || tag == "section" || tag == "main" ||
           tag == "aside" || tag == "nav" then
     let blocks = htmlProcessChildrenOf(node) in
-    if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
+    if listLength(blocks) > 0 then [mkSection(tag, blocks)]
     else []
 
   -- Header/footer sections
   else if tag == "header" || tag == "footer" then
     let blocks = htmlProcessChildrenOf(node) in
-    if listLength(blocks) > 0 then [SectionBlock({kind: tag, blocks: blocks})]
+    if listLength(blocks) > 0 then [mkSection(tag, blocks)]
     else []
 
   -- Block-level containers that flatten into the parent stream.
@@ -279,7 +279,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- caption stays paired with the image instead of floating away.
   else if tag == "figure" then
     let blocks = htmlProcessChildrenOf(node) in
-    if listLength(blocks) > 0 then [SectionBlock({kind: "figure", blocks: blocks})]
+    if listLength(blocks) > 0 then [mkSection("figure", blocks)]
     else []
 
   -- <figcaption>: the caption inside a <figure>. Promoted to a small
@@ -293,7 +293,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- semantic section so it can be surfaced separately from body text.
   else if tag == "address" then
     let blocks = htmlProcessChildrenOf(node) in
-    if listLength(blocks) > 0 then [SectionBlock({kind: "address", blocks: blocks})]
+    if listLength(blocks) > 0 then [mkSection("address", blocks)]
     else {
       let text = trim(htmlDeepText(node)) in
       if length(text) > 0 then [mkText(text, "address", 0)]
@@ -305,7 +305,7 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
   -- <summary> child (if present) renders as a level-3 heading inside.
   else if tag == "details" then
     let blocks = htmlProcessChildrenOf(node) in
-    if listLength(blocks) > 0 then [SectionBlock({kind: "details", blocks: blocks})]
+    if listLength(blocks) > 0 then [mkSection("details", blocks)]
     else []
 
   -- <summary>: the disclosure caption inside a <details>. Promote to a

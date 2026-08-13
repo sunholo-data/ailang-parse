@@ -6,7 +6,7 @@ import std/result (Ok, Err)
 import std/option (Some, None, getOrElse)
 import std/string (length, trim, endsWith, contains, startsWith, split, find, substring)
 import std/list (map, flatMap, filter, concat, foldl, length as listLength)
-import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, ImageBlock, SectionBlock, DocMetadata, mkImage)
+import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, ImageBlock, SectionBlock, DocMetadata, mkImage, mkNamedSection)
 import docparse/services/html_parser (parseHtml)
 
 -- EPUB Parser — extracts structured content from EPUB ebooks.
@@ -204,7 +204,7 @@ func epubParseContentFile(filepath: string, entryPath: string) -> [Block] ! {FS}
       let chapterDir = epubDirName(entryPath);
       let resolvedBlocks = epubResolveImagePaths(blocks, chapterDir);
       let chapterName = epubBaseName(entryPath);
-      [SectionBlock({kind: "chapter:${chapterName}", blocks: resolvedBlocks})]
+      [mkNamedSection("chapter", chapterName, resolvedBlocks)]
     }
   }
 }
@@ -253,7 +253,7 @@ pure func epubResolveOneImage(b: Block, chapterDir: string) -> Block =
       let resolved = epubResolvePath(chapterDir, img.data) in
       mkImage(resolved, img.description, img.mime),
     SectionBlock(s) =>
-      SectionBlock({kind: s.kind, blocks: epubResolveImagePaths(s.blocks, chapterDir)}),
+      mkNamedSection(s.kind, s.name, epubResolveImagePaths(s.blocks, chapterDir)),
     _ => b
   }
 
