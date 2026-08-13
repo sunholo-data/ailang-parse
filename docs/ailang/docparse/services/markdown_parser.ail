@@ -455,8 +455,23 @@ pure func mdCellFromText(s: string) -> TableCell {
 }
 
 -- A row's width is the columns it covers, which is the sum of its colSpans.
+-- A row's width is the grid columns it covers. A merged cell sitting inside a
+-- preceding cell's span occupies no column of its own — summing every colSpan
+-- made "Total {colspan=4}" plus its three continuations read as 7 columns, so
+-- every 4-cell data row was then padded out to 7.
 pure func mdCellsWidth(cells: [TableCell]) -> int =
-  foldl(\acc c. acc + c.colSpan, 0, cells)
+  mdWidthWalk(cells, 0, 0)
+
+pure func mdWidthWalk(cells: [TableCell], cover: int, acc: int) -> int =
+  match cells {
+    [] => acc,
+    c :: rest =>
+      if c.merged && cover > 0
+      then mdWidthWalk(rest, cover - 1, acc)
+      else mdWidthWalk(rest, mdSpanOf(c) - 1, acc + mdSpanOf(c))
+  }
+
+pure func mdSpanOf(c: TableCell) -> int = if c.colSpan > 1 then c.colSpan else 1
 
 -- Pad a short row out to the header width so the table is rectangular.
 --

@@ -68,14 +68,42 @@ def tables(blocks: list[dict]) -> list[tuple]:
     for b in walk(blocks):
         if b.get("type") != "table":
             continue
+        width = grid_width(b.get("headers", []))
         headers = strip_trailing_empty([cell_text(c) for c in b.get("headers", [])])
         # Trailing empty cells are padding, not content: a short row is padded
         # out to the header width on the way back in, which is a repair rather
         # than a corruption.
         rows = [strip_trailing_empty([cell_text(c) for c in r])
                 for r in b.get("rows", [])]
-        out.append((tuple(headers), tuple(tuple(r) for r in rows)))
+        # Rows WIDER than the header. Short rows are legitimately padded out
+        # (a repair), so only overflow is interesting: a row covering more
+        # columns than the header means the table describes a grid no row
+        # fits, which is what Word offers to repair.
+        overflow = sorted({grid_width(r) for r in b.get("rows", [])
+                           if grid_width(r) > width})
+        out.append((tuple(headers), tuple(tuple(r) for r in rows), width, overflow))
     return out
+
+
+def grid_width(cells: list) -> int:
+    """Columns a row covers.
+
+    A merged cell sitting inside a preceding cell's span occupies no column of
+    its own, so summing every colSpan over-counts: "Total {colspan=4}" plus its
+    three continuations is 4 columns, not 7. Getting this wrong is what padded
+    every data row of a merged-header table out to seven cells.
+    """
+    total = 0
+    cover = 0
+    for c in cells:
+        span = c.get("colSpan", 1) if isinstance(c, dict) else 1
+        merged = c.get("merged", False) if isinstance(c, dict) else False
+        if merged and cover > 0:
+            cover -= 1
+            continue
+        total += span
+        cover = span - 1
+    return total
 
 
 def strip_trailing_empty(cells: list[str]) -> list[str]:
@@ -160,7 +188,21 @@ def main() -> int:
             failures.append((src.name, f"table count {len(ta)} -> {len(tb)}"))
         else:
             for i, (x, y) in enumerate(zip(ta, tb)):
-                if len(x[0]) != len(y[0]):
+                # Grid width, not cell count: trailing-empty tolerance below
+                # hides a header that gained phantom columns, which is exactly
+                # how a merged-header table padded every data row to 7.
+                if x[2] != y[2]:
+                    failures.append((src.name,
+                                     f"table {i} grid width {x[2]} -> {y[2]}"))
+                elif set(y[3]) - set(x[3]):
+                    # Overflow that was not there before. Short rows being
+                    # padded out is a repair and is fine; a row growing PAST
+                    # the header is a grid no row fits.
+                    failures.append((src.name,
+                                     f"table {i} rows now overflow the header: "
+                                     f"header covers {y[2]} columns, rows cover "
+                                     f"{sorted(set(y[3]) - set(x[3]))}"))
+                elif len(x[0]) != len(y[0]):
                     failures.append((src.name,
                                      f"table {i} width {len(x[0])} -> {len(y[0])}"))
                 elif len(x[1]) != len(y[1]):

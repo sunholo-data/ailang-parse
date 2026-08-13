@@ -9,7 +9,29 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.33.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.33.2...HEAD)
+
+## [v0.33.2](https://github.com/sunholo-data/ailang-parse/compare/v0.33.1...v0.33.2) — 2026-08-13
+
+### A merged HEADER padded every data row with phantom columns
+
+The mirror of the v0.33.1 generator fix, on the reader side. `mdCellsWidth`
+summed the colSpan of every header cell, counting a merged continuation as a
+column of its own: `Total {colspan=4}` plus its three continuations read as
+**7** columns rather than 4. The table's width is taken from its header, so
+every 4-cell data row below was then padded out to seven — three empty columns
+per row, and a DOCX grid that no row fits.
+
+Invisible in the existing fixtures because their merged row is the LAST row,
+where a too-wide row is simply left alone. In the header it sets the width for
+everything beneath it. `data/test_files/merged_header.md` now covers both that
+case and a partial span that has to resume counting plain cells after it ends.
+
+Found by generating a feature-demo document and reading its table geometry
+back — not by any suite. The round-trip check could not see it either: its own
+width calculation had the identical flaw, and its trailing-empty tolerance
+hid the padding. Both fixed, and with the parser bug reinstated the check now
+fails on seven corpus files.
 
 ## [v0.33.1](https://github.com/sunholo-data/ailang-parse/compare/v0.33.0...v0.33.1) — 2026-08-13
 
