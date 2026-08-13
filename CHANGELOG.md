@@ -9,7 +9,36 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.33.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.33.1...HEAD)
+
+## [v0.33.1](https://github.com/sunholo-data/ailang-parse/compare/v0.33.0...v0.33.1) — 2026-08-13
+
+### Horizontal merge continuations no longer emit vMerge cells
+
+A `{merged}` cell that follows a `{colspan=N}` cell is a *horizontal*
+continuation: the span already occupies that grid position, so it must emit no
+`<w:tc>` at all. Every merged cell was instead emitted as a `<w:vMerge>` tc — a
+**vertical** merge — on top of the gridSpan that already covered it. One row of
+a 4-column table came out 7 grid units wide, `w:tblGrid` was sized to that
+widest row, and python-docx refused to read the row (`no tc element at
+grid_offset=4`) because the vMerge cells claimed continuation from a row with
+no cell at that offset. LibreOffice tolerated it; Word offers to repair.
+
+The generator now walks each row tracking how many grid columns a preceding
+span still covers, and drops continuations that fall inside one. `vMerge` is
+emitted only where nothing in the row covers the position, which is what it
+means.
+
+Reported against 0.33.0, but **not introduced by it**: v0.32.0 emits the same
+XML from the same input. What 0.33.0 changed was reachability — teaching the
+markdown reader about `{colspan}`/`{merged}` (so span topology round-trips)
+routed the markdown path into a generator defect that until then only the
+direct XLSX→DOCX path could reach.
+
+`verify_generated.py` now asserts the property that was missing: every row must
+span exactly the columns `w:tblGrid` declares, and every cell must be
+iterable. Opening the file cleanly did not catch this and neither did the JSON
+goldens — it took reading the table geometry back.
 
 ## [v0.33.0](https://github.com/sunholo-data/ailang-parse/compare/v0.32.0...v0.33.0) — 2026-08-13
 

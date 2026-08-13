@@ -415,16 +415,54 @@ pure func docxTableColCount(headers: [TableCell], rows: [[TableCell]]) -> int =
   foldl(\acc row. { let n = docxRowSpanWidth(row) in if n > acc then n else acc },
         docxRowSpanWidth(headers), rows)
 
+-- A row's true grid width. Cells that a preceding gridSpan already covers
+-- occupy no grid position of their own — counting them made a 4-column table
+-- declare a 7-column grid, because "Total {colspan=4}" plus its three merged
+-- continuations was summed as 4+1+1+1.
 pure func docxRowSpanWidth(cells: [TableCell]) -> int =
-  foldl(\acc c. acc + (if c.colSpan > 1 then c.colSpan else 1), 0, cells)
+  docxRowWidthWalk(cells, 0, 0)
+
+pure func docxRowWidthWalk(cells: [TableCell], cover: int, acc: int) -> int =
+  match cells {
+    [] => acc,
+    c :: rest =>
+      if c.merged && cover > 0
+      then docxRowWidthWalk(rest, cover - 1, acc)
+      else docxRowWidthWalk(rest, docxCoverAfter(c), acc + docxCellSpan(c))
+  }
+
+pure func docxCellSpan(c: TableCell) -> int = if c.colSpan > 1 then c.colSpan else 1
+
+-- Grid positions a cell claims beyond the one it sits in.
+pure func docxCoverAfter(c: TableCell) -> int = docxCellSpan(c) - 1
 
 pure func docxGridCols(n: int, w: int) -> string =
   if n <= 0 then ""
   else "<w:gridCol w:w=\"${intToStr(w)}\"/>${docxGridCols(n - 1, w)}"
 
 -- Header cells as bold <w:tc>
+-- Emit cells left to right, skipping any merged cell that a preceding
+-- gridSpan already covers.
+--
+-- `merged` means "this position is a continuation", and until now every one of
+-- them became a <w:vMerge> tc — a VERTICAL merge. For the horizontal case that
+-- is doubly wrong: the position is already occupied by the span, so the extra
+-- tc pushes the row past the declared grid, and it claims continuation from a
+-- row above that has no cell at that offset. python-docx refuses to read such
+-- a row; Word offers to repair the file. vMerge is correct only when nothing
+-- in this row covers the position.
 pure func docxHeaderCellsToXml(cells: [TableCell], colW: int) -> string =
-  foldl(\acc c. "${acc}${docxHeaderCellToXml(c, colW)}", "", cells)
+  docxHeaderCellsWalk(cells, colW, 0, "")
+
+pure func docxHeaderCellsWalk(cells: [TableCell], colW: int, cover: int, acc: string) -> string =
+  match cells {
+    [] => acc,
+    c :: rest =>
+      if c.merged && cover > 0
+      then docxHeaderCellsWalk(rest, colW, cover - 1, acc)
+      else docxHeaderCellsWalk(rest, colW, docxCoverAfter(c),
+                               "${acc}${docxHeaderCellToXml(c, colW)}")
+  }
 
 pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
   if cell.merged then "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/><w:vMerge/></w:tcPr><w:p/></w:tc>"
@@ -436,9 +474,19 @@ pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
   }
 }
 
--- Data cells as normal <w:tc>
+-- Data cells as normal <w:tc>, with the same horizontal-continuation skip.
 pure func docxDataCellsToXml(cells: [TableCell], colW: int) -> string =
-  foldl(\acc c. "${acc}${docxDataCellToXml(c, colW)}", "", cells)
+  docxDataCellsWalk(cells, colW, 0, "")
+
+pure func docxDataCellsWalk(cells: [TableCell], colW: int, cover: int, acc: string) -> string =
+  match cells {
+    [] => acc,
+    c :: rest =>
+      if c.merged && cover > 0
+      then docxDataCellsWalk(rest, colW, cover - 1, acc)
+      else docxDataCellsWalk(rest, colW, docxCoverAfter(c),
+                             "${acc}${docxDataCellToXml(c, colW)}")
+  }
 
 pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
   if cell.merged then "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/><w:vMerge/></w:tcPr><w:p/></w:tc>"

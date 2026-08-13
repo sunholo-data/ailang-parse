@@ -96,6 +96,7 @@ def verify_library(path: Path) -> list[str]:
             doc = Document(str(path))
             if len(doc.paragraphs) == 0:
                 errors.append("DOCX has 0 paragraphs")
+            errors.extend(_docx_table_grid_errors(doc))
         elif ext == ".pptx":
             from pptx import Presentation
             prs = Presentation(str(path))
@@ -116,6 +117,50 @@ def verify_library(path: Path) -> list[str]:
     except Exception as e:
         errors.append(f"{type(e).__name__}: {e}")
 
+    return errors
+
+
+
+def _docx_table_grid_errors(doc) -> list[str]:
+    """Every row must span exactly the columns w:tblGrid declares.
+
+    ECMA-376 defines the grid as part of the table, and a row that does not
+    add up to it is malformed however forgiving the reader: python-docx raises
+    on cell access and Word offers to repair. This caught a real defect —
+    horizontal merge continuations were emitted as extra <w:vMerge> cells on
+    top of the gridSpan that already covered them, so one row of a 4-column
+    table was 7 grid units wide. Opening the file cleanly did not catch it,
+    because LibreOffice tolerates it.
+    """
+    from docx.oxml.ns import qn
+
+    errors = []
+    for ti, table in enumerate(doc.tables):
+        grid = table._tbl.find(qn("w:tblGrid"))
+        if grid is None:
+            errors.append(f"table {ti}: no w:tblGrid")
+            continue
+        declared = len(grid.findall(qn("w:gridCol")))
+        for ri, row in enumerate(table._tbl.findall(qn("w:tr"))):
+            width = 0
+            for tc in row.findall(qn("w:tc")):
+                pr = tc.find(qn("w:tcPr"))
+                span = 1
+                if pr is not None:
+                    gs = pr.find(qn("w:gridSpan"))
+                    if gs is not None:
+                        span = int(gs.get(qn("w:val")))
+                width += span
+            if width != declared:
+                errors.append(
+                    f"table {ti} row {ri}: spans {width} grid columns, "
+                    f"tblGrid declares {declared}")
+        # Cell iteration is what actually fails on a malformed grid.
+        try:
+            for row in table.rows:
+                _ = [c.text for c in row.cells]
+        except Exception as e:
+            errors.append(f"table {ti}: cell iteration failed — {type(e).__name__}: {e}")
     return errors
 
 
