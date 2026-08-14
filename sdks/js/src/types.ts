@@ -89,6 +89,8 @@ export interface Cell {
   text: string;
   colSpan: number;
   merged: boolean;
+  /** "" | "left" | "center" | "right"; absent when unspecified. */
+  align?: string;
 }
 
 // ── Block (discriminated union via type field) ──
@@ -171,6 +173,8 @@ export interface Block {
   anchorBlockIndex?: number;
   parentId?: string; // set on threaded replies
   resolved?: boolean;
+  /** Nesting depth per list item, parallel to `items`; absent for a flat list. */
+  itemLevels?: number[];
   // SectionBlock. `name` is the container's own identity (sheet name, slide
   // title, chapter); absent for sections that have no name of their own.
   kind?: string;

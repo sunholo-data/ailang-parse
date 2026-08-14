@@ -134,6 +134,9 @@ class Cell:
     text: str = ""
     col_span: int = 1
     merged: bool = False
+    # "" | "left" | "center" | "right". Declared column alignment; empty means
+    # unspecified, which is not the same as left.
+    align: str = ""
 
     @classmethod
     def from_raw(cls, raw: Any) -> "Cell":
@@ -144,6 +147,7 @@ class Cell:
                 text=raw.get("text", ""),
                 col_span=raw.get("colSpan", 1),
                 merged=raw.get("merged", False),
+                align=raw.get("align", ""),
             )
         return cls(text=str(raw))
 
@@ -171,6 +175,8 @@ class Block:
     # `item_runs` is parallel to `items` — same length, or empty.
     runs: List[InlineRun] = field(default_factory=list)
     item_runs: List[List[InlineRun]] = field(default_factory=list)
+    # Nesting depth per list item, parallel to `items`; empty for a flat list.
+    item_levels: List[int] = field(default_factory=list)
     # ImageBlock / AudioBlock / VideoBlock
     description: str = ""
     transcription: str = ""
@@ -223,6 +229,7 @@ class Block:
         b.resolved = d.get("resolved", False)
 
         b.runs = [InlineRun.from_raw(r) for r in d.get("runs", [])]
+        b.item_levels = d.get("itemLevels", [])
         b.item_runs = [[InlineRun.from_raw(r) for r in item]
                        for item in d.get("itemRuns", [])]
 

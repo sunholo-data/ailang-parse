@@ -114,7 +114,7 @@ mcp <- function() {
   req <- httr2::request(endpoint)
   req <- httr2::req_method(req, "POST")
   req <- httr2::req_timeout(req, 300)
-  req <- httr2::req_user_agent(req, "ailangparse-r/0.11.0")
+  req <- httr2::req_user_agent(req, "ailangparse-r/0.12.0")
   req <- httr2::req_error(req, is_error = function(resp) FALSE)
   req <- httr2::req_headers(
     req,

@@ -2,7 +2,7 @@ module docparse/services/output_formatter
 
 import std/io (println)
 import std/json (encode, jo, kv, js, jnum, ja, jb, jn)
-import std/string (length, replaceMany, startsWith, substring)
+import std/string (length, replaceMany, startsWith, substring, repeat)
 import std/math (intToFloat)
 import std/list (map, foldl, filter, length as listLength, forEachE, concat)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
@@ -165,15 +165,19 @@ pure func headingJsonFields(b: {text: string, level: int, runs: [InlineRun]}) ->
 
 -- itemRuns is a parallel array to items (see mkListRuns). Emitted only when
 -- some item is actually formatted, so an ordinary list is unchanged.
-pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]]}) -> [{key: string, value: Json}] {
+pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]}) -> [{key: string, value: Json}] {
   let base = [
     kv("type", js("list")),
     kv("items", ja(stringsToJson(b.items))),
     kv("ordered", jb(b.ordered))
   ];
-  if listLength(b.itemRuns) > 0
-  then concat(base, [kv("itemRuns", ja(map(\rs. ja(runsToJson(rs)), b.itemRuns)))])
-  else base
+  let withRuns = if listLength(b.itemRuns) > 0
+    then concat(base, [kv("itemRuns", ja(map(\rs. ja(runsToJson(rs)), b.itemRuns)))])
+    else base;
+  -- Omitted for a flat list, so ordinary lists are byte-identical to before.
+  if listLength(b.itemLevels) > 0
+  then concat(withRuns, [kv("itemLevels", ja(map(\n. jnum(intToFloat(n)), b.itemLevels)))])
+  else withRuns
 }
 
 -- Flags are emitted only when true, for the same reason: a run that is merely
@@ -273,6 +277,7 @@ export pure func cellsToJson(cells: [TableCell]) -> [Json]
 -- Merged/spanned cells include full metadata
 export pure func cellToJson(cell: TableCell) -> Json {
   if cell.colSpan == 1 && not cell.merged && length(cell.scope) == 0
+       && length(cell.align) == 0
   then js(cell.text)
   else {
     let base = [
@@ -283,7 +288,10 @@ export pure func cellToJson(cell: TableCell) -> Json {
     let withScope = if length(cell.scope) > 0
                     then concat(base, [kv("scope", js(cell.scope))])
                     else base;
-    jo(withScope)
+    let withAlign = if length(cell.align) > 0
+                    then concat(withScope, [kv("align", js(cell.align))])
+                    else withScope;
+    jo(withAlign)
   }
 }
 
@@ -456,16 +464,18 @@ pure func renderBlocksMd(blocks: [Block]) -> string =
 pure func renderBlockMd(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
-      "${headingPrefix(h.level)}${mdOneLine(h.text)}\n\n",
+      "${headingPrefix(h.level)}${mdOneLine(inlineMd(h.text, h.runs))}\n\n",
     TextBlock(t) =>
       if t.style == "hr" then "---\n\n"
+      else if t.style == "quote" then "> ${mdOneLine(inlineMd(t.text, t.runs))}\n\n"
       else if isCodeStyle(t.style) then "```${codeStyleLang(t.style)}\n${t.text}\n```\n\n"
-      else if length(t.text) > 0 then "${t.text}\n\n"
+      else if length(t.text) > 0 || listLength(t.runs) > 0
+      then "${inlineMd(t.text, t.runs)}\n\n"
       else "",
     TableBlock(t) =>
       "${renderTableMd(t.headers, t.rows)}\n",
     ListBlock(l) =>
-      "${renderListMd(l.items, l.ordered, 1)}\n",
+      "${renderListMd(l.items, l.ordered, 1, l.itemLevels)}\n",
     ImageBlock(i) =>
       if length(i.description) > 0
       then "[Image: ${i.description}]\n\n"
@@ -606,28 +616,88 @@ pure func cellTextMd(cell: TableCell) -> string {
 -- A heading or a list item is one line by definition. Text carrying a newline
 -- — a PPTX title split across two lines, say — would otherwise end the
 -- construct early and leave the remainder as a stray paragraph.
+-- Runs back to Markdown markers. The reader turns "**bold**" into a run; without
+-- the inverse, every conversion THROUGH markdown quietly flattened formatting —
+-- docx(bold) -> md -> docx came out plain.
+pure func inlineMd(text: string, runs: [InlineRun]) -> string =
+  if listLength(runs) == 0 then text
+  else mdEmitRuns(runs, false, false, false, "")
+
+-- Markers are emitted as TRANSITIONS, not per run: adjacent runs sharing a
+-- format share one pair. Wrapping each run on its own produced ambiguous
+-- output — "bold with *italic* inside" came out as five consecutive asterisks,
+-- which does not read back as what it was.
+--
+-- When the format changes at all, every open marker is closed innermost-first
+-- and the new set reopened. Slightly more markers than strictly necessary,
+-- never a malformed nest.
+pure func mdEmitRuns(runs: [InlineRun], b: bool, i: bool, st: bool, acc: string) -> string =
+  match runs {
+    [] => "${acc}${mdCloseMarks(b, i, st)}",
+    r :: rest => {
+      -- Close only what must close, innermost first; a marker nested inside a
+      -- closing one has to close with it and reopen after. Closing everything
+      -- on any change is what produced "*****".
+      let closeB = b && not r.bold;
+      let closeI = (i && not r.italic) || (closeB && i);
+      let closeS = (st && not r.strike) || ((closeB || closeI) && st);
+      let openB = r.bold && (not b || closeB);
+      let openI = r.italic && (not i || closeI);
+      let openS = r.strike && (not st || closeS);
+      let head = "${acc}${mdCloseMarks(closeB, closeI, closeS)}${mdOpenMarks(openB, openI, openS)}";
+      -- Code content is literal: it must not be escaped, and its own markers
+      -- must not be re-wrapped.
+      let body = if r.code then "`${r.text}`" else mdEscapeInline(r.text);
+      let piece = if length(r.href) > 0 then "[${body}](${r.href})" else body;
+      mdEmitRuns(rest, r.bold, r.italic, r.strike, "${head}${piece}")
+    }
+  }
+
+pure func mdOpenMarks(b: bool, i: bool, st: bool) -> string =
+  "${if b then "**" else ""}${if i then "*" else ""}${if st then "~~" else ""}"
+
+pure func mdCloseMarks(b: bool, i: bool, st: bool) -> string =
+  "${if st then "~~" else ""}${if i then "*" else ""}${if b then "**" else ""}"
+
+-- A marker character in ordinary text would be read back as formatting.
+pure func mdEscapeInline(text: string) -> string =
+  replaceMany(text, [("\\", "\\\\"), ("*", "\\*"), ("_", "\\_"),
+                     ("`", "\\`"), ("[", "\\[")])
+
 pure func mdOneLine(text: string) -> string =
   replaceMany(text, [("\r\n", " "), ("\r", " "), ("\n", " ")])
 
 pure func mdEscapeCell(text: string) -> string =
   replaceMany(text, [("\\", "\\\\"), ("|", "\\|"), ("\r\n", "<br>"), ("\r", "<br>"), ("\n", "<br>")])
 
+-- The separator row carries alignment back out, so ":---:" survives a round
+-- trip instead of being read once and dropped.
 pure func renderSepMd(cells: [TableCell]) -> string =
   match cells {
     [] => "",
-    _ :: [] => "--- |",
-    _ :: rest => "--- | ${renderSepMd(rest)}"
+    c :: [] => "${alignDashes(c.align)} |",
+    c :: rest => "${alignDashes(c.align)} | ${renderSepMd(rest)}"
   }
+
+pure func alignDashes(align: string) -> string =
+  if align == "center" then ":---:"
+  else if align == "right" then "---:"
+  else if align == "left" then ":---"
+  else "---"
 
 pure func renderRowsMd(rows: [[TableCell]]) -> string =
   foldl(\acc row. "${acc}| ${renderCellsMd(row)}\n", "", rows)
 
 -- Render list items
-pure func renderListMd(items: [string], ordered: bool, idx: int) -> string =
+pure func renderListMd(items: [string], ordered: bool, idx: int, levels: [int]) -> string =
   match items {
     [] => "",
-    item :: rest =>
-      if ordered
-      then "${show(idx)}. ${mdOneLine(item)}\n${renderListMd(rest, ordered, idx + 1)}"
-      else "- ${mdOneLine(item)}\n${renderListMd(rest, ordered, idx + 1)}"
+    item :: rest => {
+      -- Two spaces per level, which is what the reader measures back.
+      let lvl = match levels { [] => 0, n :: _ => n };
+      let restLevels = match levels { [] => [], _ :: t => t };
+      let pad = repeat("  ", lvl);
+      let marker = if ordered then "${show(idx)}. " else "- ";
+      "${pad}${marker}${mdOneLine(item)}\n${renderListMd(rest, ordered, idx + 1, restLevels)}"
+    }
   }

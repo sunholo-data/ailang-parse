@@ -30,7 +30,8 @@ NULL
     return(list(
       text     = .s(raw$text),
       col_span = .i(raw$colSpan, 1L),
-      merged   = .b(raw$merged)
+      merged   = .b(raw$merged),
+      align    = .s(raw$align)
     ))
   }
   list(text = as.character(raw), col_span = 1L, merged = FALSE)
@@ -123,6 +124,7 @@ convert_save <- function(x, path = NULL) {
     data_length   = .i(d$dataLength),
     kind          = .s(d$kind),
     name          = .s(d$name),
+    item_levels   = if (is.null(d$itemLevels)) integer(0) else as.integer(unlist(d$itemLevels)),
     id            = .s(d$id),
     anchor_text   = .s(d$anchorText),
     anchor_kind   = .s(d$anchorKind),

@@ -301,6 +301,12 @@ pure func mcpJoinButLast(parts: [string]) -> string =
 -- Returns input/output formats, output modes, sample files for testing,
 -- and service info including pricing and auth details.
 -- This is the main discovery tool for agents to understand what AILANG Parse can do.
+--
+-- Markdown is the format an agent can WRITE, so it is the practical way to
+-- generate a document: YAML front matter sets title/author, and inline
+-- formatting, links, images (read from local paths and embedded), fenced code,
+-- blockquotes, nested lists and tables with alignment and colspan all survive
+-- into DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML.
 @route("GET", "/mcp/v1/formats")
 export pure func mcpFormats() -> string {
   encode(jo([
@@ -311,8 +317,8 @@ export pure func mcpFormats() -> string {
       mcpFormatEntry("odt", "OpenDocument Text", false, true, true, true, false),
       mcpFormatEntry("odp", "OpenDocument Presentation", false, true, false, false, false),
       mcpFormatEntry("ods", "OpenDocument Spreadsheet", false, true, false, false, false),
-      mcpFormatEntry("html", "HTML", false, true, false, false, false),
-      mcpFormatEntry("md", "Markdown", false, false, false, false, false),
+      mcpFormatEntry("html", "HTML", false, true, false, false, true),
+      mcpFormatEntry("md", "Markdown", false, true, false, false, true),
       mcpFormatEntry("csv", "CSV/TSV", false, true, false, false, false),
       mcpFormatEntry("epub", "EPUB ebook", false, true, false, false, true),
       mcpFormatEntry("eml", "Email (RFC 5322)", false, false, false, false, false),

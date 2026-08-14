@@ -13,8 +13,16 @@ Run the document generation verification loop to check that generated Office fil
 Three levels of verification on all files in `data/examples/`:
 
 1. **L1 Structure** — ZIP well-formedness, required entries present, XML validity
-2. **L2 Library** — python-docx, python-pptx, openpyxl open without errors
-3. **L4 Roundtrip** — Parse through AILANG Parse, verify blocks are preserved
+2. **L2 Library** — python-docx, python-pptx, openpyxl open without errors, AND
+   the DOCX table grid is inspected: every row must span exactly the columns
+   `w:tblGrid` declares, and every cell must be iterable
+3. **L2b Parts** — DOCX package wiring (declared, related, present)
+4. **L4 Roundtrip** — Parse through AILANG Parse, verify blocks are preserved
+
+**Opening a file is not verifying it.** LibreOffice tolerates malformed table
+geometry that python-docx rejects and Word offers to repair, so invalid output
+shipped twice while every check was green. Anything generated must have its
+structure read back, which is what the L2 grid assertion does.
 
 ## Usage
 
@@ -23,6 +31,27 @@ Run the verification script:
 ```bash
 uv run --with python-pptx --with openpyxl --with python-docx benchmarks/verify_generated.py
 ```
+
+### Also run the round-trip suite
+
+`verify_generated.py` only covers `data/examples/`. After any parser or
+generator change also run:
+
+```bash
+uv run benchmarks/roundtrip_check.py    # parse -> markdown -> parse, 101 files
+```
+
+It asserts table dimensions, cell text, grid width and heading sequence survive
+a trip through markdown — the writer the office suite cannot see, because every
+golden is JSON.
+
+### Building a test document
+
+The cheapest way to exercise the generators is to write markdown and convert
+it: front matter, inline formatting, links, images, fenced code, blockquotes,
+nested lists and aligned/spanned tables all round-trip. Headers, footers,
+comments and tracked changes are not expressible in markdown — convert an
+existing document that has them instead.
 
 ### With Regeneration
 

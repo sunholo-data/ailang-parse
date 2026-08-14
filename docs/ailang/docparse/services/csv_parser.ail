@@ -1,6 +1,6 @@
 module docparse/services/csv_parser
 
-import std/string (split, trim, length, contains, foldChars, join)
+import std/string (split, trim, length, contains, foldChars, join, startsWith, substring)
 import std/list (map, filter, reverse, length as listLength)
 import std/option (Some, None)
 import docparse/types/document (Block, TableBlock, TableCell, simpleCell, mkTable)
@@ -23,7 +23,12 @@ import docparse/types/document (Block, TableBlock, TableCell, simpleCell, mkTabl
 export pure func parseCsv(content: string, delimiter: string) -> [Block]
   ensures { listLength(result) <= 1 }
 {
-  let trimmed = trim(content);
+  -- A leading BOM otherwise becomes part of the first header name, so a
+  -- consumer looking for column "id" finds "\u{FEFF}id" and misses it.
+  let debommed = if startsWith(content, "\u{FEFF}")
+    then substring(content, 1, length(content))
+    else content;
+  let trimmed = trim(debommed);
   if length(trimmed) == 0 then []
   else {
     -- A file with no quote character anywhere cannot have quoted fields, so the
@@ -102,7 +107,10 @@ pure func csvStep(st: CsvState, c: string, delimiter: string) -> CsvState =
   else csvStepPlain(st, c, delimiter)
 
 pure func csvStepPlain(st: CsvState, c: string, delimiter: string) -> CsvState =
-  if c == "\"" then { st | inQ: true, wasQ: true }
+  -- A quote only opens a quoted field at the START of one. Mid-field it is
+  -- ordinary data: x"y,z is two fields, not one. Treating it as an opener
+  -- swallowed the delimiter and silently merged the columns.
+  if c == "\"" && mdIsFieldStart(st) then { st | inQ: true, wasQ: true }
   else if c == delimiter then csvFlushField(st)
   else if c == "\n" then csvFlushRow(st)
   else if c == "\r" then st
@@ -110,6 +118,9 @@ pure func csvStepPlain(st: CsvState, c: string, delimiter: string) -> CsvState =
 
 -- Quoted fields keep their whitespace — it was deliberate enough to quote.
 -- Unquoted fields are trimmed, which is what the line-split path has always done.
+pure func mdIsFieldStart(st: CsvState) -> bool =
+  match st.buf { [] => true, _ => false }
+
 pure func csvFlushField(st: CsvState) -> CsvState {
   let raw = join("", reverse(st.buf));
   let value = if st.wasQ then raw else trim(raw);

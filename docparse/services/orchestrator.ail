@@ -45,16 +45,16 @@
 
 module docparse/services/orchestrator
 
-import std/string (length, toLower)
+import std/string (length, toLower, startsWith, endsWith)
 import std/list (concat, length as listLength)
-import std/fs (readFile, writeFileBytes, removeFile)
+import std/fs (readFile, readFileBytes, fileExists, writeFileBytes, removeFile)
 import std/bytes (fromBase64)
 import std/option (Some, None)
 import std/io (println)
 import std/result (Ok, Err)
 import std/ai (AIError)
 
-import docparse/types/document (mkText, Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterImages, mkSection, mkNamedSection)
+import docparse/types/document (mkText, Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterImages, mkSection, mkNamedSection, ImageBlock, mkImage)
 import docparse/services/format_router (detectFormat, getExtension, officeType)
 
 -- Deterministic parsers (all ! {FS} or pure)
@@ -70,7 +70,7 @@ import docparse/services/ods_parser (parseOds, parseOdsMetadata)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
 import docparse/services/zip_extract (resolveBlockImages)
 import docparse/services/html_parser (parseHtmlDoc)
-import docparse/services/markdown_parser (parseMarkdown)
+import docparse/services/markdown_parser (parseMarkdown, parseMarkdownMeta)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/eml_parser (
   parseEml, parseMbox, parseMboxThreaded, parseEmlMetadata, parseMboxMetadata
@@ -257,10 +257,47 @@ func orchHtml(filepath: string) -> ParseOutcome ! {FS} = {
 }
 
 func orchMarkdown(filepath: string) -> ParseOutcome ! {FS} = {
-  let blocks = parseMarkdown(readFile(filepath));
-  mkOutcome("markdown", filepath, emptyMetadata(), blocks,
+  let content = readFile(filepath);
+  let parsed = parseMarkdown(content);
+  let blocks = orchResolveMdImages(parsed, dirOf(filepath));
+  -- Front matter carries title/author, which every other format takes from
+  -- its own core properties. Without it a generated document has none.
+  mkOutcome("markdown", filepath, parseMarkdownMeta(content), blocks,
     ["Parsed Markdown: ${show(countBlocks(blocks))} blocks"], [], 0)
 }
+
+-- A Markdown image is a PATH, not bytes, so it reached the generators as a
+-- "[Image: alt]" text placeholder — an AI writing Markdown could not put a
+-- picture in a document at all. Read the file here (the parser is pure and
+-- cannot) and hand the generators the base64 they already know how to embed.
+--
+-- A reference that does not resolve keeps its placeholder rather than failing
+-- the parse: a broken image link should not cost you the document.
+func orchResolveMdImages(blocks: [Block], baseDir: string) -> [Block] ! {FS} =
+  match blocks {
+    [] => [],
+    b :: rest =>
+      orchResolveMdImage(b, baseDir) :: orchResolveMdImages(rest, baseDir)
+  }
+
+func orchResolveMdImage(block: Block, baseDir: string) -> Block ! {FS} =
+  match block {
+    ImageBlock(i) =>
+      if length(i.data) == 0 || i.mime != "image/unknown" then block
+      else if startsWith(i.data, "http://") || startsWith(i.data, "https://")
+      then block   -- remote reference: not ours to fetch
+      else {
+        let path = if startsWith(i.data, "/") then i.data else "${baseDir}/${i.data}";
+        if not fileExists(path) then block
+        else match readFileBytes(path) {
+          Ok(b64) => mkImage(b64, i.description, orchImageMime(getExtension(i.data))),
+          Err(_) => block
+        }
+      },
+    SectionBlock(s) =>
+      mkNamedSection(s.kind, s.name, orchResolveMdImages(s.blocks, baseDir)),
+    _ => block
+  }
 
 -- `ext` is "csv" or "tsv" — detectFormat routes both here because they share a
 -- parsing strategy, but the reported format must stay the one the user gave us.

@@ -62,7 +62,7 @@ UnstructuredClient <- R6::R6Class(
       url_path <- "/general/v0/general"
       req <- httr2::request(paste0(self$server_url, url_path))
       req <- httr2::req_timeout(req, self$timeout)
-      req <- httr2::req_user_agent(req, "ailangparse-r/0.11.0")
+      req <- httr2::req_user_agent(req, "ailangparse-r/0.12.0")
       req <- httr2::req_error(req, is_error = function(resp) FALSE)
       if (nzchar(self$api_key)) {
         req <- httr2::req_headers(req, `unstructured-api-key` = self$api_key)

@@ -24,6 +24,13 @@ uv run benchmarks/run_benchmarks.py --competitors markitdown   # just MarkItDown
 
 # Regenerate golden outputs after changing parser code
 bash benchmarks/generate_golden.sh
+
+# Round-trip check: parse -> markdown -> parse (run after ANY parser or
+# generator change; the office suite cannot see markdown at all)
+uv run benchmarks/roundtrip_check.py
+
+# Generated-document verification (structure, libraries, DOCX table grid)
+uv run benchmarks/verify_generated.py
 ```
 
 ## Office Structural Benchmark
@@ -38,6 +45,32 @@ bash benchmarks/generate_golden.sh
 - Large/slow files live in `data/test_files/stress/` with golden outputs in `benchmarks/office/stress/`
 - Not included in the standard `--suite office` run
 - Run explicitly with `--suite stress` for performance testing
+
+## Round-trip suite
+
+`benchmarks/roundtrip_check.py` parses each test file, renders it to markdown,
+and parses that back, asserting table dimensions, cell text, grid width and the
+heading sequence survive. 0 failures across 101 files.
+
+It exists because **the office suite scores JSON goldens and no golden is
+markdown**, so nothing scored the markdown writer at all — it read 100.0%
+while a DOCX table with a two-paragraph cell was shattering into broken pipe
+syntax. Files whose rendered markdown exceeds 64KB are skipped and named on
+every run.
+
+## Verifying generated documents
+
+`benchmarks/verify_generated.py` opens each generated file with the Python
+libraries AND inspects its structure. The DOCX check asserts every row spans
+exactly the columns `w:tblGrid` declares and that every cell is iterable —
+added after malformed geometry shipped twice while "does it open" passed,
+because LibreOffice tolerates what python-docx and Word do not.
+
+## The blind spot to design around
+
+Three defects in a row reached a release through green suites: parse-side
+goldens and "does the file open" both pass through structurally invalid
+output. Anything generated needs its structure read BACK, not just opened.
 
 ## Philosophy
 

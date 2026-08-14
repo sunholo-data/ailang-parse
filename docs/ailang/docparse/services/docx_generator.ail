@@ -192,6 +192,7 @@ pure func docxBlockToXml(block: Block) -> string =
 
     TextBlock(t) =>
       if t.style == "hr" then docxHorizontalRule()
+      else if t.style == "quote" then docxBlockquote(t.runs, t.text)
       else if docxIsCodeStyle(t.style) then docxCodeBlock(t.text)
       else if listLength(t.runs) > 0
       then docxParagraph(docxRunsToXml(t.runs))
@@ -203,7 +204,7 @@ pure func docxBlockToXml(block: Block) -> string =
       docxTableToXml(t.headers, t.rows),
 
     ListBlock(l) =>
-      docxListToXml(l.items, l.ordered, l.itemRuns),
+      docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels),
 
     ImageBlock(i) =>
       if length(i.description) > 0
@@ -234,6 +235,26 @@ pure func docxBlockToXml(block: Block) -> string =
   }
 
 -- === Character formatting (P2 phase 4) ===================================
+
+-- A header cell centres by default, but a column that DECLARES an alignment
+-- should honour it in the header too, not just the body.
+pure func docxHeaderAlignPr(align: string) -> string =
+  if length(align) > 0 then docxAlignPr(align)
+  else "<w:pPr><w:jc w:val=\"center\"/></w:pPr>"
+
+-- Declared column alignment. Word takes it as paragraph justification inside
+-- the cell; "left" is Word's default and needs no element.
+pure func docxAlignPr(align: string) -> string =
+  if align == "left" then "<w:pPr><w:jc w:val=\"left\"/></w:pPr>"
+  else if align == "center" then "<w:pPr><w:jc w:val=\"center\"/></w:pPr>"
+  else if align == "right" then "<w:pPr><w:jc w:val=\"right\"/></w:pPr>"
+  else ""
+
+-- A blockquote: indented, as Word's own Quote style renders it.
+pure func docxBlockquote(runs: [InlineRun], text: string) -> string {
+  let body = if listLength(runs) > 0 then docxRunsToXml(runs) else docxRun(text);
+  docxParagraph("<w:pPr><w:ind w:left=\"720\"/></w:pPr>${body}")
+}
 
 -- A fenced code block. Word has no code block, so each source line becomes its
 -- own monospaced paragraph — which preserves the line structure that a single
@@ -470,7 +491,7 @@ pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
     let spanPr = if cell.colSpan > 1
       then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
       else "";
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r></w:p></w:tc>"
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p>${docxHeaderAlignPr(cell.align)}<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r></w:p></w:tc>"
   }
 }
 
@@ -494,32 +515,44 @@ pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
     let spanPr = if cell.colSpan > 1
       then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
       else "";
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph(docxRun(cell.text))}</w:tc>"
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph("${docxAlignPr(cell.align)}${docxRun(cell.text)}")}</w:tc>"
   }
 }
 
 -- Lists as real Word list paragraphs referencing word/numbering.xml
 -- (numId 1 = bullet, 2 = decimal).
-pure func docxListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> string =
-  docxListItemsToXml(items, itemRuns, if ordered then 2 else 1)
+pure func docxListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]],
+                        itemLevels: [int]) -> string =
+  docxListItemsToXml(items, itemRuns, itemLevels, if ordered then 2 else 1)
 
 -- itemRuns is parallel to items but may be empty entirely (nothing formatted).
 -- Both lists are walked together so a short or absent itemRuns simply falls
 -- back to plain text per item rather than mis-pairing formatting with the
 -- wrong item.
-pure func docxListItemsToXml(items: [string], itemRuns: [[InlineRun]], numId: int) -> string =
+pure func docxListItemsToXml(items: [string], itemRuns: [[InlineRun]], itemLevels: [int], numId: int) -> string =
   match items {
     [] => "",
     item :: rest =>
-      let pPr = "<w:pPr><w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"${intToStr(numId)}\"/></w:numPr></w:pPr>" in
+      -- w:ilvl is the nesting depth Word indents by; it was hardcoded to 0, so
+      -- every sub-item rendered flush with its parent.
+      let lvl = docxHeadLevel(itemLevels) in
+      let pPr = "<w:pPr><w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"${intToStr(lvl)}\"/><w:numId w:val=\"${intToStr(numId)}\"/></w:numPr></w:pPr>" in
       match itemRuns {
         [] =>
-          "${docxParagraph("${pPr}${docxRun(item)}")}${docxListItemsToXml(rest, [], numId)}",
+          "${docxParagraph("${pPr}${docxRun(item)}")}${docxListItemsToXml(rest, [], docxTailLevels(itemLevels), numId)}",
         r :: rrest =>
           let body = if listLength(r) > 0 then docxRunsToXml(r) else docxRun(item) in
-          "${docxParagraph("${pPr}${body}")}${docxListItemsToXml(rest, rrest, numId)}"
+          "${docxParagraph("${pPr}${body}")}${docxListItemsToXml(rest, rrest, docxTailLevels(itemLevels), numId)}"
       }
   }
+
+-- itemLevels is parallel to items but may be absent entirely (a flat list), so
+-- both are walked together and a missing level simply means top level.
+pure func docxHeadLevel(levels: [int]) -> int =
+  match levels { [] => 0, n :: _ => n }
+
+pure func docxTailLevels(levels: [int]) -> [int] =
+  match levels { [] => [], _ :: t => t }
 
 -- Section blocks: render child blocks with a section label
 pure func docxSectionToXml(kind: string, blocks: [Block]) -> string {

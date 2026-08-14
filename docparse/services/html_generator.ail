@@ -35,7 +35,7 @@ export pure func generateHtmlBody(blocks: [Block]) -> string =
 
 -- Minimal CSS for readable output
 pure func htmlStyle() -> string =
-  "<style>\nbody { font-family: sans-serif; max-width: 800px; margin: 2em auto; line-height: 1.6; }\ntable { border-collapse: collapse; margin: 1em 0; }\nth, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }\nth { background: #f5f5f5; }\n.merged { background: #f0f0f0; }\nins { background: #d4edda; text-decoration: none; }\ndel { background: #f8d7da; }\n.section-header, .section-footer { color: #666; font-style: italic; border-top: 1px solid #eee; padding-top: 0.5em; }\n.section-slide { border-top: 2px solid #333; padding-top: 1em; margin-top: 2em; }\n.section-textbox { border-left: 3px solid #ccc; padding-left: 1em; margin: 1em 0; }\n</style>\n"
+  "<style>\nbody { font-family: sans-serif; max-width: 800px; margin: 2em auto; line-height: 1.6; }\ntable { border-collapse: collapse; margin: 1em 0; }\nth, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }\nth { background: #f5f5f5; }\n.merged { background: #f0f0f0; }\nins { background: #d4edda; text-decoration: none; }\ndel { background: #f8d7da; }\n.section-header, .section-footer { color: #666; font-style: italic; border-top: 1px solid #eee; padding-top: 0.5em; }\n.section-slide { border-top: 2px solid #333; padding-top: 1em; margin-top: 2em; }\n.section-textbox { border-left: 3px solid #ccc; padding-left: 1em; margin: 1em 0; }\nli.level-1 { margin-left: 1.5em; }\nli.level-2 { margin-left: 3em; }\nli.level-3 { margin-left: 4.5em; }\n</style>\n"
 
 -- Convert a list of blocks to HTML
 pure func htmlBlocksToStr(blocks: [Block]) -> string =
@@ -51,6 +51,7 @@ pure func htmlBlockToStr(block: Block) -> string =
 
     TextBlock(t) =>
       if t.style == "hr" then "<hr>\n"
+      else if t.style == "quote" then "<blockquote><p>${if listLength(t.runs) > 0 then htmlRunsToStr(t.runs) else xmlEscape(t.text)}</p></blockquote>\n"
       else if t.style == "code" || startsWith(t.style, "code:")
       then "<pre><code>${xmlEscape(t.text)}</code></pre>\n"
       else if listLength(t.runs) > 0 || length(t.text) > 0
@@ -72,7 +73,7 @@ pure func htmlBlockToStr(block: Block) -> string =
 
 
     ListBlock(l) =>
-      let body = htmlListItemsRuns(l.items, l.itemRuns) in
+      let body = htmlListItemsLevels(l.items, l.itemRuns, l.itemLevels) in
       if l.ordered
       then "<ol>\n${body}</ol>\n"
       else "<ul>\n${body}</ul>\n",
@@ -146,6 +147,24 @@ pure func htmlRunToStr(r: InlineRun) -> string {
 -- List items, preferring per-item runs when present. itemRuns is parallel to
 -- items but may be empty; both are walked together so a short or absent
 -- itemRuns degrades to plain text rather than mis-pairing.
+-- Nested items carry their depth as a class rather than reopening <ul>, which
+-- would need lookahead to close correctly. The CSS indents on it.
+pure func htmlListItemsLevels(items: [string], itemRuns: [[InlineRun]], levels: [int]) -> string =
+  match items {
+    [] => "",
+    item :: rest => {
+      let lvl = match levels { [] => 0, n :: _ => n };
+      let restLevels = match levels { [] => [], _ :: t => t };
+      let body = match itemRuns {
+        [] => xmlEscape(item),
+        r :: _ => if listLength(r) > 0 then htmlRunsToStr(r) else xmlEscape(item)
+      };
+      let restRuns = match itemRuns { [] => [], _ :: t => t };
+      let cls = if lvl > 0 then " class=\"level-${intToStr(lvl)}\"" else "";
+      "<li${cls}>${body}</li>\n${htmlListItemsLevels(rest, restRuns, restLevels)}"
+    }
+  }
+
 pure func htmlListItemsRuns(items: [string], itemRuns: [[InlineRun]]) -> string =
   match items {
     [] => "",
@@ -176,10 +195,16 @@ pure func htmlHeaderCells(cells: [TableCell]) -> string =
 
 pure func htmlHeaderCell(cell: TableCell) -> string {
   if cell.merged then ""
-  else if cell.colSpan > 1
-    then "<th colspan=\"${intToStr(cell.colSpan)}\">${xmlEscape(cell.text)}</th>"
-    else "<th>${xmlEscape(cell.text)}</th>"
+  else {
+    let span = if cell.colSpan > 1 then " colspan=\"${intToStr(cell.colSpan)}\"" else "";
+    "<th${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cell.text)}</th>"
+  }
 }
+
+-- Declared alignment, which the Markdown separator row carries and every
+-- previous version discarded.
+pure func htmlAlignAttr(align: string) -> string =
+  if length(align) > 0 then " style=\"text-align:${align}\"" else ""
 
 -- Render data cells as <td> with colspan support
 pure func htmlDataCells(cells: [TableCell]) -> string =
@@ -187,9 +212,10 @@ pure func htmlDataCells(cells: [TableCell]) -> string =
 
 pure func htmlDataCell(cell: TableCell) -> string {
   if cell.merged then ""
-  else if cell.colSpan > 1
-    then "<td colspan=\"${intToStr(cell.colSpan)}\">${xmlEscape(cell.text)}</td>"
-    else "<td>${xmlEscape(cell.text)}</td>"
+  else {
+    let span = if cell.colSpan > 1 then " colspan=\"${intToStr(cell.colSpan)}\"" else "";
+    "<td${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cell.text)}</td>"
+  }
 }
 
 -- Render list items

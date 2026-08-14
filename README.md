@@ -87,6 +87,24 @@ Every run produces:
 
 **Generation (9 formats):** DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto)
 
+### Writing documents in Markdown
+
+Markdown is the input an LLM can write, so it is the practical way to generate a
+document: write markdown, convert to any of the nine output formats.
+
+```bash
+docparse report.md --convert report.docx
+```
+
+What survives the trip: YAML front matter (title/author/date → document
+properties), **bold**/*italic*/`code`/~~strike~~ as real character formatting,
+links as real hyperlinks, images (local paths are read and embedded), fenced
+code blocks, blockquotes, nested lists, thematic breaks, and tables with
+alignment and column spans.
+
+Headers, footers, comments and tracked changes have no Markdown syntax; those
+are preserved when converting from a document that already contains them.
+
 ## Architecture
 
 ```

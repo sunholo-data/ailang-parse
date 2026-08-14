@@ -9,7 +9,73 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.33.2...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.34.0...HEAD)
+
+## [v0.34.0](https://github.com/sunholo-data/ailang-parse/compare/v0.33.2...v0.34.0) — 2026-08-14
+
+### Markdown becomes an authoring format
+
+Markdown is the input an LLM can actually write, which makes it the practical
+way to *generate* a document rather than only to read one. Everything below is
+about closing the gap between what a Markdown author can express and what
+reaches DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML.
+
+- **YAML front matter** sets `title`, `author` and `date`. Previously there was
+  no way at all to give a generated document its core properties — every DOCX
+  written from Markdown had empty metadata.
+- **Images are read and embedded.** `![alt](diagram.png)` resolved to a text
+  placeholder because a Markdown image reference carries a path, not bytes. The
+  file is now read (in the orchestrator — the parser is pure and cannot) and
+  handed to the generators as base64. A reference that does not resolve keeps
+  its placeholder rather than failing the parse.
+- **Blockquotes** are parsed. `>` used to survive as a literal character in the
+  text of an ordinary paragraph.
+- **Nested lists** carry their depth. `ListBlock` gains `itemLevels` (parallel
+  to `items`, omitted when flat) and DOCX emits real `w:ilvl` — every sub-item
+  previously rendered flush with its parent.
+- **Table alignment** survives. `TableCell` gains `align`; `:---:` was parsed
+  and then discarded. DOCX gets `w:jc`, HTML gets `text-align`, and the
+  Markdown writer re-emits the colons.
+- **Runs are written back as Markdown markers.** The reader turned `**bold**`
+  into a run; without the inverse, every conversion *through* Markdown quietly
+  flattened formatting — docx(bold) → md → docx came out plain. Markers are
+  emitted as transitions, so adjacent runs share one pair instead of producing
+  `*****`.
+
+### Eight defects found by adversarial sweep
+
+None of these were reported; they came from deliberately hostile fixtures.
+Three were introduced by v0.33.0 itself.
+
+- **CSV: a bare quote mid-field swallowed the delimiter.** `x"y,z` parsed as a
+  single cell. A quote only opens a quoted field at the *start* of one; mid-field
+  it is data.
+- **CSV: a UTF-8 BOM stayed in the first header name**, so a consumer looking
+  for column `id` found `\uFEFFid`.
+- **Inline: backslash escapes were broken** — `\*not italic\*` came out
+  italicised with the backslashes left in. Escaped punctuation is now masked
+  before any splitting and restored afterwards.
+- **Inline: an unmatched `**` was silently deleted** — "2\*\*8 is 256" became
+  "28 is 256". A token restored as literal is masked so the weaker levels below
+  cannot re-split and drop it.
+- **Inline: links whose URL contained `_` or `*` were not parsed at all**, and
+  **parentheses in a URL produced a silently wrong href**. Links and code spans
+  are now lifted out as atoms before emphasis is peeled, and the destination is
+  matched with balanced parens.
+- **Inline: emphasis composed with code and links.** `*Source: \`x\`*` kept its
+  asterisks literal (reported by docparse); `**bold with *italic* inside**` lost
+  the inner span. Both work now.
+- **Tables: `{colspan=99}` padded every row to 100 cells.** Clamped to 64.
+
+### API-visible
+
+`TableCell.align` and `ListBlock.itemLevels` are additive and omitted when
+empty, so existing JSON is byte-identical. Both are exposed by all four SDKs
+(`sdk-v0.12.0`).
+
+`mcpFormats()` was advertising Markdown as `tables: false, images: false` and
+HTML as `images: false` — all three wrong, and this is the tool agents read to
+decide what the service can do. Corrected against actual parse output.
 
 ## [v0.33.2](https://github.com/sunholo-data/ailang-parse/compare/v0.33.1...v0.33.2) — 2026-08-13
 

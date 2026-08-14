@@ -206,6 +206,17 @@ Parser code:
 - [ ] `docparse/services/${FMT}_input_resolver.ail` *(if multi-file/archive)*
 - [ ] `docparse/services/format_router.ail`
 - [ ] `docparse/main.ail`
+- [ ] `docparse/services/mcp/tools.ail` — add an `mcpFormatEntry` to `mcpFormats()`.
+      **This is how agents discover the format exists.** Set the feature flags
+      (tables / track_changes / comments / images) from what the parser actually
+      produces on a real file, not from intent — md and html both sat advertising
+      `images: false` long after they surfaced images.
+
+Verification (all three, not just the office suite):
+- [ ] `bash benchmarks/generate_golden.sh` — new file gets a golden
+- [ ] `uv run benchmarks/run_benchmarks.py --suite office` — must be 100%
+- [ ] `uv run benchmarks/roundtrip_check.py` — parse → md → parse
+- [ ] `uv run benchmarks/verify_generated.py` — if the format is also an OUTPUT
 
 Package:
 - [ ] `ailang.toml` (exports + version + ailang constraint)
@@ -215,7 +226,12 @@ Package:
 WASM:
 - [ ] `docparse/services/docparse_browser.ail` (+ mirror to `docs/ailang/`)
 - [ ] `docs/ailang/docparse/services/${FMT}_parser.ail`
-- [ ] `docs/scripts/vendor-wasm-packages.sh`
+- [ ] `docs/scripts/vendor-wasm-packages.sh` — the module MUST be in `MODULES`.
+      The registry validator type-checks the WHOLE checkout, so a vendored copy
+      nothing refreshes goes stale against the canonical tree and fails the
+      publish (v0.33.0 died exactly this way). The script now fails on any
+      orphan, and `check-wasm-bindings.py` fails on any vendored module the demo
+      does not load — the two together pin the set from both sides.
 - [ ] `docs/js/wasm-demo.js` (MODULES_TO_LOAD + both textFormats + parseTextFile route)
 
 UI:

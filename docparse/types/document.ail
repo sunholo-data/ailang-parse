@@ -18,7 +18,11 @@ export type TableCell = {
   colSpan: int,
   rowSpan: int,
   merged: bool,
-  scope: string
+  scope: string,
+  -- "" | "left" | "center" | "right". Markdown states it with colons in the
+  -- separator row (|:---|---:|); every other format has its own notion. Empty
+  -- means "not specified", which is not the same as left.
+  align: string
 }
 
 -- A span of text within a paragraph carrying character formatting.
@@ -78,7 +82,7 @@ export type Block = TextBlock({text: string, style: string, level: int, runs: [I
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
                   | VideoBlock({data: string, description: string, mime: string})
-                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]]})
+                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]})
                   | HeadingBlock({text: string, level: int, runs: [InlineRun]})
                   | SectionBlock({kind: string, name: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
@@ -240,7 +244,7 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: ""}
 }
 
 -- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
@@ -249,21 +253,21 @@ export pure func simpleCell(text: string) -> TableCell
 export pure func scopedCell(text: string, scope: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: ""}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: ""}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: ""}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: ""}
 }
 
 -- Construct a TableBlock with no caption (most non-HTML parsers).
@@ -352,7 +356,7 @@ export pure func mkHeadingRuns(text: string, level: int, runs: [InlineRun]) -> B
 
 -- Construct a ListBlock.
 export pure func mkList(items: [string], ordered: bool) -> Block =
-  ListBlock({items: items, ordered: ordered, itemRuns: []})
+  ListBlock({items: items, ordered: ordered, itemRuns: [], itemLevels: []})
 
 -- ListBlock with per-item formatting.
 --
@@ -364,7 +368,15 @@ export pure func mkList(items: [string], ordered: bool) -> Block =
 -- parallel field is additive. Consumers must tolerate an empty itemRuns and
 -- should not assume alignment without checking length.
 export pure func mkListRuns(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> Block =
-  ListBlock({items: items, ordered: ordered, itemRuns: map(coalesceRuns, itemRuns)})
+  ListBlock({items: items, ordered: ordered, itemRuns: map(coalesceRuns, itemRuns), itemLevels: []})
+
+-- A nested list. `itemLevels` is parallel to `items`, 0 for a top-level item.
+-- Empty when the list is flat, so an ordinary list serialises exactly as it
+-- did before nesting existed.
+export pure func mkListNested(items: [string], ordered: bool,
+                              itemRuns: [[InlineRun]], itemLevels: [int]) -> Block =
+  ListBlock({items: items, ordered: ordered,
+             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels})
 
 -- Construct a plain body paragraph — the overwhelmingly common case
 -- (style "normal", level 0).

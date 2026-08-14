@@ -70,6 +70,10 @@ type Block struct {
 	ParentID         string `json:"parentId,omitempty"` // set on threaded replies
 	Resolved         bool   `json:"resolved,omitempty"`
 
+	// ItemLevels is the nesting depth per list item, parallel to Items;
+	// empty for a flat list.
+	ItemLevels []int `json:"itemLevels,omitempty"`
+
 	// SectionBlock (recursive). Name is the container's own identity (sheet
 	// name, slide title, chapter); empty for sections with no name of their own.
 	Kind     string  `json:"kind,omitempty"`
@@ -82,6 +86,8 @@ type Cell struct {
 	Text    string `json:"text"`
 	ColSpan int    `json:"colSpan,omitempty"`
 	Merged  bool   `json:"merged,omitempty"`
+	// "" | "left" | "center" | "right"; empty means unspecified.
+	Align string `json:"align,omitempty"`
 }
 
 // UnmarshalJSON handles both string ("A") and object ({"text":"A","colSpan":2}) forms.

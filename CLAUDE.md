@@ -20,6 +20,21 @@ ailang-parse/
 └── benchmarks/            # Benchmark infrastructure
 ```
 
+## Authoring documents in Markdown
+
+Markdown is the input format you can WRITE, which makes it the way to build a
+test document with known-expected structure and then check what came out the
+other side. Front matter sets title/author; inline formatting, links, images
+(local paths are read and embedded), fenced code, blockquotes, nested lists and
+tables with alignment/colspan all survive into every output format.
+
+It reaches roughly 70% of the generator surface. Headers, footers, comments and
+tracked changes are NOT expressible in markdown — to exercise those, convert an
+existing document that has them (e.g. `data/test_files/docx-hdrftr.docx`).
+
+Generating a document and reading its structure back is how the last several
+defects were found; green suites did not see any of them.
+
 ## AILANG Language & Toolchain Reference
 
 Before writing or modifying AILANG code, load the full references:
@@ -53,6 +68,11 @@ ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
 ./bin/docparse --test        # Run inline tests
 ./bin/docparse --prove       # Z3 contract verification
 bash benchmarks/quick_check.sh    # Quick smoke test (~15s)
+
+# After ANY parser or generator change, all three:
+uv run benchmarks/run_benchmarks.py --suite office   # 105 files, must be 100%
+uv run benchmarks/roundtrip_check.py                 # parse -> md -> parse
+uv run benchmarks/verify_generated.py                # generated docs + DOCX grid
 
 # Direct ailang invocation (from repo root)
 ailang run --entry main --caps IO,FS,Env docparse/main.ail data/test_files/sample.docx

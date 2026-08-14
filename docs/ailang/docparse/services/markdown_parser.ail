@@ -1,9 +1,9 @@
 module docparse/services/markdown_parser
 
-import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, charCode, foldChars, join, replace, stringToInt)
+import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, charCode, foldChars, join, replace, replaceMany, stringToInt)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, TableCell, simpleCell, mergedCell, spanCell, mkTable)
+import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, TableCell, simpleCell, mergedCell, spanCell, mkTable)
 
 -- Markdown Parser — converts Markdown text to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -29,10 +29,65 @@ import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mk
 export pure func parseMarkdown(content: string) -> [Block]
   ensures { length(content) == 0 || listLength(result) >= 0 }
 {
-  let lines = split(content, "\n");
+  let split0 = mdSplitFrontMatter(content);
+  let lines = split(split0.body, "\n");
   let result = foldl(mdProcessLine, emptyParseState(), lines);
   -- Flush any remaining accumulated state
   reverse(flushState(result))
+}
+
+-- YAML front matter is how a Markdown author states a document's title and
+-- author, and it is the only way an AI writing Markdown can set them: without
+-- it every generated DOCX carries empty core properties. Recognised only as
+-- the very first line, so a thematic break further down keeps its meaning.
+export pure func parseMarkdownMeta(content: string) -> DocMetadata {
+  let fm = mdSplitFrontMatter(content);
+  if length(fm.front) == 0 then emptyMetadata()
+  else {
+    let fields = split(fm.front, "\n");
+    { title: mdFrontField(fields, "title"),
+      author: mdFrontField(fields, "author"),
+      created: mdFrontField(fields, "date"),
+      modified: "",
+      pageCount: 0 }
+  }
+}
+
+type MdFront = { front: string, body: string }
+
+pure func mdSplitFrontMatter(content: string) -> MdFront =
+  if not startsWith(content, "---\n") then { front: "", body: content }
+  else {
+    let rest = substring(content, 4, length(content));
+    let close = find(rest, "\n---");
+    if close < 0 then { front: "", body: content }
+    else {
+      let after = substring(rest, close + 4, length(rest));
+      -- Tolerate "---", "---\n" and "--- \n" as the closing fence.
+      let body = if startsWith(after, "\n") then substring(after, 1, length(after))
+                 else if startsWith(after, "-") then after
+                 else after;
+      { front: substring(rest, 0, close), body: body }
+    }
+  }
+
+-- One "key: value" line. Quotes around the value are stripped, since YAML
+-- writers add them whenever the value contains a colon.
+pure func mdFrontField(fields: [string], key: string) -> string =
+  match fields {
+    [] => "",
+    line :: rest =>
+      if startsWith(trim(line), "${key}:")
+      then mdStripQuotes(trim(substring(trim(line), length(key) + 1, length(trim(line)))))
+      else mdFrontField(rest, key)
+  }
+
+pure func mdStripQuotes(v: string) -> string {
+  let n = length(v);
+  if n >= 2 && ((startsWith(v, "\"") && endsWith(v, "\"")) ||
+                (startsWith(v, "'") && endsWith(v, "'")))
+  then substring(v, 1, n - 1)
+  else v
 }
 
 -- Internal parse state tracks accumulated lines for multi-line blocks.
@@ -45,6 +100,9 @@ type MdParseState = {
   tableRows: [[string]], -- accumulated table rows (reversed)
   textLines: [string],   -- accumulated paragraph lines (reversed)
   codeLines: [string],   -- accumulated fenced-code lines (reversed)
+  quoteLines: [string],  -- accumulated blockquote lines (reversed)
+  tableAligns: [string], -- per-column alignment from the separator row
+  itemLevels: [int],     -- nesting depth per list item (reversed)
   inCode: bool,          -- inside a ``` fence
   codeLang: string       -- info string of the open fence, "" when absent
 }
@@ -64,6 +122,9 @@ pure func emptyParseState() -> MdParseState
   tableRows: [],
   textLines: [],
   codeLines: [],
+  quoteLines: [],
+  tableAligns: [],
+  itemLevels: [],
   inCode: false,
   codeLang: ""
 }
@@ -102,32 +163,55 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     let s = flushToState(state) in
     { s | blocks: mkText("", "hr", 0) :: s.blocks }
 
-  -- Unordered list item: - or *
+  -- Unordered list item: - or *. Depth comes from the RAW line's indentation,
+  -- which is why it is measured before trimming.
   else if startsWith(trimmedLine, "- ") || startsWith(trimmedLine, "* ") then
     let s = flushText(flushTable(state)) in
     let item = trim(substring(trimmedLine, 2, length(trimmedLine))) in
-    { s | listItems: item :: s.listItems, listOrdered: false }
+    { s | listItems: item :: s.listItems, listOrdered: false,
+          itemLevels: mdIndentLevel(line) :: s.itemLevels }
 
   -- Ordered list item: starts with digit followed by ". "
   else if mdIsOrderedListItem(trimmedLine) then
     let s = flushText(flushTable(state)) in
     let item = mdExtractOrderedItem(trimmedLine) in
-    { s | listItems: item :: s.listItems, listOrdered: true }
+    { s | listItems: item :: s.listItems, listOrdered: true,
+          itemLevels: mdIndentLevel(line) :: s.itemLevels }
 
   -- Table row: starts and ends with |
   else if startsWith(trimmedLine, "|") then
     -- Skip separator rows (| --- | --- |)
-    if mdIsTableSeparator(trimmedLine) then state
+    -- The separator row is where alignment is declared. It used to be skipped
+    -- outright, so ":---:" was read and then thrown away.
+    if mdIsTableSeparator(trimmedLine)
+    then { state | tableAligns: map(mdCellAlign, mdSplitCells(trimmedLine)) }
     else
       let s = flushText(flushList(state)) in
       let cells = mdParseTableRow(trimmedLine) in
       { s | tableRows: cells :: s.tableRows }
 
+  -- Blockquote: "> quoted". Consecutive lines join into one quoted
+  -- paragraph. Without this the ">" survived as a literal character in the
+  -- text and every generator rendered it as punctuation.
+  else if startsWith(trimmedLine, ">") then {
+    let s = flushList(flushTable(flushText(state)));
+    let body = trim(substring(trimmedLine, 1, length(trimmedLine)));
+    { s | quoteLines: body :: s.quoteLines }
+  }
+
   -- Regular text line: accumulate for paragraph
   else
-    let s = flushList(flushTable(state)) in
+    let s = flushList(flushTable(flushQuote(state))) in
     { s | textLines: trimmedLine :: s.textLines }
 }
+
+-- Flush accumulated blockquote lines into a TextBlock with style "quote"
+pure func flushQuote(state: MdParseState) -> MdParseState =
+  if mdIsEmptyList(state.quoteLines) then state
+  else {
+    let text = mdJoinLines(reverse(state.quoteLines));
+    { state | blocks: mdTextBlock(text, "quote", 0) :: state.blocks, quoteLines: [] }
+  }
 
 pure func mdHeadingState(state: MdParseState, trimmedLine: string, level: int) -> MdParseState {
   let s = flushToState(state);
@@ -156,7 +240,7 @@ pure func flushToState(state: MdParseState) -> MdParseState {
   let s = if state.inCode && not mdIsEmptyList(state.codeLines)
     then mdFlushCode(state)   -- unterminated fence: keep the code, don't drop it
     else state;
-  flushText(flushList(flushTable(s)))
+  flushQuote(flushText(flushList(flushTable(s))))
 }
 
 -- Flush accumulated text lines into a TextBlock
@@ -180,8 +264,9 @@ pure func flushList(state: MdParseState) -> MdParseState
   if mdIsEmptyList(state.listItems) then state
   else {
     let items = reverse(state.listItems);
-    { state | blocks: mdListBlock(items, state.listOrdered) :: state.blocks,
-              listItems: [], listOrdered: false }
+    let levels = reverse(state.itemLevels);
+    { state | blocks: mdListBlock(items, state.listOrdered, levels) :: state.blocks,
+              listItems: [], listOrdered: false, itemLevels: [] }
   }
 }
 
@@ -195,7 +280,8 @@ pure func flushTable(state: MdParseState) -> MdParseState
     match reverse(state.tableRows) {
       [] => state,
       headerCells :: dataRows => {
-        let headerRow = map(mdCellFromText, headerCells);
+        let aligns = state.tableAligns;
+        let headerRow = mdApplyAligns(map(mdCellFromText, headerCells), aligns);
         -- Rows are fitted to the header width (GFM): short rows gain empty
         -- cells, long rows lose the excess. A ragged table is not renderable
         -- and every consumer downstream assumes rectangularity.
@@ -204,8 +290,9 @@ pure func flushTable(state: MdParseState) -> MdParseState
         -- with merged cells a row of 2 cells can be exactly as wide as a header
         -- of 3, and padding it to 3 would invent a column.
         let width = mdCellsWidth(headerRow);
-        let bodyRows = map(\row. mdFitCells(map(mdCellFromText, row), width), dataRows);
-        { state | blocks: mkTable(bodyRows, headerRow) :: state.blocks, tableRows: [] }
+        let bodyRows = map(\row. mdApplyAligns(mdFitCells(map(mdCellFromText, row), width), aligns), dataRows);
+        { state | blocks: mkTable(bodyRows, headerRow) :: state.blocks,
+                  tableRows: [], tableAligns: [] }
       }
     }
   }
@@ -238,62 +325,211 @@ pure func flushTable(state: MdParseState) -> MdParseState
 -- the span, odd indices inside. An odd index that is also the LAST segment
 -- means the token was never closed, so it is restored as literal text.
 
-pure func mdInlineLevels() -> int = 5
+-- Inline scanning happens in three passes.
+--
+--   1. Backslash escapes are swapped for sentinels, so an escaped marker is
+--      never seen as a marker.
+--   2. Code spans and links are lifted out ("atoms"), each replaced by a
+--      single sentinel character. Their contents are then invisible to
+--      everything downstream — a URL full of underscores cannot be mistaken
+--      for emphasis, and an asterisk inside a code span stays literal.
+--   3. Emphasis is peeled from the remaining skeleton by splitting on one
+--      token at a time, and the atoms are spliced back in afterwards,
+--      inheriting whatever emphasis was wrapped around them.
+--
+-- Splitting, not walking: charAt is O(i) in AILANG so an index-based scanner
+-- is quadratic, and a per-character foldChars allocates a state record per
+-- character. Both were far too slow (16.9s and 15.0s on a 41KB document,
+-- against 2.0s for doing nothing). `split`/`find`/`contains` are native.
+--
+-- Peeling ** before *, and ~~ before ~, is what stops a double marker being
+-- read as two single ones.
+
+pure func mdEmphLevels() -> int = 4
 
 pure func mdLevelTok(level: int) -> string =
-  if level == 0 then "`"
-  else if level == 1 then "**"
-  else if level == 2 then "~~"
-  else if level == 3 then "*"
+  if level == 0 then "**"
+  else if level == 1 then "~~"
+  else if level == 2 then "*"
   else "_"
 
 pure func mdStyledRun(text: string, level: int) -> InlineRun =
   { text: text,
-    bold: level == 1,
-    italic: level == 3 || level == 4,
+    bold: level == 0,
+    italic: level == 2 || level == 3,
     underline: false,
-    strike: level == 2,
-    code: level == 0,
+    strike: level == 1,
+    code: false,
     href: "",
     vertAlign: "" }
+
+-- One private-use character stands in for every lifted atom. The peel keeps
+-- runs in document order, so walking them left to right pairs each sentinel
+-- with the next atom.
+pure func mdAtomChar() -> string = "\u{E010}"
+
+type MdAtoms = { masked: string, atoms: [InlineRun] }
 
 export pure func mdInlineRuns(s: string) -> [InlineRun] {
   -- Prose with no marker character at all is the common case, and `contains`
   -- is a native scan where everything below allocates.
   if not mdHasMarker(s) then [plainRun(s)]
-  else mdLevelRuns(s, 0)
+  else if contains(s, mdAtomChar()) || contains(s, "\u{E000}")
+  then [plainRun(s)]   -- sentinels already present: refuse to guess
+  else {
+    let escaped = if contains(s, "\\") then mdMaskEscapes(s) else s;
+    let lifted = mdExtractAtoms(escaped);
+    let skeleton = mdEmphRuns(lifted.masked, 0);
+    map(mdUnmaskRun, mdSpliceAtoms(skeleton, lifted.atoms))
+  }
 }
 
 pure func mdHasMarker(s: string) -> bool =
   contains(s, "*") || contains(s, "_") || contains(s, "`") ||
-  contains(s, "~") || contains(s, "[")
+  contains(s, "~") || contains(s, "[") || contains(s, "\\")
 
-pure func mdLevelRuns(s: string, level: int) -> [InlineRun] =
-  if level >= mdInlineLevels() then mdLinkRuns(s)
+-- === Escapes =============================================================
+
+pure func mdEscapePairs() -> [(string, string)] = [
+  ("\\\\", "\u{E000}"),
+  ("\\*", "\u{E001}"),
+  ("\\_", "\u{E002}"),
+  ("\\`", "\u{E003}"),
+  ("\\~", "\u{E004}"),
+  ("\\[", "\u{E005}"),
+  ("\\]", "\u{E006}")
+]
+
+pure func mdMaskEscapes(s: string) -> string = replaceMany(s, mdEscapePairs())
+
+pure func mdUnmaskEscapes(s: string) -> string = replaceMany(s, [
+  ("\u{E000}", "\\"),
+  ("\u{E001}", "*"),
+  ("\u{E002}", "_"),
+  ("\u{E003}", "`"),
+  ("\u{E004}", "~"),
+  ("\u{E005}", "["),
+  ("\u{E006}", "]")
+])
+
+pure func mdUnmaskRun(r: InlineRun) -> InlineRun =
+  { r | text: mdUnmaskEscapes(r.text), href: mdUnmaskEscapes(r.href) }
+
+-- === Pass 2: lift out code spans and links ===============================
+
+pure func mdExtractAtoms(s: string) -> MdAtoms = mdExtractLoop(s, "", [])
+
+pure func mdExtractLoop(rest: string, acc: string, atoms: [InlineRun]) -> MdAtoms {
+  let tick = find(rest, "`");
+  let brk = find(rest, "[");
+  if tick < 0 && brk < 0 then { masked: "${acc}${rest}", atoms: reverse(atoms) }
+  else if tick >= 0 && (brk < 0 || tick < brk)
+  then mdExtractCode(rest, tick, acc, atoms)
+  else mdExtractLink(rest, brk, acc, atoms)
+}
+
+pure func mdExtractCode(rest: string, at: int, acc: string, atoms: [InlineRun]) -> MdAtoms {
+  let after = substring(rest, at + 1, length(rest));
+  let close = find(after, "`");
+  if close < 0
+  then mdExtractLoop(after, "${acc}${substring(rest, 0, at)}`", atoms)
   else {
-    let tok = mdLevelTok(level);
-    if not contains(s, tok) then mdLevelRuns(s, level + 1)
-    else mdLevelWalk(split(s, tok), 0, tok, level, "", [])
+    let inner = substring(after, 0, close);
+    let head = "${acc}${substring(rest, 0, at)}${mdAtomChar()}";
+    let run = { text: inner, bold: false, italic: false, underline: false,
+                strike: false, code: true, href: "", vertAlign: "" };
+    mdExtractLoop(substring(after, close + 1, length(after)), head, run :: atoms)
+  }
+}
+
+pure func mdExtractLink(rest: string, at: int, acc: string, atoms: [InlineRun]) -> MdAtoms {
+  let after = substring(rest, at + 1, length(rest));
+  let close = find(after, "](");
+  let urlPart = if close < 0 then "" else substring(after, close + 2, length(after));
+  let urlEnd = if close < 0 then -1 else mdMatchParen(urlPart, 0, 0);
+  if close < 0 || urlEnd < 0
+  then mdExtractLoop(after, "${acc}${substring(rest, 0, at)}[", atoms)
+  else {
+    let label = substring(after, 0, close);
+    let href = substring(urlPart, 0, urlEnd);
+    -- An empty label still has a destination worth showing.
+    let text = if length(label) > 0 then label else href;
+    let head = "${acc}${substring(rest, 0, at)}${mdAtomChar()}";
+    let run = { text: text, bold: false, italic: false, underline: false,
+                strike: false, code: false, href: href, vertAlign: "" };
+    mdExtractLoop(substring(urlPart, urlEnd + 1, length(urlPart)), head, run :: atoms)
+  }
+}
+
+-- Index of the ")" closing a link destination, tracking nesting so a URL may
+-- contain balanced parentheses — Wikipedia links routinely do, and taking the
+-- first ")" produced a silently WRONG href rather than no link at all.
+pure func mdMatchParen(s: string, i: int, depth: int) -> int =
+  if i >= length(s) then -1
+  else {
+    let c = charAt(s, i);
+    if c == ")" && depth == 0 then i
+    else if c == ")" then mdMatchParen(s, i + 1, depth - 1)
+    else if c == "(" then mdMatchParen(s, i + 1, depth + 1)
+    else mdMatchParen(s, i + 1, depth)
   }
 
-pure func mdLevelWalk(segs: [string], idx: int, tok: string, level: int,
-                      prev: string, acc: [[InlineRun]]) -> [InlineRun] =
+-- === Pass 3: peel emphasis, then splice the atoms back ===================
+--
+-- Splitting on a token yields alternating segments: even indices are outside
+-- the span, odd indices inside. An odd index that is also the LAST segment
+-- means the token was never closed, so it is restored as literal text.
+
+pure func mdEmphRuns(s: string, level: int) -> [InlineRun] =
+  if level >= mdEmphLevels() then (if length(s) == 0 then [] else [plainRun(s)])
+  else {
+    let tok = mdLevelTok(level);
+    if not contains(s, tok) then mdEmphRuns(s, level + 1)
+    else mdEmphWalk(split(s, tok), 0, tok, level, "", [])
+  }
+
+pure func mdEmphWalk(segs: [string], idx: int, tok: string, level: int,
+                     prev: string, acc: [[InlineRun]]) -> [InlineRun] =
   match segs {
     [] => mdFlattenRuns(acc),
     seg :: rest => {
       let isLast = mdIsEmptyList(rest);
-      let allowed = level != 4 || mdUnderscoreIsEmphasis(prev, mdHeadOr(rest));
+      let allowed = level != 3 || mdUnderscoreIsEmphasis(prev, mdHeadOr(rest));
+      -- A token restored as literal is MASKED first. Otherwise the weaker
+      -- levels below re-split it into empty spans and drop it: an unclosed
+      -- "**" was being deleted outright, turning "2**8 is 256" into
+      -- "28 is 256". The mask is undone with the escape sentinels at the end.
+      let lit = mdMaskTok(tok);
       let runs = if idx % 2 == 1 && not isLast && allowed
-        then (if length(seg) == 0 then [] else [mdStyledRun(seg, level)])
+        then mdStyleInner(seg, level)
         else if idx % 2 == 1 && not isLast
-        then mdLevelRuns("${tok}${seg}${tok}", level + 1)  -- intraword: literal
+        then mdEmphRuns("${lit}${seg}${lit}", level + 1)  -- intraword: literal
         else if idx % 2 == 1
-        then mdLevelRuns("${tok}${seg}", level + 1)        -- token never closed
+        then mdEmphRuns("${lit}${seg}", level + 1)        -- token never closed
         else if length(seg) == 0 then []
-        else mdLevelRuns(seg, level + 1);
-      mdLevelWalk(rest, idx + 1, tok, level, seg, runs :: acc)
+        else mdEmphRuns(seg, level + 1);
+      mdEmphWalk(rest, idx + 1, tok, level, seg, runs :: acc)
     }
   }
+
+-- Inside a span, keep peeling the remaining (weaker) tokens so **bold with
+-- *italic* inside** carries both, then fold this level's style over the result.
+-- The literal form of a token, in escape sentinels, so no level below can
+-- mistake it for markup again.
+pure func mdMaskTok(tok: string) -> string =
+  if tok == "**" then "\u{E001}\u{E001}"
+  else if tok == "~~" then "\u{E004}\u{E004}"
+  else if tok == "*" then "\u{E001}"
+  else "\u{E002}"
+
+pure func mdStyleInner(seg: string, level: int) -> [InlineRun] =
+  if length(seg) == 0 then []
+  else map(\r. mdApplyStyle(r, level), mdEmphRuns(seg, level + 1))
+
+pure func mdApplyStyle(r: InlineRun, level: int) -> InlineRun =
+  { r | bold: r.bold || level == 0,
+        strike: r.strike || level == 1,
+        italic: r.italic || level == 2 || level == 3 }
 
 -- CommonMark: "_" does not open or close emphasis inside a word, so
 -- snake_case_names stay snake_case_names instead of turning into italics.
@@ -319,46 +555,49 @@ pure func mdHeadOr(xs: [string]) -> string =
 pure func mdFlattenRuns(acc: [[InlineRun]]) -> [InlineRun] =
   foldl(\out rs. concat(rs, out), [], acc)
 
--- Leaf level: [label](href). Only reached on segments with no markers left,
--- which are short, so find/substring here is cheap.
-pure func mdLinkRuns(s: string) -> [InlineRun] =
-  if length(s) == 0 then []
-  else if not contains(s, "](") then [plainRun(s)]
-  else match split(s, "[") {
-    [] => [plainRun(s)],
-    first :: rest => {
-      let head = if length(first) == 0 then [] else [plainRun(first)];
-      concat(head, mdLinkPieces(rest, []))
-    }
-  }
+-- Splice the lifted atoms back where their sentinels sit, giving each the
+-- emphasis of the run it was found in — so *a `b` c* italicises the code too.
+pure func mdSpliceAtoms(runs: [InlineRun], atoms: [InlineRun]) -> [InlineRun] =
+  mdSpliceLoop(runs, atoms, [])
 
-pure func mdLinkPieces(pieces: [string], acc: [[InlineRun]]) -> [InlineRun] =
-  match pieces {
+pure func mdSpliceLoop(runs: [InlineRun], atoms: [InlineRun], acc: [[InlineRun]]) -> [InlineRun] =
+  match runs {
     [] => mdFlattenRuns(acc),
-    piece :: rest => mdLinkPieces(rest, mdLinkPiece(piece) :: acc)
+    r :: rest =>
+      if not contains(r.text, mdAtomChar())
+      then mdSpliceLoop(rest, atoms, (if length(r.text) == 0 then [] else [r]) :: acc)
+      else {
+        let parts = split(r.text, mdAtomChar());
+        let out = mdSpliceParts(parts, r, atoms, true, []);
+        mdSpliceLoop(rest, out.left, out.runs :: acc)
+      }
   }
 
--- One piece is everything after a "[": "label](href)trailing", or just text
--- when the bracket was not a link after all.
-pure func mdLinkPiece(piece: string) -> [InlineRun] {
-  let i = find(piece, "](");
-  if i < 0 then [plainRun("[${piece}")]
-  else {
-    let label = substring(piece, 0, i);
-    let after = substring(piece, i + 2, length(piece));
-    let j = find(after, ")");
-    if j < 0 then [plainRun("[${piece}")]
-    else {
-      let href = substring(after, 0, j);
-      let trailing = substring(after, j + 1, length(after));
-      -- An empty label still has a destination worth showing.
-      let text = if length(label) > 0 then label else href;
-      let linkRun = { text: text, bold: false, italic: false, underline: false,
-                      strike: false, code: false, href: href, vertAlign: "" };
-      if length(trailing) == 0 then [linkRun] else [linkRun, plainRun(trailing)]
+-- One run's text, split on the sentinel: text, atom, text, atom, ... Each gap
+-- consumes the next atom in document order.
+pure func mdSpliceParts(parts: [string], base: InlineRun, atoms: [InlineRun],
+                        first: bool, acc: [[InlineRun]])
+    -> {runs: [InlineRun], left: [InlineRun]} =
+  match parts {
+    [] => { runs: mdFlattenRuns(acc), left: atoms },
+    p :: rest => {
+      let withAtom = if first then acc
+        else match atoms {
+          [] => acc,
+          a :: _ => [mdMergeAtom(a, base)] :: acc
+        };
+      let atomsLeft = if first then atoms
+        else match atoms { [] => [], _ :: t => t };
+      let withText = if length(p) == 0 then withAtom else [{ base | text: p }] :: withAtom;
+      mdSpliceParts(rest, base, atomsLeft, false, withText)
     }
   }
-}
+
+pure func mdMergeAtom(a: InlineRun, base: InlineRun) -> InlineRun =
+  { a | bold: a.bold || base.bold,
+        italic: a.italic || base.italic,
+        strike: a.strike || base.strike,
+        underline: a.underline || base.underline }
 
 pure func mdRunsText(runs: [InlineRun]) -> string =
   join("", map(\r. r.text, runs))
@@ -384,26 +623,62 @@ pure func mdAnyFormatted(itemRuns: [[InlineRun]]) -> bool =
 -- actually carries formatting gains runs, and there `text` becomes the
 -- marker-free reading — the same contract the DOCX and HTML parsers follow.
 
+-- `text` is always the run concatenation, never the raw source. For prose with
+-- no markers the two are identical (the scanner short-circuits to a single
+-- plain run), so unformatted output stays byte-for-byte what it was. Where
+-- they differ is a backslash escape: "\\*literal\\*" reads as "*literal*",
+-- and taking the raw string in the unformatted branch left the backslashes in
+-- while the formatted branch stripped them — the same document punctuated two
+-- different ways depending on whether it happened to contain bold elsewhere.
 pure func mdTextBlock(raw: string, style: string, level: int) -> Block {
   let runs = mdInlineRuns(raw);
   if mdRunsFormatted(runs)
   then mkTextRuns(mdRunsText(runs), style, level, runs)
-  else mkText(raw, style, level)
+  else mkText(mdRunsText(runs), style, level)
 }
 
 pure func mdHeadingBlock(raw: string, level: int) -> Block {
   let runs = mdInlineRuns(raw);
   if mdRunsFormatted(runs)
   then mkHeadingRuns(mdRunsText(runs), level, runs)
-  else mkHeading(raw, level)
+  else mkHeading(mdRunsText(runs), level)
 }
 
-pure func mdListBlock(items: [string], ordered: bool) -> Block {
+pure func mdListBlock(items: [string], ordered: bool, levels: [int]) -> Block {
   let itemRuns = map(mdInlineRuns, items);
-  if mdAnyFormatted(itemRuns)
-  then mkListRuns(map(mdRunsText, itemRuns), ordered, itemRuns)
-  else mkList(items, ordered)
+  let texts = map(mdRunsText, itemRuns);
+  -- Levels are dropped when every item is top-level, so a flat list keeps the
+  -- shape it has always had.
+  let nested = mdAnyNested(levels);
+  if mdAnyFormatted(itemRuns) || nested
+  then mkListNested(texts, ordered, (if mdAnyFormatted(itemRuns) then itemRuns else []),
+                    (if nested then levels else []))
+  else mkList(texts, ordered)
 }
+
+pure func mdAnyNested(levels: [int]) -> bool =
+  match levels {
+    [] => false,
+    n :: rest => n > 0 || mdAnyNested(rest)
+  }
+
+-- Two spaces (or one tab) per level, which is what every Markdown writer emits
+-- and what CommonMark's "indented enough to be inside the parent item" reduces
+-- to for ordinary lists. Capped so a runaway indent cannot invent depth.
+pure func mdIndentLevel(line: string) -> int {
+  let n = mdCountIndent(line, 0, 0);
+  let lvl = n / 2;
+  if lvl > 8 then 8 else lvl
+}
+
+pure func mdCountIndent(line: string, i: int, acc: int) -> int =
+  if i >= length(line) then acc
+  else {
+    let c = charAt(line, i);
+    if c == " " then mdCountIndent(line, i + 1, acc + 1)
+    else if c == "\t" then mdCountIndent(line, i + 1, acc + 2)
+    else acc
+  }
 
 -- A paragraph that is nothing but an image is an image, not a sentence about
 -- one. Inline images inside prose are left as text rather than silently
@@ -447,7 +722,10 @@ pure func mdCellFromText(s: string) -> TableCell {
       let text = trim(substring(t, 0, idx));
       let digits = substring(t, idx + 9, length(t) - 1);
       match stringToInt(digits) {
-        Some(n) => if n > 1 then spanCell(text, n) else simpleCell(text),
+        -- Clamped: the span sets the table's width, so an absurd or hostile
+        -- value ({colspan=99}) padded every data row out to match it. No real
+        -- table has more columns than this.
+        Some(n) => if n > 1 && n <= 64 then spanCell(text, n) else simpleCell(text),
         None => simpleCell(t)
       }
     }
@@ -560,6 +838,28 @@ pure func mdAllSepCells(cells: [string]) -> bool =
   match cells {
     [] => true,
     c :: rest => mdIsSepCell(c) && mdAllSepCells(rest)
+  }
+
+-- ":---" left, "---:" right, ":---:" centre, "---" unspecified.
+pure func mdCellAlign(cell: string) -> string {
+  let t = trim(cell);
+  let n = length(t);
+  if n == 0 then ""
+  else {
+    let l = charAt(t, 0) == ":";
+    let r = charAt(t, n - 1) == ":" && n > 1;
+    if l && r then "center" else if r then "right" else if l then "left" else ""
+  }
+}
+
+pure func mdApplyAligns(cells: [TableCell], aligns: [string]) -> [TableCell] =
+  match cells {
+    [] => [],
+    c :: rest => {
+      let a = match aligns { [] => "", x :: _ => x };
+      let restA = match aligns { [] => [], _ :: t => t };
+      (if length(a) > 0 then { c | align: a } else c) :: mdApplyAligns(rest, restA)
+    }
   }
 
 -- One separator cell: optional ':', one or more '-', optional ':'
