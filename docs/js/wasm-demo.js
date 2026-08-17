@@ -74,6 +74,8 @@
     { name: 'docparse/services/odp_parser',       path: 'docparse/services/odp_parser.ail' },
     { name: 'docparse/services/ods_parser',       path: 'docparse/services/ods_parser.ail' },
     { name: 'docparse/services/epub_parser',      path: 'docparse/services/epub_parser.ail' },
+    // markdown_writer before output_formatter — the latter imports it.
+    { name: 'docparse/services/markdown_writer',  path: 'docparse/services/markdown_writer.ail' },
     { name: 'docparse/services/output_formatter', path: 'docparse/services/output_formatter.ail' },
     // A2UI: vendored package + formatter (dependencies before dependents)
     { name: 'pkg/sunholo/a2ui/components',        path: 'pkg/sunholo/a2ui/components.ail' },

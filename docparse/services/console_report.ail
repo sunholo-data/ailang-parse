@@ -1,0 +1,95 @@
+module docparse/services/console_report
+
+import std/io (println)
+import std/string (length)
+import std/list (foldl, length as listLength, forEachE)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, TableCell, ParsedDocument, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections)
+
+-- Console report — human-readable summary and block listing for the CLI.
+--
+-- Split out of output_formatter for the browser's sake. The in-browser WASM
+-- type-checker has a 2 second PER-MODULE budget, and output_formatter was the
+-- worst module in the bundle. This half is console output behind the IO effect:
+-- the browser can never run it, but while it lived in output_formatter the
+-- browser still paid to type-check it on every page load.
+--
+-- Because only main.ail imports this, it is deliberately NOT in wasm-demo.js's
+-- module list — the cost leaves the browser bundle entirely rather than merely
+-- moving to a different module in it.
+
+-- Pretty print a document summary to console
+export func printSummary(doc: ParsedDocument) -> () ! {IO} {
+  println("=== Document Summary ===");
+  println("Format:   ${doc.format}");
+  println("Filename: ${doc.filename}");
+  println("Title:    ${doc.metadata.title}");
+  println("Author:   ${doc.metadata.author}");
+  println("Blocks:   ${show(countBlocks(doc.blocks))}");
+  println("Headings: ${show(countBlocks(filterHeadings(doc.blocks)))}");
+  println("Tables:   ${show(countBlocks(filterTables(doc.blocks)))}");
+  println("Images:   ${show(countBlocks(filterImages(doc.blocks)))}");
+  println("Sections: ${show(countBlocks(filterSections(doc.blocks)))}");
+  println("Changes:  ${show(countBlocks(filterChanges(doc.blocks)))}");
+  println("========================")
+}
+
+-- Print each block with its type
+export func printBlocks(blocks: [Block]) -> () ! {IO} =
+  forEachE(printBlock, blocks)
+
+func printBlock(block: Block) -> () ! {IO} =
+  match block {
+    TextBlock(b) =>
+      println("[text:${b.style}] ${b.text}"),
+    HeadingBlock(b) =>
+      println("[h${show(b.level)}] ${b.text}"),
+    TableBlock(b) =>
+      println("[table] ${show(countCellRows(b.rows))} rows, ${show(countCells(b.headers))} cols${mergeInfo(b.headers, b.rows)}"),
+    ListBlock(b) =>
+      println("[list] ${show(countItems(b.items))} items"),
+    ImageBlock(b) =>
+      println("[image:${b.mime}] ${b.description}"),
+    AudioBlock(b) =>
+      println("[audio:${b.mime}] ${b.transcription}"),
+    VideoBlock(b) =>
+      println("[video:${b.mime}] ${b.description}"),
+    SectionBlock(b) => {
+      println("[${b.kind}]");
+      printBlocks(b.blocks)
+    },
+    ChangeBlock(b) =>
+      println("[${b.changeType}:${b.author}] ${b.text}"),
+    LinkBlock(b) =>
+      println("[link] ${b.text} → ${b.href}"),
+    CommentBlock(b) =>
+      if b.anchored
+      then println("[comment:${b.author}] on \"${b.anchorText}\" → ${b.text}")
+      else println("[comment:${b.author}] (unanchored) → ${b.text}")
+  }
+
+pure func countCellRows(rows: [[TableCell]]) -> int = listLength(rows)
+
+pure func countCells(cells: [TableCell]) -> int = listLength(cells)
+
+pure func countItems(items: [string]) -> int = listLength(items)
+
+-- Check if any cells have merge info and return a summary string
+pure func mergeInfo(headers: [TableCell], rows: [[TableCell]]) -> string {
+  let mergedCount = countMergedCells(headers) + countMergedInRows(rows);
+  let spanCount = countSpannedCells(headers) + countSpannedInRows(rows);
+  if mergedCount > 0 || spanCount > 0
+  then " (merged:${show(mergedCount)} spanned:${show(spanCount)})"
+  else ""
+}
+
+pure func countMergedCells(cells: [TableCell]) -> int =
+  foldl(\acc c. if c.merged then acc + 1 else acc, 0, cells)
+
+pure func countSpannedCells(cells: [TableCell]) -> int =
+  foldl(\acc c. if c.colSpan > 1 then acc + 1 else acc, 0, cells)
+
+pure func countMergedInRows(rows: [[TableCell]]) -> int =
+  foldl(\acc row. acc + countMergedCells(row), 0, rows)
+
+pure func countSpannedInRows(rows: [[TableCell]]) -> int =
+  foldl(\acc row. acc + countSpannedCells(row), 0, rows)

@@ -27,9 +27,12 @@ import docparse/services/html_parser (parseHtml)
 -- Requires well-formed XHTML content files (standard for EPUB).
 
 -- Parse an EPUB file into blocks
--- Contract: always returns at least an empty list
+--
+-- No contract: "always returns at least an empty list" is a property of every
+-- list, so the `listLength(result) >= 0` that encoded it proved nothing. The
+-- input is a path rather than content, so there is no empty-in/empty-out
+-- property to state either.
 export func parseEpub(filepath: string) -> [Block] ! {FS}
-  ensures { listLength(result) >= 0 }
 {
   -- Step 1: List all entries in the ZIP
   let entries = match listEntries(filepath) {

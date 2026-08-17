@@ -116,6 +116,7 @@ MODULES=(
   "services/odp_parser.ail"
   "services/ods_parser.ail"
   "services/epub_parser.ail"
+  "services/markdown_writer.ail"
   "services/output_formatter.ail"
   "services/a2ui_formatter.ail"
   "services/docx_generator.ail"

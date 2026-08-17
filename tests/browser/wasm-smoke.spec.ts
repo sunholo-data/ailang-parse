@@ -30,11 +30,26 @@ test("homepage loads WASM and parses sample.docx", async ({ page }) => {
   // wasm-demo.js exposes window.DocParseEngine.isReady() once the WASM
   // runtime has booted and all parser modules have loaded. Boot can take
   // 10–30s on a cold Chromium in CI, so the timeout is generous.
-  await page.waitForFunction(
-    () => (window as unknown as { DocParseEngine?: { isReady: () => boolean } }).DocParseEngine?.isReady() === true,
-    null,
-    { timeout: 60_000 },
-  );
+  //
+  // The console errors collected above are reported HERE, not only at the end
+  // of the test. A boot failure makes isReady() stay false forever, so the
+  // wait is what fails — and reporting errors after it meant a hard module
+  // error surfaced as a bare "Timeout 60000ms exceeded" with the actual cause
+  // (a WASM type-checker budget overrun naming the module) visible only inside
+  // the trace artifact. Failing with the real message costs nothing and is the
+  // difference between a one-line diagnosis and an archaeology session.
+  try {
+    await page.waitForFunction(
+      () => (window as unknown as { DocParseEngine?: { isReady: () => boolean } }).DocParseEngine?.isReady() === true,
+      null,
+      { timeout: 60_000 },
+    );
+  } catch (e) {
+    const detail = consoleErrors.length
+      ? `\n\nConsole errors during WASM boot:\n  - ${consoleErrors.join("\n  - ")}`
+      : "\n\nNo console errors were captured — the page is likely just slow to boot.";
+    throw new Error(`${(e as Error).message}${detail}`);
+  }
 
   // Upload the fixture via the existing file input on the homepage demo.
   await page.locator("#file-input").setInputFiles(SAMPLE_DOCX);

@@ -34,9 +34,10 @@ import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mk
 --   let blocks = parseHtml(content)
 
 -- Parse HTML content string into Block ADT
--- Contract: returns error block on malformed input, never crashes
+-- Contract: empty content produces no blocks. Malformed-but-non-empty input
+-- yields a single error block rather than crashing (see the Err arm below).
 export pure func parseHtml(content: string) -> [Block]
-  ensures { listLength(result) >= 0 }
+  ensures { length(content) > 0 || listLength(result) == 0 }
 {
   match parse(content) {
     Ok(root) => htmlExtractBlocks(root),

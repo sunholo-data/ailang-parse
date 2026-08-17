@@ -4,7 +4,7 @@ module docparse/types/document
 -- Represents the universal output of parsing any document format.
 -- All parsers (docx, pptx, xlsx) produce [Block] lists.
 
-import std/string (length, join)
+import std/string (length, join, startsWith, contains, find, substring)
 import std/list (filter, map, reverse, length as listLength)
 
 -- A table cell with merge span info
@@ -430,6 +430,58 @@ export pure func mkImageFull(data: string, description: string, mime: string,
     title: title,
     loading: loading
   })
+
+-- What an ImageBlock.data string actually refers to.
+--
+-- The field is overloaded by history: Office/EPUB/ODF parsers embed raw base64
+-- bytes, while the HTML parser stores the <img src> verbatim — which may be a
+-- data: URI, a relative path, or a remote URL. A consumer that assumes base64
+-- unconditionally renders `src="data:image/unknown;base64,photo.png"`, which is
+-- not a reference to anything.
+export type ImageSource
+  = InlineBase64(string)   -- bytes in hand (embedded base64, or a decoded data: URI)
+  | LocalFile(string)      -- path to read from disk, relative to the doc's dir
+  | RemoteUrl(string)      -- http(s) — never fetched by the CLI
+  | NotAnImage             -- empty / unusable reference
+
+-- Classify what an ImageBlock.data string refers to. Base64 uses the alphabet
+-- A-Za-z0-9+/= and so never contains "."; a real file reference carries an
+-- extension dot. That "." is the discriminator between a long embedded blob and
+-- a path. Single definition shared by the AI describer (which needs to know
+-- whether to read from disk) and by every generator (which needs to know what
+-- to put in a src/href).
+export pure func classifyImageSource(data: string) -> ImageSource {
+  if length(data) == 0 then NotAnImage
+  else if startsWith(data, "data:") then {
+    let idx = find(data, ",");
+    if idx >= 0 then InlineBase64(substring(data, idx + 1, length(data)))
+    else NotAnImage
+  }
+  else if startsWith(data, "http://") || startsWith(data, "https://") then RemoteUrl(data)
+  else if length(data) > 100 && contains(data, ".") == false then InlineBase64(data)
+  else LocalFile(data)
+}
+
+-- The reference a generator should point at for an image: a full data: URI when
+-- we hold the bytes, otherwise the path/URL as written. Shared by the HTML and
+-- Quarto generators, which need the identical answer for src="…" and ![](…).
+--
+-- Returns "" when there is nothing to point at, so callers can branch on empty
+-- rather than emitting a dangling reference. Bytes with no mime count as
+-- nothing to point at: a data: URI needs a type to render, and the callers'
+-- "[Image: description]" placeholder is more use to a reader than an <img> that
+-- resolves to application/octet-stream and shows a broken icon.
+export pure func imageSrcRef(data: string, mime: string) -> string
+  ensures { length(data) > 0 || length(result) == 0 }
+{
+  match classifyImageSource(data) {
+    NotAnImage => "",
+    RemoteUrl(url) => url,
+    LocalFile(path) => path,
+    InlineBase64(b64) =>
+      if length(mime) > 0 then "data:${mime};base64,${b64}" else ""
+  }
+}
 
 -- Create an empty metadata record
 export pure func emptyMetadata() -> DocMetadata

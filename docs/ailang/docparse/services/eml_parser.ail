@@ -50,8 +50,11 @@ export pure func parseEml(content: string) -> [Block]
 }
 
 -- Parse EML metadata: Subject→title, From→author, Date→created
+--
+-- No contract: the postcondition here used to be `length(result.title) >= 0 &&
+-- length(result.author) >= 0`, which is true of every string that has ever
+-- existed. It read as a guarantee and constrained nothing.
 export pure func parseEmlMetadata(content: string) -> DocMetadata
-  ensures { length(result.title) >= 0 && length(result.author) >= 0 }
 {
   let normalized = join("\n", split(content, "\r\n"));
   let parts = emlSplitHeaderBody(normalized);
@@ -74,8 +77,9 @@ export pure func parseEmlMetadata(content: string) -> DocMetadata
 }
 
 -- Parse MBOX file: split on "From " envelope lines, parse each message
+-- Contract: empty content produces no blocks
 export pure func parseMbox(content: string) -> [Block]
-  ensures { listLength(result) >= 0 }
+  ensures { length(content) > 0 || listLength(result) == 0 }
 {
   let normalized = join("\n", split(content, "\r\n"));
   let messages = emlSplitMbox(normalized);
@@ -561,8 +565,10 @@ pure func emlByteToStr(val: int) -> string {
 -- Decode RFC 2047 encoded-words in header values
 -- =?charset?encoding?encoded_text?=
 -- encoding: B (base64) or Q (QP variant)
+-- No contract: `length(result) >= 0` was vacuous. A real postcondition here
+-- would have to relate the decoded output to the encoded input, which is not
+-- expressible in the decidable fragment.
 export pure func emlDecodeHeaderValue(value: string) -> string
-  ensures { length(result) >= 0 }
 {
   let pos = find(value, "=?");
   if pos < 0 then value
@@ -650,8 +656,9 @@ type EmlThreadInfo = { messageId: string, inReplyTo: string, references: string,
 type EmlMsgPair = { content: string, info: EmlThreadInfo }
 
 -- Parse MBOX with thread reconstruction: groups messages into conversation threads
+-- Contract: empty content produces no blocks
 export pure func parseMboxThreaded(content: string) -> [Block]
-  ensures { listLength(result) >= 0 }
+  ensures { length(content) > 0 || listLength(result) == 0 }
 {
   let normalized = join("\n", split(content, "\r\n"));
   let messages = emlSplitMbox(normalized);
