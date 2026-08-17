@@ -27,7 +27,7 @@ import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeading
 -- Parse markdown content into Block ADT
 -- Contract: empty content produces no blocks
 export pure func parseMarkdown(content: string) -> [Block]
-  ensures { length(content) == 0 || listLength(result) >= 0 }
+  ensures { length(content) > 0 || listLength(result) == 0 }
 {
   let split0 = mdSplitFrontMatter(content);
   let lines = split(split0.body, "\n");
@@ -793,7 +793,7 @@ pure func mdIsOrderedListItem(line: string) -> bool {
 -- Check if all characters in a string are digits
 -- Contract: empty string is never all digits
 pure func mdAllDigits(s: string) -> bool
-  ensures { length(s) == 0 || result == true || result == false }
+  ensures { length(s) > 0 || result == false }
 {
   if length(s) == 0 then false
   else mdAllDigitsFrom(s, 0)

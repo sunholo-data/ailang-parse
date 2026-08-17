@@ -29,6 +29,21 @@ Known bugs (for awareness, not workarounds):
 
 ## Contracts
 
-28+ contracts across modules. Verify with:
-- `ailang run --verify-contracts ...` (runtime)
+91 `ensures` clauses across modules; Z3 proves 14 of them, the rest skip as
+recursive/higher-order. Verify with:
+- `ailang run --verify-contracts ...` (runtime — this is where most of them fire)
 - `ailang verify <file>` or `./bin/docparse --prove` (static Z3)
+
+Both run in CI. `--prove` gates on VIOLATIONs only; skips and encoder errors
+(upstream sunholo-data/ailang#755-757) are reported without failing the build.
+
+**Write contracts that can be false.** An audit found 13 that could not be:
+`ensures { listLength(result) >= 0 }` and friends hold of every list that has
+ever existed, so Z3 discharged them for free and they read as coverage while
+constraining nothing. In every case the comment above stated the real property
+("empty content produces no blocks") and the contract stated its tautological
+inverse. If a postcondition cannot fail, it is a comment — write it as one.
+
+**There are zero `requires` clauses.** With no preconditions, every `ensures`
+must hold for arbitrary input, which is the pressure that produces weak
+postconditions. Reach for `requires` when adding a contract.

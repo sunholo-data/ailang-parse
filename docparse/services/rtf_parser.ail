@@ -46,8 +46,9 @@ pure func rtfEmptyState() -> RtfState =
 -- Entry point
 -- ============================================================================
 
+-- Contract: empty content produces no blocks
 export pure func parseRtf(content: string) -> [Block]
-  ensures { length(content) == 0 || listLength(result) >= 0 }
+  ensures { length(content) > 0 || listLength(result) == 0 }
 {
   let final = foldChars(rtfProcessChar, rtfEmptyState(), content);
   let flushed = rtfFlushPara(final);

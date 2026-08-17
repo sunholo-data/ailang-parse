@@ -58,6 +58,21 @@ MODULES=(
   docparse/services/ods_generator.ail
   docparse/services/qmd_generator.ail
   docparse/services/ai_generator.ail
+  # Added after an audit found these 12 were in neither --check nor --prove.
+  # tex_parser alone carries 19 contracts — the most of any module in the repo —
+  # so the module with the densest contract coverage was the one nothing scored.
+  docparse/services/tex_parser.ail
+  docparse/services/tex_input_resolver.ail
+  docparse/services/tex_archive_extract.ail
+  docparse/services/rtf_parser.ail
+  docparse/services/orchestrator.ail
+  docparse/services/chunker.ail
+  docparse/services/omml.ail
+  docparse/services/pdf_annotations.ail
+  docparse/services/mcp/tools.ail
+  docparse/services/mcp/auth.ail
+  docparse/services/mcp/account.ail
+  docparse/services/mcp/estimate.ail
   docparse/main.ail
 )
 
@@ -296,16 +311,38 @@ do_prove() {
   local total_violations=0
   local total_errors=0
   for mod in "${MODULES[@]}"; do
-    local name
-    name="$(basename "$mod")"
     local output
-    if output=$(ailang verify "$mod" 2>&1); then
+    output=$(ailang verify "$mod" 2>&1) || true
+    # Only print modules that have contracts, so the summary is readable.
+    if echo "$output" | grep -qE "VERIFIED|SKIPPED|VIOLATION|! ERROR"; then
       echo "$output"
-    else
-      echo "$output"
+      echo ""
     fi
-    echo ""
+    total_verified=$((total_verified + $(echo "$output" | grep -c "✓ VERIFIED" || true)))
+    total_skipped=$((total_skipped + $(echo "$output" | grep -c "⚠ SKIPPED" || true)))
+    total_violations=$((total_violations + $(echo "$output" | grep -c "✗ VIOLATION" || true)))
+    total_errors=$((total_errors + $(echo "$output" | grep -c "! ERROR" || true)))
   done
+
+  echo "─────────────────────────────────────────────"
+  echo "verified:   $total_verified"
+  echo "skipped:    $total_skipped   (outside Z3's decidable fragment)"
+  echo "errors:     $total_errors   (encoder bugs upstream: sunholo-data/ailang#755-757)"
+  echo "violations: $total_violations"
+
+  # Gate on VIOLATIONs only. A violation means a contract we wrote is false —
+  # a real regression. Skips are the decidable fragment being narrow, and the
+  # errors are AILANG encoder bugs we have filed and cannot fix from here;
+  # gating on either would make this permanently red and therefore ignored.
+  #
+  # This used to always return 0 — the counters above were declared, never
+  # incremented and never checked — so --prove could not fail no matter what.
+  if [ "$total_violations" -gt 0 ]; then
+    echo ""
+    echo "FAIL: $total_violations contract violation(s)."
+    return 1
+  fi
+  return 0
 }
 
 # --- Parse arguments ---

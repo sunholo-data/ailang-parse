@@ -8,7 +8,7 @@ import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
 import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, last_or)
 import std/fs (readFileBytes)
-import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable, mkNamedSection)
+import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable, mkNamedSection, ImageSource, InlineBase64, LocalFile, RemoteUrl, NotAnImage, classifyImageSource)
 
 -- AI-powered layout understanding
 -- Uses LLM to handle complex document structure that pure XML parsing misses:
@@ -20,14 +20,10 @@ import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock
 -- Budget: AI @limit=N ensures bounded cost per document.
 -- Pure parsing handles the deterministic parts; AI handles ambiguity.
 
--- What an ImageBlock.data string actually refers to. Office/EPUB/ODF parsers
--- embed raw base64; the HTML parser stores the <img src> verbatim, which may be
--- a data: URI, a local file path, or a remote URL.
-type ImageSource
-  = InlineBase64(string)   -- bytes in hand (embedded base64 or decoded data: URI)
-  | LocalFile(string)      -- path to read from disk, relative to the doc's dir
-  | RemoteUrl(string)      -- http(s) — not fetched by the CLI (warned)
-  | NotAnImage             -- empty / unusable reference
+-- ImageSource and its classifier now live in docparse/types/document, so the
+-- describer and the generators agree on what an ImageBlock.data string means.
+-- They disagreed before: this module resolved paths correctly while the HTML
+-- and Quarto generators assumed base64 unconditionally.
 
 -- Describe every image in a document using AI vision.
 --
@@ -59,7 +55,7 @@ func layoutDescribeList(baseDir: string, blocks: [Block]) -> {blocks: [Block], w
 func layoutDescribeOne(baseDir: string, b: Block) -> {block: Block, warnings: [string], aiCalls: int} ! {AI, FS} =
   match b {
     ImageBlock(img) =>
-      match layoutClassifySource(img.data) {
+      match classifyImageSource(img.data) {
         InlineBase64(b64) => {
           let mime = layoutEffectiveMime(img.mime, img.data);
           let r = layoutDescribeBytes(b64, mime, "embedded image");
@@ -85,21 +81,6 @@ func layoutDescribeOne(baseDir: string, b: Block) -> {block: Block, warnings: [s
     _ => { block: b, warnings: [], aiCalls: 0 }
   }
 
--- Classify what an ImageBlock.data string refers to. Base64 uses the alphabet
--- A-Za-z0-9+/= and so never contains "."; a real file reference carries an
--- extension dot. That "." is the discriminator between a long embedded blob and
--- a path.
-pure func layoutClassifySource(data: string) -> ImageSource {
-  if length(data) == 0 then NotAnImage
-  else if startsWith(data, "data:") then {
-    let idx = find(data, ",");
-    if idx >= 0 then InlineBase64(substring(data, idx + 1, length(data)))
-    else NotAnImage
-  }
-  else if startsWith(data, "http://") || startsWith(data, "https://") then RemoteUrl(data)
-  else if length(data) > 100 && contains(data, ".") == false then InlineBase64(data)
-  else LocalFile(data)
-}
 
 -- Send image bytes to the AI as a real multimodal request (mode=multimodal),
 -- NOT base64 interpolated into a text prompt — the old path did the latter,

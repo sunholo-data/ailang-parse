@@ -123,7 +123,10 @@ docparse/
 └── main.ail                     # CLI entry point
 ```
 
-28+ contracts, 50+ inline tests.
+91 contracts, 50+ inline tests. Of the 91, Z3 proves 14 outright; the rest are
+checked at runtime under `--prove`/`--verify-contracts` in CI, and skip statically
+because parser code is recursive and higher-order, which is outside Z3's
+decidable fragment.
 
 ## AI Configuration
 
@@ -136,7 +139,7 @@ docparse scan.pdf --ai granite-docling           # Local Ollama (free)
 docparse scan.pdf --ai claude-haiku-4-5          # Anthropic
 ```
 
-AI usage is bounded by capability budgets (`AI @limit=30`), so costs are predictable.
+AI usage is bounded by capability budgets (`AI @limit=200` on `main`), so costs are predictable.
 
 ## Dev Commands
 

@@ -35,8 +35,38 @@ jobs:
       - name: Install package dependencies
         run: ailang lock
 
+      # --check and --prove only cover what bin/docparse's MODULES array lists,
+      # and it had drifted: 12 modules were in neither, including tex_parser.ail
+      # with 19 contracts — more than any other module here.
+      - name: Check MODULES lists every .ail module
+        run: python3 docs/scripts/check-module-list.py
+
       - name: Type-check all modules
         run: ./bin/docparse --check
+
+      # Gates on VIOLATIONs — a contract we wrote turning out to be false.
+      # Skips (Z3's decidable fragment is narrow) and encoder errors
+      # (sunholo-data/ailang#755-757) are reported but do not fail the build,
+      # since neither is fixable from this repo and a permanently-red gate is
+      # a gate nobody reads. Until now no workflow ran contract verification
+      # at all, so every contract in the repo was decoration.
+      - name: Verify contracts with Z3 (fails on violations)
+        run: ./bin/docparse --prove
+
+      # Static verification skips most parser code, so also exercise the
+      # contracts at runtime over real documents, where they do fire.
+      - name: Runtime contract checks over sample documents
+        run: |
+          set -euo pipefail
+          for f in data/test_files/comments.docx \
+                   data/test_files/pandoc_inline_images.docx \
+                   data/test_files/challenge_real_world.docx; do
+            [ -f "$f" ] || continue
+            echo "── $f"
+            ailang run --verify-contracts --caps IO,FS,Env,Clock,Net,Process \
+              --entry main docparse/main.ail "$f" > /dev/null
+          done
+          echo "No contract violated at runtime."
 
       - name: Check WASM bindings (source ↔ wasm-demo.js ↔ vendor script)
         run: python3 docs/scripts/check-wasm-bindings.py

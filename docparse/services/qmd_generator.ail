@@ -1,8 +1,8 @@
 module docparse/services/qmd_generator
 
-import std/string (length, join, intToStr, split, startsWith, substring)
+import std/string (length, join, intToStr, split, startsWith, substring, contains)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks, cellText, imageSrcRef)
 
 -- QMD Generator — converts Block ADT to Quarto Markdown (.qmd) format.
 -- Pure string concatenation: generates YAML front matter + Quarto-flavored Markdown.
@@ -165,13 +165,26 @@ pure func qmdStyledText(text: string, style: string) -> string =
   else if style == "code" || style == "Code" then "`${text}`"
   else "[${text}]{.${style}}"
 
--- Image: use Quarto image syntax with figure div
+-- Image: use Quarto image syntax with figure div.
+--
+-- The target comes from imageSrcRef, so a linked image keeps its path instead of
+-- being wrapped in a base64 envelope it was never encoded with — this used to
+-- emit ![](data:image/unknown;base64,photo.png) for <img src="photo.png">.
 pure func qmdImageToStr(data: string, description: string, mime: string) -> string =
-  if length(data) > 0 && length(mime) > 0
-  then "![${description}](data:${mime};base64,${data})\n\n"
+  let target = imageSrcRef(data, mime) in
+  if length(target) > 0
+  then "![${description}](${qmdImageTarget(target)})\n\n"
   else if length(description) > 0
     then "![${description}]()\n\n"
     else "![Image]()\n\n"
+
+-- A Markdown link target only survives unquoted if it has no spaces or parens;
+-- the angle-bracket form carries the rest. Relevant for linked images, whose
+-- path comes from the source document rather than from us.
+pure func qmdImageTarget(target: string) -> string =
+  if contains(target, " ") || contains(target, "(") || contains(target, ")")
+  then "<${target}>"
+  else target
 
 -- Section blocks → Quarto divs
 pure func qmdSectionToStr(kind: string, blocks: [Block]) -> string =

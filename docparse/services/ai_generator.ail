@@ -22,8 +22,10 @@ import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, Hea
 
 -- Generate blocks from a natural language prompt.
 -- The AI is given the Block ADT schema and asked to return conformant JSON.
+-- No contract: `listLength(result) >= 0` was vacuous. What we actually want to
+-- guarantee — that the model returned schema-conformant blocks — is a property
+-- of an AI response and cannot be discharged statically.
 export func aiGenerateBlocks(prompt: string, targetFormat: string) -> [Block] ! {AI}
-  ensures { listLength(result) >= 0 }
 {
   let formatHint = aiFormatHint(targetFormat);
   let request = encode(jo([

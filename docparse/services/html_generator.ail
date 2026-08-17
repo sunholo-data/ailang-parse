@@ -2,8 +2,8 @@ module docparse/services/html_generator
 
 import std/string (length, join, intToStr, startsWith)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
-import docparse/services/xml_helpers (xmlEscape)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
+import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
 -- Pure string concatenation, no XML tree building needed.
@@ -78,9 +78,15 @@ pure func htmlBlockToStr(block: Block) -> string =
       then "<ol>\n${body}</ol>\n"
       else "<ul>\n${body}</ul>\n",
 
+    -- src is built by imageSrcRef, which knows the difference between embedded
+    -- base64 and a path/URL reference, and is escaped like every other attribute
+    -- here. Both mattered: this branch used to interpolate i.mime and i.data raw
+    -- while every sibling escaped, so an <img src='x" onerror="…'> in an input
+    -- HTML document broke out of the attribute in the generated one.
     ImageBlock(i) =>
-      if length(i.data) > 0 && length(i.mime) > 0
-      then "<figure><img src=\"data:${i.mime};base64,${i.data}\" alt=\"${xmlEscape(i.description)}\"/></figure>\n"
+      let src = imageSrcRef(i.data, i.mime) in
+      if length(src) > 0
+      then "<figure><img src=\"${xmlAttrEscape(src)}\" alt=\"${xmlEscape(i.description)}\"/></figure>\n"
       else if length(i.description) > 0
         then "<p><em>[Image: ${xmlEscape(i.description)}]</em></p>\n"
         else "<p><em>[Image]</em></p>\n",

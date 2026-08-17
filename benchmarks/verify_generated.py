@@ -319,6 +319,83 @@ def verify_conversion_matrix() -> bool:
     return True
 
 
+# Hostile inputs whose text is attacker-controlled, paired with the substring
+# that must NOT appear in generated output. Each is a real breakout, not a
+# lookalike: the payload closes the attribute it is interpolated into.
+#
+# Added after `<img src='x&quot; onerror=&quot;alert(1)'>` in an input HTML
+# document produced a live `onerror="alert(1)"` handler in the generated one.
+# html_generator escaped 19 of its 20 interpolation sites; the image src was the
+# one that did not, so nothing structural caught it. "Does it open" cannot.
+# Targets are per-case, and deliberately not uniform.
+#
+# HTML is the format where document text is unambiguously data: anything from
+# the source that lands in markup is a defect. Markdown and Quarto permit inline
+# HTML by design, and docparse is a lossless converter — escaping a <script> the
+# author really wrote would itself be a bug. So a raw-tag assertion only applies
+# to HTML output, while an attribute breakout is checked everywhere it could
+# manifest. (QMD front matter is separately safe: the generator backslash-escapes
+# quotes, so a title containing " does not break out of the YAML string.)
+INJECTION_CASES = [
+    (
+        "img_src_breakout.html",
+        "<html><body><img src='x&quot; onerror=&quot;alert(1)' alt='p'/></body></html>",
+        ['onerror="alert(1)"', "onerror='alert(1)'"],
+        ("html", "qmd", "md"),
+    ),
+    (
+        "link_href_breakout.html",
+        "<html><body><a href='y&quot; onclick=&quot;alert(2)'>t</a></body></html>",
+        ['onclick="alert(2)"', "onclick='alert(2)'"],
+        ("html", "qmd", "md"),
+    ),
+    (
+        "title_breakout.html",
+        "<html><head><title>a&lt;/title&gt;&lt;script&gt;alert(3)&lt;/script&gt;</title></head>"
+        "<body><p>b</p></body></html>",
+        ["<script>alert(3)</script>", "</title><script>"],
+        ("html",),
+    ),
+]
+
+
+def verify_no_injection() -> bool:
+    """Attacker-controlled document text must not become markup in the output."""
+    import subprocess, tempfile
+
+    repo = Path(__file__).resolve().parent.parent
+    print("── injection escaping ──")
+    failures = []
+    checked = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, source, forbidden, targets in INJECTION_CASES:
+            src = Path(tmp) / name
+            src.write_text(source)
+            for tgt in targets:
+                checked += 1
+                out = Path(tmp) / f"{src.stem}__{tgt}.{tgt}"
+                r = subprocess.run(
+                    [str(repo / "bin" / "docparse"), str(src), "--convert", str(out)],
+                    capture_output=True, text=True, errors="replace",
+                    cwd=str(repo), timeout=120,
+                )
+                if r.returncode != 0 or not out.exists():
+                    failures.append(f"{name} -> {tgt}: conversion failed")
+                    continue
+                text = out.read_text(errors="replace")
+                for bad in forbidden:
+                    if bad in text:
+                        failures.append(f"{name} -> {tgt}: emitted {bad!r}")
+
+    if failures:
+        print(f"  L6 Injection:  FAIL ({len(failures)})")
+        for f in failures:
+            print(f"     ⚠ {f}")
+        return False
+    print(f"  L6 Injection:  PASS ({checked}/{checked} — no attribute or tag breakout)")
+    return True
+
+
 def main():
     print("=== DocParse Generated File Verification ===\n")
 
@@ -330,6 +407,8 @@ def main():
         sys.exit(1)
 
     all_pass = verify_conversion_matrix()
+    print()
+    all_pass = verify_no_injection() and all_pass
     print()
     for path in files:
         print(f"── {path.name} ──")

@@ -31,8 +31,9 @@ import docparse/types/document (mkHeading, mkList, mkText, Block, HeadingBlock, 
 -- Entry point
 -- ============================================================================
 
+-- Contract: empty content produces no blocks
 export pure func parseLatex(content: string) -> [Block]
-  ensures { length(content) == 0 || listLength(result) >= 0 }
+  ensures { length(content) > 0 || listLength(result) == 0 }
 {
   let body = texExtractDocumentBody(content);
   let stripped = texStripComments(body);
