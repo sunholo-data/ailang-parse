@@ -9,7 +9,95 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.34.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.35.0...HEAD)
+
+## [v0.35.0](https://github.com/sunholo-data/ailang-parse/compare/v0.34.0...v0.35.0) — 2026-08-18
+
+### Breaking: three exported symbols moved module
+
+`output_formatter` was split in three. If you import any of these from
+`pkg/sunholo/ailang_parse/services/output_formatter`, update the import:
+
+| symbol | was | now |
+|---|---|---|
+| `renderMarkdown` | `services/output_formatter` | `services/markdown_writer` |
+| `printSummary` | `services/output_formatter` | `services/console_report` |
+| `printBlocks` | `services/output_formatter` | `services/console_report` |
+
+Everything else in `output_formatter` (`formatResult`, `blocksToJson`,
+`metadataToJson`, `renderMarkdownMetaJson`, the cell/JSON helpers) is unchanged
+and stays where it was.
+
+### Generated HTML no longer lets document text become markup
+
+`html_generator` escaped 19 of its 20 interpolation sites. The image `src` was
+the one that did not, and for HTML input `ImageBlock.data` holds the verbatim
+`<img src>` of an untrusted document, so
+
+```
+<img src='x&quot; onerror=&quot;alert(1)'>
+```
+
+produced a working `onerror` handler in the generated HTML. Both fields are now
+escaped like every sibling attribute.
+
+Underneath it was a plain correctness bug. `ImageBlock.data` holds either base64
+bytes or a path/URL reference, and both the HTML and Quarto generators assumed
+base64 unconditionally — a linked image rendered as
+`src="data:image/unknown;base64,photo.png"`, a reference to nothing. `ImageSource`
+and its classifier moved from `layout_ai` (which got this right for its own
+purposes) into `types/document`, so the describer and the generators now share
+one definition, with `imageSrcRef` giving both generators the `src`/`![]()`
+target they need.
+
+A new L6 check in `benchmarks/verify_generated.py` reads the generated markup
+back and asserts no attribute or tag breakout — the parse-side goldens and
+"does the file open" both passed straight through this.
+
+### The browser demo boots again
+
+The in-browser WASM type-checker has a hard 2 second **per-module** budget.
+`output_formatter` reached 1344ms — 67% — on a fast laptop, which is over budget
+on slower hardware, and the demo failed to initialise entirely:
+
+```
+Module docparse/services/output_formatter failed: type error in renderMarkdown:
+WASM type-checker budget exceeded (2s)
+```
+
+No single function was the hotspot; the cost was several whole-ADT matches over
+`Block` accumulating in one module. Since the budget is per module, the fix is
+the split above. `console_report` is deliberately absent from the browser bundle
+— it is console output behind the `IO` effect, so the browser could never run it
+yet was type-checking it on every page load.
+
+- `output_formatter` 1344ms (67% of budget) → 544ms (27%)
+- worst module in the bundle 67% → 39%
+
+### Contracts that can actually fail
+
+Thirteen contracts were tautologies — `ensures { listLength(result) >= 0 }` holds
+of every list that has ever existed, so Z3 discharged them for free while they
+read as coverage. In each case the comment above stated the real property and the
+contract stated its inverse. Six became the true form ("empty content produces no
+blocks", checked against each parser); seven were removed where no property was
+expressible. The codebase has 91 contracts, of which Z3 proves 14.
+
+- **CI now verifies contracts.** Neither `--prove` nor `--verify-contracts` ran in
+  any workflow, and `--prove` declared four counters, incremented none and always
+  returned 0 — it could not fail. It now gates on violations.
+- **`bin/docparse` covered 38 of 50 modules.** The 12 missing included
+  `tex_parser`, which carries 19 contracts, more than any other module — nothing
+  type-checked or verified it. `docs/scripts/check-module-list.py` holds the line.
+
+### Filed upstream while auditing
+
+`sunholo-data/ailang` [#755](https://github.com/sunholo-data/ailang/issues/755)
+(empty list literal in a record encoded as `(Seq Int)` against a correctly-typed
+declaration), [#756](https://github.com/sunholo-data/ailang/issues/756) (recursive
+callee applied in SMT but never declared),
+[#757](https://github.com/sunholo-data/ailang/issues/757) (list patterns
+unsupported in the unroller).
 
 ## [v0.34.0](https://github.com/sunholo-data/ailang-parse/compare/v0.33.2...v0.34.0) — 2026-08-14
 
