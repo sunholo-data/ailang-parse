@@ -308,7 +308,7 @@ ailang serve-api --mcp --routes-only \
       <p>AILANG Parse follows an <strong>agent-first design</strong>. Three discovery mechanisms:</p>
 
       <h3>MCP tools/list</h3>
-      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the hosted endpoint <code>tools/list</code> currently returns around 32 entries, because every HTTP route is auto-exposed as a tool; the 7 <code>mcp*</code> tools above are the supported surface, and the rest are internals that shadow them. <code>GET /api/v1/tools</code> returns just the curated 7.</p>
+      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the hosted endpoint <code>tools/list</code> returns 10: the 7 <code>mcp*</code> tools above, plus <code>submit_feedback</code>, <code>editDocument</code> (structured edits, returns blocks) and <code>getUploadUrl</code> (Business-tier GCS upload for files over 32&nbsp;MB). It previously returned 32 — every HTTP route was auto-exposed, so internals shadowed the curated tools; those are now hidden from MCP but still serve over HTTP. <code>GET /api/v1/tools</code> returns the curated 7.</p>
 
       <h3>mcpFormats (recommended first call)</h3>
       <p>Agents should call <code>mcpFormats</code> first. It returns the full service contract: 17 input formats, 9 output formats, 26 test samples, 3 pricing tiers, and all 7 tool names. This gives the agent everything it needs to advise the human intelligently.</p>
@@ -377,7 +377,7 @@ ailang_parse = StructuredTool.from_function(
         </details>
         <details>
           <summary>How do AI agents discover AILANG Parse as a tool?</summary>
-          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code> which returns full JSON Schema definitions for the 7 curated tools. Note that <code>tools/list</code> on the hosted endpoint also surfaces internal routes that shadow them &mdash; prefer the <code>mcp*</code> names. Agents should call <code>mcpFormats</code> first &mdash; it returns the full service contract including samples, pricing tiers, and capabilities.</p></div>
+          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code> which returns full JSON Schema definitions for the 7 curated tools. <code>tools/list</code> returns those plus <code>submit_feedback</code>, <code>editDocument</code> and <code>getUploadUrl</code>. Agents should call <code>mcpFormats</code> first &mdash; it returns the full service contract including samples, pricing tiers, and capabilities.</p></div>
         </details>
         <details>
           <summary>Which AI agents work with the AILANG Parse MCP server?</summary>

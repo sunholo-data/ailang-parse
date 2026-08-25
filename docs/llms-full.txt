@@ -104,17 +104,31 @@ A working end-to-end shell example lives in [examples/agent_workflow.sh](https:/
 
 ## Tool catalog (7 curated MCP tools)
 
-**Read this before calling anything.** `tools/list` on the hosted endpoint
-currently returns ~32 entries, because `serve-api` auto-exposes every HTTP route
-as an MCP tool. Most of those are internals, and several are near-duplicates of
-the curated tools below — `parseFileSecure` shadows `mcpParse`, `convertDocument`
-shadows `mcpConvert`, `formats` shadows `mcpFormats`, `estimate` shadows
-`mcpEstimate`, and the four `deviceAuth*` routes shadow `mcpAuth`/`mcpAuthPoll`.
+`tools/list` on the hosted endpoint returns **10** tools: the seven `mcp*` tools
+below, plus `submit_feedback`, `editDocument` and `getUploadUrl`.
 
-**Use the seven `mcp*` tools listed here.** They are the supported surface: they
-carry the auth handling, the quota accounting and the typed errors. The
-lower-level routes are implementation detail and may change without notice.
-(`submit_feedback` is also real and safe to call — see "Reporting issues".)
+It used to return 32, because `serve-api` auto-exposes every HTTP route as an
+MCP tool — so `parseFileSecure` sat beside `mcpParse`, `convertDocument` beside
+`mcpConvert`, and four `deviceAuth*` routes beside `mcpAuth`/`mcpAuthPoll`.
+Those internals are now hidden from MCP (they still serve over HTTP). If you are
+working from an older cached tool list, prefer the `mcp*` names.
+
+The three non-`mcp*` tools:
+
+- **`submit_feedback`** — report a bug, missing format or docs gap. Pass
+  `package="sunholo/ailang_parse"`. See "Reporting issues" below.
+- **`editDocument(filepath, deltas, apiKey)`** — apply structured edits to a
+  document without a full round trip. `deltas` is a JSON array of edit
+  operations; an empty array or `""` round-trips (parse and return blocks
+  unchanged). Returns modified **blocks**, not a file — pass them to
+  `mcpConvert` or the CLI to get a document back. Deterministic Office formats
+  only (docx, pptx, xlsx, odt, odp, ods); PDF, image, audio and video are
+  rejected.
+- **`getUploadUrl(filename, mimeType)`** — Business tier. Returns a
+  pre-authenticated GCS upload URL plus a `gs://` ref for files above the 32 MB
+  request limit. PUT the bytes to `upload_url`, then pass the `gs_ref` as
+  `mcpConvert`'s `input` (or `gcsRef` on the REST endpoints). For anything under
+  32 MB use a normal multipart upload instead.
 
 Source of truth: `docparse/services/mcp/{tools,auth,account,estimate}.ail` in the repo. Param names below match the AILANG signatures exactly.
 
