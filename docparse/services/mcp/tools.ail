@@ -1,6 +1,6 @@
 module docparse/services/mcp/tools
 
-import std/string (length, intToStr, toLower, split, contains)
+import std/string (length, intToStr, toLower, split, contains, startsWith)
 import std/list (concat, last, map, filter)
 import std/option (Some, None)
 import std/json (encode, decode, jo, kv, js, ja, jb, getString)
@@ -67,8 +67,19 @@ func mcpConvertHosted(input: string, outputFormat: string, apiKey: string) -> st
   -- Target is normalised server-side; passing it through means a new target
   -- needs no change here.
   let target = toLower(outputFormat);
-  let body = if contains(input, ".")
-    then "{\"filepath\":\"${input}\",\"target\":\"${target}\",\"apiKey\":\"${apiKey}\"}"
+  -- Route by prefix into the field /api/v1/convert expects. These are mutually
+  -- exclusive server-side (sourceUrl > gcsRef > filepath).
+  --
+  -- Unlike /parse there is no `sample_id` field: a sample ID travels in
+  -- `filepath` just like a path does. This used to be an if/else whose two
+  -- arms were byte-identical — written as though sample IDs needed their own
+  -- field, then correctly given the same one, leaving a conditional that could
+  -- not branch. The real gap it hid is below: an https:// or gs:// input was
+  -- posted as `filepath` and could never resolve.
+  let body = if startsWith(input, "https://") || startsWith(input, "http://")
+    then "{\"sourceUrl\":\"${input}\",\"target\":\"${target}\",\"apiKey\":\"${apiKey}\"}"
+    else if startsWith(input, "gs://")
+    then "{\"gcsRef\":\"${input}\",\"target\":\"${target}\",\"apiKey\":\"${apiKey}\"}"
     else "{\"filepath\":\"${input}\",\"target\":\"${target}\",\"apiKey\":\"${apiKey}\"}";
   httpPost("${baseUrl}/api/v1/convert", body)
 }
@@ -324,6 +335,8 @@ export pure func mcpFormats() -> string {
       mcpFormatEntry("epub", "EPUB ebook", false, true, false, false, true),
       mcpFormatEntry("eml", "Email (RFC 5322)", false, false, false, false, false),
       mcpFormatEntry("mbox", "Mailbox", false, false, false, false, false),
+      mcpFormatEntry("tex", "LaTeX / arXiv", false, true, false, false, true),
+      mcpFormatEntry("rtf", "Rich Text Format", false, true, false, false, false),
       mcpFormatEntry("pdf", "PDF", true, true, false, false, true),
       mcpFormatEntry("png", "PNG image", true, false, false, false, true),
       mcpFormatEntry("jpg", "JPEG image", true, false, false, false, true),
@@ -331,6 +344,29 @@ export pure func mcpFormats() -> string {
       mcpFormatEntry("mp4", "MP4 video", true, false, false, false, false)
     ])),
     kv("output_formats", ja(map(js, ["docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"]))),
+    -- The authoring contract, in the payload rather than only in a source
+    -- comment. An agent asked to produce a document has no other way to learn
+    -- that Markdown is the way in, or that a running header is not on offer.
+    kv("generation", jo([
+      kv("how", js("Markdown is the format you can write, so it is how you generate a document: write Markdown, then call mcpConvert with the target format. There is no separate create-a-document tool.")),
+      kv("survives", ja(map(js, [
+        "YAML front matter (title/author/date become document properties)",
+        "bold, italic, code and strikethrough as real character formatting",
+        "links as real hyperlinks",
+        "images — local paths are read and embedded",
+        "fenced code blocks",
+        "blockquotes, nested lists and thematic breaks",
+        "tables, including column alignment and colspan"
+      ]))),
+      kv("not_expressible", ja(map(js, [
+        "running headers and footers",
+        "comments",
+        "tracked changes"
+      ]))),
+      kv("not_expressible_note", js("These have no Markdown syntax. They survive only when converting FROM a document that already contains them (e.g. docx to odt). Do not promise a generated document with a running header.")),
+      kv("target_notes", js("pptx: headings become slides. xlsx/ods: tables become sheets.")),
+      kv("ai_generation", js("Generating a document from a PROMPT (--generate with --prompt) is a local CLI feature only. It is not available on the hosted API, which does deterministic conversion. Write the Markdown yourself, then convert it."))
+    ])),
     kv("output_modes", ja([
       jo([kv("id", js("blocks")), kv("description", js("Structured JSON with typed Block ADT (Heading, Text, Table, Image, Change, Comment, Section, Code)"))]),
       jo([kv("id", js("markdown")), kv("description", js("Rendered Markdown suitable for LLM consumption"))]),
@@ -376,7 +412,13 @@ export pure func mcpFormats() -> string {
         jo([kv("name", js("Business")), kv("price", js("EUR 99/month")), kv("requests_month", js("500,000")), kv("ai_parses_month", js("2,000")), kv("daily_limit", js("20,000")), kv("max_file_mb", js("50"))])
       ])),
       kv("tools_available", ja([js("mcpParse"), js("mcpConvert"), js("mcpFormats"), js("mcpEstimate"), js("mcpAuth"), js("mcpAuthPoll"), js("mcpAccount")])),
-      kv("docs_url", js("https://www.sunholo.com/docparse/"))
+      -- input_formats above is the package's full list, which covers local and
+      -- WASM use. The hosted deployment does not accept audio or video — say so
+      -- here rather than letting an agent discover it as a failed request.
+      kv("self_host_only", ja(map(js, ["mp3", "wav", "mp4"]))),
+      kv("self_host_only_note", js("Audio and video parsing needs your own AI key and is available via the AILANG CLI or WASM, not the hosted API.")),
+      kv("docs_url", js("https://www.sunholo.com/ailang-parse/")),
+      kv("generation_guide_url", js("https://www.sunholo.com/ailang-parse/document-generation.html"))
     ]))
   ]))
 }

@@ -39,9 +39,9 @@ pure func mcpParseToolDef() -> Json =
         ])),
         kv("outputFormat", jo([
           kv("type", js("string")),
-          kv("enum", ja(map(js, ["blocks", "markdown", "html"]))),
+          kv("enum", ja(map(js, ["blocks", "markdown", "html", "a2ui"]))),
           kv("default", js("blocks")),
-          kv("description", js("blocks = structured JSON; markdown = rendered Markdown; html = rendered HTML"))
+          kv("description", js("blocks = structured JSON; markdown = rendered Markdown; html = rendered HTML; a2ui = A2UI components for agent-driven rendering. Local mode also accepts a2ui+editable, which adds block_index props; hosted mode does not."))
         ])),
         kv("apiKey", jo([
           kv("type", js("string")),
@@ -59,7 +59,7 @@ pure func mcpParseToolDef() -> Json =
 pure func mcpConvertToolDef() -> Json =
   jo([
     kv("name", js("mcpConvert")),
-    kv("description", js("Convert a document from one format to another. Parses the input, then generates the output. Supports: DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto). In hosted mode, pass an apiKey.")),
+    kv("description", js("Generate a document. Parses the input, then generates the target format: DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto). To AUTHOR a document, write Markdown and convert it — front matter, inline formatting, links, images and tables all carry through. In hosted mode the generated document is returned inline in the response (see outputPath) and an apiKey is required.")),
     kv("endpoint", js("POST /mcp/v1/convert")),
     kv("mcp_tool", js("docparse.services.mcp.tools.mcpConvert")),
     kv("inputSchema", jo([
@@ -67,16 +67,16 @@ pure func mcpConvertToolDef() -> Json =
       kv("properties", jo([
         kv("input", jo([
           kv("type", js("string")),
-          kv("description", js("Path to input file, or a sample_id"))
+          kv("description", js("Path to input file, a sample_id, an https:// URL, or a gs:// ref (Business tier)"))
         ])),
         kv("outputFormat", jo([
           kv("type", js("string")),
           kv("enum", ja(map(js, ["docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"]))),
-          kv("description", js("Target format for conversion"))
+          kv("description", js("Target format. Case-insensitive; a leading dot is accepted, and markdown/htm/quarto are aliases for md/html/qmd."))
         ])),
         kv("outputPath", jo([
           kv("type", js("string")),
-          kv("description", js("Path to write output file. If omitted, uses input filename with new extension."))
+          kv("description", js("Local mode only: path to write the output file; if omitted, the input filename with the new extension. IGNORED in hosted mode, where the document comes back in the response as `content` encoded per `encoding` (base64 for the ZIP containers docx/pptx/xlsx/odt/odp/ods, utf8 for html/md/qmd) alongside `filename` and `content_type`. Branch on `encoding`, never on the target."))
         ])),
         kv("apiKey", jo([
           kv("type", js("string")),
