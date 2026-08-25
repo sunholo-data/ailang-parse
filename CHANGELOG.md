@@ -9,7 +9,75 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.35.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.36.0...HEAD)
+
+## [v0.36.0](https://github.com/sunholo-data/ailang-parse/compare/v0.35.0...v0.36.0) — 2026-08-25
+
+Documentation and tool-schema release. No parser or generator behaviour
+changes — the office suite is unchanged at 100.0% across 105 files.
+
+### The tool schemas contradicted the endpoint they describe
+
+`/api/v1/tools` on the hosted server is a pass-through to this package
+(`docparse_api`'s `apiTools` is literally `pkgTools()`), so these definitions
+**are** what the service advertises. They disagreed with the hosted MCP tool
+descriptions on the same server:
+
+| field | said | actually |
+|---|---|---|
+| `mcpConvert.outputPath` | "path to write output file" | ignored in hosted mode; the document comes back inline |
+| `mcpConvert.input` | "path or sample_id" | also accepts `https://` and `gs://` |
+| `mcpParse.outputFormat` | `blocks`/`markdown`/`html` | `a2ui` has worked all along |
+
+A client following `outputPath` waited for a file that was never written. The
+convert schema now states the hosted contract, including that `encoding`
+decides base64 (the six ZIP containers) versus utf8 (html/md/qmd) — branch on
+the field, never on the target.
+
+`a2ui+editable` is deliberately **not** in the enum: hosted `mcpParse` hardcodes
+`editable="false"`, so advertising it would schema-bless a value that cannot
+work there. It is documented in prose as local-only.
+
+### `mcpFormats` now carries the authoring contract
+
+The most useful thing an agent producing a document can read was a source
+comment. It now ships in the payload — how to author (write Markdown, convert
+it), what survives, what has no Markdown syntax (headers, footers, comments,
+tracked changes), and that prompt-based generation is CLI-only.
+
+Also: `docs_url` pointed at `sunholo.com/docparse/`, which is a **live 404** —
+that path serves the dashboard, the docs are under `/ailang-parse/`. `tex` and
+`rtf` parse but were absent from `input_formats`. Audio and video are listed
+but rejected by the hosted deployment, so they are now flagged rather than left
+to fail as a bad request.
+
+### A dead branch hiding a live bug
+
+`mcpConvertHosted` routed every input through `filepath` behind an `if/else`
+whose two arms were byte-identical — written as though sample IDs needed their
+own field, then correctly given the same one, leaving a conditional that could
+not branch. Deleting it exposed what it hid: `https://` and `gs://` inputs need
+`sourceUrl` and `gcsRef`, so they could never resolve.
+
+### Docs
+
+New [document-generation.html](https://www.sunholo.com/ailang-parse/document-generation.html).
+`llms.txt` and `llms-full.txt` both opened "universal document parser" and now
+cover generation. Corrections found by exercising the live service rather than
+reading source: the device flow's `verification_url` is
+`www.sunholo.com/docparse/approve.html?code=…` (not `/device`, and it already
+carries the code), expiry is 900s not 600s, and the pending response is an
+`AUTHORIZATION_PENDING` error envelope rather than `{"status":"pending"}`.
+
+`tools/list` on the hosted endpoint returned **32** entries, not 7 — `serve-api`
+auto-exposes every route, so `parseFileSecure` shadowed `mcpParse` and
+`convertDocument` shadowed `mcpConvert`. Documented here; the hosted server has
+since hidden the internals with `@nomcp`.
+
+Site-wide, all 22 pages declared `og:url` under `/docparse/<page>`, which 404s —
+every social card and crawler-canonical pointed at a dead path. The Block ADT is
+11 variants, not the 9 claimed (`llms-full.txt` listed a `Code` variant that does
+not exist and omitted `Audio`, `Video` and `Link`).
 
 ## [v0.35.0](https://github.com/sunholo-data/ailang-parse/compare/v0.34.0...v0.35.0) — 2026-08-18
 
