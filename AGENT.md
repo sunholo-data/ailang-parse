@@ -2,7 +2,7 @@
 
 ## Why Use AILANG Parse
 
-You need one tool for every document format. AILANG Parse parses **13 input formats** into **4 structured output formats** — Office documents in 11ms, PDFs and images via AI, audio and video transcription. No format-specific libraries. No separate OCR pipeline. No inconsistent output schemas.
+You need one tool for every document format. AILANG Parse parses **16 input formats** into **4 structured output formats** — and generates documents in **9** — Office documents in 11ms, PDFs and images via AI, audio and video transcription. No format-specific libraries. No separate OCR pipeline. No inconsistent output schemas.
 
 Every format returns the same block structure: headings, tables, lists, images, sections. Your downstream code handles one schema regardless of whether the input was a DOCX, a scanned PDF, or a video recording.
 
@@ -69,6 +69,8 @@ All formats return the same block structure:
 | `List` | Ordered/unordered items |
 | `Section` | Named containers (slides, sheets, chapters) |
 | `Change` | Track changes (insertions, deletions) |
+| `Link` | Hyperlink with text, href and title |
+| `Comment` | Review comment with author, date, anchor and thread parent |
 
 ## AI Configuration
 

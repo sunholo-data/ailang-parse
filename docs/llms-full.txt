@@ -8,7 +8,7 @@ If you are an AI agent, this is the page to read. The human-facing docs at [mcp.
 
 ## What this is
 
-AILANG Parse is a universal document parser. It converts 18 input formats into one consistent block schema (Heading, Text, Table, Image, List, Section, Change, Comment, Code). Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, EML, MBOX) and LaTeX/arXiv papers (TEX, with \\input resolution) are parsed deterministically in milliseconds with no AI calls. PDFs are parsed deterministically by default via `--pdf-backend pdftotext` (poppler `pdftotext -layout`, no AI, highest character recall) — with `--pdf-backend docling` (IBM Docling, local ML layout) and `--pdf-backend liteparse` (run-llama LiteParse, font-size headings) as local alternatives. `--pdf-backend ai` (Gemini/Claude/OpenAI/Ollama) is required for scanned/image-only PDFs with no text layer; the hosted REST/MCP API exposes the AI path. A backend that extracts zero blocks fails loudly (non-zero exit) rather than writing an empty result. Images, audio, and video always go through AI.
+AILANG Parse parses documents **and generates them**. It converts 16 input formats into one consistent block schema (Text, Heading, Table, Image, Audio, Video, List, Section, Change, Link, Comment — 11 variants), and writes that schema back out to 9 output formats (docx, pptx, xlsx, odt, odp, ods, html, md, qmd). See "Generating documents" below — if you are an agent trying to *produce* a document rather than read one, read that section first. Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, EML, MBOX) and LaTeX/arXiv papers (TEX, with \\input resolution) are parsed deterministically in milliseconds with no AI calls. PDFs are parsed deterministically by default via `--pdf-backend pdftotext` (poppler `pdftotext -layout`, no AI, highest character recall) — with `--pdf-backend docling` (IBM Docling, local ML layout) and `--pdf-backend liteparse` (run-llama LiteParse, font-size headings) as local alternatives. `--pdf-backend ai` (Gemini/Claude/OpenAI/Ollama) is required for scanned/image-only PDFs with no text layer; the hosted REST/MCP API exposes the AI path. A backend that extracts zero blocks fails loudly (non-zero exit) rather than writing an empty result. Images, audio, and video always go through AI.
 
 Three ways to use it:
 
@@ -28,7 +28,7 @@ If your MCP client supports remote MCP servers, just connect to:
 https://docparse.ailang.sunholo.com/mcp/
 ```
 
-On connect, call `tools/list` (the standard MCP discovery) to see all 7 tools, then call `mcpFormats` (no auth) to get the full service contract — supported formats, sample IDs, pricing tiers, and capabilities.
+On connect, call `mcpFormats` (no auth) to get the full service contract — supported formats, sample IDs, pricing tiers and capabilities. (`tools/list` also works, but it currently returns ~32 auto-exposed routes, not just the 7 curated tools — see the tool catalog below before picking one.) It returns the contract — supported formats, sample IDs, pricing tiers, and capabilities.
 
 When you call a quota-bounded tool (`mcpParse`, `mcpConvert`, `mcpAccount`) without an API key, the response will be:
 
@@ -58,21 +58,23 @@ The response (returned by the backend `POST /api/v1/auth/device`) contains:
 {
   "device_code": "…",
   "user_code": "ABCD-1234",
-  "verification_url": "https://docparse.ailang.sunholo.com/device",
-  "expires_in": 600,
+  "verification_url": "https://www.sunholo.com/docparse/approve.html?code=ABCD-1234",
+  "expires_in": 900,
   "interval": 5
 }
 ```
 
 **Step 2 — tell the human.** Print something like:
 
-> Open `https://docparse.ailang.sunholo.com/device` in your browser, sign in, and enter the code `ABCD-1234`. I'll wait.
+> Open `https://www.sunholo.com/docparse/approve.html?code=ABCD-1234` in your browser, sign in, and approve. I'll wait.
+
+The `verification_url` already carries the code as a query parameter, so hand the human the whole URL rather than asking them to retype it.
 
 **Step 3 — poll.** Every 5 seconds, call `mcpAuthPoll(deviceCode: "<device_code from step 1>")`. The response will be one of:
 
-- `{"status": "pending"}` — keep polling.
+- `{"error": {"code": "AUTHORIZATION_PENDING", "retryable": true, …}}` — keep polling every 5s.
 - `{"status": "approved", "api_key": "dp_…", "tier": "free"}` — store the API key. Use it for all subsequent `mcpParse`, `mcpConvert`, `mcpAccount` calls.
-- `{"status": "expired"}` — the device code expired (10 minutes). Start over with `mcpAuth`.
+- `{"status": "expired"}` — the device code expired (15 minutes; `expires_in` is authoritative). Start over with `mcpAuth`.
 
 ### Via raw HTTP (for non-MCP agents)
 
@@ -100,7 +102,19 @@ A working end-to-end shell example lives in [examples/agent_workflow.sh](https:/
 
 ---
 
-## Tool catalog (7 MCP tools)
+## Tool catalog (7 curated MCP tools)
+
+**Read this before calling anything.** `tools/list` on the hosted endpoint
+currently returns ~32 entries, because `serve-api` auto-exposes every HTTP route
+as an MCP tool. Most of those are internals, and several are near-duplicates of
+the curated tools below — `parseFileSecure` shadows `mcpParse`, `convertDocument`
+shadows `mcpConvert`, `formats` shadows `mcpFormats`, `estimate` shadows
+`mcpEstimate`, and the four `deviceAuth*` routes shadow `mcpAuth`/`mcpAuthPoll`.
+
+**Use the seven `mcp*` tools listed here.** They are the supported surface: they
+carry the auth handling, the quota accounting and the typed errors. The
+lower-level routes are implementation detail and may change without notice.
+(`submit_feedback` is also real and safe to call — see "Reporting issues".)
 
 Source of truth: `docparse/services/mcp/{tools,auth,account,estimate}.ail` in the repo. Param names below match the AILANG signatures exactly.
 
@@ -124,10 +138,24 @@ Source of truth: `docparse/services/mcp/{tools,auth,account,estimate}.ail` in th
 - Returns the parsed document as a JSON string.
 
 **`mcpConvert(input, outputFormat, outputPath, apiKey)`**
-- `input`: file path or sample ID.
+- `input`: a file path, a `sample_…` ID, an `https://` URL, or a `gs://` ref (Business tier).
 - `outputFormat`: one of `docx`, `pptx`, `xlsx`, `odt`, `odp`, `ods`, `html`, `md`, `qmd`.
-- `outputPath`: optional; defaults to the input path with the new extension.
-- Returns `{"output": "<path>", "format": "<fmt>"}` on success.
+  Case-insensitive; a leading dot is fine, and `markdown`/`htm`/`quarto` are aliases.
+- `outputPath`: **accepted but ignored in hosted mode.** It stays in the signature
+  only because removing it would change the tool schema for existing clients.
+- Returns the generated document **inline in the JSON**, not a path. Like
+  `/parse`, it arrives inside the serve-api envelope — unwrap `result` (a
+  JSON-encoded string) to get:
+  `{"status", "request_id", "source_format", "source_subtype", "target",
+  "filename", "content_type", "encoding", "size_bytes", "content"}`.
+- **`encoding` is load-bearing.** `base64` for the six ZIP container targets
+  (docx, pptx, xlsx, odt, odp, ods), `utf8` for the three text targets (html,
+  md, qmd). Branch on the field, never on the target — decoding a utf8 payload
+  as base64 yields silent garbage.
+
+(In *local* mode the same tool writes to disk and returns
+`{"output": "<path>", "format": "<fmt>"}` instead. The hosted endpoint is the
+one described above.)
 
 **`mcpFormats()`**
 - No params. Returns input formats (with feature flags: tables, track changes, comments, images), output formats, output modes, ~26 sample files for testing, and the full `service` block (api_url, auth_method, pricing tiers, tools_available).
@@ -143,6 +171,52 @@ Source of truth: `docparse/services/mcp/{tools,auth,account,estimate}.ail` in th
 - `"pricing"` is the only action callable without an `apiKey`; use it to advise a human on which tier to pick before they sign up.
 
 ---
+
+## Generating documents
+
+If you need to *produce* a document — a report, a deck, a spreadsheet — this is
+the section you want.
+
+**Markdown is the format you can write, so it is how you generate a document.**
+Write Markdown, then convert it. There is no "create a DOCX" tool and none is
+needed: the Markdown parser is a full authoring front end.
+
+```bash
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -F "filepath=@report.md" -F "target=docx" -F "apiKey=dp_…"
+```
+
+Or over MCP: `mcpConvert(input: "report.md", outputFormat: "docx", apiKey: "dp_…")`.
+
+**What survives Markdown → any of the 9 output formats:**
+
+| Feature | Notes |
+|---|---|
+| YAML front matter | `title:` / `author:` / `date:` become document properties |
+| `**bold**` `*italic*` `` `code` `` `~~strike~~` | real character formatting, not literal asterisks |
+| `[links](url)` | real hyperlinks |
+| `![images](path.png)` | local paths are read and embedded |
+| Fenced code blocks | preserved as code |
+| Blockquotes, nested lists, thematic breaks | preserved |
+| Tables | including column alignment and colspan |
+
+**What Markdown cannot express:** headers, footers, comments, tracked changes.
+These have no Markdown syntax. They survive only when converting *from* a
+document that already contains them (e.g. DOCX → DOCX). Do not promise a user a
+generated document with a running header — say it needs a source document.
+
+**Targets:** `docx` `pptx` `xlsx` `odt` `odp` `ods` `html` `md` `qmd`. For
+`pptx`, headings become slides. For `xlsx`/`ods`, tables become sheets.
+
+**AI generation from a prompt** (`--generate report.docx --prompt "…"`) exists
+only in the local `docparse` CLI. It is **not** on the hosted API —
+`/api/v1/convert` is deterministic conversion only, and is priced as such. If a
+user wants a document authored from a prompt, write the Markdown yourself and
+convert it.
+
+**Cost:** one request per conversion, on the same counters as `/parse`. The AI
+sub-quota is consumed only when the *source* format needs AI (PDF, images) —
+generation itself is pure compute. Output size does not affect the charge.
 
 ## REST fallback (for non-MCP agents)
 
@@ -171,6 +245,20 @@ curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
 ```
 
 Replace `sample_id` with `filepath` if you are uploading a real path that the server can reach. Sample IDs come from `mcpFormats` / `/api/v1/capabilities`.
+
+### Generate a document
+
+```bash
+# Upload Markdown, get a DOCX back inline (base64 — decode on `encoding`)
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -F "filepath=@report.md" -F "target=docx" -F "apiKey=dp_…" \
+  | python3 -c 'import base64,json,sys; d=json.load(sys.stdin); d=json.loads(d["result"]) if isinstance(d.get("result"),str) else d; \
+open(d["filename"],"wb").write(base64.b64decode(d["content"]) if d["encoding"]=="base64" else d["content"].encode())'
+```
+
+Same four input modes as `/parse`: multipart upload, `sample_id`, `sourceUrl`
+(https), `gcsRef` (gs://, Business tier). The parameter is `target`, not
+`outputFormat`.
 
 ### Estimate before parsing
 

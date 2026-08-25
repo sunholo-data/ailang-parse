@@ -7,7 +7,7 @@
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.sunholo--data%2Fparse-1f6feb?logo=anthropic&logoColor=white)](https://registry.modelcontextprotocol.io/v0/servers?search=sunholo)
 [![CI](https://img.shields.io/github/actions/workflow/status/sunholo-data/ailang-parse/ci.yml?logo=github&label=CI)](https://github.com/sunholo-data/ailang-parse/actions/workflows/ci.yml)
 
-Universal document parsing in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown.
+Universal document parsing **and generation** in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown — and writes documents back out in 9 formats. To author a document, write Markdown and convert it; see [Writing documents in Markdown](#writing-documents-in-markdown).
 
 **Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs** default to the deterministic `pdftotext` backend (poppler) — also no AI, no cloud — with `docling` and `liteparse` as local alternatives and pluggable AI (Gemini, Claude, local Ollama) for scanned/image-only pages via `--pdf-backend ai`. **Images** delegate to whatever AI model you plug in. AILANG Parse is AI-agnostic: swap `--pdf-backend`/`--ai` to change the backend, zero code changes.
 
@@ -109,7 +109,7 @@ are preserved when converting from a document that already contains them.
 
 ```
 docparse/
-├── types/document.ail           # Block ADT (9 variants)
+├── types/document.ail           # Block ADT (11 variants)
 ├── services/
 │   ├── format_router.ail        # Format detection (36 inline tests)
 │   ├── zip_extract.ail          # ZIP layer (9 inline tests)

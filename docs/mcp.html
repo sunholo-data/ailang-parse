@@ -25,7 +25,7 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "What is the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse exposes 7 MCP tools: parse documents, convert formats, discover capabilities, estimate costs, authenticate via device auth, and manage accounts with quota visibility. Local mode has 4 tools (no auth needed); hosted mode has all 7 with billing integration."}},
-    {"@type": "Question", "name": "How do AI agents discover AILANG Parse as a tool?", "acceptedAnswer": {"@type": "Answer", "text": "The /api/v1/tools endpoint returns machine-readable tool definitions for all 7 tools. Call mcpFormats first to get the full service contract: formats, samples, pricing tiers, and capabilities. MCP-compatible agents discover tools automatically via tools/list."}},
+    {"@type": "Question", "name": "How do AI agents discover AILANG Parse as a tool?", "acceptedAnswer": {"@type": "Answer", "text": "The /api/v1/tools endpoint returns machine-readable tool definitions for the 7 curated tools. Call mcpFormats first to get the full service contract: formats, samples, pricing tiers, and capabilities. MCP-compatible agents discover tools automatically via tools/list."}},
     {"@type": "Question", "name": "Which AI agents work with the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Any MCP-compatible agent works: Claude (via Claude Code or Claude Desktop), ChatGPT (via the Actions/tool-use protocol), custom LangChain agents, and LlamaIndex agent pipelines. The MCP server also works with Cursor, Windsurf, and other IDE-integrated AI tools that support MCP."}},
     {"@type": "Question", "name": "Why is structured document parsing better for AI agents than flat text extraction?", "acceptedAnswer": {"@type": "Answer", "text": "When an AI agent receives flat text, it loses the ability to reference specific table cells, identify which text was inserted versus deleted (track changes), or attribute comments to specific reviewers. AILANG Parse gives agents a typed Block ADT where each element has semantic meaning, enabling precise reasoning about document structure."}}
   ]
@@ -41,7 +41,7 @@
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">MCP</span> Server</h1>
     <p class="subtitle reveal reveal-delay-1">Document parsing as a tool for any AI agent.</p>
-    <p class="reveal reveal-delay-1" style="margin-top:8px;font-size:14px;color:var(--dp-muted)">AI agents: fetch <a href="llms.txt">llms.txt</a> or <a href="llms-full.txt">llms-full.txt</a> for a single-request reference covering the hosted MCP endpoint, device auth flow, and all 7 tools.</p>
+    <p class="reveal reveal-delay-1" style="margin-top:8px;font-size:14px;color:var(--dp-muted)">AI agents: fetch <a href="llms.txt">llms.txt</a> or <a href="llms-full.txt">llms-full.txt</a> for a single-request reference covering the hosted MCP endpoint, device auth flow, and the 7 curated tools.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -308,7 +308,7 @@ ailang serve-api --mcp --routes-only \
       <p>AILANG Parse follows an <strong>agent-first design</strong>. Three discovery mechanisms:</p>
 
       <h3>MCP tools/list</h3>
-      <p>MCP clients call <code>tools/list</code> and receive all 7 tools (or 4 in local mode) with full JSON Schema input definitions. This is automatic &mdash; no configuration needed once the server is connected.</p>
+      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the hosted endpoint <code>tools/list</code> currently returns around 32 entries, because every HTTP route is auto-exposed as a tool; the 7 <code>mcp*</code> tools above are the supported surface, and the rest are internals that shadow them. <code>GET /api/v1/tools</code> returns just the curated 7.</p>
 
       <h3>mcpFormats (recommended first call)</h3>
       <p>Agents should call <code>mcpFormats</code> first. It returns the full service contract: 17 input formats, 9 output formats, 26 test samples, 3 pricing tiers, and all 7 tool names. This gives the agent everything it needs to advise the human intelligently.</p>
@@ -377,7 +377,7 @@ ailang_parse = StructuredTool.from_function(
         </details>
         <details>
           <summary>How do AI agents discover AILANG Parse as a tool?</summary>
-          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code> which returns full JSON Schema definitions for all 7 tools. Agents should call <code>mcpFormats</code> first &mdash; it returns the full service contract including samples, pricing tiers, and capabilities.</p></div>
+          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code> which returns full JSON Schema definitions for the 7 curated tools. Note that <code>tools/list</code> on the hosted endpoint also surfaces internal routes that shadow them &mdash; prefer the <code>mcp*</code> names. Agents should call <code>mcpFormats</code> first &mdash; it returns the full service contract including samples, pricing tiers, and capabilities.</p></div>
         </details>
         <details>
           <summary>Which AI agents work with the AILANG Parse MCP server?</summary>

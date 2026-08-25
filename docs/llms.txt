@@ -1,6 +1,6 @@
 # AILANG Parse
 
-> Universal document parser. Deterministic Office (DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML/MD/CSV/EPUB/EML/TEX) in milliseconds. PDFs deterministically via `pdftotext` by default (v0.21+), with local Docling / LiteParse backends, or via AI for scans. Comments and PDF annotations are extracted with author attribution and anchored to the text they annotate (v0.23+). Deterministic RAG chunking, no AI (v0.27+). Images, audio, and video via AI. One block schema for every format. Available as a hosted MCP server, a local MCP stdio server, and a REST API.
+> Universal document parser **and generator**. Parses 16 formats into one block schema and writes documents back out in 9 (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD) — to author a document, write Markdown and convert it. Deterministic Office (DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML/MD/CSV/EPUB/EML/TEX) in milliseconds. PDFs deterministically via `pdftotext` by default (v0.21+), with local Docling / LiteParse backends, or via AI for scans. Comments and PDF annotations are extracted with author attribution and anchored to the text they annotate (v0.23+). Deterministic RAG chunking, no AI (v0.27+). Images, audio, and video via AI. One block schema for every format. Available as a hosted MCP server, a local MCP stdio server, and a REST API.
 
 This file follows the [llmstxt.org](https://llmstxt.org) convention. Agents should fetch [llms-full.txt](llms-full.txt) for the complete agent-oriented reference (device auth flow, tool catalog, REST examples).
 
@@ -10,10 +10,11 @@ This file follows the [llmstxt.org](https://llmstxt.org) convention. Agents shou
 - **Hosted REST API**: `https://docparse.ailang.sunholo.com/api/v1/*`
 - **Auth**: RFC 8628 device authorization. Call `mcpAuth` → human approves in browser → poll `mcpAuthPoll` → store the returned `dp_…` API key.
 - **Discovery**: Call `mcpFormats` (no auth) for the full service contract — formats, samples, pricing tiers, capabilities.
+- **Generating a document**: write Markdown, then `mcpConvert` (or `POST /api/v1/convert`) to any of the 9 output formats. The document comes back inline in the JSON — branch on `encoding` (`base64` for the ZIP containers, `utf8` for html/md/qmd). Prompt-based AI generation is CLI-only, not on the hosted API.
 
 ## Docs
 
-- [llms-full.txt](llms-full.txt): full agent reference (auth flow, all 7 tools with params, REST fallback, env vars)
+- [llms-full.txt](llms-full.txt): full agent reference (auth flow, the 7 curated tools with params, REST fallback, env vars)
 - [mcp.html](mcp.html): human-readable MCP server documentation
 - [api.html](api.html): REST API reference
 - [pricing.html](pricing.html): pricing tiers
@@ -22,6 +23,7 @@ This file follows the [llmstxt.org](https://llmstxt.org) convention. Agents shou
 ## Optional
 
 - [docs.html](docs.html): full documentation index
+- [document-generation.html](document-generation.html): generating DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML/MD/QMD from Markdown — what survives, what cannot
 - [why.html](why.html): why deterministic Office parsing matters
 - [benchmarks.html](benchmarks.html): OfficeDocBench results vs Docling, LlamaParse, MarkItDown
 - [chunking.html](chunking.html): deterministic RAG chunking — four strategies, blocks never split, per-chunk citation provenance

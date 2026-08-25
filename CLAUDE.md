@@ -11,7 +11,7 @@ This is a production AILANG module, not a demo. Every change must exercise AILAN
 ```
 ailang-parse/
 ├── docparse/              # AILANG modules (keeps docparse/ prefix for imports)
-│   ├── types/document.ail # Block ADT (9 variants)
+│   ├── types/document.ail # Block ADT (11 variants)
 │   ├── services/          # Parser + generator modules
 │   └── main.ail           # CLI entry point
 ├── bin/docparse           # Bash CLI wrapper

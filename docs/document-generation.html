@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generate DOCX from Markdown — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Generate DOCX from Markdown, or Markdown to PowerPoint, Excel, ODT and Quarto. One source file, nine output formats, real formatting — no templates, no Office install.">
+<meta property="og:title" content="Generate DOCX from Markdown — AILANG Parse">
+<meta property="og:description" content="Write Markdown, get real Office documents. Nine output formats with genuine character formatting, hyperlinks, embedded images and tables with column spans.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/ailang-parse/document-generation.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* ---- Page-specific styles ---- */
+.dg-fanout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 10px;
+  margin: 24px 0;
+}
+.dg-fanout div {
+  padding: 12px 8px;
+  text-align: center;
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dp-blue);
+}
+.dg-fanout div span {
+  display: block;
+  margin-top: 4px;
+  font-weight: 400;
+  font-size: 10px;
+  opacity: .7;
+}
+@media (max-width: 768px) {
+  .dg-fanout { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I generate a DOCX from Markdown?", "acceptedAnswer": {"@type": "Answer", "text": "Run docparse report.md --convert report.docx, or POST the Markdown to /api/v1/convert with target=docx. Front matter becomes document properties, and bold, italic, links, images and tables become real Word formatting rather than literal characters."}},
+    {"@type": "Question", "name": "Can I convert Markdown to PowerPoint?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. docparse notes.md --convert slides.pptx turns headings into slides and carries tables, lists and images onto them. The same source file also converts to XLSX, ODT, ODP, ODS, HTML and Quarto."}},
+    {"@type": "Question", "name": "Can generated documents have headers, footers or tracked changes?", "acceptedAnswer": {"@type": "Answer", "text": "Not from Markdown — those features have no Markdown syntax. They are preserved when you convert from a document that already contains them, such as DOCX to DOCX or DOCX to ODT."}},
+    {"@type": "Question", "name": "Can AILANG Parse write a document from a prompt?", "acceptedAnswer": {"@type": "Answer", "text": "The local CLI can, via --generate with --prompt and an AI model. The hosted API does not: /api/v1/convert is deterministic conversion only. Have your own model write the Markdown, then convert it."}},
+    {"@type": "Question", "name": "Do I need Microsoft Office or LibreOffice installed?", "acceptedAnswer": {"@type": "Answer", "text": "No. The generators write OOXML and OpenDocument containers directly. There is no headless Office process, no subprocess, and no license requirement."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal"><span class="dp-accent">Generate DOCX from Markdown</span> — and eight other formats</h1>
+    <p class="subtitle reveal reveal-delay-1">Write one Markdown file. Get real Word, PowerPoint, Excel, OpenDocument, HTML and Quarto documents &mdash; with genuine formatting, not asterisks pasted into a paragraph.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#problem" class="active">Why Markdown</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#survives">What Survives</a>
+        <a href="#limits">What Markdown Can't Say</a>
+        <a href="#api">Over the API</a>
+        <a href="#agents">For AI Agents</a>
+        <a href="#try-it">Try It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="problem">Why Markdown is the authoring format</h2>
+      <p>Generating an Office document usually means one of two bad options: drive a headless Office install and inherit its licensing and crash surface, or hand-assemble OOXML and discover that Word is stricter than the spec. Both are heavy for what is normally a simple job &mdash; turn some content into a file someone can open.</p>
+
+      <p>AILANG Parse takes a different route. Markdown is the one format a human or a language model can write fluently, and the Markdown parser here is a full authoring front end, not a text-extraction afterthought. Write Markdown, convert it, and the structure becomes real document structure: character runs, working hyperlinks, embedded image parts, table grids with column spans.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>There is no separate &ldquo;create a document&rdquo; API. Generation is conversion with Markdown as the source, which means the generators are the same code path the parser round-trips against &mdash; and every fix on one side lands on the other.</div>
+      </div>
+
+      <h2 id="how-it-works">How it works</h2>
+      <p>One source file fans out to <span data-dp="formats.output_count">9</span> output formats. Headings become slides in PPTX; tables become sheets in XLSX and ODS; everything else maps to the closest native construct.</p>
+
+      <div class="dg-fanout">
+        <div>DOCX<span>Word</span></div>
+        <div>PPTX<span>slides</span></div>
+        <div>XLSX<span>sheets</span></div>
+        <div>ODT<span>Writer</span></div>
+        <div>ODP<span>Impress</span></div>
+        <div>ODS<span>Calc</span></div>
+        <div>HTML<span>web</span></div>
+        <div>MD<span>markdown</span></div>
+        <div>QMD<span>Quarto</span></div>
+      </div>
+
+      <pre><code class="language-bash" data-src="examples/cli/generate.sh"># Write the document in Markdown, then convert it to any of the 9 formats.
+# Front matter sets the document properties.
+cat &gt; report.md &lt;&lt;'MD'
+---
+title: Q1 Revenue Review
+author: Finance
+date: 2026-04-02
+---
+
+# Q1 Revenue Review
+
+Revenue grew **31%** against a [flat forecast](https://example.com/plan).
+
+| Region | Q4      | Q1      | Change |
+|:-------|--------:|--------:|:------:|
+| EMEA   | 1.20M   | 1.61M   | +34%   |
+| AMER   | 0.90M   | 1.14M   | +27%   |
+
+&gt; Renewals, not new logos, drove the quarter.
+MD
+
+# One source, every output format
+docparse report.md --convert report.docx     # Word
+docparse report.md --convert deck.pptx       # headings become slides
+docparse report.md --convert report.xlsx     # tables become sheets
+docparse report.md --convert report.odt      # OpenDocument
+docparse report.md --convert report.html     # HTML
+docparse report.md --convert report.qmd      # Quarto
+
+# Read the structure back to check it survived —
+# "the file opens" is not the same as "the file is correct"
+docparse report.docx</code></pre>
+
+      <p>No Office install, no headless browser, no subprocess. The generators write OOXML and OpenDocument containers directly from the parsed block structure.</p>
+
+      <h2 id="survives">What survives the trip</h2>
+      <p>These are not rendered as literal characters &mdash; they become real formatting in the output container.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Markdown</th><th>Becomes</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>YAML front matter</td><td><code>title</code>/<code>author</code>/<code>date</code> document properties</td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td><code>**bold**</code> <code>*italic*</code> <code>`code`</code> <code>~~strike~~</code></td><td>real character runs</td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td><code>[text](url)</code></td><td>real hyperlinks (OOXML <code>HYPERLINK</code> fields)</td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td><code>![alt](photo.png)</code></td><td>image read from disk and embedded</td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td>Fenced code blocks</td><td>monospaced code paragraphs</td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td>Blockquotes, nested lists, rules</td><td>native quote/list/separator styles</td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td>Tables with <code>:---:</code> alignment</td><td>table grid with alignment and colspan</td><td><span class="dp-preserved">Preserved</span></td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="limits">What Markdown can't say</h2>
+      <p>Headers, footers, comments and tracked changes have no Markdown syntax, so they cannot be authored this way. They are preserved when you convert <em>from</em> a document that already contains them &mdash; DOCX to DOCX, or DOCX to ODT.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Feature</th><th>From Markdown</th><th>From a document that has it</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Running headers / footers</td><td><span class="dp-lost">No syntax</span></td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td>Comments with author attribution</td><td><span class="dp-lost">No syntax</span></td><td><span class="dp-preserved">Preserved</span></td></tr>
+          <tr><td>Tracked changes</td><td><span class="dp-lost">No syntax</span></td><td><span class="dp-preserved">Preserved</span></td></tr>
+        </tbody>
+      </table>
+
+      <p>If you need a generated document to carry a running header, start from a source document rather than a Markdown file. See <a href="comments.html">comment extraction</a> and <a href="track-changes.html">track changes</a> for how those survive a conversion.</p>
+
+      <h2 id="api">Over the API</h2>
+      <p><code>POST /api/v1/convert</code> takes the same four input modes as <a href="api.html">the parse endpoint</a> &mdash; multipart upload, a sample ID, an <code>https://</code> URL the server fetches, or a <code>gs://</code> reference on Business tier &mdash; plus a <code>target</code>.</p>
+
+      <pre><code class="language-bash" data-src="examples/api/curl-convert.sh"># Generate a DOCX from Markdown via the hosted API.
+# The document comes back inside the JSON, not as a binary body.
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -F "filepath=@report.md" \
+  -F "target=docx" \
+  -F "apiKey=$DOCPARSE_API_KEY" &gt; response.json
+
+# `encoding` is load-bearing: "base64" for the six ZIP container targets
+# (docx, pptx, xlsx, odt, odp, ods) and "utf8" for the three text targets
+# (html, md, qmd). Branch on the field, never on the target.
+python3 - &lt;&lt;'PY'
+import base64, json
+r = json.load(open("response.json"))
+# Unwrap the serve-api envelope, same as /api/v1/parse
+if isinstance(r.get("result"), str):
+    r = json.loads(r["result"])
+data = (base64.b64decode(r["content"]) if r["encoding"] == "base64"
+        else r["content"].encode("utf-8"))
+open(r["filename"], "wb").write(data)
+print(f'{r["filename"]}  {r["content_type"]}  {r["size_bytes"]} bytes')
+PY
+
+# Other input modes — a sample ID, or a URL the server fetches itself
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_docx_tables","target":"html","apiKey":"'"$DOCPARSE_API_KEY"'"}'
+
+curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -H "Content-Type: application/json" \
+  -d '{"sourceUrl":"https://example.com/notes.md","target":"pptx","apiKey":"'"$DOCPARSE_API_KEY"'"}'</code></pre>
+
+      <p>The generated document comes back <strong>inside the JSON</strong>, not as a binary body:</p>
+
+      <pre><code class="language-json">{
+  "status": "success",
+  "target": "docx",
+  "filename": "report.docx",
+  "content_type": "application/vnd...wordprocessingml.document",
+  "encoding": "base64",
+  "size_bytes": 8213,
+  "content": "UEsDBBQ..."
+}</code></pre>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div><strong><code>encoding</code> is load-bearing.</strong> It is <code>base64</code> for the six ZIP container targets and <code>utf8</code> for the three text targets. Branch on the field, never on the target name &mdash; decoding a utf8 payload as base64 fails silently and writes garbage.</div>
+      </div>
+
+      <p>Conversion is charged per generated document on the same counters as parsing. Output size does not affect the cost, and the AI sub-quota is only touched when the <em>source</em> needs AI &mdash; a PDF or an image. Generating from Markdown is pure compute.</p>
+
+      <h2 id="agents">For AI agents</h2>
+      <p>Over MCP the tool is <code>mcpConvert</code>, and the workflow is the one you would expect: write the Markdown yourself, then convert it.</p>
+
+      <pre><code class="language-json">mcpConvert(input: "report.md", outputFormat: "docx", apiKey: "dp_...")</code></pre>
+
+      <p>Prompt-based generation (<code>--generate report.docx --prompt "..."</code>) exists in the local CLI only. It is deliberately absent from the hosted API, which is deterministic conversion with a matching price. If a user wants a document authored from a prompt, write the Markdown and convert it. See <a href="mcp.html">the MCP server guide</a> and <a href="llms-full.txt">llms-full.txt</a>.</p>
+
+      <h2 id="try-it">Try it</h2>
+      <p>Parse any of <span data-dp="formats.input_count">16</span> input formats, generate any of <span data-dp="formats.output_count">9</span>:</p>
+
+      <pre><code class="language-bash"># Markdown to a Word document
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -F "filepath=@report.md" -F "target=docx" -F "apiKey=YOUR_API_KEY"
+
+# Or convert a built-in sample, no upload needed
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -H "Content-Type: application/json" \
+  -d '{"filepath":"sample_docx_tables","target":"pptx","apiKey":"YOUR_API_KEY"}'</code></pre>
+
+      <p style="text-align:center;margin-top:28px">
+        <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Try in Browser</a>
+        &nbsp;&nbsp;
+        <a href="api.html" class="dp-btn" style="display:inline-block;padding:12px 32px;background:transparent;color:var(--dp-blue);border:1px solid var(--dp-blue-border);border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">API Reference</a>
+      </p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I generate a DOCX from Markdown?</summary>
+          <div class="dp-faq-answer"><p>Run <code>docparse report.md --convert report.docx</code>, or POST the file to <a href="api.html"><code>/api/v1/convert</code></a> with <code>target=docx</code>. Front matter becomes document properties, and bold, links, images and tables become real Word formatting.</p></div>
+        </details>
+        <details>
+          <summary>Can I convert Markdown to PowerPoint?</summary>
+          <div class="dp-faq-answer"><p>Yes &mdash; <code>docparse notes.md --convert slides.pptx</code> turns headings into slides. The same source also converts to XLSX, ODT, ODP, ODS, HTML and Quarto.</p></div>
+        </details>
+        <details>
+          <summary>Can generated documents have headers, footers or tracked changes?</summary>
+          <div class="dp-faq-answer"><p>Not from Markdown &mdash; those have no Markdown syntax. They survive when you convert from a document that already contains them, such as DOCX to ODT.</p></div>
+        </details>
+        <details>
+          <summary>Can AILANG Parse write a document from a prompt?</summary>
+          <div class="dp-faq-answer"><p>The local CLI can, via <code>--generate</code> with <code>--prompt</code>. The hosted API cannot &mdash; it is deterministic conversion only. Have your model write the Markdown, then convert it.</p></div>
+        </details>
+        <details>
+          <summary>Do I need Microsoft Office or LibreOffice installed?</summary>
+          <div class="dp-faq-answer"><p>No. The generators write OOXML and OpenDocument containers directly &mdash; no headless Office, no subprocess, no license.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
