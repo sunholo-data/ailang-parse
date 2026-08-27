@@ -13,7 +13,7 @@ module docparse/services/eml_parser
 import std/string (length, substring, find, split, join, trim, toLower, startsWith, endsWith, contains, chars, foldChars, charAt, intToStr, replace, decodeQuotedPrintable as builtinDecodeQP)
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
 import std/option (Option, Some, None)
-import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts)
+import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts, toInts)
 import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata, mkSection, mkNamedSection)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
@@ -101,13 +101,22 @@ export pure func parseMboxMetadata(content: string) -> DocMetadata {
 -- ============================================================
 
 -- Split email into header section and body at first blank line
+-- Split on the FIRST blank line via split/join rather than find/substring:
+-- substring is rune-indexed, so it decodes the string into runes to compute
+-- byte offsets, and Go's rune decode silently replaces any invalid-UTF-8
+-- byte with U+FFFD as it goes -- permanently, since the result is re-encoded
+-- from the (already-replaced) runes. A message body in windows-1252 or
+-- iso-8859-1 is not valid UTF-8 by definition, so every 0x80-0xFF byte in it
+-- was being destroyed here, before charset decoding ever got a chance to run
+-- (verified: readFile and split/join round-trip such bytes losslessly;
+-- substring does not, even for a full no-op copy). split(content, "\n\n")
+-- plus rejoining everything after the first element reconstructs the
+-- original text exactly (same delimiter split then joined is lossless) while
+-- never triggering a rune decode.
 pure func emlSplitHeaderBody(content: string) -> { headers: string, body: string } {
-  let sep = find(content, "\n\n");
-  if sep < 0 then { headers: content, body: "" }
-  else {
-    let h = substring(content, 0, sep);
-    let b = if sep + 2 < length(content) then substring(content, sep + 2, length(content)) else "";
-    { headers: h, body: b }
+  match split(content, "\n\n") {
+    [] => { headers: "", body: "" },
+    h :: rest => { headers: h, body: join("\n\n", rest) }
   }
 }
 
@@ -209,12 +218,20 @@ pure func emlExtractDisplayName(from: string) -> string {
 -- Parse body based on Content-Type and Content-Transfer-Encoding
 pure func emlParseBody(body: string, contentType: string, encoding: string) -> [Block] {
   let lowerCt = toLower(contentType);
-  if contains(lowerCt, "multipart/") then {
+  -- The entity's own type, params stripped (emlExtractMimeType already takes
+  -- only the token before the first ";"). RFC 2387's `type=` parameter on a
+  -- multipart/related declares the media type of the ROOT PART of a CHILD
+  -- entity — it is metadata about a child, not the container's own type — so
+  -- checking it via `contains(lowerCt, ...)` against the whole raw header
+  -- mis-detected e.g. "multipart/mixed; ...; type=\"multipart/alternative\""
+  -- as alternative and skipped descending into the real multipart/mixed body.
+  let baseType = emlExtractMimeType(contentType);
+  if startsWith(baseType, "multipart/") then {
     let boundary = emlExtractBoundary(contentType);
     if length(boundary) == 0 then [mkText(body, "Normal", 0)]
     else {
       let parts = emlSplitMultipart(body, boundary);
-      if contains(lowerCt, "multipart/alternative") then
+      if baseType == "multipart/alternative" then
         emlSelectAlternativePart(parts)
       else
         flatMap(emlParseMimePart, parts)
@@ -222,7 +239,7 @@ pure func emlParseBody(body: string, contentType: string, encoding: string) -> [
   }
   else {
     -- Single-part message
-    let decoded = emlDecodeBody(body, encoding);
+    let decoded = emlDecodeBody(body, encoding, emlExtractCharset(contentType));
     if contains(lowerCt, "text/html") then parseHtml(decoded)
     else [mkText(decoded, "Normal", 0)]
   }
@@ -306,7 +323,8 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
       let sp = emlSplitHeaderBody(part);
       let headers = emlParseHeaders(sp.headers);
       let enc = emlGetHeader(headers, "content-transfer-encoding");
-      let decoded = emlDecodeBody(sp.body, enc);
+      let cs = emlExtractCharset(emlGetHeader(headers, "content-type"));
+      let decoded = emlDecodeBody(sp.body, enc, cs);
       [mkText(decoded, "Normal", 0)]
     },
     None => {
@@ -316,7 +334,8 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
           let sp = emlSplitHeaderBody(part);
           let headers = emlParseHeaders(sp.headers);
           let enc = emlGetHeader(headers, "content-transfer-encoding");
-          let decoded = emlDecodeBody(sp.body, enc);
+          let cs = emlExtractCharset(emlGetHeader(headers, "content-type"));
+          let decoded = emlDecodeBody(sp.body, enc, cs);
           parseHtml(decoded)
         },
         None => match parts {
@@ -325,7 +344,8 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
             let sp = emlSplitHeaderBody(first);
             let headers = emlParseHeaders(sp.headers);
             let enc = emlGetHeader(headers, "content-transfer-encoding");
-            let decoded = emlDecodeBody(sp.body, enc);
+            let cs = emlExtractCharset(emlGetHeader(headers, "content-type"));
+            let decoded = emlDecodeBody(sp.body, enc, cs);
             [mkText(decoded, "Normal", 0)]
           }
         }
@@ -397,6 +417,7 @@ pure func emlParseMimePart(part: string) -> [Block] {
   let headers = emlParseHeaders(splitResult.headers);
   let partCt = emlGetHeader(headers, "content-type");
   let partEnc = emlGetHeader(headers, "content-transfer-encoding");
+  let partCharset = emlExtractCharset(partCt);
   let disposition = emlGetHeader(headers, "content-disposition");
   let lowerCt = toLower(partCt);
 
@@ -406,7 +427,7 @@ pure func emlParseMimePart(part: string) -> [Block] {
     let mimeType = emlExtractMimeType(partCt);
     if emlIsParseableMime(mimeType) then {
       -- Text-based attachment: decode and parse inline
-      let decoded = emlDecodeBody(splitResult.body, partEnc);
+      let decoded = emlDecodeBody(splitResult.body, partEnc, partCharset);
       let parsedBlocks = emlParseAttachmentContent(decoded, mimeType);
       let metaBlock = mkText("${filename} (${mimeType})", "attachment-meta", 0);
       [mkNamedSection("attachment", filename, metaBlock :: parsedBlocks)]
@@ -425,25 +446,27 @@ pure func emlParseMimePart(part: string) -> [Block] {
       [mkText("[attachment: ${filename}, ${mimeType}]", "attachment", 0)]
     }
   }
-  else if contains(lowerCt, "multipart/") then {
-    -- Nested multipart
+  else if startsWith(emlExtractMimeType(partCt), "multipart/") then {
+    -- Nested multipart. Same params-stripped type check as emlParseBody --
+    -- see the comment there on RFC 2387's `type=` parameter.
+    let baseType = emlExtractMimeType(partCt);
     let boundary = emlExtractBoundary(partCt);
     if length(boundary) == 0 then [mkText(splitResult.body, "Normal", 0)]
     else {
       let subParts = emlSplitMultipart(splitResult.body, boundary);
-      if contains(lowerCt, "multipart/alternative") then
+      if baseType == "multipart/alternative" then
         emlSelectAlternativePart(subParts)
       else
         flatMap(emlParseMimePart, subParts)
     }
   }
   else if contains(lowerCt, "text/html") then {
-    let decoded = emlDecodeBody(splitResult.body, partEnc);
+    let decoded = emlDecodeBody(splitResult.body, partEnc, partCharset);
     let htmlBlocks = parseHtml(decoded);
     [mkSection("mime-part", htmlBlocks)]
   }
   else if contains(lowerCt, "text/") then {
-    let decoded = emlDecodeBody(splitResult.body, partEnc);
+    let decoded = emlDecodeBody(splitResult.body, partEnc, partCharset);
     [mkText(decoded, "Normal", 0)]
   }
   else {
@@ -505,31 +528,109 @@ pure func emlExtractParam(header: string, paramName: string) -> string {
 -- P2: Encoding (RFC 2045 + RFC 2047)
 -- ============================================================
 
--- Decode body based on Content-Transfer-Encoding
-pure func emlDecodeBody(body: string, encoding: string) -> string {
+-- Decode body based on Content-Transfer-Encoding and the part's declared
+-- charset. `charset` is whatever emlExtractCharset found on the part's
+-- Content-Type header ("" when absent), threaded through so the final
+-- bytes->string step below can honour it instead of assuming UTF-8.
+pure func emlDecodeBody(body: string, encoding: string, charset: string) -> string {
   let lowerEnc = trim(toLower(encoding));
-  if lowerEnc == "base64" then emlDecodeBase64(body)
-  else if lowerEnc == "quoted-printable" then emlDecodeQuotedPrintable(body)
-  else body
+  if lowerEnc == "base64" then emlDecodeBase64(body, charset)
+  else if lowerEnc == "quoted-printable" then emlDecodeQuotedPrintable(body, charset)
+  -- 7bit/8bit/binary/unspecified: no transfer decoding, but 8bit body text
+  -- still needs charset decoding -- an 8bit windows-1252 body was previously
+  -- returned untouched here and reached JSON output as raw non-UTF-8 bytes.
+  else emlDecodeCharsetBytes(stringToBytes(body), charset)
 }
 
--- Decode base64 body: strip whitespace, decode via std/bytes
-pure func emlDecodeBase64(encoded: string) -> string {
+-- Decode base64 body: strip whitespace, decode via std/bytes, then decode the
+-- resulting bytes per the declared charset (was: assumed UTF-8 unconditionally).
+pure func emlDecodeBase64(encoded: string, charset: string) -> string {
   -- Strip all whitespace (newlines, spaces, tabs, carriage returns)
   let noNewlines = join("", split(encoded, "\n"));
   let noCr = join("", split(noNewlines, "\r"));
   let noSpaces = join("", split(noCr, " "));
   let cleanStripped = join("", split(noSpaces, "\t"));
   match fromBase64(cleanStripped) {
-    Some(bytes) => bytesToString(bytes),
+    Some(bytes) => emlDecodeCharsetBytes(bytes, charset),
     None => encoded
   }
 }
 
--- Decode quoted-printable body (RFC 2045 §6.7)
+-- Decode quoted-printable body (RFC 2045 §6.7), then decode per the declared
+-- charset. The native builtin operates byte-wise (verified: round-trips an
+-- 0x80-0xFF byte introduced via a "=XX" escape without altering it), so
+-- converting its result back to bytes via fromString recovers the exact
+-- decoded bytes rather than a UTF-8 reinterpretation of them.
 -- Uses native builtin for O(n) performance (80μs/37KB vs infinite with AILANG recursion)
-pure func emlDecodeQuotedPrintable(text: string) -> string {
-  builtinDecodeQP(text)
+pure func emlDecodeQuotedPrintable(text: string, charset: string) -> string {
+  emlDecodeCharsetBytes(stringToBytes(builtinDecodeQP(text)), charset)
+}
+
+-- Decode raw bytes per a declared charset into a proper UTF-8 string.
+-- Falls back to UTF-8 only when no charset was declared at all (cs == "",
+-- unchanged default behaviour). A charset that IS declared but isn't
+-- recognized falls back to latin-1 (the identity byte->codepoint mapping)
+-- rather than UTF-8: latin-1 round-trips every byte 0x00-0xFF and can never
+-- produce a replacement character, where UTF-8 would silently destroy every
+-- byte >= 0x80 that isn't part of a valid sequence.
+pure func emlDecodeCharsetBytes(raw: bytes, charset: string) -> string {
+  let cs = trim(toLower(charset));
+  if cs == "utf-8" || cs == "utf8" || cs == "" then bytesToString(raw)
+  else if cs == "windows-1252" || cs == "cp1252" || cs == "cp-1252" then
+    join("", map(\b. emlCodePointToUtf8(emlCp1252ToUnicode(b)), toInts(raw)))
+  else
+    -- iso-8859-1 / latin1 / us-ascii / anything unrecognized: identity.
+    join("", map(\b. emlCodePointToUtf8(b), toInts(raw)))
+}
+
+-- Extract the charset parameter from a Content-Type header, "" when absent.
+pure func emlExtractCharset(contentType: string) -> string =
+  emlExtractParam(contentType, "charset")
+
+-- Convert a Unicode code point to its UTF-8 string representation. Codepoints
+-- needed here (ASCII plus the CP1252 upper range, max U+2122) never exceed
+-- 3-byte UTF-8, so 4-byte/surrogate handling isn't needed.
+pure func emlCodePointToUtf8(cp: int) -> string {
+  if cp < 128 then bytesToString(fromInts([cp]))
+  else if cp < 2048 then bytesToString(fromInts([192 + cp / 64, 128 + cp % 64]))
+  else bytesToString(fromInts([224 + cp / 4096, 128 + (cp / 64) % 64, 128 + cp % 64]))
+}
+
+-- Windows-1252 byte -> Unicode code point. 0x00-0x7F and 0xA0-0xFF map
+-- directly; 0x80-0x9F carries Windows-1252's own assignments (same table as
+-- rtf_parser's rtfCp1252ToUnicode -- duplicated rather than imported because
+-- non-exported helpers with the same name+type across modules collide at
+-- runtime; see the AILANG bug policy note in .claude/rules/ailang-coding.md).
+pure func emlCp1252ToUnicode(b: int) -> int {
+  if b < 128 then b
+  else if b == 128 then 8364     -- € EURO SIGN
+  else if b == 130 then 8218     -- ‚ SINGLE LOW-9 QUOTATION MARK
+  else if b == 131 then 402      -- ƒ LATIN SMALL LETTER F WITH HOOK
+  else if b == 132 then 8222     -- „ DOUBLE LOW-9 QUOTATION MARK
+  else if b == 133 then 8230     -- … HORIZONTAL ELLIPSIS
+  else if b == 134 then 8224     -- † DAGGER
+  else if b == 135 then 8225     -- ‡ DOUBLE DAGGER
+  else if b == 136 then 710      -- ˆ MODIFIER LETTER CIRCUMFLEX ACCENT
+  else if b == 137 then 8240     -- ‰ PER MILLE SIGN
+  else if b == 138 then 352      -- Š LATIN CAPITAL LETTER S WITH CARON
+  else if b == 139 then 8249     -- ‹ SINGLE LEFT-POINTING ANGLE QUOTATION
+  else if b == 140 then 338      -- Œ LATIN CAPITAL LIGATURE OE
+  else if b == 142 then 381      -- Ž LATIN CAPITAL LETTER Z WITH CARON
+  else if b == 145 then 8216     -- ' LEFT SINGLE QUOTATION MARK
+  else if b == 146 then 8217     -- ' RIGHT SINGLE QUOTATION MARK
+  else if b == 147 then 8220     -- " LEFT DOUBLE QUOTATION MARK
+  else if b == 148 then 8221     -- " RIGHT DOUBLE QUOTATION MARK
+  else if b == 149 then 8226     -- • BULLET
+  else if b == 150 then 8211     -- – EN DASH
+  else if b == 151 then 8212     -- — EM DASH
+  else if b == 152 then 732      -- ˜ SMALL TILDE
+  else if b == 153 then 8482     -- ™ TRADE MARK SIGN
+  else if b == 154 then 353      -- š LATIN SMALL LETTER S WITH CARON
+  else if b == 155 then 8250     -- › SINGLE RIGHT-POINTING ANGLE QUOTATION
+  else if b == 156 then 339      -- œ LATIN SMALL LIGATURE OE
+  else if b == 158 then 382      -- ž LATIN SMALL LETTER Z WITH CARON
+  else if b == 159 then 376      -- Ÿ LATIN CAPITAL LETTER Y WITH DIAERESIS
+  else b                          -- 0xA0-0xFF map directly
 }
 
 -- Convert a hex nibble character to its integer value
@@ -579,6 +680,11 @@ export pure func emlDecodeHeaderValue(value: string) -> string
     let q1 = find(afterStart, "?");
     if q1 < 0 then value
     else {
+      -- Previously parsed past and discarded (same UTF-8-only assumption as
+      -- the body-decode path) -- an encoded-word declaring e.g.
+      -- =?windows-1252?Q?...?= had its charset read only to find where it
+      -- ends, then the decoded bytes were handed to bytesToString regardless.
+      let headerCharset = substring(afterStart, 0, q1);
       let afterCharset = substring(afterStart, q1 + 1, length(afterStart));
       -- Find encoding type (B or Q)
       let q2 = find(afterCharset, "?");
@@ -592,8 +698,8 @@ export pure func emlDecodeHeaderValue(value: string) -> string
         else {
           let encodedText = substring(afterEncType, 0, closePos);
           let rest = substring(afterEncType, closePos + 2, length(afterEncType));
-          let decoded = if encType == "b" then emlDecodeBase64(encodedText)
-                        else if encType == "q" then emlDecodeQEncoding(encodedText)
+          let decoded = if encType == "b" then emlDecodeBase64(encodedText, headerCharset)
+                        else if encType == "q" then emlDecodeQEncoding(encodedText, headerCharset)
                         else encodedText;
           -- Skip whitespace between adjacent encoded-words (RFC 2047 §6.2)
           let trimmedRest = if startsWith(trim(rest), "=?") then trim(rest) else rest;
@@ -606,9 +712,9 @@ export pure func emlDecodeHeaderValue(value: string) -> string
 
 -- Decode Q-encoding (RFC 2047 §4 variant of quoted-printable)
 -- Same as QP but underscore = space, no soft line breaks
-pure func emlDecodeQEncoding(text: string) -> string {
+pure func emlDecodeQEncoding(text: string, charset: string) -> string {
   let withSpaces = join(" ", split(text, "_"));
-  builtinDecodeQP(withSpaces)
+  emlDecodeCharsetBytes(stringToBytes(builtinDecodeQP(withSpaces)), charset)
 }
 
 -- ============================================================
