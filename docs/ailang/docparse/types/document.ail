@@ -13,6 +13,11 @@ import std/list (filter, map, reverse, length as listLength)
 -- merged: true if this is a continuation cell (content lives in the span origin)
 -- scope: "row" | "col" | "rowgroup" | "colgroup" | "" — populated by HTML
 --        parser for <th scope=…>. Empty for normal data cells.
+-- runs: same text/runs relationship as InlineRun above — text is left raw
+--       (markdown_parser keeps its "`code`"/"**bold**" markers in text) and
+--       runs carries the tokenized decomposition for generators that want it.
+--       Empty for every parser but markdown_parser today; generators fall
+--       back to plain text when it's empty.
 export type TableCell = {
   text: string,
   colSpan: int,
@@ -22,7 +27,8 @@ export type TableCell = {
   -- "" | "left" | "center" | "right". Markdown states it with colons in the
   -- separator row (|:---|---:|); every other format has its own notion. Empty
   -- means "not specified", which is not the same as left.
-  align: string
+  align: string,
+  runs: [InlineRun]
 }
 
 -- A span of text within a paragraph carrying character formatting.
@@ -244,7 +250,7 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: []}
 }
 
 -- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
@@ -253,21 +259,35 @@ export pure func simpleCell(text: string) -> TableCell
 export pure func scopedCell(text: string, scope: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: []}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: ""}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: []}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: []}
+}
+
+-- Same as simpleCell/spanCell, plus the tokenized inline runs (markdown_parser
+-- only — everything else has no per-cell formatting to decompose).
+export pure func simpleCellRuns(text: string, runs: [InlineRun]) -> TableCell
+  ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
+{
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs}
+}
+
+export pure func spanCellRuns(text: string, cs: int, runs: [InlineRun]) -> TableCell
+  ensures { result.colSpan == cs && result.merged == false }
+{
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs}
 }
 
 -- Construct a TableBlock with no caption (most non-HTML parsers).

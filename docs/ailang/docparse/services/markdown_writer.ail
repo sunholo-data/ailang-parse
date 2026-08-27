@@ -59,7 +59,7 @@ export pure func renderBlockMd(block: Block) -> string =
     TableBlock(t) =>
       "${renderTableMd(t.headers, t.rows)}\n",
     ListBlock(l) =>
-      "${renderListMd(l.items, l.ordered, 1, l.itemLevels)}\n",
+      "${renderListMd(l.items, l.itemRuns, l.ordered, 1, l.itemLevels)}\n",
     ImageBlock(i) =>
       if length(i.description) > 0
       then "[Image: ${i.description}]\n\n"
@@ -272,8 +272,13 @@ pure func alignDashes(align: string) -> string =
 pure func renderRowsMd(rows: [[TableCell]]) -> string =
   foldl(\acc row. "${acc}| ${renderCellsMd(row)}\n", "", rows)
 
--- Render list items
-pure func renderListMd(items: [string], ordered: bool, idx: int, levels: [int]) -> string =
+-- Render list items. itemRuns is parallel to items but may be empty entirely
+-- (nothing formatted) or shorter than items, so both are walked together and
+-- a missing/empty run list simply falls back to the flattened item text --
+-- mirroring docx_generator's docxListItemsToXml. Without this a list item's
+-- bold/italic/code markers survived into `blocks` but were dropped on the way
+-- to markdown, since only the flattened plain-text `items` were ever read.
+pure func renderListMd(items: [string], itemRuns: [[InlineRun]], ordered: bool, idx: int, levels: [int]) -> string =
   match items {
     [] => "",
     item :: rest => {
@@ -282,6 +287,8 @@ pure func renderListMd(items: [string], ordered: bool, idx: int, levels: [int]) 
       let restLevels = match levels { [] => [], _ :: t => t };
       let pad = repeat("  ", lvl);
       let marker = if ordered then "${show(idx)}. " else "- ";
-      "${pad}${marker}${mdOneLine(item)}\n${renderListMd(rest, ordered, idx + 1, restLevels)}"
+      let body = match itemRuns { [] => item, r :: _ => inlineMd(item, r) };
+      let restRuns = match itemRuns { [] => [], _ :: t => t };
+      "${pad}${marker}${mdOneLine(body)}\n${renderListMd(rest, restRuns, ordered, idx + 1, restLevels)}"
     }
   }

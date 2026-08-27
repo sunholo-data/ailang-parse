@@ -3,7 +3,7 @@ module docparse/services/markdown_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, charCode, foldChars, join, replace, replaceMany, stringToInt)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, TableCell, simpleCell, mergedCell, spanCell, mkTable)
+import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, TableCell, simpleCell, mergedCell, spanCell, simpleCellRuns, spanCellRuns, mkTable)
 
 -- Markdown Parser — converts Markdown text to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -199,7 +199,15 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     { s | quoteLines: body :: s.quoteLines }
   }
 
-  -- Regular text line: accumulate for paragraph
+  -- Regular text line: a wrapped continuation of the open list item's
+  -- paragraph (CommonMark lazy continuation) joins onto that item, so a
+  -- hard-wrapped source line doesn't split one item into a list block plus an
+  -- orphaned sibling text block. Otherwise accumulate for a plain paragraph.
+  else if not mdIsEmptyList(state.listItems) then
+    match state.listItems {
+      item :: rest => { state | listItems: "${item} ${trimmedLine}" :: rest },
+      [] => state
+    }
   else
     let s = flushList(flushTable(flushQuote(state))) in
     { s | textLines: trimmedLine :: s.textLines }
@@ -712,12 +720,16 @@ pure func mdAllChar(s: string, c: string, i: int) -> bool =
 -- Recover table topology from the attribute suffixes the markdown writer emits
 -- (output_formatter.cellTextMd). Without this the markers survived as literal
 -- text — a cell reading "Total {colspan=2}" — in every consumer downstream.
+-- Cell text is tokenized the same way a paragraph is (mdInlineRuns), so a
+-- `` `code` `` span or **bold** term inside a cell carries into `runs`
+-- instead of reaching every generator as literal markup characters. `text`
+-- keeps the raw markdown (see TableCell's doc comment) — only `runs` decodes it.
 pure func mdCellFromText(s: string) -> TableCell {
   let t = trim(s);
   if endsWith(t, "{merged}") then mergedCell()
   else {
     let idx = find(t, "{colspan=");
-    if idx < 0 || not endsWith(t, "}") then simpleCell(t)
+    if idx < 0 || not endsWith(t, "}") then simpleCellRuns(t, mdInlineRuns(t))
     else {
       let text = trim(substring(t, 0, idx));
       let digits = substring(t, idx + 9, length(t) - 1);
@@ -725,8 +737,8 @@ pure func mdCellFromText(s: string) -> TableCell {
         -- Clamped: the span sets the table's width, so an absurd or hostile
         -- value ({colspan=99}) padded every data row out to match it. No real
         -- table has more columns than this.
-        Some(n) => if n > 1 && n <= 64 then spanCell(text, n) else simpleCell(text),
-        None => simpleCell(t)
+        Some(n) => if n > 1 && n <= 64 then spanCellRuns(text, n, mdInlineRuns(text)) else simpleCellRuns(text, mdInlineRuns(text)),
+        None => simpleCellRuns(t, mdInlineRuns(t))
       }
     }
   }
