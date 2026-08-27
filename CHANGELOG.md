@@ -9,7 +9,42 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.36.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.37.0...HEAD)
+
+## [v0.37.0](https://github.com/sunholo-data/ailang-parse/compare/v0.36.0...v0.37.0) — 2026-08-27
+
+### Four defects reported via ailang messages, fixed
+
+- **Markdown: lazy continuation split list items.** A hard-wrapped list-item
+  paragraph (CommonMark lazy continuation — a wrapped line with no blank line
+  before it) produced a one-item list block plus an orphaned sibling text
+  block instead of one complete item. The parser now folds the continuation
+  onto the open list item.
+- **Markdown output dropped bold/italic/code inside list items.** `itemRuns`
+  was parsed correctly but the markdown writer only ever read the flattened
+  `items` text, so `**bold**` survived into `blocks` and vanished on the way
+  back to markdown. `renderListMd` now re-emits `itemRuns` the same way
+  headings and paragraphs already did.
+- **DOCX table cells: inline code was not tokenized.** A `` `code` `` span
+  inside a GFM table cell reached the DOCX table as literal backtick
+  characters — `TableCell` had nowhere to carry per-cell runs. `TableCell`
+  gains a `runs` field (markdown_parser only; every other parser leaves it
+  empty), and the DOCX generator renders it as a real monospace run.
+- **DOCX fenced code wrapped at the margin.** A code block was one paragraph
+  per source line at full body font size, so anything wider than the text
+  column — an ASCII diagram, say — wrapped and lost its alignment. It is now
+  one paragraph with soft line breaks at 8.5pt against the ~10.5pt body.
+
+### New: `--no-attachment-data` for EML/MBOX
+
+Drops `attachment-data`/`attachment-ext` base64 blocks from parsed output
+while keeping `attachment-meta`, so a persisted `.eml.json` archive doesn't
+carry dead-weight attachment bytes that every downstream consumer discards
+anyway. Threaded through `ParseOptions` the same way `--deep`/`--threaded`
+are — CLI flag or `DOCPARSE_NO_ATTACHMENT_DATA=1` env var for batch mode.
+
+Office suite 100.0% across 105 files; round-trip 0 failures across 102;
+generated-doc checks pass.
 
 ## [v0.36.0](https://github.com/sunholo-data/ailang-parse/compare/v0.35.0...v0.36.0) — 2026-08-25
 
