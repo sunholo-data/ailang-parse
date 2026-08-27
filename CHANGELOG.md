@@ -9,7 +9,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.37.0...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.37.1...HEAD)
+
+## [v0.37.1](https://github.com/sunholo-data/ailang-parse/compare/v0.37.0...v0.37.1) — 2026-08-27
+
+v0.37.0's publish failed registry validation: `docs/ailang/docparse/` vendors
+copies of the parser modules for the browser bundle under the same module
+paths as the canonical tree, and the registry validator type-checks the whole
+tarball. The vendored copies still constructed the pre-`runs`-field
+`TableCell`, so they failed against the new type. Same trap as v0.33.0
+(fcb210b) — re-vendored via `vendor-wasm-packages.sh --skip-wasm`, no source
+changes.
 
 ## [v0.37.0](https://github.com/sunholo-data/ailang-parse/compare/v0.36.0...v0.37.0) — 2026-08-27
 
