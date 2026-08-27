@@ -9,7 +9,38 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.37.1...HEAD)
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.38.0...HEAD)
+
+## [v0.38.0](https://github.com/sunholo-data/ailang-parse/compare/v0.37.1...v0.38.0) — 2026-08-27
+
+### Two .eml defects reported via ailang messages
+
+Measured on a real 66,621-message archive: 2,236 messages (3.4%) had raw MIME
+in their extracted body, and 2,512 (3.8%) had U+FFFD corrupting Danish text.
+
+- **A `type=` parameter naming a multipart type broke MIME descent.**
+  `Content-Type: multipart/mixed; boundary=...; type="multipart/alternative"`
+  (RFC 2387 — `type=` declares the media type of a *child*, not the
+  container's own type) was misread as the container itself being
+  `multipart/alternative`, which routed it into alternative-part selection
+  instead of recursing on its boundary. The fallback then emitted the raw
+  first child part — boundary markers, headers, undecoded base64 — as one
+  literal text block. This is the exact shape Outlook/Exchange produces for
+  any rich message with inline images. Fixed by comparing the entity's own
+  params-stripped type instead of substring-matching the whole header.
+- **Declared charset was ignored; body decoded as UTF-8 unconditionally.**
+  Every byte >= 0x80 in a windows-1252 or iso-8859-1 body became U+FFFD.
+  Root cause had two layers: `emlSplitHeaderBody` used `substring`, which is
+  rune-indexed and silently replaces invalid-UTF-8 bytes while computing
+  offsets — destroying non-UTF-8 body bytes before charset decoding ever ran,
+  regardless of what the decoder did. Switched to `split`/`join`, which needs
+  no rune decode. Then added actual charset decoding (windows-1252 table,
+  latin-1 fallback for anything else) at every bytes→string boundary,
+  including RFC 2047 encoded-words in header values (`Subject:`, filenames).
+
+Fixing the charset bug surfaced a golden fixture with a literal U+FFFD baked
+into its expected output — the same bug, previously enshrined as "correct".
+Regenerated that one golden now that the decode is right.
 
 ## [v0.37.1](https://github.com/sunholo-data/ailang-parse/compare/v0.37.0...v0.37.1) — 2026-08-27
 
