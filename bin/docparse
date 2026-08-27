@@ -137,6 +137,8 @@ Options:
   --verify          Enable runtime contract verification
   --budget-report   Show capability budget usage after run
   --output-dir DIR  Copy output files to DIR after parsing
+  --no-attachment-data  EML/MBOX: omit attachment-data/attachment-ext base64
+                    blocks from output (attachment-meta is kept)
   --check           Type-check all modules (no file needed)
   --test            Run all inline tests (no file needed)
   --prove           Static Z3 contract verification (no file needed, requires z3)
@@ -360,6 +362,7 @@ PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-pdftotext}"
 EXTRA_FLAGS=()
 DEEP_REQUESTED=false
 THREADED_REQUESTED=false
+NO_ATTACHMENT_DATA_REQUESTED=false
 CONVERT_TARGET=""
 GENERATE_TARGET=""
 PROMPT_TEXT=""
@@ -465,6 +468,10 @@ while [ $# -gt 0 ]; do
       ;;
     --threaded)
       THREADED_REQUESTED=true
+      shift
+      ;;
+    --no-attachment-data)
+      NO_ATTACHMENT_DATA_REQUESTED=true
       shift
       ;;
     -*)
@@ -678,6 +685,9 @@ if [ "$DEEP_REQUESTED" = "true" ]; then
 fi
 if [ "$THREADED_REQUESTED" = "true" ]; then
   ENV_PREFIX+=(DOCPARSE_THREADED=1)
+fi
+if [ "$NO_ATTACHMENT_DATA_REQUESTED" = "true" ]; then
+  ENV_PREFIX+=(DOCPARSE_NO_ATTACHMENT_DATA=1)
 fi
 
 run_cmd() {

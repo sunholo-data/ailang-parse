@@ -256,17 +256,28 @@ pure func docxBlockquote(runs: [InlineRun], text: string) -> string {
   docxParagraph("<w:pPr><w:ind w:left=\"720\"/></w:pPr>${body}")
 }
 
--- A fenced code block. Word has no code block, so each source line becomes its
--- own monospaced paragraph — which preserves the line structure that a single
--- paragraph with embedded newlines would lose.
+-- A fenced code block. Word has no code block, so the whole fence becomes ONE
+-- monospaced paragraph with soft line breaks (w:br) between source lines,
+-- rather than one paragraph per line: a paragraph-per-line let a page break
+-- fall mid-fence, and rendering at full body size wrapped anything wider than
+-- the text column (an ASCII diagram, say) at the margin, destroying its
+-- alignment. Dropping to 8.5pt against a ~10.5pt body keeps typical 72-80
+-- column content inside the page width.
 pure func docxIsCodeStyle(style: string) -> bool =
   style == "code" || startsWith(style, "code:")
 
 pure func docxCodeBlock(text: string) -> string =
-  foldl(\acc line. "${acc}${docxParagraph(docxMonoRun(line))}", "", split(text, "\n"))
+  docxParagraph(docxMonoLines(split(text, "\n")))
+
+pure func docxMonoLines(lines: [string]) -> string =
+  match lines {
+    [] => "",
+    line :: [] => docxMonoRun(line),
+    line :: rest => "${docxMonoRun(line)}<w:r><w:br/></w:r>${docxMonoLines(rest)}"
+  }
 
 pure func docxMonoRun(text: string) -> string =
-  "<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
+  "<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/><w:sz w:val=\"17\"/><w:szCs w:val=\"17\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
 
 -- A thematic break. Word has no <hr> element — the idiom is an empty paragraph
 -- carrying a bottom border, which is what Word itself writes for one.
@@ -491,7 +502,13 @@ pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
     let spanPr = if cell.colSpan > 1
       then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
       else "";
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p>${docxHeaderAlignPr(cell.align)}<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r></w:p></w:tc>"
+    -- Runs carry their own formatting (e.g. code:true from a `backtick` span);
+    -- bold is forced on top of that rather than replacing it, so a header cell
+    -- stays bold the way a plain-text header cell always has.
+    let body = if listLength(cell.runs) > 0
+      then docxRunsToXml(map(\r. {r | bold: true}, cell.runs))
+      else "<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r>";
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p>${docxHeaderAlignPr(cell.align)}${body}</w:p></w:tc>"
   }
 }
 
@@ -515,7 +532,12 @@ pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
     let spanPr = if cell.colSpan > 1
       then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
       else "";
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph("${docxAlignPr(cell.align)}${docxRun(cell.text)}")}</w:tc>"
+    -- cell.runs is the tokenized decomposition of cell.text (markdown_parser
+    -- populates it; every other parser leaves it empty), so a `code` span or
+    -- **bold** term inside a cell renders as a real Word run instead of
+    -- reaching the page as literal backtick/asterisk characters.
+    let body = if listLength(cell.runs) > 0 then docxRunsToXml(cell.runs) else docxRun(cell.text);
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph("${docxAlignPr(cell.align)}${body}")}</w:tc>"
   }
 }
 

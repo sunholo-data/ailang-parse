@@ -46,7 +46,7 @@
 module docparse/services/orchestrator
 
 import std/string (length, toLower, startsWith, endsWith)
-import std/list (concat, length as listLength)
+import std/list (concat, map, filter, length as listLength)
 import std/fs (readFile, readFileBytes, fileExists, writeFileBytes, removeFile)
 import std/bytes (fromBase64)
 import std/option (Some, None)
@@ -101,7 +101,10 @@ export type ParseOptions = {
   deep: bool,           -- recurse into EML attachments
   extractImages: bool,  -- extract embedded binary images (DOCX/PPTX)
   threaded: bool,       -- MBOX: group messages into conversation threads
-  projectRoot: string   -- root for Process shell-outs (PDF adapter)
+  projectRoot: string,  -- root for Process shell-outs (PDF adapter)
+  noAttachmentData: bool -- EML: omit attachment-data/attachment-ext base64
+                          -- blocks from output; attachment-meta is kept. No-op
+                          -- when `deep` already resolved (and dropped) them.
 }
 
 export pure func defaultParseOptions() -> ParseOptions = {
@@ -110,7 +113,8 @@ export pure func defaultParseOptions() -> ParseOptions = {
   deep: false,
   extractImages: true,
   threaded: false,
-  projectRoot: ""
+  projectRoot: "",
+  noAttachmentData: false
 }
 
 -- A parsed document plus everything a caller might want to report.
@@ -317,13 +321,41 @@ func orchCsv(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
 func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcome ! {FS} = {
   let content = readFile(filepath);
   let isMbox = ext == "mbox";
-  let blocks = if isMbox && opts.threaded then parseMboxThreaded(content)
+  let parsed = if isMbox && opts.threaded then parseMboxThreaded(content)
                else if isMbox then parseMbox(content)
                else parseEml(content);
+  -- Skipped when opts.deep: the resolution pass below needs attachment-data
+  -- present to decode, and strips it as a side effect of resolving, so
+  -- stripping it here first would leave --deep with nothing to resolve.
+  let blocks = if opts.noAttachmentData && not opts.deep
+    then orchStripAttachmentData(parsed) else parsed;
   let meta = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
   mkOutcome(ext, filepath, meta, blocks,
     ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], [], 0)
 }
+
+-- Drop the base64 attachment-data (and its paired attachment-ext) blocks from
+-- an EML/MBOX parse, keeping attachment-meta so attachment rows and filenames
+-- still land in the index. Recurses through every SectionBlock rather than
+-- just top-level attachment sections, since a message/rfc822 attachment or an
+-- MBOX thread nests one attachment section inside another.
+pure func orchStripAttachmentData(blocks: [Block]) -> [Block] =
+  map(orchStripAttachmentDataBlock, blocks)
+
+pure func orchStripAttachmentDataBlock(block: Block) -> Block =
+  match block {
+    SectionBlock(s) => {
+      let kept = filter(\b. not orchIsAttachmentDataBlock(b), s.blocks);
+      mkNamedSection(s.kind, s.name, orchStripAttachmentData(kept))
+    },
+    _ => block
+  }
+
+pure func orchIsAttachmentDataBlock(block: Block) -> bool =
+  match block {
+    TextBlock(t) => t.style == "attachment-data" || t.style == "attachment-ext",
+    _ => false
+  }
 
 -- parseDocumentPure cannot resolve attachments (that needs Process for the PDF
 -- ladder), so say so rather than quietly returning a shallow parse when the
