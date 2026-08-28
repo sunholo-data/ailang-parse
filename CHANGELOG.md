@@ -95,9 +95,22 @@ numbering one closes the limitation described at the end of the section above.
   unresolvable before and after. Proven where it matters: generate a DOCX under
   a template whose numId 1 is decimal (anti-pandoc), and re-reading it now
   reports bullets unordered — the legacy rule called every item ordered.
-  Numbering keyed by `List Bullet`/`List Number` *styles* (python-docx output)
-  is still not detected as lists at all — that layer belongs to the planned
-  v0.19.0 style-inheritance work, which should reuse this resolution.
+- **Lists numbered through styles are now lists.** python-docx's `List Bullet`
+  and `List Number` put the `numPr` in the STYLE (styles.xml), not on the
+  paragraph, and the reader only ever looked at the paragraph — so
+  `challenge_numbering.docx` parsed to 25 plain text blocks and zero lists.
+  The golden had recorded the defect, not the document. A paragraph now
+  resolves its numbering through `pStyle → style numPr → numId` and then the
+  same machinery as above (`numId → abstractNum → w:numFmt`), so the file
+  parses to 23 list blocks — the numbered outline ordered, the bullets
+  unordered, exactly as Word renders it. The decision stays on `w:numFmt`:
+  matching on the style NAME would be the same guess-with-a-different-constant
+  the old rule was. Regenerated goldens: `challenge_numbering`,
+  `challenge_nested_lists`, `challenge_real_world` (text → list blocks), plus
+  `docx-hdrftr` — where a footer table cell keeps its literal three spaces
+  (xml:space=preserve); that drift predates this change and the suite's
+  normalized checks never byte-compare cell text. `basedOn` style chains and
+  full style inheritance remain v0.19.0 scope.
 - **`--table-style NAME` and template table styles** — generated `<w:tbl>`
   carried hardcoded borders and no `<w:tblStyle>`, so tables were the one
   element that still looked generated under a reference doc. The generator now

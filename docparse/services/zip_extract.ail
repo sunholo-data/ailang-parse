@@ -76,6 +76,16 @@ export func readDocxNumbering(path: string) -> string ! {FS} {
   }
 }
 
+-- Read word/styles.xml (§17.7). Absent part yields "" — paragraphs numbered
+-- through a style then fall back to the direct-numPr reading, which is what
+-- they got before style resolution existed.
+export func readDocxStyles(path: string) -> string ! {FS} {
+  match readEntry(path, "word/styles.xml") {
+    Ok(content) => content,
+    Err(_) => ""
+  }
+}
+
 -- Read an embedded image as base64
 -- Read an embedded image by its full ZIP entry path (e.g. "word/media/image1.jpg").
 -- findMediaEntries already yields full paths, so we must NOT re-prepend

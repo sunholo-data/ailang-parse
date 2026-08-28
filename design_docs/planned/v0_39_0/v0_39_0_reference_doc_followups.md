@@ -47,6 +47,55 @@ style inheritance, which already plans style-level `w:numPr` detection. This
 doc fixes the numbering.xml layer and hands the style layer a resolved map to
 consume (see boundary below).
 
+## Item 2b — style-based numbering (added during execution)
+
+**Found during the item-2 round-trip proof, promoted into this sprint by
+decision of the repo owner.** C9 in full: `challenge_numbering.docx` numbers
+its paragraphs through `pStyle` (`ListBullet`/`ListNumber` styles carrying
+`numPr` in styles.xml), and `isListParagraph` only inspects the paragraph's own
+`<w:numPr>` — so the file yields ZERO list blocks, every item a plain text
+block with a style label. The golden recorded the defect, not the document.
+
+### Scope line
+
+Direct style-level `numPr` resolution ONLY — one indirection
+(`pStyle → style → numPr → numId`), then the item-2 machinery takes over
+(`numId → abstractNum → w:numFmt`, ilvl, fallbacks). Explicitly still v0_19_0:
+`basedOn` chain walking, field-by-field style inheritance, table styles.
+When v0_19_0 lands it should replace the direct-only lookup with the full
+chain and reuse `docxNumberingMaps` unchanged.
+
+### Design
+
+- `zip_extract.readDocxStyles(path)` — same absent-part-yields-"" shape as
+  `readDocxRelationships`/`readDocxNumbering`.
+- Parse `word/styles.xml` once in `parseDocx`, extract
+  `styleId → numId` and `styleId → ilvl` from each paragraph-type style's
+  `w:pPr/w:numPr`, into the SAME map already threaded through the walk under a
+  third key space (`s:<styleId>` → numId, `s:<styleId>:ilvl` → ilvl) beside
+  `n:` and `a:`. One map, one threaded parameter, no new walk plumbing.
+- `isListParagraph(p, nums)`: direct `numPr`, OR a `pStyle` whose styleId has
+  an `s:` entry.
+- `isOrderedList(p, nums)`: numId from the direct `numPr` first, else the
+  style's; ilvl likewise. The numbered-vs-bullet decision stays where item 2
+  put it — `w:numFmt`, never a style-name substring heuristic (`"List
+  Number"` in the name would be the same guess-with-a-different-constant the
+  `numId != "1"` rule was).
+- Unresolvable style reference (style missing, style without `numPr`, numId
+  dangling, no numbering.xml): the item-2 fallbacks apply unchanged, keyed on
+  the numId wherever it was found.
+- Headers/footers and the browser pure entry points keep empty maps — the
+  same documented limitation as their rels handling.
+
+### Verification
+
+- `challenge_numbering.docx` golden moves from 25 text blocks to list blocks;
+  every moved golden is eyeballed against the document before regeneration.
+- Office suite must return to 100% with ONLY resolvable-numbering goldens
+  moved; roundtrip and verify_generated green; `--prove` 0 violations.
+- Round-trip: a markdown with bullets and numbers → DOCX → parse back, both
+  list kinds intact (now also under style-only numbering).
+
 ## Item 1 — `--reference-section N`
 
 ### Problem (measured, from the source message)
