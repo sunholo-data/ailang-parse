@@ -9,6 +9,26 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.39.1...HEAD)
+
+### Unicode bullet glyphs parse as lists — the Word-paste case
+
+Content that came from Word carries literal bullet characters: a list copied
+out as plain text is exactly `• item` lines, and hand-written documents use
+the glyph family too. The markdown parser only knew GFM's `-`/`*`/`+`, so
+those lines parsed as ONE plain paragraph and a generated DOCX showed literal
+`•` runs that render and print fine but do not behave as a list — no
+renumbering, no demote/promote, indent lost on paste. Observed on a real
+client document generated under a reference doc: the tables styled correctly
+and the bullets read as generated.
+
+The parser now treats the unambiguous bullet glyphs (• U+2022, ‣, ⁃, ◦, ▪)
+as unordered list markers, including indented lines. The generated DOCX gets
+real `w:numPr` list paragraphs wired to word/numbering.xml — Word's own list
+behaviour. En dash and middle dot are deliberately not markers: they are live
+punctuation in prose (ranges, ellipses) and would convert ordinary lines;
+the glyph must be followed by a space, matching Word's paste format.
+
 ## [v0.39.1](https://github.com/sunholo-data/ailang-parse/compare/v0.39.0...v0.39.1) — 2026-08-28
 
 ### Published manifest declared a floor the package does not meet

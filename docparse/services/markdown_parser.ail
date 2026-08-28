@@ -171,6 +171,22 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     { s | listItems: item :: s.listItems, listOrdered: false,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
 
+  -- Unicode bullet glyphs as unordered list markers. GFM only knows - * +,
+  -- but content that CAME from Word carries literal bullet characters — a
+  -- copied-out list is exactly "• item" lines — and hand-written documents
+  -- use them too. Without this those lines parse as one plain paragraph and
+  -- the generated DOCX shows literal • runs that do not behave as a list: no
+  -- renumbering, no demote/promote, indent lost on paste. The marker set is
+  -- the unambiguous bullet glyphs (Word's paste set plus common round/hyphen
+  -- variants); en dash and middle dot are deliberately excluded because they
+  -- are live punctuation in prose (ranges, ellipses) and would false-fire.
+
+  else if mdIsUnicodeBullet(trimmedLine) then
+    let s = flushText(flushTable(state)) in
+    let item = trim(substring(trimmedLine, 1, length(trimmedLine))) in
+    { s | listItems: item :: s.listItems, listOrdered: false,
+          itemLevels: mdIndentLevel(line) :: s.itemLevels }
+
   -- Ordered list item: starts with digit followed by ". "
   else if mdIsOrderedListItem(trimmedLine) then
     let s = flushText(flushTable(state)) in
@@ -704,6 +720,29 @@ pure func mdImageBlock(raw: string) -> Block {
 -- A run of three or more of the same -, * or _ is a thematic break. It used to
 -- become a paragraph reading literally "---", which then travelled into every
 -- generated DOCX and PPTX as those three characters.
+-- Does the line start with one of the Unicode bullet glyphs treated as an
+-- unordered list marker? These are the characters a list becomes when copied
+-- out of Word (or written by hand) as plain text: • (U+2022), ‣, ⁃, ◦, ▪.
+-- En dash and middle dot are deliberately NOT markers — they are live
+-- punctuation in prose (ranges, ellipses) and would convert ordinary lines.
+-- The glyph must be followed by something, so a bare glyph line stays text.
+-- Requires a space after the marker: "•text" without one is far more likely
+-- decoration than a list item, and the space is what Word's paste format has.
+pure func mdIsUnicodeBullet(line: string) -> bool
+  tests [
+    ("• First literal bullet", true),
+    ("•Second no space", false),
+    ("  • indented bullet", true),
+    ("– en dash is not a marker", false),
+    ("· middle dot is not a marker", false),
+    ("•", false),
+    ("- ascii dash stays gfm", false),
+    ("◦ round bullet", true)
+  ]
+{ let t = trim(line) in length(t) > 2 &&
+  (startsWith(t, "• ") || startsWith(t, "‣ ") || startsWith(t, "⁃ ") ||
+   startsWith(t, "◦ ") || startsWith(t, "▪ ")) }
+
 pure func mdIsThematicBreak(line: string) -> bool {
   let t = trim(line);
   if length(t) < 3 then false
