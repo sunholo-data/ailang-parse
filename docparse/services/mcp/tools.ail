@@ -6,6 +6,7 @@ import std/option (Some, None)
 import std/json (encode, decode, jo, kv, js, ja, jb, getString)
 import std/fs (readFile, writeFile, fileExists)
 import std/env (getEnvOr)
+import std/process (exec, NotFound as ProcNotFound)
 import std/net (httpGet, httpPost)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages)
@@ -321,7 +322,7 @@ pure func mcpJoinButLast(parts: [string]) -> string =
 -- blockquotes, nested lists and tables with alignment and colspan all survive
 -- into DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML.
 @route("GET", "/mcp/v1/formats")
-export pure func mcpFormats() -> string {
+export func mcpFormats() -> string ! {Env, Process} {
   encode(jo([
     kv("input_formats", ja([
       mcpFormatEntry("docx", "Microsoft Word", false, true, true, true, true),
@@ -412,17 +413,62 @@ export pure func mcpFormats() -> string {
         jo([kv("name", js("Pro")), kv("price", js("EUR 29/month")), kv("requests_month", js("100,000")), kv("ai_parses_month", js("500")), kv("daily_limit", js("5,000")), kv("max_file_mb", js("25"))]),
         jo([kv("name", js("Business")), kv("price", js("EUR 99/month")), kv("requests_month", js("500,000")), kv("ai_parses_month", js("2,000")), kv("daily_limit", js("20,000")), kv("max_file_mb", js("50"))])
       ])),
-      kv("tools_available", ja([js("mcpParse"), js("mcpConvert"), js("mcpFormats"), js("mcpEstimate"), js("mcpAuth"), js("mcpAuthPoll"), js("mcpAccount")])),
-      -- input_formats above is the package's full list, which covers local and
-      -- WASM use. The hosted deployment does not accept audio or video — say so
-      -- here rather than letting an agent discover it as a failed request.
-      kv("self_host_only", ja(map(js, ["mp3", "wav", "mp4"]))),
-      kv("self_host_only_note", js("Audio and video parsing needs your own AI key and is available via the AILANG CLI or WASM, not the hosted API.")),
       kv("docs_url", js("https://www.sunholo.com/ailang-parse/")),
       kv("generation_guide_url", js("https://www.sunholo.com/ailang-parse/document-generation.html"))
-    ]))
+    ])),
+    -- The runtime half of the capability manifest (issue #17): what THIS
+    -- process can deliver right now, not what the package supports in
+    -- principle. A deployment with a missing dependency advertises a capability
+    -- it cannot deliver, and the only way to find out was to call and fail —
+    -- for a feedback channel that means field reports vanish silently. An
+    -- agent trusts the manifest; the manifest must describe state.
+    kv("runtime", mcpRuntimeBlock()),
+    kv("tools_available", ja([js("mcpParse"), js("mcpConvert"), js("mcpFormats"), js("mcpEstimate"), js("mcpAuth"), js("mcpAuthPoll"), js("mcpAccount")])),
+    -- input_formats above is the package's full list, which covers local and
+    -- WASM use. The hosted deployment does not accept audio or video — say so
+    -- here rather than letting an agent discover it as a failed request.
+    kv("self_host_only", ja(map(js, ["mp3", "wav", "mp4"]))),
+    kv("self_host_only_note", js("Audio and video parsing needs your own AI key and is available via the AILANG CLI or WASM, not the hosted API.")),
+    kv("docs_url", js("https://www.sunholo.com/ailang-parse/")),
+    kv("generation_guide_url", js("https://www.sunholo.com/ailang-parse/document-generation.html"))
   ]))
 }
+
+-- The runtime half of the capability manifest: which backend is configured,
+-- whether AI generation is provisioned, which external PDF tools are on PATH.
+-- A probe that cannot run reports "unknown", not false — distinguishing "not
+-- installed" from "this response could not check" is the same honesty the
+-- capability request itself is about (issue #17).
+func mcpRuntimeBlock() -> Json ! {Env, Process} {
+  let googleKey = getEnvOr("GOOGLE_API_KEY", "");
+  let anyAiKey = length(googleKey) > 0 || length(getEnvOr("OPENAI_API_KEY", "")) > 0 || length(getEnvOr("ANTHROPIC_API_KEY", "")) > 0;
+  let storage = getEnvOr("AILANG_STORAGE", "");
+  jo([
+    kv("mode", js(getEnvOr("DOCPARSE_MODE", "local"))),
+    kv("storage_backend", js(if length(storage) > 0 then storage else "unset")),
+    -- Mirrors storage: the deployment's submit_feedback publisher requires
+    -- AILANG_STORAGE=gcp, so an unset storage IS a dead feedback channel —
+    -- reportable here instead of via a failed bug report.
+    kv("feedback_publisher", js(if storage == "gcp" then "available" else "unavailable")),
+    kv("ai_generation", js(if anyAiKey then "provisioned" else "unconfigured")),
+    kv("pdf_backends", jo([
+      kv("pdftotext", mcpBinaryOnPath("pdftotext")),
+      kv("docling", mcpBinaryOnPath("docling")),
+      kv("liteparse", mcpBinaryOnPath("liteparse")),
+      kv("ai", js(if anyAiKey then "provisioned" else "unconfigured"))
+    ]))
+  ])
+}
+
+-- Is an external binary resolvable on PATH? true / false / "unknown".
+-- "unknown" is not false: an agent routing around a degraded service needs to
+-- know whether the backend is missing or whether this response could not check.
+func mcpBinaryOnPath(name: string) -> Json ! {Process} =
+  match exec("which", [name]) {
+    Ok(out) => jb(out.exitCode == 0),
+    Err(ProcNotFound(_)) => jb(false),
+    Err(_) => js("unknown")
+  }
 
 pure func mcpFormatEntry(ext: string, name: string, aiRequired: bool, tables: bool, trackChanges: bool, comments: bool, images: bool) -> Json =
   jo([
