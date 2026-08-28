@@ -340,14 +340,18 @@ pure func emlSelectAlternativePart(parts: [string]) -> [Block] {
         },
         None => match parts {
           [] => [],
-          first :: _ => {
-            let sp = emlSplitHeaderBody(first);
-            let headers = emlParseHeaders(sp.headers);
-            let enc = emlGetHeader(headers, "content-transfer-encoding");
-            let cs = emlExtractCharset(emlGetHeader(headers, "content-type"));
-            let decoded = emlDecodeBody(sp.body, enc, cs);
-            [mkText(decoded, "Normal", 0)]
-          }
+          first :: _ =>
+            -- No directly-displayable child. The selected part can itself be a
+            -- multipart entity — Apple Mail emits alternative -> mixed -> plain
+            -- for a rich message — and emitting it as decoded text produces the
+            -- body as raw MIME scaffolding: boundary delimiter, part headers,
+            -- undecoded encoding. Recurse instead; emlParseMimePart dispatches
+            -- on the child's own type (multipart descent, html, text), so the
+            -- nested structure is walked to its displayable leaf. For a leaf
+            -- part this reduces to the same decode-and-emit as before.
+            -- (Issue #29: the v0.38.0 D1 fix corrected which entities REACH
+            -- selection, not what happens to a selected multipart.)
+            emlParseMimePart(first)
         }
       }
     }
