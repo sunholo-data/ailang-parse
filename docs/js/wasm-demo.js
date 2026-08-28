@@ -41,7 +41,7 @@
     return el && el.src ? el.src.replace(/js\/wasm-demo\.js.*$/, '') : '';
   })();
 
-  var WASM_BINARY_URL = ASSET_BASE + 'wasm/ailang.wasm?v=v0.30.0';
+  var WASM_BINARY_URL = ASSET_BASE + 'wasm/ailang.wasm?v=v0.34.0';
   var MODULE_BASE = ASSET_BASE + 'ailang/';
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
   var MAX_XML_SIZE = 5 * 1024 * 1024;
