@@ -53,6 +53,7 @@ docparse scan.pdf --pdf-backend ai --ai gemini-2.5-flash  # Scanned PDF needs AI
 docparse report.docx --convert output.html
 docparse data.csv --convert report.docx
 docparse notes.md --convert slides.pptx
+docparse notes.md --convert offer.docx --reference-doc letterhead.docx
 
 # AI document generation
 ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
@@ -104,6 +105,55 @@ alignment and column spans.
 
 Headers, footers, comments and tracked changes have no Markdown syntax; those
 are preserved when converting from a document that already contains them.
+
+### Styling a generated DOCX from a template
+
+`--reference-doc` is the Quarto/Pandoc `reference-doc` feature: an existing
+`.docx` supplies the look, the Markdown supplies the content.
+
+```bash
+docparse annex.md --convert annex.docx --reference-doc letterhead.docx
+```
+
+The template's `styles.xml`, `numbering.xml`, theme, embedded fonts, headers,
+footers and page setup are applied to the new content. Everything the merge does
+not regenerate is carried through byte-for-byte, so the letterhead, logo and
+licensed fonts come out exactly as they went in.
+
+What comes from where:
+
+| | |
+|---|---|
+| Template | page size, margins, headers, footers, page numbering, fonts, theme, colours |
+| Your document | the body content, and `docProps/core.xml` (title/author) |
+| Merged | `styles.xml` (ours fill only the styleIds the template lacks), `numbering.xml` (our list definitions take ids above the template's), `[Content_Types].xml`, both `.rels` |
+
+Two consequences worth knowing:
+
+- **The template's headers and footers win.** A source document's own headers are
+  dropped rather than mixed with the letterhead. The page furniture all lives in
+  the template's body `<w:sectPr>`, which is lifted whole.
+- **The template's comments are dropped** along with its body, and so are
+  `commentsExtended.xml` and `people.xml`. Comments in the *source* document
+  still come through.
+
+Two flags refine a multi-section template:
+
+- `--reference-section N` picks which of the template's sections supplies the
+  page setup, headers and footers — 1 is the first section, Word's numbering.
+  The default is the last section (the body-level one, what the flag-less
+  behaviour has always lifted). A multi-section template's wanted furniture is
+  often an earlier section's — the master agreement's CONFIDENTIAL footer, not
+  the Annex's missing one.
+- `--table-style NAME` binds generated tables to a table style the template
+  defines (matched on styleId, then style name). Without it, the style named
+  `Table` is used if the template has one, else the first table style that is
+  not the implicit Normal Table. Under a bound style the generator stops
+  emitting its own hardcoded borders — the style carries them.
+
+An unreadable or non-DOCX reference is an error and writes nothing — a silent
+fallback to the built-in styling would produce a plausible file missing exactly
+the letterhead it was asked for. DOCX output only.
 
 ## Architecture
 

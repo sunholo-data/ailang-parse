@@ -2,7 +2,7 @@ module docparse/main
 
 import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile, mkdirAll)
 import std/json (encode)
-import std/string (length, intToStr, floatToStr, toLower, split, contains)
+import std/string (length, intToStr, floatToStr, toLower, split, contains, stringToInt)
 import std/list (last, concat, any, map, flatMap as listFlatMap, filter, length as listLength)
 import std/option (Some, None)
 import std/bytes (fromBase64)
@@ -34,7 +34,7 @@ import docparse/services/console_report (printSummary, printBlocks)
 import docparse/services/markdown_writer (renderMarkdown)
 import docparse/services/eval (evalMain, evalNormalizeJson, evalJaccard, evalComputeScore)
 import docparse/services/html_generator (generateHtml)
-import docparse/services/docx_generator (generateDocx)
+import docparse/services/docx_generator (generateDocxWithReference)
 import docparse/services/pptx_generator (generatePptx)
 import docparse/services/xlsx_generator (generateXlsx)
 import docparse/services/odt_generator (generateOdt)
@@ -103,10 +103,21 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
   let convertTarget = getConvertTarget(args);
   let generateTarget = getGenerateTarget(args);
   let promptText = getPromptText(args);
+  let referenceDoc = getReferenceDoc(args);
+  let referenceSection = getReferenceSection(args);
+  let tableStyle = getTableStyle(args);
+  if referenceSection < 0 then {
+    println("Error: --reference-section requires a positive section number (1 = first section)");
+    exit(1)
+  } else ();
+  if length(tableStyle) > 0 && length(referenceDoc) == 0 then {
+    println("Error: --table-style requires --reference-doc (a template supplies the style)");
+    exit(1)
+  } else ();
 
   -- AI Document Generation mode: --generate output.docx --prompt "..."
   if length(generateTarget) > 0 && length(promptText) > 0 then {
-    generateDocument(generateTarget, promptText)
+    generateDocument(generateTarget, promptText, referenceDoc, referenceSection, tableStyle)
   }
   else if length(generateTarget) > 0 then {
     println("Error: --generate requires --prompt \"description\"");
@@ -158,7 +169,7 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
       projectRoot: getEnvOr("DOCPARSE_PROJECT_ROOT", ""),
       noAttachmentData: hasFlag(args, "--no-attachment-data") || getEnvOr("DOCPARSE_NO_ATTACHMENT_DATA", "") == "1"
     };
-    runParse(filepath, opts, doSummarize, convertTarget)
+    runParse(filepath, opts, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle)
   }
 }
 
@@ -194,7 +205,8 @@ func printNotes(notes: [string]) -> () ! {IO} =
 -- Replaces ~14 parse*Document functions that each re-derived their own dispatch
 -- and merge order — the divergence that let the hosted API drop PDF annotations
 -- and silently truncate multi-file LaTeX.
-func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTarget: string)
+func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTarget: string,
+              referenceDoc: string, referenceSection: int, tableStyle: string)
   -> () ! {IO, FS, AI, Env, Net, Process, Clock} {
   match parseDocument(filepath, opts) {
     Err(e) => {
@@ -225,7 +237,7 @@ func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTa
       if countBlocks(doc.blocks) == 0
         then println("⚠ Warning: extraction produced no content blocks.")
         else ();
-      writeOutputs(doc, result, doSummarize, filepath, convertTarget)
+      writeOutputs(doc, result, doSummarize, filepath, convertTarget, referenceDoc, referenceSection, tableStyle)
     }
   }
 }
@@ -252,6 +264,51 @@ pure func getGenerateTarget(args: [string]) -> string =
     _ :: rest => getGenerateTarget(rest)
   }
 
+-- Extract --reference-doc path: the .docx whose styles, fonts, headers and page
+-- setup a generated .docx should adopt — Quarto/Pandoc's `reference-doc`.
+pure func getReferenceDoc(args: [string]) -> string =
+  match args {
+    [] => "",
+    "--reference-doc" :: rest => match rest {
+      [] => "",
+      target :: _ => target
+    },
+    _ :: rest => getReferenceDoc(rest)
+  }
+
+-- Extract --reference-section N: which of a multi-section template's
+-- <w:sectPr> elements supplies page setup, headers and footers. 1-based the way
+-- Word numbers sections; 0 (the default, flag absent) keeps the pre-flag
+-- behaviour of lifting the last one. Non-integer values are rejected here so a
+-- typo fails before any parse, and the loader turns an out-of-range N into an
+-- error that names the count.
+pure func getReferenceSection(args: [string]) -> int =
+  match args {
+    [] => 0,
+    "--reference-section" :: rest => match rest {
+      [] => -1,
+      n :: _ => match stringToInt(n) {
+        Some(v) => if v >= 1 then v else -1,
+        None => -1
+      }
+    },
+    _ :: rest => getReferenceSection(rest)
+  }
+
+-- Extract --table-style NAME: bind generated tables to this table style of
+-- the reference doc (styleId first, then w:name). Requires --reference-doc:
+-- without a carried styles.xml the reference would name a style nothing
+-- defines, and Word renders a table with no borders at all.
+pure func getTableStyle(args: [string]) -> string =
+  match args {
+    [] => "",
+    "--table-style" :: rest => match rest {
+      [] => "",
+      n :: _ => n
+    },
+    _ :: rest => getTableStyle(rest)
+  }
+
 -- Extract --prompt text from args: ["--prompt", "Q1 report"] -> "Q1 report"
 pure func getPromptText(args: [string]) -> string =
   match args {
@@ -264,7 +321,7 @@ pure func getPromptText(args: [string]) -> string =
   }
 
 -- AI Document Generation: prompt -> AI -> [Block] -> format generator -> file
-func generateDocument(outputPath: string, prompt: string) -> () ! {IO, FS, AI, Env} {
+func generateDocument(outputPath: string, prompt: string, referenceDoc: string, referenceSection: int, tableStyle: string) -> () ! {IO, FS, AI, Env} {
   let ext = getExtension(outputPath);
   println("--- AI Document Generation ---");
   println("Output:   ${outputPath}");
@@ -300,7 +357,7 @@ func generateDocument(outputPath: string, prompt: string) -> () ! {IO, FS, AI, E
     println("Generated HTML: ${outputPath}")
   }
   else if ext == "docx" then {
-    let msg = generateDocx(doc, outputPath);
+    let msg = generateDocxWithReference(doc, outputPath, referenceDoc, referenceSection, tableStyle);
     println(msg)
   }
   else if ext == "pptx" then {
@@ -343,7 +400,8 @@ func generateDocument(outputPath: string, prompt: string) -> () ! {IO, FS, AI, E
 -- Output filenames are derived from input: sample.docx -> sample.docx.json, sample.docx.md
 -- Output dir: DOCPARSE_OUTPUT_DIR env var (default: docparse/data)
 -- convertTarget: if non-empty, generate output in target format (e.g., "out.html", "out.docx")
-func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bool, filepath: string, convertTarget: string) -> () ! {IO, FS, AI, Env} {
+func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bool, filepath: string,
+                  convertTarget: string, referenceDoc: string, referenceSection: int, tableStyle: string) -> () ! {IO, FS, AI, Env} {
   let outDir = getEnvOr("DOCPARSE_OUTPUT_DIR", "docparse/data");
   let basename = mainBasename(filepath);
 
@@ -374,7 +432,7 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bo
       println("Converted to HTML: ${convertTarget}")
     }
     else if convertExt == "docx" then {
-      let msg = generateDocx(doc, convertTarget);
+      let msg = generateDocxWithReference(doc, convertTarget, referenceDoc, referenceSection, tableStyle);
       println(msg)
     }
     else if convertExt == "pptx" then {

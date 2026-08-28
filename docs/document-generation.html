@@ -81,6 +81,7 @@
         <a href="#how-it-works">How It Works</a>
         <a href="#survives">What Survives</a>
         <a href="#limits">What Markdown Can't Say</a>
+        <a href="#reference-doc">Reference Doc Styling</a>
         <a href="#api">Over the API</a>
         <a href="#agents">For AI Agents</a>
         <a href="#try-it">Try It</a>
@@ -183,7 +184,44 @@ docparse report.docx</code></pre>
         </tbody>
       </table>
 
-      <p>If you need a generated document to carry a running header, start from a source document rather than a Markdown file. See <a href="comments.html">comment extraction</a> and <a href="track-changes.html">track changes</a> for how those survive a conversion.</p>
+      <p>If you need a generated document to carry a running header, either start from a source document rather than a Markdown file, or hand it a <a href="#reference-doc">reference doc</a>. See <a href="comments.html">comment extraction</a> and <a href="track-changes.html">track changes</a> for how those survive a conversion.</p>
+
+      <h2 id="reference-doc">Styling from a reference doc</h2>
+      <p>This is Quarto and Pandoc&rsquo;s <code>reference-doc</code>, done natively. An existing <code>.docx</code> supplies the look; the Markdown supplies the content. It is how you put generated content on a letterhead without a Python script splicing OOXML by hand.</p>
+
+      <pre><code class="language-bash">docparse annex.md --convert annex.docx --reference-doc letterhead.docx</code></pre>
+
+      <p>Everything the merge does not regenerate is carried through byte-for-byte, so a licensed embedded font or a logo comes out exactly as it went in.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Part of the document</th><th>Comes from</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Page size, margins, headers, footers, page numbering</td><td>the template&rsquo;s body <code>&lt;w:sectPr&gt;</code>, lifted whole</td></tr>
+          <tr><td>Theme, embedded fonts, logos, settings</td><td>the template, byte-for-byte</td></tr>
+          <tr><td>Body content, title and author</td><td>your document</td></tr>
+          <tr><td><code>styles.xml</code></td><td>the template&rsquo;s, extended only for styleIds it does not define</td></tr>
+          <tr><td><code>numbering.xml</code></td><td>the template&rsquo;s, with our list definitions at ids above its own</td></tr>
+        </tbody>
+      </table>
+
+      <p>Two consequences worth knowing before you rely on it:</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Situation</th><th>What happens</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>The source document has its own headers or footers</td><td><span class="dp-lost">Dropped</span> &mdash; the template&rsquo;s page furniture wins, because all of it lives in the one <code>&lt;w:sectPr&gt;</code> that gets lifted</td></tr>
+          <tr><td>The template has comments</td><td><span class="dp-lost">Dropped</span> with its body. Comments in the <em>source</em> document still come through</td></tr>
+          <tr><td>The reference doc is missing or is not a DOCX</td><td><span class="dp-lost">Error, nothing written</span> &mdash; there is no silent fallback to the built-in styling</td></tr>
+        </tbody>
+      </table>
+
+      <p>DOCX output only. Other targets ignore the flag.</p>
+
+      <p>A multi-section template has more than one <code>&lt;w:sectPr&gt;</code>, and the body-level one is the <em>last</em> section&rsquo;s. <code>--reference-section N</code> (1 = first, Word&rsquo;s numbering) picks which one supplies the page furniture; the default stays the last. <code>--table-style NAME</code> binds generated tables to a named table style of the template &mdash; by default the style called <code>Table</code>, else the first table style the template defines that is not the implicit Normal Table &mdash; and the generator stops emitting its own borders, because direct formatting would override the style.</p>
 
       <h2 id="api">Over the API</h2>
       <p><code>POST /api/v1/convert</code> takes the same four input modes as <a href="api.html">the parse endpoint</a> &mdash; multipart upload, a sample ID, an <code>https://</code> URL the server fetches, or a <code>gs://</code> reference on Business tier &mdash; plus a <code>target</code>.</p>

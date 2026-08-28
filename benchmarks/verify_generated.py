@@ -13,6 +13,7 @@ Usage:
 
 import json
 import os
+import posixpath
 import subprocess
 import sys
 import tempfile
@@ -188,15 +189,26 @@ def verify_docx_parts(path: Path) -> list[str]:
             declared.add(ov.get("PartName").lstrip("/"))
 
         # Resolve every relationship target to a package-absolute part name.
+        #
+        # Every _rels part in the package is walked, and targets are resolved
+        # against the directory that owns them — including "../" hops. Checking
+        # only _rels/.rels and word/_rels/document.xml.rels was enough while
+        # every package here was generated from scratch; a reference doc brings
+        # customXml/_rels/item1.xml.rels and Target="../customXml/item1.xml"
+        # with it, and both read as broken wiring under the old resolution.
         reachable = {"word/document.xml"}
         rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
-        for rels_name, base in (("_rels/.rels", ""), ("word/_rels/document.xml.rels", "word/")):
-            if rels_name not in names:
-                continue
+        for rels_name in sorted(n for n in names if n.endswith(".rels")):
+            owner_dir = posixpath.dirname(posixpath.dirname(rels_name))
             for rel in ET.fromstring(z.read(rels_name)).findall(rel_ns):
                 if rel.get("TargetMode") == "External":
                     continue
-                reachable.add((base + rel.get("Target").lstrip("/")).replace("//", "/"))
+                target = rel.get("Target") or ""
+                if target.startswith("/"):
+                    resolved = target.lstrip("/")
+                else:
+                    resolved = posixpath.normpath(posixpath.join(owner_dir, target))
+                reachable.add(resolved)
 
         for part in sorted(declared - reachable):
             errors.append(f"part declared but unreachable (no relationship): {part}")
@@ -278,6 +290,308 @@ CONVERSION_MATRIX_SOURCES = [
     "test.md",
 ]
 CONVERSION_TARGETS = ["html", "docx", "pptx", "xlsx", "odt", "odp", "ods", "md", "qmd"]
+
+
+# ── Reference-doc (Quarto-style template) verification ──────────────────────
+
+REFERENCE_DOC_SOURCE = """---
+title: Reference Doc Check
+author: DocParse
+---
+
+# Top Heading
+
+## Second Level
+
+Body paragraph with a [link](https://example.com/x).
+
+- bullet one
+- bullet two
+
+1. ordered one
+2. ordered two
+
+| Col A | Col B |
+|---|---|
+| a1 | b1 |
+| a2 | b2 |
+"""
+
+# Both templates are in-repo and chosen for what they stress:
+#   docx-hdrftr.docx  even/default headers AND footers on the body sectPr, an
+#                     attribute-bearing <w:sectPr w:rsidR=...>, no numbering.xml,
+#                     and a styles.xml missing Heading1/2 and ListParagraph
+#   comments.docx     comments.xml + commentsExtended.xml + people.xml, which the
+#                     merge has to drop together with their rels and overrides
+REFERENCE_DOC_TEMPLATES = ["docx-hdrftr.docx", "comments.docx"]
+
+# Parts the merge is expected to rewrite. Anything else in the template must
+# come out byte-for-byte, because "the template's look survived" IS the feature.
+_REF_REGENERATED = {
+    "[Content_Types].xml", "_rels/.rels", "docProps/core.xml",
+    "word/document.xml", "word/_rels/document.xml.rels",
+    "word/styles.xml", "word/numbering.xml",
+}
+_REF_DROPPED = {
+    "word/comments.xml", "word/commentsExtended.xml",
+    "word/commentsIds.xml", "word/people.xml",
+}
+
+
+def _body_sect_pr(doc_xml: str) -> str:
+    """The template's own body-level <w:sectPr>, revision spans removed."""
+    import re
+    inner = doc_xml.rsplit("</w:body>", 1)[0]
+    inner = re.sub(r"<w:sectPrChange\b.*?</w:sectPrChange>", "", inner, flags=re.S)
+    m = list(re.finditer(r"<w:sectPr[ >].*?</w:sectPr>", inner, re.S))
+    return m[-1].group(0) if m else ""
+
+
+def _reference_doc_errors(template: Path, out: Path) -> list[str]:
+    import re
+    errors = []
+    with zipfile.ZipFile(template) as tz, zipfile.ZipFile(out) as oz:
+        tnames, onames = set(tz.namelist()), set(oz.namelist())
+
+        # 1. Nothing from the template is silently lost, and what is carried is
+        #    carried unchanged — this is what keeps the fonts and theme intact.
+        for n in sorted(tnames - _REF_REGENERATED - _REF_DROPPED):
+            if n.endswith("/"):
+                continue
+            if n not in onames:
+                errors.append(f"template part dropped: {n}")
+            elif tz.read(n) != oz.read(n):
+                errors.append(f"carried template part was modified: {n}")
+
+        # 2. The page setup, headers and footers come from the template. Losing
+        #    this is the failure that still opens cleanly and looks like ours.
+        t_sect = _body_sect_pr(tz.read("word/document.xml").decode("utf-8", "replace"))
+        o_sect = _body_sect_pr(oz.read("word/document.xml").decode("utf-8", "replace"))
+        if not t_sect:
+            errors.append(f"fixture {template.name} has no body sectPr to compare")
+        elif o_sect != t_sect:
+            errors.append(f"body sectPr not lifted from template\n"
+                          f"       template: {t_sect[:160]}\n"
+                          f"       output:   {o_sect[:160]}")
+
+        # 3. The template's own comment parts leave together with their wiring.
+        for n in sorted(_REF_DROPPED & tnames):
+            if n in onames:
+                errors.append(f"template comment part should have been dropped: {n}")
+
+        # 4. Our list numbering must not land on a numId the template defines,
+        #    which renders as the template's list rather than a bullet.
+        if "word/numbering.xml" in tnames:
+            tpl_nums = set(re.findall(r'<w:num w:numId="(\d+)"', tz.read("word/numbering.xml").decode()))
+            used = set(re.findall(r'<w:numId w:val="(\d+)"', oz.read("word/document.xml").decode()))
+            clash = tpl_nums & used
+            if clash:
+                errors.append(f"body uses numId(s) the template already defines: {sorted(clash)}")
+
+        # 5. Our media must not overwrite the template's.
+        tpl_media = {n for n in tnames if n.startswith("word/media/")}
+        for n in tpl_media:
+            if n in onames and tz.read(n) != oz.read(n):
+                errors.append(f"template media overwritten: {n}")
+
+        # 6. The template's styles survive and ours only fill gaps.
+        tpl_ids = set(re.findall(r'w:styleId="([^"]+)"', tz.read("word/styles.xml").decode()))
+        out_ids = set(re.findall(r'w:styleId="([^"]+)"', oz.read("word/styles.xml").decode()))
+        missing = tpl_ids - out_ids
+        if missing:
+            errors.append(f"template styleIds lost: {sorted(missing)[:6]}")
+        for needed in ("ListParagraph", "Hyperlink"):
+            if needed not in out_ids:
+                errors.append(f"styleId referenced by the body is undefined: {needed}")
+
+        # 8. Tables bind to the template's table style when it defines a usable
+        #    one (anything but the implicit Normal Table every table has).
+        #    Hardcoded borders would override the style and defeat the binding,
+        #    so their presence under a bound style is itself the defect.
+        tpl_styles = tz.read("word/styles.xml").decode("utf-8", "replace")
+        tpl_table_ids = set(re.findall(
+            r'<w:style w:type="table"[^>]*w:styleId="([^"]+)"', tpl_styles))
+        tpl_table_named = dict(re.findall(
+            r'<w:style w:type="table"[^>]*w:styleId="([^"]+)"><w:name w:val="([^"]+)"', tpl_styles))
+        usable = {sid for sid, name in tpl_table_named.items()
+                  if name not in ("Normal Table", "Table Normal")} | \
+                 {sid for sid in tpl_table_ids if tpl_table_named.get(sid) not in ("Normal Table", "Table Normal")}
+        if usable:
+            body = oz.read("word/document.xml").decode("utf-8", "replace")
+            style_refs = set(re.findall(r'<w:tblStyle w:val="([^"]+)"', body))
+            if not style_refs:
+                errors.append("template defines table style(s) but body binds to none")
+            else:
+                dangling = style_refs - tpl_table_ids
+                if dangling:
+                    errors.append(f"tblStyle references undefined styleId(s): {sorted(dangling)}")
+            if "<w:tblBorders>" in body:
+                errors.append("hardcoded tblBorders present under a bound table style "
+                              "(direct formatting overrides the style)")
+
+    # 7. The generic package wiring assertions apply here too — a dangling
+    #    relationship or an Override naming an absent part is what makes Word
+    #    refuse the file outright.
+    errors.extend(verify_docx_parts(out))
+
+    # 8. And it has to open.
+    try:
+        from docx import Document
+        d = Document(str(out))
+        errors.extend(_docx_table_grid_errors(d))
+        if not any((p.style.name or "").startswith("Heading") for p in d.paragraphs if p.style):
+            errors.append("no heading resolved through the template's styles")
+    except Exception as e:
+        errors.append(f"python-docx could not open the output: {type(e).__name__}: {e}")
+
+    return errors
+
+
+def verify_reference_doc() -> bool:
+    """--reference-doc must apply a template's look without breaking the package.
+
+    Read BACK, not just opened: every defect this guards against — a lost
+    letterhead, a bullet rendering as the template's numbered list, a clobbered
+    logo — produces a file that opens perfectly and is wrong.
+    """
+    repo = Path(__file__).resolve().parent.parent
+    test_dir = repo / "data" / "test_files"
+    print("── reference doc ──")
+    ok = True
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "refdoc_source.md"
+        src.write_text(REFERENCE_DOC_SOURCE, encoding="utf-8")
+        for name in REFERENCE_DOC_TEMPLATES:
+            template = test_dir / name
+            if not template.exists():
+                print(f"  L6 RefDoc:     SKIP ({name} missing)")
+                continue
+            out = Path(tmp) / f"styled__{template.stem}.docx"
+            r = subprocess.run(
+                [str(repo / "bin" / "docparse"), str(src), "--convert", str(out),
+                 "--reference-doc", str(template)],
+                capture_output=True, text=True, errors="replace",
+                cwd=str(repo), timeout=120,
+            )
+            if r.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+                lines = ((r.stdout or "") + (r.stderr or "")).splitlines()
+                err = next((l for l in reversed(lines) if "rror" in l), lines[-1] if lines else "no output")
+                print(f"  L6 RefDoc:     FAIL ({name}: {err.strip()[:120]})")
+                ok = False
+                continue
+            errs = _reference_doc_errors(template, out)
+            if errs:
+                print(f"  L6 RefDoc:     FAIL ({name})")
+                for e in errs:
+                    print(f"     ⚠ {e}")
+                ok = False
+            else:
+                print(f"  L6 RefDoc:     PASS ({name})")
+
+        # A reference doc that cannot be read must write nothing rather than
+        # quietly producing an unstyled file that looks like a success.
+        bad_out = Path(tmp) / "should_not_exist.docx"
+        r = subprocess.run(
+            [str(repo / "bin" / "docparse"), str(src), "--convert", str(bad_out),
+             "--reference-doc", str(test_dir / "ailang_formats.csv")],
+            capture_output=True, text=True, errors="replace", cwd=str(repo), timeout=120,
+        )
+        if bad_out.exists():
+            print("  L6 RefDoc:     FAIL (non-DOCX reference still produced output)")
+            ok = False
+        else:
+            print("  L6 RefDoc:     PASS (non-DOCX reference refused)")
+
+        # --reference-section: a multi-section template has one sectPr per
+        # section plus the body one, and the body one is the LAST. The in-repo
+        # templates are single-section, so the stage synthesizes a two-section
+        # variant of docx-hdrftr.docx whose FIRST section (paragraph-level,
+        # distinct margins and header ref) must be liftable by number.
+        base = test_dir / "docx-hdrftr.docx"
+        if base.exists():
+            two = _synthesize_two_section_template(base, Path(tmp) / "two-section.docx")
+            if two is None:
+                print("  L6 RefSection: FAIL (could not synthesize two-section template)")
+                ok = False
+            else:
+                ok = _check_reference_section(repo, src, two, Path(tmp)) and ok
+    return ok
+
+
+def _synthesize_two_section_template(base: Path, dest: Path) -> Path | None:
+    """docx-hdrftr.docx with a paragraph-level sectPr injected before the body
+    one: section 1 = injected (pgMar top=1000, header rId11), section 2 = the
+    original body sectPr. Returns the path, or None on any surprise."""
+    import re
+    try:
+        with zipfile.ZipFile(base) as zin:
+            doc = zin.read("word/document.xml").decode("utf-8")
+            body_sect = re.search(r"<w:sectPr[ >].*</w:sectPr>", doc, re.S)
+            if not body_sect:
+                return None
+            mid = ('<w:p><w:pPr><w:sectPr>'
+                   '<w:headerReference w:type="default" r:id="rId11"/>'
+                   '<w:pgSz w:w="11906" w:h="16838"/>'
+                   '<w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/>'
+                   '</w:sectPr></w:pPr></w:p>')
+            newdoc = doc.replace(body_sect.group(0), mid + body_sect.group(0))
+            with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
+                for n in zin.namelist():
+                    zout.writestr(n, newdoc.encode("utf-8") if n == "word/document.xml" else zin.read(n))
+        return dest
+    except Exception:
+        return None
+
+
+def _check_reference_section(repo: Path, src: Path, template: Path, tmp: Path) -> bool:
+    """--reference-section 1 lifts the FIRST sectPr (injected pgMar top=1000);
+    the default (no flag) still lifts the LAST; out of range writes nothing."""
+    import re
+    ok = True
+
+    def _lifted(out: Path) -> str:
+        with zipfile.ZipFile(out) as z:
+            doc = z.read("word/document.xml").decode("utf-8", "replace")
+        m = list(re.finditer(r"<w:sectPr[ >].*</w:sectPr>", doc, re.S))
+        return m[-1].group(0) if m else ""
+
+    out1 = tmp / "sect1.docx"
+    r = subprocess.run(
+        [str(repo / "bin" / "docparse"), str(src), "--convert", str(out1),
+         "--reference-doc", str(template), "--reference-section", "1"],
+        capture_output=True, text=True, errors="replace", cwd=str(repo), timeout=120)
+    if r.returncode != 0 or not out1.exists():
+        print("  L6 RefSection: FAIL (--reference-section 1 errored)")
+        return False
+    s1 = _lifted(out1)
+    if 'w:top="1000"' not in s1:
+        print("  L6 RefSection: FAIL (section 1 not lifted — injected pgMar absent)")
+        ok = False
+    else:
+        print("  L6 RefSection: PASS (--reference-section 1 lifts the first sectPr)")
+
+    outd = tmp / "sectdefault.docx"
+    subprocess.run(
+        [str(repo / "bin" / "docparse"), str(src), "--convert", str(outd),
+         "--reference-doc", str(template)],
+        capture_output=True, text=True, errors="replace", cwd=str(repo), timeout=120)
+    if outd.exists() and 'w:top="1000"' not in _lifted(outd):
+        print("  L6 RefSection: PASS (no flag still lifts the last sectPr)")
+    else:
+        print("  L6 RefSection: FAIL (default no longer lifts the last sectPr)")
+        ok = False
+
+    out3 = tmp / "sect3.docx"
+    subprocess.run(
+        [str(repo / "bin" / "docparse"), str(src), "--convert", str(out3),
+         "--reference-doc", str(template), "--reference-section", "3"],
+        capture_output=True, text=True, errors="replace", cwd=str(repo), timeout=120)
+    if out3.exists():
+        print("  L6 RefSection: FAIL (out-of-range section still produced output)")
+        ok = False
+    else:
+        print("  L6 RefSection: PASS (out-of-range refused, nothing written)")
+    return ok
 
 
 def verify_conversion_matrix() -> bool:
@@ -409,6 +723,8 @@ def main():
     all_pass = verify_conversion_matrix()
     print()
     all_pass = verify_no_injection() and all_pass
+    print()
+    all_pass = verify_reference_doc() and all_pass
     print()
     for path in files:
         print(f"── {path.name} ──")

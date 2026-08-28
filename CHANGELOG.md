@@ -11,6 +11,111 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.38.0...HEAD)
 
+### `--reference-doc`: style a generated DOCX from an existing one
+
+Quarto/Pandoc's `reference-doc`, natively. An existing `.docx` supplies the look
+— `styles.xml`, `numbering.xml`, theme, embedded fonts, headers, footers, page
+setup — and the generated body supplies the content.
+
+```bash
+docparse annex.md --convert annex.docx --reference-doc letterhead.docx
+```
+
+Everything the merge does not regenerate is carried through byte-for-byte, so
+licensed fonts and letterhead logos come out exactly as they went in. Verified
+against a real client template: 16 of 21 parts byte-identical, four embedded
+Helvetica Neue faces and the logo intact, A4 geometry and header references
+lifted from the template's body `<w:sectPr>`.
+
+New module `docparse/services/docx_template` does the load and the string
+surgery; the merges live next to the definitions they merge in
+`docx_generator`. The block → XML layer is untouched.
+
+Four collisions this had to get right, each of which fails silently rather than
+loudly:
+
+- **`<w:sectPr>`** carries page size, margins and the header/footer relationship
+  ids. Generating our own instead of lifting the template's means no letterhead,
+  in a file that opens perfectly. Under revision tracking a second `<w:sectPr>`
+  nests inside `<w:sectPrChange>` and is textually last, so those spans are
+  removed before the body one is located — otherwise the template's *previous*
+  page setup gets applied.
+- **numId** — a template that already defines numId 1–7 turns our bullets into
+  its numbered list. Our list definitions now take ids above the template's max.
+- **Relationship ids** — image rels moved from `rId<N>` to `rIdImage<N>`, so no
+  id this generator emits can land on a template's `rId1..rIdN` and the
+  template's relationship graph can be carried whole.
+- **`word/media/image1.png`** — the template usually has one. Our media is
+  written as `dpimage<N>` under a reference doc.
+
+The template's own comment parts (`comments.xml`, `commentsExtended.xml`,
+`people.xml`) are dropped with its body, together with their relationships and
+content-type overrides: a part left declared but absent is what makes Word
+refuse a package outright.
+
+An unreadable or non-DOCX reference is an error that writes nothing.
+
+`benchmarks/verify_generated.py` gains an L6 stage that reads the output back
+and asserts the carried parts are byte-identical, the `sectPr` matches the
+template's, no numId collides, the template's styleIds survive and no
+relationship or override dangles — against two in-repo templates chosen for what
+they stress (`docx-hdrftr.docx`: headers, footers, no numbering, sparse styles;
+`comments.docx`: the parts that have to be dropped). Confirmed to fail with 18
+errors when handed an output generated without the template.
+
+Its relationship-reachability check was resolving targets by string-prefixing
+`word/`, which read `Target="../customXml/item1.xml"` as broken and never walked
+nested `_rels` parts. It now resolves against the owning directory with `..`
+normalisation and walks every `.rels` part — a gap that only appeared once
+packages stopped being generated entirely from scratch.
+
+### `--reference-section` and `--table-style`; numbering resolved, not guessed
+
+Three follow-ups to `--reference-doc`, scoped and shipped together. The
+numbering one closes the limitation described at the end of the section above.
+
+- **`--reference-section N`** — a multi-section template has one `<w:sectPr>`
+  per section plus the body-level one, and the body one is the LAST. On the
+  real client template that meant generated documents got the Annex's header
+  and no footer when the wanted furniture was the master agreement's. The flag
+  picks the section, 1-based the way Word numbers them; the default (no flag)
+  is still the last, byte-identical to before. Out of range is an error that
+  names the section count and writes nothing. Mid-document `<w:sectPr>`s are
+  collected in document order after `<w:sectPrChange>` spans are stripped, and
+  the span reader is boundary-aware: a self-closing `<w:sectPr/>` followed by a
+  closed one used to be safe only because the old code read the LAST one —
+  scanning forward would have swallowed every section in between.
+- **Numbering resolution in the DOCX reader.** `isOrderedList` now resolves
+  `numId → abstractNum → w:numFmt` from `word/numbering.xml` (previously read
+  nowhere in the parse path), matching the paragraph's own `w:ilvl` and falling
+  back to lvl 0 for `singleLevel` abstracts. `bullet` → unordered, anything
+  else → ordered. Unresolvable cases — no numbering.xml, dangling numId,
+  `numStyleLink` indirection — keep the legacy convention, which bounded golden
+  movement to zero: every office-suite file either resolves the same way or was
+  unresolvable before and after. Proven where it matters: generate a DOCX under
+  a template whose numId 1 is decimal (anti-pandoc), and re-reading it now
+  reports bullets unordered — the legacy rule called every item ordered.
+  Numbering keyed by `List Bullet`/`List Number` *styles* (python-docx output)
+  is still not detected as lists at all — that layer belongs to the planned
+  v0.19.0 style-inheritance work, which should reuse this resolution.
+- **`--table-style NAME` and template table styles** — generated `<w:tbl>`
+  carried hardcoded borders and no `<w:tblStyle>`, so tables were the one
+  element that still looked generated under a reference doc. The generator now
+  binds to the template's table style — the style named `Table` (Pandoc's
+  convention) if present, else the first table style that is not the implicit
+  Normal Table — emits `<w:tblStyle>` and drops the hardcoded borders (direct
+  formatting would override the style and defeat the binding). `--table-style`
+  overrides, matched on styleId then name; an unmatched name is an error that
+  lists the template's table styles, and using it without `--reference-doc` is
+  an error, since a style reference nothing defines is how Word renders a table
+  with no borders at all. The no-template path is byte-identical.
+
+`benchmarks/verify_generated.py` L6 grows matching teeth: a template table
+style must actually be bound (and no hardcoded borders alongside it), and a
+two-section template synthesized from `docx-hdrftr.docx` must lift section 1 by
+number, the last by default, and nothing out of range.
+
+
 ## [v0.38.0](https://github.com/sunholo-data/ailang-parse/compare/v0.37.1...v0.38.0) — 2026-08-27
 
 ### Two .eml defects reported via ailang messages

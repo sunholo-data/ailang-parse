@@ -119,6 +119,7 @@ Conversion & generation:
   docparse in.docx --convert out.qmd        To Quarto Markdown, then:
                                               quarto render out.qmd --to pdf
   docparse --generate report.docx --prompt "Q1 sales report with a revenue table"
+  docparse notes.md --convert offer.docx --reference-doc letterhead.docx
 
   Convert targets: html docx pptx xlsx odt odp ods md qmd
 
@@ -126,6 +127,19 @@ Options:
   --convert PATH    Convert the input to PATH (format from its extension)
   --generate PATH   AI-generate a document at PATH (requires --prompt)
   --prompt TEXT     Prompt for --generate
+  --reference-doc F Style a generated .docx after an existing .docx: its
+                    styles, theme, embedded fonts, headers, footers and page
+                    setup are applied to the new content (like Quarto's
+                    reference-doc). DOCX output only.
+  --reference-section N
+                    Which section of --reference-doc supplies the page setup,
+                    headers and footers (1 = first, Word's numbering).
+                    Default: the last section. DOCX output only.
+  --table-style NAME
+                    Bind generated tables to this table style of
+                    --reference-doc (styleId or style name). Default: the
+                    style named "Table", else the first table style the
+                    template defines. Requires --reference-doc.
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
   --pdf-backend B   PDF backend: pdftotext (default, deterministic plain text),
@@ -366,6 +380,9 @@ NO_ATTACHMENT_DATA_REQUESTED=false
 CONVERT_TARGET=""
 GENERATE_TARGET=""
 PROMPT_TEXT=""
+REFERENCE_DOC=""
+REFERENCE_SECTION=""
+TABLE_STYLE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -447,6 +464,42 @@ while [ $# -gt 0 ]; do
       PROMPT_TEXT="$2"
       shift 2
       ;;
+    --reference-doc)
+      if [ $# -lt 2 ]; then
+        echo "Error: --reference-doc requires a .docx path" >&2
+        exit 2
+      fi
+      REFERENCE_DOC="$2"
+      shift 2
+      ;;
+    --reference-section)
+      if [ $# -lt 2 ]; then
+        echo "Error: --reference-section requires a section number (1 = first section)" >&2
+        exit 2
+      fi
+      case "$2" in
+        ''|*[!0-9]*)
+          echo "Error: --reference-section must be a positive integer (got: $2)" >&2
+          exit 2
+          ;;
+        *)
+          if [ "$2" -lt 1 ]; then
+            echo "Error: --reference-section must be a positive integer (got: $2)" >&2
+            exit 2
+          fi
+          ;;
+      esac
+      REFERENCE_SECTION="$2"
+      shift 2
+      ;;
+    --table-style)
+      if [ $# -lt 2 ]; then
+        echo "Error: --table-style requires a style name or id" >&2
+        exit 2
+      fi
+      TABLE_STYLE="$2"
+      shift 2
+      ;;
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
@@ -485,6 +538,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- Reference doc: must exist and must be absolute, because we cd to
+# PROJECT_DIR before running and a relative path would resolve against the
+# sources. Checked here rather than in AILANG so a typo fails before the parse.
+if [ -n "$REFERENCE_DOC" ]; then
+  if [ ! -f "$REFERENCE_DOC" ]; then
+    echo "Error: --reference-doc not found: $REFERENCE_DOC" >&2
+    exit 2
+  fi
+  if [[ ! "$REFERENCE_DOC" = /* ]]; then
+    REFERENCE_DOC="$(pwd)/$REFERENCE_DOC"
+  fi
+fi
+
 # --- AI generation mode: no input document, needs AI + a prompt ---
 if [ -n "$GENERATE_TARGET" ]; then
   if [ -z "$PROMPT_TEXT" ]; then
@@ -497,7 +563,10 @@ if [ -n "$GENERATE_TARGET" ]; then
   cd "$PROJECT_DIR"
   exec env GOOGLE_API_KEY="${GOOGLE_API_KEY:-}" ailang run --entry main \
     --caps IO,FS,Env,AI --max-recursion-depth 50000 --ai "$AI_MODEL" \
-    "$MAIN_AIL" --generate "$GENERATE_TARGET" --prompt "$PROMPT_TEXT"
+    "$MAIN_AIL" --generate "$GENERATE_TARGET" --prompt "$PROMPT_TEXT" \
+    ${REFERENCE_DOC:+--reference-doc "$REFERENCE_DOC"} \
+    ${REFERENCE_SECTION:+--reference-section "$REFERENCE_SECTION"} \
+    ${TABLE_STYLE:+--table-style "$TABLE_STYLE"}
 fi
 
 if [ -n "$PROMPT_TEXT" ]; then
@@ -647,6 +716,15 @@ if [ -n "$CONVERT_TARGET" ]; then
   fi
   mkdir -p "$(dirname "$CONVERT_TARGET")"
   AILANG_ARGS+=(--convert "$CONVERT_TARGET")
+fi
+if [ -n "$REFERENCE_DOC" ]; then
+  AILANG_ARGS+=(--reference-doc "$REFERENCE_DOC")
+fi
+if [ -n "$REFERENCE_SECTION" ]; then
+  AILANG_ARGS+=(--reference-section "$REFERENCE_SECTION")
+fi
+if [ -n "$TABLE_STYLE" ]; then
+  AILANG_ARGS+=(--table-style "$TABLE_STYLE")
 fi
 
 # --- Resolve output dir to absolute path before cd ---
