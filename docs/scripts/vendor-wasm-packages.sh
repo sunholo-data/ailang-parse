@@ -120,6 +120,7 @@ MODULES=(
   "services/output_formatter.ail"
   "services/a2ui_formatter.ail"
   "services/docx_generator.ail"
+  "services/docx_template.ail"
   "services/docparse_generate.ail"
   "services/docparse_browser.ail"
 )

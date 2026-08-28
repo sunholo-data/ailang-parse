@@ -196,9 +196,16 @@
     // The generator is not in the default set — the WASM type-checker's 2s
     // per-module budget is tight, so only this page pays for it.
     log('loading docx_generator…');
-    // Order matters: docparse_generate imports docx_generator.
-    window.docparseWasm.loadExtraModule('docparse/services/docx_generator',
-                                        'docparse/services/docx_generator.ail')
+    log('loading docx_template…');
+    // Order matters: docx_generator imports docx_template, which imports
+    // nothing from the services layer. docparse_generate then imports
+    // docx_generator.
+    window.docparseWasm.loadExtraModule('docparse/services/docx_template',
+                                        'docparse/services/docx_template.ail')
+      .then(function () {
+        return window.docparseWasm.loadExtraModule('docparse/services/docx_generator',
+                                                   'docparse/services/docx_generator.ail');
+      })
       .then(function () {
         return window.docparseWasm.loadExtraModule('docparse/services/docparse_generate',
                                                    'docparse/services/docparse_generate.ail');

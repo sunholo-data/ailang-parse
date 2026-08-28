@@ -4,10 +4,10 @@ import std/xml (parseLenient, findAll, findAllTexts, findFirst, getText, getAttr
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
-import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup)
+import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
 import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
-import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
+import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
 import docparse/services/omml (renderOmml)
 
 -- DOCX Parser
@@ -42,11 +42,20 @@ import docparse/services/omml (renderOmml)
 export func parseDocx(filepath: string) -> [Block] ! {FS} {
   let xml = readDocxContent(filepath);
   let rels = docxLoadRels(filepath);
+  let nums = docxLoadNumberingContext(filepath);
   match parseLenient(xml) {
-    Ok(root) => extractBodyBlocksWithRels(root, rels),
+    Ok(root) => extractBodyBlocksWithNums(root, rels, nums),
     Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
   }
 }
+
+-- Numbering definitions and style-level numbering, parsed once per document
+-- and threaded through the otherwise-pure walk — the same shape docxLoadRels
+-- uses for hyperlink targets. Empty map (neither part present) = every lookup
+-- falls back to the legacy numId != "1" convention, which is what those
+-- documents always got.
+func docxLoadNumberingContext(filepath: string) -> Map[string, string] ! {FS} =
+  docxNumberingContext(readDocxNumbering(filepath), readDocxStyles(filepath))
 
 -- === Hyperlink targets (ECMA-376 §17.16.22) ==============================
 --
@@ -164,12 +173,11 @@ export pure func parseSectionXml(xml: string) -> [Block] {
   else match parseLenient(xml) {
     Ok(root) => {
       let children = getChildren(root);
-      processBodyChildren(children, emptyMap())
+      processBodyChildren(children, emptyMap(), emptyMap())
     },
     Err(_) => []
   }
 }
-
 -- Check if a block list has any non-empty content
 export pure func hasContent(blocks: [Block]) -> bool =
   any(blockHasContent, blocks)
@@ -193,31 +201,34 @@ pure func blockHasContent(b: Block) -> bool =
 export pure func extractBodyBlocks(root: XmlNode) -> [Block] =
   extractBodyBlocksWithRels(root, emptyMap())
 
-export pure func extractBodyBlocksWithRels(root: XmlNode, rels: Map[string, string]) -> [Block] {
+export pure func extractBodyBlocksWithRels(root: XmlNode, rels: Map[string, string]) -> [Block] =
+  extractBodyBlocksWithNums(root, rels, emptyMap())
+
+export pure func extractBodyBlocksWithNums(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
   match findFirst(root, "w:body") {
     Some(body) => {
       let children = getChildren(body);
-      processBodyChildren(children, rels)
+      processBodyChildren(children, rels, nums)
     },
     None => []
   }
 }
 
 -- Process children of w:body (paragraphs and tables)
-pure func processBodyChildren(nodes: [XmlNode], rels: Map[string, string]) -> [Block] =
-  flatMap(\n. processBodyNode(n, rels), nodes)
+pure func processBodyChildren(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string]) -> [Block] =
+  flatMap(\n. processBodyNode(n, rels, nums), nodes)
 
 -- Process a single body-level node
-pure func processBodyNode(node: XmlNode, rels: Map[string, string]) -> [Block] {
+pure func processBodyNode(node: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
   let tag = getTag(node);
   if tag == "w:p" then {
-    let mainBlock = parseParagraph(node, rels);
+    let mainBlock = parseParagraph(node, rels, nums);
     let changeBlocks = extractParagraphChanges(node);
-    let textBoxBlocks = extractTextBoxes(node, rels);
+    let textBoxBlocks = extractTextBoxes(node, rels, nums);
     mainBlock :: concat(changeBlocks, textBoxBlocks)
   }
   else if tag == "w:tbl" then [parseTable(node, rels)]
-  else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels)
+  else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels, nums)
   -- A body-level w:sectPr is a section break. Emitted as an empty marker block
   -- so consumers can see where a section ends; also deleted by e9de665.
   else if tag == "w:sectPr" then [mkSection("section-break", [])]
@@ -226,40 +237,40 @@ pure func processBodyNode(node: XmlNode, rels: Map[string, string]) -> [Block] {
 
 -- Extract blocks from a body-level structured document tag (w:sdt)
 -- SDTs can wrap paragraphs, tables, and nested SDTs at the body level
-pure func extractSdtBodyBlocks(sdt: XmlNode, rels: Map[string, string]) -> [Block] =
+pure func extractSdtBodyBlocks(sdt: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] =
   match findFirst(sdt, "w:sdtContent") {
-    Some(content) => processBodyChildren(getChildren(content), rels),
+    Some(content) => processBodyChildren(getChildren(content), rels, nums),
     None => []
   }
 
 -- Extract text from text boxes (wps:txbx / w:txbxContent) inside a node
 -- Text boxes appear inside drawings within paragraphs
-pure func extractTextBoxes(node: XmlNode, rels: Map[string, string]) -> [Block] {
+pure func extractTextBoxes(node: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
   let txbxContents = findAll(node, "w:txbxContent");
-  extractTextBoxContent(txbxContents, rels)
+  extractTextBoxContent(txbxContents, rels, nums)
 }
 
 -- Parse text box content nodes into blocks wrapped in a SectionBlock
-pure func extractTextBoxContent(nodes: [XmlNode], rels: Map[string, string]) -> [Block] =
+pure func extractTextBoxContent(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string]) -> [Block] =
   flatMap(\txbx.
-    let blocks = processBodyChildren(getChildren(txbx), rels) in
+    let blocks = processBodyChildren(getChildren(txbx), rels, nums) in
     if hasContent(blocks) then [mkSection("textbox", blocks)]
     else [],
     nodes)
 
 -- Parse a w:p (paragraph) element into a Block
-pure func parseParagraph(p: XmlNode, rels: Map[string, string]) -> Block {
+pure func parseParagraph(p: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> Block {
   let text = extractParagraphText(p, rels);
   let style = extractParagraphStyle(p);
   let headingLevel = headingLevelFromStyle(style);
   let runs = extractParagraphRuns(p, rels);
   if headingLevel > 0
   then mkHeadingRuns(text, headingLevel, runs)
-  else if isListParagraph(p)
+  else if isListParagraph(p, nums)
   -- One DOCX list paragraph is one item, so itemRuns is parallel with a single
   -- entry. Kept empty when the item has no formatting, so the field only
   -- appears where it carries information.
-  then mkListRuns([text], isOrderedList(p), if listLength(runs) > 0 then [runs] else [])
+  then mkListRuns([text], isOrderedList(p, nums), if listLength(runs) > 0 then [runs] else [])
   else mkTextRuns(text, style, 0, runs)
 }
 
@@ -542,25 +553,177 @@ pure func headingLevelFromStyle(style: string) -> int
   else 0
 }
 
--- Check if paragraph is a list item (has w:numPr)
-pure func isListParagraph(p: XmlNode) -> bool =
-  getOrElse(
-    optMap(\_.  true,
-      optFlatMap(\ppr. findFirst(ppr, "w:numPr"), findFirst(p, "w:pPr"))),
-    false)
+-- Check if paragraph is a list item: a direct w:numPr, or numbered through
+-- its pStyle (the style carries numPr in styles.xml — python-docx's List
+-- Bullet / List Number do exactly this, and before style resolution those
+-- paragraphs were invisible to the list reader entirely).
+pure func isListParagraph(p: XmlNode, nums: Map[string, string]) -> bool =
+  match docxParaNumPr(p) {
+    Some(_) => true,
+    None => match docxParaStyleId(p) {
+      Some(sid) => mapMember(nums, "s:${sid}"),
+      None => false
+    }
+  }
 
--- Check if a list paragraph is ordered (numbered) vs unordered (bullet)
--- Convention: numId > 0 with ilvl suggests ordered; simplified heuristic
-pure func isOrderedList(p: XmlNode) -> bool =
+-- Check if a list paragraph is ordered (numbered) vs unordered (bullet).
+--
+-- Resolved, not guessed: numId -> abstractNumId -> w:numFmt of the lvl entry
+-- matching the paragraph's own w:ilvl (Word falls back to ilvl 0 when the
+-- paragraph's level has no entry — singleLevel abstracts define only lvl 0).
+-- The numId itself comes from the paragraph's direct w:numPr first, else from
+-- its style's numPr (python-docx numbers through List Bullet / List Number
+-- styles, which carry numPr in styles.xml). The old convention — numId != "1"
+-- — agreed with pandoc files by coincidence (pandoc assigns bullets numId 1)
+-- and misread everything else, including our own reference-doc output, whose
+-- list ids sit above the template's max.
+--
+-- Unresolvable (no numbering.xml, dangling numId, numStyleLink indirection)
+-- falls back to that same legacy convention, so documents the resolver cannot
+-- see keep the behaviour they always had.
+pure func isOrderedList(p: XmlNode, nums: Map[string, string]) -> bool {
+  match docxParaNumId(p, nums) {
+    Some(numId) =>
+      match mapLookup(nums, "n:${numId}") {
+        Some(absId) => docxNumFmtOrdered(nums, absId, docxParaIlvl(p, nums), numId),
+        None => docxLegacyOrdered(numId)
+      },
+    None => false
+  }
+}
+
+-- The paragraph's effective numId: direct w:numPr/w:numId first, else the
+-- pStyle's style-level numPr
+pure func docxParaNumId(p: XmlNode, nums: Map[string, string]) -> Option[string] =
+  match docxParaDirectNumId(p) {
+    Some(id) => Some(id),
+    None => match docxParaStyleId(p) {
+      Some(sid) => mapLookup(nums, "s:${sid}"),
+      None => None
+    }
+  }
+
+pure func docxParaDirectNumId(p: XmlNode) -> Option[string] =
+  optFlatMap(\numPr.
+    optFlatMap(\numId. getAttr(numId, "w:val"), findFirst(numPr, "w:numId")),
+    docxParaNumPr(p))
+
+-- The paragraph's pStyle value, if it names one
+pure func docxParaStyleId(p: XmlNode) -> Option[string] =
+  optFlatMap(\ppr. optFlatMap(\ps. getAttr(ps, "w:val"), findFirst(ppr, "w:pStyle")),
+             findFirst(p, "w:pPr"))
+
+pure func docxParaNumPr(p: XmlNode) -> Option[XmlNode] =
+  optFlatMap(\ppr. findFirst(ppr, "w:numPr"), findFirst(p, "w:pPr"))
+
+-- The paragraph's effective nesting depth: direct w:ilvl, else the style's,
+-- else 0 (absent w:ilvl means level 0)
+pure func docxParaIlvl(p: XmlNode, nums: Map[string, string]) -> string =
+  let direct = optFlatMap(\numPr.
+    optFlatMap(\ilvl. getAttr(ilvl, "w:val"), findFirst(numPr, "w:ilvl")),
+    docxParaNumPr(p)) in
+  match direct {
+    Some(lvl) => lvl,
+    None => match docxParaStyleId(p) {
+      Some(sid) => getOrElse(mapLookup(nums, "s:${sid}:ilvl"), "0"),
+      None => "0"
+    }
+  }
+
+-- numFmt of the abstract's lvl at ilvl, falling back to lvl 0 (singleLevel
+-- abstracts), then to the legacy convention when neither exists
+pure func docxNumFmtOrdered(nums: Map[string, string], absId: string, ilvl: string, numId: string) -> bool =
+  match mapLookup(nums, "a:${absId}:${ilvl}") {
+    Some(fmt) => fmt != "bullet",
+    None =>
+      match mapLookup(nums, "a:${absId}:0") {
+        Some(fmt) => fmt != "bullet",
+        None => docxLegacyOrdered(numId)
+      }
+  }
+
+-- The pre-numbering-resolution convention, kept for anything unresolvable.
+-- Takes the effective numId (direct or style-derived) so both numbering routes
+-- fall back identically.
+pure func docxLegacyOrdered(numId: string) -> bool =
+  length(numId) > 0 && numId != "1"
+
+-- One map, three key spaces, built in one pass over each part:
+--   "n:<numId>"                -> abstractNumId   (from <w:num>)
+--   "a:<abstractNumId>:<ilvl>" -> w:numFmt        (from each <w:lvl>)
+--   "s:<styleId>"             -> numId           (from a style's pPr/numPr)
+--   "s:<styleId>:ilvl"        -> ilvl            (absent = 0)
+-- Encoding the lvl into the key keeps the per-paragraph lookup to O(1) map
+-- hits; the numId->abstract indirection is what the spec requires, so the map
+-- cannot be flattened below two lookups anyway.
+-- The numbering-definitions entries alone (n:/a: key spaces)
+pure func docxNumberingEntries(numberingXml: string) -> [(string, string)] =
+  if length(numberingXml) == 0 then []
+  else match parseLenient(numberingXml) {
+    Err(_) => [],
+    Ok(root) => concat(flatMap(docxNumEntries, findAll(root, "w:num")),
+                       flatMap(docxAbstractNumEntries, findAll(root, "w:abstractNum")))
+  }
+
+export pure func docxNumberingMaps(numberingXml: string) -> Map[string, string] =
+  mapFromList(docxNumberingEntries(numberingXml))
+
+-- The full context: numbering definitions plus style-level numbering, in one
+-- map. Style entries never collide with n:/a: keys, so concatenating the
+-- entry lists before mapFromList is safe.
+export pure func docxNumberingContext(numberingXml: string, stylesXml: string) -> Map[string, string] =
+  mapFromList(concat(docxNumberingEntries(numberingXml), docxStyleNumEntries(stylesXml)))
+
+pure func docxStyleNumEntries(stylesXml: string) -> [(string, string)] =
+  if length(stylesXml) == 0 then []
+  else match parseLenient(stylesXml) {
+    Err(_) => [],
+    Ok(root) => flatMap(docxStyleNumEntry, findAll(root, "w:style"))
+  }
+
+pure func docxStyleNumEntry(style: XmlNode) -> [(string, string)] =
+  match getAttr(style, "w:styleId") {
+    Some(sid) =>
+      match docxStyleNumPr(style) {
+        Some(numId) => [("s:${sid}", numId), ("s:${sid}:ilvl", docxStyleIlvl(style))],
+        None => []
+      },
+    None => []
+  }
+
+-- numId declared by a style's own pPr/numPr, if any
+pure func docxStyleNumPr(style: XmlNode) -> Option[string] =
+  optFlatMap(\numPr.
+    optFlatMap(\numId. getAttr(numId, "w:val"), findFirst(numPr, "w:numId")),
+    findFirst(style, "w:pPr"))
+
+pure func docxStyleIlvl(style: XmlNode) -> string =
   getOrElse(
-    optFlatMap(\ppr.
-      optFlatMap(\numPr.
-        optFlatMap(\numId.
-          optMap(\val. val != "1", getAttr(numId, "w:val")),
-          findFirst(numPr, "w:numId")),
-        findFirst(ppr, "w:numPr")),
-      findFirst(p, "w:pPr")),
-    false)
+    optFlatMap(\numPr.
+      optFlatMap(\ilvl. getAttr(ilvl, "w:val"), findFirst(numPr, "w:ilvl")),
+      findFirst(style, "w:pPr")),
+    "0")
+
+pure func docxNumEntries(num: XmlNode) -> [(string, string)] =
+  match getAttr(num, "w:numId") {
+    Some(numId) =>
+      match optFlatMap(\abs. getAttr(abs, "w:val"), findFirst(num, "w:abstractNumId")) {
+        Some(absId) => [("n:${numId}", absId)],
+        None => []
+      },
+    None => []
+  }
+
+pure func docxAbstractNumEntries(abs: XmlNode) -> [(string, string)] =
+  match getAttr(abs, "w:abstractNumId") {
+    Some(absId) => map(\lvl. docxLvlEntry(absId, lvl), findAll(abs, "w:lvl")),
+    None => []
+  }
+
+pure func docxLvlEntry(absId: string, lvl: XmlNode) -> (string, string) =
+  let ilvl = getOrElse(getAttr(lvl, "w:ilvl"), "0") in
+  let fmt = getOrElse(optFlatMap(\f. getAttr(f, "w:val"), findFirst(lvl, "w:numFmt")), "") in
+  ("a:${absId}:${ilvl}", fmt)
 
 -- Parse a w:tbl (table) element into a TableBlock
 -- Handles merged cells via gridSpan (horizontal) and vMerge (vertical)
@@ -726,9 +889,12 @@ export pure func docxWalkBodyRoot(root: XmlNode) -> DocxWalk =
   docxWalkBodyRootWithRels(root, emptyMap())
 
 export pure func docxWalkBodyRootWithRels(root: XmlNode, rels: Map[string, string]) -> DocxWalk =
+  docxWalkBodyRootFull(root, rels, emptyMap())
+
+export pure func docxWalkBodyRootFull(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk =
   match findFirst(root, "w:body") {
     Some(body) => {
-      let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels);
+      let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels, nums);
       { blocks: reverse(st.blocks), anchors: reverse(st.anchors),
         open: st.open, count: st.count }
     },
@@ -738,25 +904,25 @@ export pure func docxWalkBodyRootWithRels(root: XmlNode, rels: Map[string, strin
 pure func docxEmptyWalk() -> DocxWalk =
   { blocks: [], anchors: [], open: [], count: 0 }
 
-pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk, rels: Map[string, string]) -> DocxWalk =
+pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk =
   match nodes {
     [] => st,
-    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st, rels), rels)
+    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st, rels, nums), rels, nums)
   }
 
 -- Process one body-level node: emit its blocks (reusing processBodyNode so
 -- block extraction stays in one place) and scan it for comment markers.
-pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string]) -> DocxWalk {
+pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk {
   let tag = getTag(node);
   if tag == "w:sdt" then
     -- SDTs emit their content's blocks, so recurse rather than counting them
     -- as one node; the recursion keeps the index accounting correct.
     match findFirst(node, "w:sdtContent") {
-      Some(content) => docxWalkNodes(getChildren(content), st, rels),
+      Some(content) => docxWalkNodes(getChildren(content), st, rels, nums),
       None => st
     }
   else {
-    let emitted = processBodyNode(node, rels);
+    let emitted = processBodyNode(node, rels, nums);
     let scanned =
       if tag == "w:p" then docxScanParagraph(node, st)
       else if tag == "w:tbl" then docxScanParagraphs(findAll(node, "w:p"), st)
@@ -901,10 +1067,11 @@ type DocxPlacedComment = {
 -- order) meets each comment beside its target. Comments whose anchor could not
 -- be resolved go in a trailing group, explicitly labelled unanchored.
 export func parseDocxWithComments(filepath: string) -> [Block] ! {FS} =
-  parseDocxWithCommentsXmlRels(readDocxContent(filepath),
-                               readComments(filepath),
-                               readCommentsExtended(filepath),
-                               docxLoadRels(filepath))
+  parseDocxWithCommentsXmlRelsNum(readDocxContent(filepath),
+                                  readComments(filepath),
+                                  readCommentsExtended(filepath),
+                                  docxLoadRels(filepath),
+                                  docxLoadNumberingContext(filepath))
 
 -- Pure core of the anchored parse, over raw XML strings.
 --
@@ -920,9 +1087,17 @@ export pure func parseDocxWithCommentsXml(documentXml: string, commentsXml: stri
 -- and uses this; the browser has no rels part and uses the arity-3 form above.
 export pure func parseDocxWithCommentsXmlRels(documentXml: string, commentsXml: string,
                                               extXml: string, rels: Map[string, string]) -> [Block] =
+  parseDocxWithCommentsXmlRelsNum(documentXml, commentsXml, extXml, rels, emptyMap())
+
+-- Same, with word/numbering.xml definitions so list classification matches the
+-- plain parse. The browser hands over the numbering part as a string when it
+-- has one; without it, list paragraphs keep the legacy convention.
+export pure func parseDocxWithCommentsXmlRelsNum(documentXml: string, commentsXml: string,
+                                                 extXml: string, rels: Map[string, string],
+                                                 nums: Map[string, string]) -> [Block] =
   match parseLenient(documentXml) {
     Ok(root) => {
-      let walk = docxWalkBodyRootWithRels(root, rels);
+      let walk = docxWalkBodyRootFull(root, rels, nums);
       let placed = docxCommentsFromXml(commentsXml, extXml, walk.anchors);
       docxSpliceComments(walk.blocks, placed)
     },

@@ -1,0 +1,533 @@
+module docparse/services/docx_template
+
+import std/string (length, find, substring, contains, split, stringToInt, endsWith, intToStr)
+import std/option (getOrElse, Option, Some, None)
+import std/list (length as listLength, reverse, nth_or)
+import std/zip (listEntries, readEntry, readEntryBytes)
+import std/result (Result, Ok, Err)
+
+-- Reference-doc support for DOCX generation — the Quarto/Pandoc `reference-doc`
+-- feature. A reference doc supplies the LOOK (styles.xml, numbering.xml, theme,
+-- embedded fonts, headers/footers, page geometry); the generated body supplies
+-- the CONTENT.
+--
+-- Mechanically: unzip the template, carry every part through verbatim except
+-- the handful we regenerate, and merge those so nothing the template declared is
+-- lost and nothing we add collides with it.
+--
+-- Division of responsibility:
+--   template wins   page size, margins, headers, footers, page numbering — all
+--                   of it lives in the body-level <w:sectPr>, lifted verbatim
+--   we own          word/document.xml body, docProps/core.xml
+--   merged          styles.xml, numbering.xml, [Content_Types].xml, both .rels
+--   carried         everything else, base64, byte-for-byte
+--
+-- A SectionBlock header/footer in the SOURCE document is dropped in
+-- reference-doc mode. Mixing a letterhead with the source document's own
+-- headers gives whichever Word happens to resolve, and the template is the
+-- explicit instruction — see docx_generator.docxPlan.
+--
+-- This module is load + string surgery only. The merges themselves live in
+-- docx_generator, next to the style and numbering definitions they merge.
+
+-- A loaded reference doc. `active` false is the no-template case, and every
+-- consumer branches on it, so one value type covers both paths and there is no
+-- second code path to drift.
+export type DocxRefDoc = {
+  active: bool,
+  entries: [{name: string, data: string}],
+  stylesXml: string,
+  numberingXml: string,
+  contentTypesXml: string,
+  documentRelsXml: string,
+  rootRelsXml: string,
+  sectPr: string,
+  numIdBase: int,
+  absNumIdBase: int,
+  tableStyleId: string
+}
+
+-- No reference doc. numIdBase 1 / absNumIdBase 0 reproduce the ids the
+-- generator has always emitted, so the non-template path is byte-identical.
+export pure func docxTplNone() -> DocxRefDoc = {
+  active: false,
+  entries: [],
+  stylesXml: "",
+  numberingXml: "",
+  contentTypesXml: "",
+  documentRelsXml: "",
+  rootRelsXml: "",
+  sectPr: "",
+  numIdBase: 1,
+  absNumIdBase: 0,
+  tableStyleId: ""
+}
+
+-- Template parts carrying the template's own comment threads. The template
+-- supplies style, not content, so its body — and everything anchored into it —
+-- is discarded. Part, relationship and content-type override have to go
+-- together: any one left behind is a dangling reference, and a dangling
+-- reference is what makes Word refuse the package outright rather than
+-- degrading.
+export pure func docxTplDroppedParts() -> [{name: string, part: string, target: string}] = [
+  {name: "word/comments.xml",         part: "/word/comments.xml",         target: "comments.xml"},
+  {name: "word/commentsExtended.xml", part: "/word/commentsExtended.xml", target: "commentsExtended.xml"},
+  {name: "word/commentsIds.xml",      part: "/word/commentsIds.xml",      target: "commentsIds.xml"},
+  {name: "word/people.xml",           part: "/word/people.xml",           target: "people.xml"}
+]
+
+-- ============================================================
+-- Loading
+-- ============================================================
+
+-- section 0 = last <w:sectPr> in document order (the body-level one, and what
+-- every caller before --reference-section wanted); N >= 1 = the Nth in document
+-- order. 1-based because that is how Word counts sections in the status bar.
+-- tableOverride = --table-style NAME: bind generated tables to that template
+-- table style (matched on styleId first, then w:name); "" = pick a default.
+export func docxTplLoad(path: string, section: int, tableOverride: string) -> Result[DocxRefDoc, string] ! {FS} =
+  match listEntries(path) {
+    Err(e) => Err("cannot open reference doc ${path}: ${e}"),
+    Ok(names) =>
+      if docxTplHas(names, "word/document.xml")
+      then docxTplBuild(path, names, section, tableOverride)
+      else Err("reference doc ${path} has no word/document.xml — not a DOCX")
+  }
+
+func docxTplBuild(path: string, names: [string], section: int, tableOverride: string) -> Result[DocxRefDoc, string] ! {FS} {
+  let docXml = docxTplRead(path, "word/document.xml");
+  let sect = docxTplSectPrAt(docXml, section);
+  let numbering = docxTplReadIf(path, names, "word/numbering.xml");
+  let styles = docxTplReadIf(path, names, "word/styles.xml");
+  if length(sect) == 0 && section >= 1
+  then
+    let count = listLength(docxTplCollectSectPrs(docXml)) in
+    Err("reference doc ${path} has ${intToStr(count)} <w:sectPr> element(s); --reference-section ${intToStr(section)} is out of range")
+  else if length(sect) == 0
+  then Err("reference doc ${path} has no body <w:sectPr> — nothing to take page setup, headers or footers from")
+  else if length(tableOverride) > 0 && not docxTplHasTableStyle(styles, tableOverride)
+  then Err("reference doc ${path} defines no table style \"${tableOverride}\" — its table styles are: ${docxTplTableStyleNames(styles)}")
+  else match docxTplCarry(path, names) {
+    Err(e) => Err(e),
+    Ok(carried) => Ok({
+      active: true,
+      entries: carried,
+      stylesXml: styles,
+      numberingXml: numbering,
+      contentTypesXml: docxTplReadIf(path, names, "[Content_Types].xml"),
+      documentRelsXml: docxTplReadIf(path, names, "word/_rels/document.xml.rels"),
+      rootRelsXml: docxTplReadIf(path, names, "_rels/.rels"),
+      sectPr: sect,
+      numIdBase: docxTplMaxAttrInt(numbering, "w:numId=\"") + 1,
+      absNumIdBase: docxTplMaxAttrInt(numbering, "w:abstractNumId=\"") + 1,
+      tableStyleId: docxTplResolveTableStyle(styles, tableOverride)
+    })
+  }
+}
+
+-- Every template part except the ones the merge regenerates, base64 so the
+-- binary ones — theme, embedded fonts, the letterhead logo — survive the round
+-- trip byte-for-byte. A part that fails to read is an error, not a skip: a
+-- silently missing font or theme is a document that renders wrong with no
+-- indication why.
+@allow_empty_ok("base case of the recursion over part names — the empty tail of the list, not an empty result")
+func docxTplCarry(path: string, names: [string]) -> Result[[{name: string, data: string}], string] ! {FS} =
+  match names {
+    [] => Ok([]),
+    n :: rest =>
+      if docxTplSkipPart(n)
+      then docxTplCarry(path, rest)
+      else match readEntryBytes(path, n) {
+        Err(e) => Err("reference doc part ${n}: ${e}"),
+        Ok(b64) => match docxTplCarry(path, rest) {
+          Err(e) => Err(e),
+          Ok(tail) => Ok({name: n, data: b64} :: tail)
+        }
+      }
+  }
+
+pure func docxTplSkipPart(name: string) -> bool =
+  docxTplEndsWithSlash(name)
+  || docxTplRegenerated(name)
+  || docxTplIsDropped(name, docxTplDroppedParts())
+
+pure func docxTplRegenerated(name: string) -> bool =
+  name == "[Content_Types].xml"
+  || name == "_rels/.rels"
+  || name == "docProps/core.xml"
+  || name == "word/document.xml"
+  || name == "word/_rels/document.xml.rels"
+  || name == "word/styles.xml"
+  || name == "word/numbering.xml"
+
+pure func docxTplIsDropped(name: string, dropped: [{name: string, part: string, target: string}]) -> bool =
+  match dropped {
+    [] => false,
+    d :: rest => if d.name == name then true else docxTplIsDropped(name, rest)
+  }
+
+pure func docxTplEndsWithSlash(name: string) -> bool =
+  length(name) > 0 && substring(name, length(name) - 1, length(name)) == "/"
+
+pure func docxTplHas(names: [string], name: string) -> bool =
+  match names {
+    [] => false,
+    n :: rest => if n == name then true else docxTplHas(rest, name)
+  }
+
+func docxTplRead(path: string, name: string) -> string ! {FS} =
+  match readEntry(path, name) {
+    Ok(s) => s,
+    Err(_) => ""
+  }
+
+func docxTplReadIf(path: string, names: [string], name: string) -> string ! {FS} =
+  if docxTplHas(names, name) then docxTplRead(path, name) else ""
+
+-- ============================================================
+-- <w:sectPr> extraction
+-- ============================================================
+
+-- A multi-section template has one <w:sectPr> per section plus the body-level
+-- one, and the body one is the LAST in document order — mid-document section
+-- breaks live inside a <w:pPr> earlier in the body. Lifting the last is what
+-- Pandoc does and what the no-flag path must keep doing; --reference-section N
+-- exists because a template's wanted furniture is often an EARLIER section's
+-- (the master agreement's CONFIDENTIAL footer, not the Annex's missing one).
+--
+-- section = 0 means "last" (the pre-flag behaviour); N >= 1 means the Nth in
+-- document order, 1-based the way Word numbers sections in the status bar.
+-- Out of range yields "", which the loader reports as an error naming the
+-- count — an off-by-one must not silently pick the wrong letterhead.
+--
+-- Under revision tracking <w:sectPrChange> nests a SECOND <w:sectPr> holding
+-- the pre-change setup. Those spans are removed before collecting, so they are
+-- neither liftable nor counted as sections.
+--
+-- (No inline `tests` block on this two-argument function: the inline-test
+-- grammar takes single-argument (input, expected) pairs only. The single-arg
+-- wrappers below pin the behaviours that matter, and
+-- benchmarks/verify_generated.py L6 exercises --reference-section end-to-end.)
+export pure func docxTplSectPrAt(docXml: string, section: int) -> string
+  ensures { length(result) == 0 || endsWith(result, "</w:sectPr>") || endsWith(result, "/>") }
+{
+  let all = docxTplCollectSectPrs(docXml);
+  let n = listLength(all);
+  let idx = if section <= 0 then n - 1 else section - 1;
+  if idx < 0 || idx >= n then "" else nth_or(all, idx, "")
+}
+
+-- The no-flag entry point: the body-level <w:sectPr>, i.e. the last in document
+-- order. Kept as its own export because it is the behaviour every pre-flag
+-- caller means, and "last" reads better than "section 0" at those call sites.
+export pure func docxTplExtractSectPr(docXml: string) -> string
+  ensures { length(result) == 0 || endsWith(result, "</w:sectPr>") || endsWith(result, "/>") }
+  tests [
+    ("", ""),
+    ("<w:body><w:p/><w:sectPr><w:pgSz/></w:sectPr></w:body>", "<w:sectPr><w:pgSz/></w:sectPr>"),
+    ("<w:body><w:sectPr w:rsidR=\"00A\"/></w:body>", "<w:sectPr w:rsidR=\"00A\"/>"),
+    ("<w:body><w:pPr><w:sectPr><w:pgSz w:w=\"1\"/></w:sectPr></w:pPr><w:p/><w:sectPr><w:pgSz w:w=\"2\"/></w:sectPr></w:body>", "<w:sectPr><w:pgSz w:w=\"2\"/></w:sectPr>"),
+    ("<w:body><w:sectPr><w:good/></w:sectPr><w:pPr><w:sectPrChange><w:sectPr><w:old/></w:sectPr></w:sectPrChange></w:pPr></w:body>", "<w:sectPr><w:good/></w:sectPr>")
+  ]
+{ docxTplSectPrAt(docXml, 0) }
+
+-- The last case above is revision tracking: the sectPrChange-nested sectPr is
+-- textually LAST and must not be lifted — the pre-flag defect this suite is for.
+--
+-- Single-argument seam for the 1-based pick: section 1 of a two-section
+-- document is the FIRST one (the master-agreement furniture, not the Annex's).
+pure func docxTplSectPrFirst(docXml: string) -> string
+  tests [
+    ("<w:body><w:pPr><w:sectPr><w:pgSz w:w=\"1\"/></w:sectPr></w:pPr><w:p/><w:sectPr><w:pgSz w:w=\"2\"/></w:sectPr></w:body>", "<w:sectPr><w:pgSz w:w=\"1\"/></w:sectPr>")
+  ]
+{ docxTplSectPrAt(docXml, 1) }
+
+-- Every <w:sectPr> span in document order, <w:sectPrChange>-nested ones
+-- removed first so they are neither collected nor counted.
+pure func docxTplCollectSectPrs(docXml: string) -> [string] =
+  docxTplCollectFrom(docxTplCleanForSectPr(docXml), 0, [])
+
+-- Cut everything below </w:body> (the sectPr cannot be there) and drop
+-- sectPrChange spans — hoisted so collect and count see the same document.
+pure func docxTplCleanForSectPr(docXml: string) -> string {
+  let bodyEnd = docxTplLastIndexOf(docXml, "</w:body>");
+  let inner = if bodyEnd >= 0 then substring(docXml, 0, bodyEnd) else docXml;
+  docxTplDropSpans(inner, "<w:sectPrChange", "</w:sectPrChange>")
+}
+
+pure func docxTplCollectFrom(cleaned: string, from: int, acc: [string]) -> [string] {
+  if from >= length(cleaned) then reverse(acc)
+  else {
+    let rest = substring(cleaned, from, length(cleaned));
+    let sp = find(rest, "<w:sectPr ");
+    let gt = find(rest, "<w:sectPr>");
+    let relSp = if sp < 0 then length(rest) else sp;
+    let relGt = if gt < 0 then length(rest) else gt;
+    let rel = if relSp <= relGt then relSp else relGt;
+    if rel >= length(rest) then reverse(acc)
+    else {
+      let span = docxTplSectPrSpanFrom(cleaned, from + rel);
+      if length(span) == 0
+      then reverse(acc)
+      else docxTplCollectFrom(cleaned, from + rel + length(span), span :: acc)
+    }
+  }
+}
+
+-- The <w:sectPr> span starting at open. Decides closed-vs-self-closing from the
+-- open tag's own boundary, NOT from where the next </w:sectPr> happens to be:
+-- scanning forward, a self-closing <w:sectPr/> is followed by other sections'
+-- close tags, and matching against those would swallow every section in
+-- between into one "span". The open tag ends at its first '>'; a '/' before it
+-- means self-closing; otherwise the span runs to the first </w:sectPr> after
+-- the open tag. ('>' inside an attribute value would defeat this — Word emits
+-- hex rsids there and nothing else; the previous last-only code had the same
+-- blind spot in its close search.) An unterminated sectPr yields "" so the
+-- collector stops instead of inventing a section.
+pure func docxTplSectPrSpanFrom(s: string, open: int) -> string {
+  let tail = substring(s, open, length(s));
+  let gt = find(tail, ">");
+  if gt < 0 then ""
+  else if gt > 0 && substring(tail, gt - 1, gt) == "/"
+  then substring(tail, 0, gt + 1)
+  else docxTplSectPrClosedFrom(tail, gt + 1)
+}
+
+pure func docxTplSectPrClosedFrom(tail: string, afterOpen: int) -> string {
+  let rest = substring(tail, afterOpen, length(tail));
+  let close = find(rest, "</w:sectPr>");
+  if close < 0 then ""
+  else substring(tail, 0, afterOpen + close + length("</w:sectPr>"))
+}
+
+-- ============================================================
+-- Table style resolution (--table-style / template default)
+-- ============================================================
+
+-- The template's table-type styles, in styles.xml document order.
+-- Splitting on "<w:style " leaves each part beginning with the opening tag's
+-- attributes, which is where w:type lives; <w:name> sits in the body below it.
+export type DocxTblStyle = { id: string, name: string }
+
+pure func docxTplTableStyles(stylesXml: string) -> [DocxTblStyle] =
+  docxTplScanStyles(docxTplDropFirst(split(stylesXml, "<w:style ")), [])
+
+pure func docxTplDropFirst(parts: [string]) -> [string] =
+  match parts {
+    [] => [],
+    _ :: rest => rest
+  }
+
+pure func docxTplScanStyles(parts: [string], acc: [DocxTblStyle]) -> [DocxTblStyle] {
+  match parts {
+    [] => reverse(acc),
+    p :: rest => {
+      let openTag = substring(p, 0, docxTplGtOrEnd(p));
+      if contains(openTag, "w:type=\"table\"")
+      then docxTplScanStyles(rest, { id: docxTplAttrValue(openTag, "w:styleId=\""), name: docxTplAttrValue(p, "<w:name w:val=\"") } :: acc)
+      else docxTplScanStyles(rest, acc)
+    }
+  }
+}
+
+pure func docxTplGtOrEnd(s: string) -> int {
+  let gt = find(s, ">");
+  if gt < 0 then length(s) else gt
+}
+
+-- Value of the attribute written prefix + "..." (quotes excluded). Absent
+-- attribute yields "", which the callers treat as unmatchable rather than
+-- guessing a style id.
+pure func docxTplAttrValue(s: string, prefix: string) -> string {
+  let i = find(s, prefix);
+  if i < 0 then "" else docxTplUntilQuote(substring(s, i + length(prefix), length(s)))
+}
+
+pure func docxTplUntilQuote(s: string) -> string {
+  let q = find(s, "\"");
+  if q < 0 then s else substring(s, 0, q)
+}
+
+-- Every table has Normal Table / Table Normal implicitly — pointing a
+-- <w:tblStyle> at it is a no-op that looks like success. Skipping it here is
+-- what makes the default picker actually find the template's REAL table look
+-- (TableGrid in the docx-hdrftr.docx L6 template).
+pure func docxTplIsImplicitTableStyle(name: string) -> bool =
+  name == "Normal Table" || name == "Table Normal"
+
+-- The default table style for generated tables: a style literally named
+-- "Table" wins (Pandoc's convention — reference.docx ships one), else the
+-- first table style in document order that is not the implicit default.
+-- "" = the template defines nothing usable; generated tables keep their
+-- hardcoded borders, which is today's output.
+export pure func docxTplPickTableStyle(stylesXml: string) -> string
+  tests [
+    ("", ""),
+    ("<w:style w:type=\"table\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/></w:style>", ""),
+    ("<w:style w:type=\"table\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/></w:style><w:style w:type=\"table\" w:styleId=\"TableGrid\"><w:name w:val=\"Table Grid\"/></w:style>", "TableGrid"),
+    ("<w:style w:type=\"table\" w:styleId=\"Grid1\"><w:name w:val=\"Table Grid\"/></w:style><w:style w:type=\"table\" w:styleId=\"Custom\"><w:name w:val=\"Table\"/></w:style>", "Custom")
+  ]
+{ docxTplPickFrom(docxTplTableStyles(stylesXml)) }
+
+pure func docxTplPickFrom(cands: [DocxTblStyle]) -> string {
+  match docxTplFindNamed(cands, "Table") {
+    Some(s) => s.id,
+    None =>
+      match cands {
+        [] => "",
+        c :: rest => if docxTplIsImplicitTableStyle(c.name) then docxTplPickFrom(rest) else c.id
+      }
+  }
+}
+
+pure func docxTplFindNamed(cands: [DocxTblStyle], name: string) -> Option[DocxTblStyle] =
+  match cands {
+    [] => None,
+    c :: rest => if c.name == name then Some(c) else docxTplFindNamed(rest, name)
+  }
+
+-- --table-style NAME resolution: styleId match first, then w:name. None = the
+-- template defines no such table style, an error at load.
+export pure func docxTplTableStyleNamed(stylesXml: string, nameOrId: string) -> Option[string] =
+  docxTplFindStyle(docxTplTableStyles(stylesXml), nameOrId)
+
+pure func docxTplFindStyle(cands: [DocxTblStyle], nameOrId: string) -> Option[string] =
+  match cands {
+    [] => None,
+    c :: rest =>
+      if c.id == nameOrId || c.name == nameOrId
+      then Some(c.id)
+      else docxTplFindStyle(rest, nameOrId)
+  }
+
+pure func docxTplHasTableStyle(stylesXml: string, nameOrId: string) -> bool =
+  match docxTplTableStyleNamed(stylesXml, nameOrId) {
+    Some(_) => true,
+    None => false
+  }
+
+-- The resolved tableStyleId for the record: the override when given (already
+-- validated by docxTplBuild), else the template default.
+pure func docxTplResolveTableStyle(stylesXml: string, tableOverride: string) -> string =
+  if length(tableOverride) > 0
+  then match docxTplTableStyleNamed(stylesXml, tableOverride) {
+    Some(id) => id,
+    None => ""
+  }
+  else docxTplPickTableStyle(stylesXml)
+
+-- Comma-joined table style names for the --table-style error message.
+export pure func docxTplTableStyleNames(stylesXml: string) -> string =
+  docxTplJoinNames(docxTplTableStyles(stylesXml), "")
+
+pure func docxTplJoinNames(cands: [DocxTblStyle], acc: string) -> string =
+  match cands {
+    [] => acc,
+    c :: rest =>
+      let joined = if length(acc) == 0 then c.name else "${acc}, ${c.name}" in
+      docxTplJoinNames(rest, joined)
+  }
+
+-- ============================================================
+-- String surgery primitives
+-- ============================================================
+
+-- Index of the last occurrence, or -1. std/string.find is first-occurrence
+-- only; this walks it forward rather than scanning character by character,
+-- because these run over a whole document.xml.
+export pure func docxTplLastIndexOf(hay: string, needle: string) -> int
+  requires { length(needle) > 0 }
+  ensures { result == -1 || (result >= 0 && result + length(needle) <= length(hay)) }
+=
+  docxTplLastIdxScan(hay, needle, 0, -1)
+
+pure func docxTplLastIdxScan(hay: string, needle: string, offset: int, best: int) -> int {
+  let i = if offset >= length(hay) then -1
+          else find(substring(hay, offset, length(hay)), needle);
+  if i < 0 then best
+  else docxTplLastIdxScan(hay, needle, offset + i + 1, offset + i)
+}
+
+-- Remove every open..close span, inclusive. Unbalanced input is returned
+-- untouched: half-removing a span would corrupt the XML, and the caller's
+-- emptiness check then reports the template as unusable instead.
+export pure func docxTplDropSpans(s: string, open: string, close: string) -> string
+  requires { length(open) > 0 && length(close) > 0 }
+  ensures { length(result) <= length(s) }
+{
+  let i = find(s, open);
+  if i < 0 then s else docxTplDropSpanAt(s, open, close, i)
+}
+
+pure func docxTplDropSpanAt(s: string, open: string, close: string, i: int) -> string {
+  let j = find(substring(s, i, length(s)), close);
+  if j < 0 then s
+  else docxTplDropSpans(
+    "${substring(s, 0, i)}${substring(s, i + j + length(close), length(s))}",
+    open, close)
+}
+
+-- Insert before the last occurrence of marker; used for the closing tag of a
+-- part (</w:styles>, </Types>, </Relationships>). Returns the input unchanged
+-- when the marker is absent, which the callers treat as "template part is not
+-- what we thought" and fall back to generating the part outright.
+export pure func docxTplInsertBefore(xml: string, marker: string, payload: string) -> string {
+  let i = docxTplLastIndexOf(xml, marker);
+  if i < 0 then xml
+  else "${substring(xml, 0, i)}${payload}${substring(xml, i, length(xml))}"
+}
+
+export pure func docxTplInsertBeforeFirst(xml: string, marker: string, payload: string) -> string {
+  let i = find(xml, marker);
+  if i < 0 then xml
+  else "${substring(xml, 0, i)}${payload}${substring(xml, i, length(xml))}"
+}
+
+-- Remove every self-closing element opening with openTag whose text contains
+-- needle. Both <Relationship .../> and <Override .../> are self-closing by
+-- schema, which is what makes "up to the next />" a safe bound.
+export pure func docxTplDropElems(xml: string, openTag: string, needle: string) -> string =
+  docxTplDropElemsScan(xml, openTag, needle, 0)
+
+pure func docxTplDropElemsScan(xml: string, openTag: string, needle: string, from: int) -> string {
+  let i = if from >= length(xml) then -1
+          else find(substring(xml, from, length(xml)), openTag);
+  if i < 0 then xml
+  else docxTplDropElemAt(xml, openTag, needle, from + i)
+}
+
+pure func docxTplDropElemAt(xml: string, openTag: string, needle: string, start: int) -> string {
+  let rest = substring(xml, start, length(xml));
+  let e = find(rest, "/>");
+  if e < 0 then xml
+  else docxTplDropElemDecide(xml, openTag, needle, start, start + e + 2, substring(rest, 0, e + 2))
+}
+
+pure func docxTplDropElemDecide(xml: string, openTag: string, needle: string,
+                                start: int, stop: int, elem: string) -> string =
+  if contains(elem, needle)
+  then docxTplDropElemsScan(
+    "${substring(xml, 0, start)}${substring(xml, stop, length(xml))}",
+    openTag, needle, start)
+  else docxTplDropElemsScan(xml, openTag, needle, stop)
+
+-- Largest integer written as `prefix<digits>"` anywhere in xml, or 0 when the
+-- attribute never appears. Splitting on the prefix means every occurrence is
+-- examined, including ones this code has no other reason to know about — which
+-- is the point: the next free id has to clear ALL of the template's, not just
+-- the ones in the shapes we expect.
+export pure func docxTplMaxAttrInt(xml: string, prefix: string) -> int =
+  docxTplMaxOfParts(split(xml, prefix), 0)
+
+pure func docxTplMaxOfParts(parts: [string], best: int) -> int =
+  match parts {
+    [] => best,
+    p :: rest =>
+      let v = docxTplLeadingInt(p) in
+      docxTplMaxOfParts(rest, if v > best then v else best)
+  }
+
+pure func docxTplLeadingInt(s: string) -> int {
+  let q = find(s, "\"");
+  if q <= 0 then 0 else getOrElse(stringToInt(substring(s, 0, q)), 0)
+}

@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.38.0...HEAD)
+## [v0.39.0](https://github.com/sunholo-data/ailang-parse/compare/v0.38.0...v0.39.0) — 2026-08-28
 
 ### `--reference-doc`: style a generated DOCX from an existing one
 

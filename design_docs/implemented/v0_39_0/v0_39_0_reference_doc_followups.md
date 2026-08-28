@@ -1,6 +1,11 @@
 # `--reference-doc` follow-ups: section picking, numbering resolution, table styles
 
-**Status**: PLANNED (2026-08-28)
+**Status**: DONE (2026-08-28, shipped in v0.39.0). Items 1–3 shipped together
+with the style-based numbering discovery (Item 2b); items 4–7 remain deferred
+with reasons recorded below. Office suite 105/105 at 100.0%, roundtrip 0/102,
+verify_generated green with the L6 RefDoc/RefSection stages, `--prove` 0
+violations, 103 inline tests. Published to the AILANG package registry by the
+v0.39.0 tag CI.
 **Source**: ailang message `inbox_1787906079375_e820fe40` from ailang-parse-claude — "Follow-ups after --reference-doc (DOCX style templates)", filed at `--reference-doc` ship time with the items deliberately left out.
 **Follows**: the `--reference-doc` feature (CHANGELOG "Unreleased", working tree; module `docparse/services/docx_template.ail`).
 **Related**: [`v0_19_0_style_inheritance.md`](../../planned/v0_19_0/v0_19_0_style_inheritance.md) — owns the *style-level* numbering half (see boundary in item 2); [`v0_32_0_generation_surfaces.md`](../../planned/v0_32_0/v0_32_0_generation_surfaces.md) — owns the MCP/WASM surface gaps (items 4–5 deferred there).
