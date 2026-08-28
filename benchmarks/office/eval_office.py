@@ -2,7 +2,8 @@
 
 Evaluates DocParse output against golden expected outputs on structural
 features: track changes, comments, headers/footers, merged cells, text boxes,
-speaker notes, images, tables, and text content.
+speaker notes, images, tables, lists (count + ordered/unordered classification),
+and text content.
 
 Covers: DOCX, PPTX, XLSX, ODT, ODP, ODS, EPUB, HTML, CSV, Markdown.
 
@@ -77,6 +78,53 @@ def check_tables(golden_els: list[NormalizedElement], actual_els: list[Normalize
         "merge_match": golden_merges == actual_merges,
         "cell_text_jaccard": round(jaccard, 4),
     }
+
+
+def check_lists(golden_els: list[NormalizedElement], actual_els: list[NormalizedElement]) -> dict:
+    """Check list extraction: items detected, ordered/unordered classification.
+
+    This is the structural guard for numbering resolution. Text similarity
+    passes even when every list has degraded to a text block — the words are
+    all still there — which is exactly how style-numbered lists (python-docx's
+    List Bullet / List Number) went undetected: the golden recorded the defect
+    and every structural check stayed green. This check fails when list items
+    vanish, when bullet-vs-numbered classification drifts, or (when counts
+    agree) when the i-th list item's classification disagrees.
+    """
+    golden_lists = [e for e in golden_els if e.type == "list_item"]
+    actual_lists = [e for e in actual_els if e.type == "list_item"]
+
+    if not golden_lists:
+        return {"applicable": False}
+
+    golden_ordered = sum(1 for e in golden_lists if e.metadata.get("is_ordered"))
+    actual_ordered = sum(1 for e in actual_lists if e.metadata.get("is_ordered"))
+
+    count_match = len(actual_lists) == len(golden_lists)
+    ordered_match = golden_ordered == actual_ordered
+
+    result = {
+        "applicable": True,
+        "list_count_match": count_match,
+        "golden_lists": len(golden_lists),
+        "actual_lists": len(actual_lists),
+        "golden_ordered": golden_ordered,
+        "actual_ordered": actual_ordered,
+        "ordered_match": ordered_match,
+    }
+
+    # Position-wise classification: the i-th list item in each document should
+    # agree on ordered/unordered. Only well-defined when the counts line up;
+    # when they do not, the totals above already fail the check.
+    if count_match:
+        mismatches = [
+            i for i, (g, a) in enumerate(zip(golden_lists, actual_lists))
+            if bool(g.metadata.get("is_ordered")) != bool(a.metadata.get("is_ordered"))
+        ]
+        result["ordered_position_match"] = not mismatches
+        result["position_mismatch_indexes"] = mismatches[:5]
+
+    return result
 
 
 def check_track_changes(golden_els: list[NormalizedElement], actual_els: list[NormalizedElement]) -> dict:
@@ -299,6 +347,7 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
     # Run all checks
     checks = {
         "tables": check_tables(golden_els, actual_els),
+        "lists": check_lists(golden_els, actual_els),
         "track_changes": check_track_changes(golden_els, actual_els),
         "comments": check_comments(golden_els, actual_els),
         "headers_footers": check_headers_footers(golden_els, actual_els),
@@ -348,15 +397,15 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
 def print_report(results: list[dict], batch_ms: float = 0) -> None:
     """Print a markdown-style report."""
     print("\n# DocParse Structural Benchmark\n")
-    print(f"| File | Score | Elements | Tables | Changes | Comments | Hdr/Ftr | TextBox | Jaccard |")
-    print(f"|------|-------|----------|--------|---------|----------|---------|---------|---------|")
+    print(f"| File | Score | Elements | Tables | Lists | Changes | Comments | Hdr/Ftr | TextBox | Jaccard |")
+    print(f"|------|-------|----------|--------|-------|---------|----------|---------|---------|---------|")
 
     total_score = 0
     total_files = 0
 
     for r in results:
         if r["status"] != "OK":
-            print(f"| {r['file']} | FAIL | — | — | — | — | — | — | — |")
+            print(f"| {r['file']} | FAIL | — | — | — | — | — | — | — | — |")
             continue
 
         total_files += 1
@@ -373,6 +422,11 @@ def print_report(results: list[dict], batch_ms: float = 0) -> None:
         if c["tables"].get("applicable") and c["tables"].get("merge_match") is False:
             tables = "MERGE"
 
+        lists = cell(c["lists"], "list_count_match")
+        if c["lists"].get("applicable") and c["lists"].get("ordered_match") is False \
+                and c["lists"].get("list_count_match", True):
+            lists = "ORDER"
+
         changes = cell(c["track_changes"])
         comments = cell(c["comments"])
         hdrftr = cell(c["headers_footers"], "header_match")
@@ -380,7 +434,7 @@ def print_report(results: list[dict], batch_ms: float = 0) -> None:
         jaccard = f"{c['text_similarity']['jaccard']:.2f}"
 
         score_pct = f"{r['score']:.0%}"
-        print(f"| {r['file']} | {score_pct} | {r['actual_elements']} | {tables} | {changes} | {comments} | {hdrftr} | {textbox} | {jaccard} |")
+        print(f"| {r['file']} | {score_pct} | {r['actual_elements']} | {tables} | {lists} | {changes} | {comments} | {hdrftr} | {textbox} | {jaccard} |")
 
     mean_score = total_score / total_files if total_files else 0
     batch_s = batch_ms / 1000
