@@ -9,6 +9,33 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.39.1](https://github.com/sunholo-data/ailang-parse/compare/v0.39.0...v0.39.1) — 2026-08-28
+
+### Published manifest declared a floor the package does not meet
+
+0.38.0 and 0.39.0 shipped with `ailang = ">=0.31.0"`, but `eml_parser`'s
+charset decoding (v0.38.0) imports `std/bytes.toInts`, which first shipped in
+AILANG **v0.33.1** (v0.33.0 does not export it — the floor check caught exactly
+that). Floor bumped to `>=0.33.1`, verified by compiling all 53 modules against
+a binary built from the v0.33.1 tag with that tag's own stdlib.
+
+### Browser bundle: pin v0.30.0 → v0.34.0, type-check budget 2s → 8s
+
+The same hole, browser side: the in-browser demo pinned ailang.wasm v0.30.0,
+whose `std/bytes` also lacks `toInts` — the site's eml charset decoding has
+been broken since the vendored parser picked up the v0.38.0 charset work, and
+the WASM smoke test failed on it. Pin bumped to v0.34.0 and re-vendored.
+
+The v0.34.0 runtime type-checks measurably slower, and three default-set
+modules now exceed its hardcoded 2s per-module type-check budget: docx_parser
+2663ms (charset decoding, numbering resolution, style-level lists),
+markdown_parser 2335ms, tex_parser 2375ms — measured by the module-budget
+spec, not estimated. ailang#662 made the budget embedder-configurable for
+exactly this case, so `wasm-demo.js` raises it to 8s at boot: a visitor who
+already downloaded a ~42 MB WASM binary prefers a slower boot to a refused
+one, and the page shows real per-module progress. The deterministic step
+counts still report headroom.
+
 ## [v0.39.0](https://github.com/sunholo-data/ailang-parse/compare/v0.38.0...v0.39.0) — 2026-08-28
 
 ### `--reference-doc`: style a generated DOCX from an existing one

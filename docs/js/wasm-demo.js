@@ -251,6 +251,20 @@
             55 + Math.round(((i + 1) / allStdlibs.length) * 15));
         }
 
+        // Raise the WASM type-check budget before loading modules. The runtime
+        // default is 2s per module (v0.22.x, sized on the module corpus of the
+        // time); the v0.34.0 runtime type-checks the same sources measurably
+        // slower, which pushed docx_parser (eml charset decoding, numbering
+        // resolution, style-level lists) and markdown_parser over it. ailang#662
+        // made the limit embedder-configurable for exactly this case: a host
+        // that has already downloaded a ~40 MB WASM binary prefers a slower
+        // boot to a refused one, and this page shows real progress per module.
+        // The deterministic step counts in each loadModule result still report
+        // headroom, so the module-budget spec can watch growth.
+        if (typeof ailangSetTypeCheckBudget === 'function') {
+          ailangSetTypeCheckBudget(8000);
+        }
+
         // Load AILANG Parse modules
         for (var k = 0; k < MODULES_TO_LOAD.length; k++) {
           var mod = MODULES_TO_LOAD[k];

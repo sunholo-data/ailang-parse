@@ -33,15 +33,16 @@ test("per-module type-check timings", async ({ page }) => {
       const t0 = performance.now();
       const r = engine.repl.loadModule(m, src);
       const t1 = performance.now();
-      out.push({ name: m, ms: Math.round(t1 - t0), ok: !!r.success });
+      out.push({ name: m, ms: Math.round(t1 - t0), ok: !!r.success, budgetMs: r.budgetMs });
     }
     return out;
   });
 
+  const budget = timings[0] && timings[0].budgetMs ? timings[0].budgetMs : 2000;
   timings.sort((a, b) => b.ms - a.ms);
-  console.log("PER-MODULE TYPE-CHECK (budget 2000ms each):");
+  console.log(`PER-MODULE TYPE-CHECK (budget ${budget}ms each):`);
   for (const t of timings) {
-    const pct = Math.round((t.ms / 2000) * 100);
+    const pct = Math.round((t.ms / budget) * 100);
     console.log(`  ${String(t.ms).padStart(5)}ms  ${String(pct).padStart(3)}% of budget  ${t.ok ? "ok " : "ERR"}  ${t.name}`);
   }
 });
