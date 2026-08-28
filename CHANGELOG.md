@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased](https://github.com/sunholo-data/ailang-parse/compare/v0.39.1...HEAD)
+## [v0.39.2](https://github.com/sunholo-data/ailang-parse/compare/v0.39.1...v0.39.2) — 2026-08-28
 
 ### Unicode bullet glyphs parse as lists — the Word-paste case
 
