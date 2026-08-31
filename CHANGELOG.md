@@ -9,6 +9,73 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.39.3](https://github.com/sunholo-data/ailang-parse/compare/v0.39.2...v0.39.3) — 2026-08-31
+
+### A failed parse is an error, not a document containing the error
+
+Reported from a batch of nine files: one produced a 114-byte `.md` and the run
+said **9/9 succeeded**. The file's entire content was the sentence
+`PDF extraction failed: could not execute 'uv'.` It was caught only because
+someone was checking output sizes. A batch of client contracts could have lost
+one silently.
+
+`pdf_backend_external` states the rule it intends — *"a backend that errors,
+exits non-zero, emits non-JSON, or extracts zero blocks is a hard failure the
+caller must surface (no silent 1-byte 'successes')"* — and the guard in
+`parsePdfViaBackend` does return `Err`. The orchestrator then caught that `Err`
+and returned `Ok` with the message as the document's only block. From there
+nothing could tell a failure from a parse: the CLI exited 0, wrote the file, and
+`ailang run --batch` counted it.
+
+**A failed parse now returns `Err`: exit non-zero, no output file written.** Two
+further sites did the same with the deterministic path's refusals (an
+unsupported format produced a 45-byte document) and are fixed alongside.
+
+**API-visible.** `parseDocument` / `parseDocumentAI` return `Err` on paths that
+previously returned a document. Callers that assumed `Ok` need to handle it —
+which is the point: the old shape gave them no way to detect the failure at all.
+The MCP server now reports the error's own code (`UNSUPPORTED_FORMAT`,
+`BACKEND_ERROR`) and its real `retryable` flag instead of labelling everything
+`AI_PROVIDER_ERROR` with `retryable: true`, which told clients to retry an
+unsupported format forever.
+
+### docling could never finish a PDF
+
+The message was misleading, and chasing it found a third defect. `uv` was on
+PATH and had worked for the other eight files. `ailang run` defaults
+`--process-timeout` to **30 seconds**; docling needs ~185s on a 9-page
+contract, so it was killed every time. `sunholo/external_backend` then
+collapsed all seven `ProcessError` variants into `"could not execute '<cmd>'"`
+— the missing-binary phrasing — sending the reader to check a PATH that was
+never wrong.
+
+`bin/docparse` now passes `--process-timeout 20m` on the paths that grant
+Process, overridable with `DOCPARSE_PROCESS_TIMEOUT`. The reported file parses
+to 28,763 bytes of real content instead of 114 bytes of error. **docling had
+never once completed a non-trivial PDF.**
+
+Fixed upstream too: `sunholo/external_backend` 0.2.0 adds
+`describeProcessError`, which renders each variant with the detail it carries —
+timeout duration, output-byte limit, kill signal — and names the flag that
+fixes it.
+
+### `benchmarks/failure_check.py`
+
+The regression guard, and the only suite that scores what happens when a parse
+*fails*; every other one scores documents that parsed, which is why none of them
+saw this. Verified against the pre-fix code: it catches both laundering sites.
+Its positive controls are load-bearing — failing everything would satisfy "no
+output on failure" too.
+
+Its first CI run went red on exactly that control, and correctly: the runner has
+no poppler, so no CI job had ever parsed a PDF. Both workflows now install it,
+and the release gate runs the check.
+
+`orchParseError` carries this repo's first `requires` clause. Z3 rejected the
+first postcondition honestly — an empty message satisfies nothing — and the
+precondition is the real rule: an error with no message is the silent failure in
+miniature.
+
 ## [v0.39.2](https://github.com/sunholo-data/ailang-parse/compare/v0.39.1...v0.39.2) — 2026-08-28
 
 ### Unicode bullet glyphs parse as lists — the Word-paste case

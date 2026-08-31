@@ -53,11 +53,23 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      # poppler supplies the `pdftotext` binary the default PDF backend shells
+      # out to. The office suite parses no PDFs, so nothing here needed it.
+      - name: Install poppler (pdftotext backend)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Download test files
         run: bash benchmarks/download_test_files.sh
 
       - name: Run structural benchmark (must be 100%)
         run: uv run benchmarks/run_benchmarks.py --suite office
+
+      # Gates the RELEASE on failures, not just on documents that parse. The
+      # defect this guards — a failed parse returned as a document containing
+      # its own error, exit 0 — shipped past a green office suite, which is
+      # the pattern .claude/rules/benchmarks.md calls the blind spot.
+      - name: Run failure check (failed parses must not write output)
+        run: uv run benchmarks/failure_check.py
 
   publish:
     name: Publish to AILANG Registry
