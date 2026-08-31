@@ -83,6 +83,12 @@ The property is one line: **a file on disk means a document was parsed.** A
 failed parse exits non-zero and writes nothing. The positive controls are
 load-bearing — failing everything would satisfy that too.
 
+Needs `pdftotext` (poppler) on PATH — `brew install poppler`, or
+`apt-get install -y poppler-utils`. It exits 2 with that instruction rather
+than skipping, because the PDF path is the one it exists to guard. Its first CI
+run failed for exactly this reason: no other job parses a PDF, so the runner
+had never needed poppler and CI had zero coverage of the PDF backend.
+
 ## The blind spot to design around
 
 Three defects in a row reached a release through green suites: parse-side

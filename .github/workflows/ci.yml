@@ -423,6 +423,13 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      # poppler supplies the `pdftotext` binary the default PDF backend shells
+      # out to. Not needed by the office suite (it parses no PDFs), which is
+      # why CI ran without it and had zero coverage of the PDF path — the path
+      # the failure check exists to guard.
+      - name: Install poppler (pdftotext backend)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Download test files
         run: bash benchmarks/download_test_files.sh
 

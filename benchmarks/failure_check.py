@@ -33,6 +33,7 @@ Usage:
 """
 
 import argparse
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -92,7 +93,17 @@ def check_success(name: str, args: list[str], tmp: Path,
     problems = []
 
     if code != 0:
-        problems.append(f"{name}: exit {code} on a parse that should succeed")
+        # Quote the run's own output. The first CI failure of this check read
+        # only "exit 1 on a parse that should succeed", which is true of a
+        # broken fix AND of a missing dependency — and it was the latter (no
+        # poppler on the runner, since the office suite parses no PDFs). A
+        # positive control that cannot say why it failed sends you to debug
+        # the wrong half.
+        tail = "\n      ".join(text.strip().splitlines()[-4:])
+        problems.append(
+            f"{name}: exit {code} on a parse that should succeed\n"
+            f"      {tail}"
+        )
     elif not wrote:
         problems.append(f"{name}: exit 0 but wrote no output file")
     elif out.stat().st_size < min_bytes:
@@ -117,6 +128,17 @@ def main() -> int:
     if not good_pdf.exists():
         print(f"missing test file: {good_pdf}", file=sys.stderr)
         print("run: bash benchmarks/download_test_files.sh", file=sys.stderr)
+        return 2
+
+    # Preflight the PDF backend rather than letting its absence surface as a
+    # confusing positive-control failure. Skipping is NOT an option here: the
+    # PDF path is the one this suite exists to guard, so an environment that
+    # cannot run it must say so and stop, not quietly test less.
+    if shutil.which("pdftotext") is None:
+        print("pdftotext (poppler) not on PATH — the PDF backend cannot run.",
+              file=sys.stderr)
+        print("  macOS:  brew install poppler", file=sys.stderr)
+        print("  Debian: sudo apt-get install -y poppler-utils", file=sys.stderr)
         return 2
 
     problems: list[str] = []
