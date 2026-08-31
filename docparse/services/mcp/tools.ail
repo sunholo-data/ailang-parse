@@ -9,6 +9,7 @@ import std/env (getEnvOr)
 import std/process (exec, NotFound as ProcNotFound)
 import std/net (httpGet, httpPost)
 import std/result (Ok, Err)
+import std/ai (AIError)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages)
 import docparse/services/orchestrator (parseDocumentPure, parseDocumentAI, ParseOptions, ParseOutcome)
 import docparse/services/format_router (detectFormat, getExtension, needsAI, strategyDescription)
@@ -146,15 +147,32 @@ func mcpParseDeterministic(filepath: string, ext: string, format: string, output
   }
 
 -- Parse AI-required formats.
+--
+-- The error object reports the AIError's own code and retryable flag rather
+-- than hardcoding AI_PROVIDER_ERROR / retryable:true. Not every failure that
+-- reaches here is the provider's: a refused format or a dead PDF backend
+-- arrives as an Err too, and telling a client to retry an unsupported format
+-- is an infinite loop over a decision that will never change.
 func mcpParseAI(filepath: string, ext: string, format: string, outputFormat: string) -> string ! {Clock, AI, Env, FS, IO, Net} =
   match parseDocumentAI(filepath, mcpParseOptions()) {
     Ok(outcome) => mcpFormatOutcome(outcome, outputFormat),
-    Err(e) => encode(jo([
-      kv("error", js("AI_PROVIDER_ERROR")),
-      kv("message", js(show(e))),
-      kv("retryable", jb(true))
-    ]))
+    Err(e) => mcpErrorJson(e)
   }
+
+-- One JSON shape for every orchestrator failure, so a client never has to
+-- guess whether `message` holds a sentence or a rendered record.
+pure func mcpErrorJson(e: AIError) -> string =
+  encode(jo([
+    kv("error", js(mcpErrorCode(e.code))),
+    kv("message", js(e.message)),
+    kv("retryable", jb(e.retryable))
+  ]))
+
+-- Map an orchestrator error code to the SCREAMING_CASE the MCP contract uses.
+pure func mcpErrorCode(code: string) -> string =
+  if code == "parse_refused" then "UNSUPPORTED_FORMAT"
+  else if code == "pdf_backend_failed" then "BACKEND_ERROR"
+  else "AI_PROVIDER_ERROR"
 
 -- Capability envelope for the stdio MCP server.
 --
@@ -234,11 +252,7 @@ export func mcpConvert(input: string, outputFormat: string, outputPath: string, 
 
     match parseDocumentAI(resolved, mcpParseOptions()) {
       Ok(outcome) => mcpGenerate(outcome.document, outFmt, outPath),
-      Err(e) => encode(jo([
-        kv("error", js("AI_PROVIDER_ERROR")),
-        kv("message", js(show(e))),
-        kv("retryable", jb(true))
-      ]))
+      Err(e) => mcpErrorJson(e)
     }
   }
   }

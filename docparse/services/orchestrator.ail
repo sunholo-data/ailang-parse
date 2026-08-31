@@ -169,6 +169,25 @@ export func parseDocumentPure(filepath: string, opts: ParseOptions)
   else Err(orchPureRefusal(format))
 }
 
+-- A parse that could not be attempted is an Err, never an Ok document whose
+-- only block carries the error text.
+--
+-- Laundering a failure into content is indistinguishable from a successful
+-- parse to every caller: the CLI exits 0, writes a ~100-byte .md saying
+-- "Parse failed: …", and `ailang run --batch` counts the file as a success.
+-- A nine-file batch reported 9/9 while one document had been replaced by its
+-- own error message. Err exits 1 and writes no output file.
+-- `requires`: an error with no message is the silent failure in miniature —
+-- the caller gets "Error []:" and is no better off than with the empty .md.
+-- `ensures` pins the field mapping rather than asserting length > 0, because
+-- code and msg are both strings: swapping them type-checks, and would print
+-- the whole diagnostic as the code and nothing as the message.
+pure func orchParseError(code: string, msg: string) -> AIError
+  requires { length(msg) > 0 }
+  ensures { result.code == code && result.message == msg && result.retryable == false }
+=
+  {code: code, message: msg, retryable: false}
+
 -- Why a format is refused by the deterministic path, and what to call instead.
 pure func orchPureRefusal(format: string) -> string =
   if format == "pdf" then
@@ -409,11 +428,10 @@ export func parseDocument(filepath: string, opts: ParseOptions)
       if format == "email" && opts.deep
         then Ok(orchEnrich(filepath, orchEmailDeep(outcome, opts), opts))
         else Ok(orchEnrich(filepath, outcome, opts)),
-    -- Deterministic path refused. AI-only formats (image/audio/video) are not
-    -- yet routed here; surface the refusal rather than returning empty blocks.
-    Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
-      [mkText("Parse failed: ${msg}", "error", 0)],
-      [], [msg], 0))
+    -- Deterministic path refused — every format it can do has been routed
+    -- above, so what reaches here is genuinely unsupported. Surface it as a
+    -- failure, not as a document whose content is the refusal (orchParseError).
+    Err(msg) => Err(orchParseError("parse_refused", "${filepath}: ${msg}"))
   }
 }
 
@@ -568,11 +586,17 @@ func orchPdf(filepath: string, opts: ParseOptions)
     },
     -- An explicit backend choice is respected: no silent AI fallback, because
     -- AI costs money and the caller asked for something free.
+    --
+    -- The failure is returned as Err, NOT as an Ok document whose only block is
+    -- the error text. That laundering is what pdf_backend_external warns against
+    -- ("no silent 1-byte successes"): the caller wrote a 114-byte .md containing
+    -- "PDF extraction failed: …" and counted the file as parsed, so a batch of
+    -- nine reported 9/9 while one document was gone. An Err exits 1, writes no
+    -- output file, and is counted as a failure by `ailang run --batch`.
     Err(msg) =>
       if length(opts.pdfBackend) > 0
-        then Ok(mkOutcome("pdf", filepath, emptyMetadata(),
-          [mkText("PDF extraction failed: ${msg}. If this is a scanned PDF, retry with pdfBackend=ai.", "error", 0)],
-          [], ["PDF backend '${backend}' failed: ${msg}"], 0))
+        then Err(orchParseError("pdf_backend_failed",
+          "PDF backend '${backend}' failed on ${filepath}: ${msg}. If this is a scanned PDF, retry with --pdf-backend ai."))
         else match parsePdfResult(filepath) {
           Err(e) => Err(e),
           Ok(blocks) => {
@@ -788,8 +812,6 @@ export func parseDocumentAI(filepath: string, opts: ParseOptions)
   else if format == "video" then Ok(orchMedia(filepath, "video", parseVideo(filepath, orchVideoMime(ext))))
   else match parseDocumentPure(filepath, opts) {
     Ok(outcome) => Ok(orchEnrich(filepath, outcome, opts)),
-    Err(msg) => Ok(mkOutcome(format, filepath, emptyMetadata(),
-      [mkText("Parse failed: ${msg}", "error", 0)],
-      [], [msg], 0))
+    Err(msg) => Err(orchParseError("parse_refused", "${filepath}: ${msg}"))
   }
 }

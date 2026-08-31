@@ -428,3 +428,10 @@ jobs:
 
       - name: Run structural benchmark (53 files, must be 100%)
         run: uv run benchmarks/run_benchmarks.py --suite office
+
+      # Scores the failures, which no other suite looks at: a failed parse must
+      # exit non-zero and write nothing. An explicit --pdf-backend failure used
+      # to be returned as the document's only block, so the CLI exited 0 and a
+      # batch counted the file as parsed.
+      - name: Run failure check (failed parses must not write output)
+        run: uv run benchmarks/failure_check.py

@@ -69,10 +69,11 @@ ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
 ./bin/docparse --prove       # Z3 contract verification
 bash benchmarks/quick_check.sh    # Quick smoke test (~15s)
 
-# After ANY parser or generator change, all three:
+# After ANY parser or generator change, all four:
 uv run benchmarks/run_benchmarks.py --suite office   # 105 files, must be 100%
 uv run benchmarks/roundtrip_check.py                 # parse -> md -> parse
 uv run benchmarks/verify_generated.py                # generated docs + DOCX grid
+uv run benchmarks/failure_check.py                   # failed parses write nothing
 
 # Direct ailang invocation (from repo root)
 ailang run --entry main --caps IO,FS,Env docparse/main.ail data/test_files/sample.docx

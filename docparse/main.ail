@@ -209,9 +209,14 @@ func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTa
               referenceDoc: string, referenceSection: int, tableStyle: string)
   -> () ! {IO, FS, AI, Env, Net, Process, Clock} {
   match parseDocument(filepath, opts) {
+    -- Hard failure: print, write NOTHING, exit non-zero. The error text must
+    -- never become the document — a caller that gets a file back cannot tell a
+    -- parse from a failure, and `ailang run --batch` scores it as a success.
+    -- The code says which kind of failure it was; "AI provider failure" was
+    -- hardcoded here and mislabelled every backend and routing error as one.
     Err(e) => {
       println("");
-      println("Error: AI provider failure — ${show(e)}");
+      println("Error [${e.code}]: ${e.message}");
       exit(1)
     },
     Ok(outcome) => {

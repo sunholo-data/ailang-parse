@@ -679,6 +679,18 @@ if $USE_BATCH; then
 fi
 CMD+=(--entry main --caps "$CAPS" --max-recursion-depth 50000)
 
+# `ailang run` defaults --process-timeout to 30s, which is fine for pdftotext
+# (instant) and far too short for OCR: docling took 185s on a 9-page contract,
+# so it was killed at 30s on every non-trivial PDF and had never completed one.
+# The kill surfaced as ExecFailed "could not execute 'uv'", which reads as a
+# missing binary and sends you to check a PATH that was never the problem.
+#
+# 20m is a ceiling, not a target — a backend that finishes in 3s still returns
+# in 3s. Override with DOCPARSE_PROCESS_TIMEOUT (any Go duration: 90s, 5m, 1h).
+if $NEEDS_PROCESS; then
+  CMD+=(--process-timeout "${DOCPARSE_PROCESS_TIMEOUT:-20m}")
+fi
+
 if $USE_AI; then
   CMD+=(--ai "$AI_MODEL")
 fi

@@ -31,6 +31,9 @@ uv run benchmarks/roundtrip_check.py
 
 # Generated-document verification (structure, libraries, DOCX table grid)
 uv run benchmarks/verify_generated.py
+
+# Failure check: a failed parse must exit non-zero and write NO output file
+uv run benchmarks/failure_check.py
 ```
 
 ## Office Structural Benchmark
@@ -65,6 +68,20 @@ libraries AND inspects its structure. The DOCX check asserts every row spans
 exactly the columns `w:tblGrid` declares and that every cell is iterable —
 added after malformed geometry shipped twice while "does it open" passed,
 because LibreOffice tolerates what python-docx and Word do not.
+
+## Failure check
+
+`benchmarks/failure_check.py` is the only suite that scores what happens when a
+parse *fails*. Every other one scores documents that parsed, so none of them
+could see an error being returned AS the document: an explicit `--pdf-backend`
+failure was caught, formatted into a sentence, and handed back as the outcome's
+only block. The CLI exited 0, wrote a 114-byte `.md` reading "PDF extraction
+failed: …", and `ailang run --batch` counted it — a nine-file batch reported
+9/9 with one contract silently replaced by its own error message.
+
+The property is one line: **a file on disk means a document was parsed.** A
+failed parse exits non-zero and writes nothing. The positive controls are
+load-bearing — failing everything would satisfy that too.
 
 ## The blind spot to design around
 
