@@ -9,6 +9,44 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.39.4](https://github.com/sunholo-data/ailang-parse/compare/v0.39.3...v0.39.4) — 2026-09-01
+
+### "0 template parts carried" now says why
+
+A reference doc that is itself a docparse output reports `reference doc
+applied, 0 template parts carried`. That is **correct** — such a file has no
+theme, headers, footers or embedded fonts to carry — but it reads as failure,
+and it cost a caller a real detour proving their template had applied when it
+had. The zero case now names the cause:
+
+```
+reference doc applied, 0 template parts carried (template declares no theme, headers or fonts)
+```
+
+Behaviour is unchanged; only the message is. The non-zero case is byte-identical.
+
+### Vendored browser modules re-synced
+
+`docs/ailang/docparse/services/` had drifted from the canonical tree on three
+modules — `docx_generator` (the message above), `eml_parser` and
+`markdown_parser` (fixes from v0.37–v0.39 that never reached the mirror). The
+registry validator type-checks the whole checkout, so a stale vendored copy is
+a publish failure waiting to happen; it already cost the v0.33.0 and v0.37.0
+publishes. Re-vendored with `docs/scripts/vendor-wasm-packages.sh`.
+
+### Downstream
+
+The hosted API does not surface the generator's success message — since
+docparse v0.22.0 it returns `template_parts_carried` as a number, which is
+what a caller should assert on — so this release changes nothing for API
+consumers. It matters to CLI and WASM users.
+
+Reference-doc templating over HTTP shipped in docparse v0.22.0 (2026-09-01)
+and the SDK pass-through in `sdk-v0.13.0`/`0.13.1`; see
+[design_docs/implemented/v0_40_0/](design_docs/implemented/v0_40_0/).
+
+---
+
 ## [v0.39.3](https://github.com/sunholo-data/ailang-parse/compare/v0.39.2...v0.39.3) — 2026-08-31
 
 ### A failed parse is an error, not a document containing the error
