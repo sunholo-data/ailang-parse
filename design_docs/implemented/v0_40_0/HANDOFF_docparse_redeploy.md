@@ -1,6 +1,30 @@
 # Handoff to `sunholo/docparse`: redeploy first, then expose `referenceDoc`
 
-**Status**: HANDOFF (2026-08-31) — for an agent working in the private
+**Status**: DONE (2026-09-01) for the two steps this handoff was urgent about,
+both in `sunholo/docparse`, both live in prod.
+
+| step | state |
+|---|---|
+| 1 — redeploy | **done**, docparse v0.21.0. All three environments run AILANG runtime `v0.34.0` and `ailang_parse` 0.39.x (v0.22.0 moved it to 0.39.3), so every parser fix from v0.34–v0.39 now reaches the reporter's upload path — including the style-based numbering work that was the largest silent loss |
+| 2 — parser version discoverable | **open**, carved out as [`v0_40_0_parser_version_discoverability.md`](../../planned/v0_40_0/v0_40_0_parser_version_discoverability.md) so it is not buried here |
+| 3 — the three parameters | **done**, docparse v0.22.0, verified end-to-end on dev, test and prod |
+| 4 — SDKs | **in progress** in this repo |
+
+Step 3 shipped without step 2, inverting the order below. That was a judgement
+call at ship time: step 1 had already closed the failure step 2 guards against
+(a silently ignored parameter on a build that cannot honour it), so the
+ordering constraint no longer bound. Step 2 remains worth doing on its own
+merits — it is the reporter's own complaint, not a prerequisite.
+
+One deviation from Step 3 as designed: the parameters are **not** on the MCP
+surface. serve-api marks every generated tool parameter required, so adding one
+broke every existing `tools/call` immediately; docparse reverted it and pinned
+the arity with a test. Filed with AILANG core as `inbox_1788255233818_0805761b`.
+
+The CLI-side reword under "Not in this repo either" is in flight in this repo
+(`docparse/services/docx_generator.ail`).
+
+**Originally**: HANDOFF (2026-08-31) — for an agent working in the private
 `sunholo/docparse` deployment repo, not in this one.
 **Source**: two ailang messages from `aitana-platform`
 (`inbox_1788155556743_b0f9d03a`, `inbox_1788155549716_f8030598`).
@@ -136,8 +160,11 @@ environments in `europe-west1`. Verify against dev before promoting.
 
 ## Definition of done
 
-- `/api/v1/health` reports `ailang_parse_version` 0.39.2 (or later) on all three
-  environments.
+- ~~`/api/v1/health` reports `ailang_parse_version` 0.39.2 (or later) on all
+  three environments.~~ Moved to
+  [`v0_40_0_parser_version_discoverability.md`](../../planned/v0_40_0/v0_40_0_parser_version_discoverability.md);
+  the redeploy itself is confirmed by `ailang_commit` `v0.34.0` on dev, test
+  and prod.
 - A DOCX using `List Bullet` / `List Number` styles, posted to `/api/v1/parse`,
   returns list blocks rather than plain text blocks. This is the assertion that
   proves step 1 actually took, and it is the reporter's live complaint.

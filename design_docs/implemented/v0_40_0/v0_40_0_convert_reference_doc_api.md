@@ -1,11 +1,27 @@
 # `--reference-doc` over HTTP: `referenceDoc` / `referenceSection` / `tableStyle` on `POST /api/v1/convert`
 
-**Status**: PLANNED (2026-08-31)
+**Status**: SHIPPED (2026-09-01) — the endpoint half landed in
+`sunholo/docparse` **v0.22.0** and is live in prod. `GET /api/v1/capabilities`
+on docparse.ailang.sunholo.com now lists `referenceDoc`, `referenceSection` and
+`tableStyle` on convert, all seven error codes named below, and
+`reference_doc_applied` / `template_parts_carried` in the output schema.
+Verified end-to-end on dev, test and prod with a real templated conversion:
+10 template parts carried, the output carrying the template's `theme1.xml`,
+`fontTable.xml`, `styles.xml` and its body `<w:sectPr>`. **No AILANG library
+change was needed**, exactly as "the transport question" below predicted.
+**Residuals**, carved out rather than buried in an implemented doc: step 2 is
+now [`v0_40_0_parser_version_discoverability.md`](../../planned/v0_40_0/v0_40_0_parser_version_discoverability.md);
+step 4 (SDK pass-through) is in progress in this repo. One deviation from the
+design: the three parameters are **not** on the MCP surface, because serve-api
+marks every generated tool parameter required and adding one broke every
+existing `tools/call` — filed with AILANG core as
+`inbox_1788255233818_0805761b`.
+**Originally**: PLANNED (2026-08-31)
 **Source**: ailang message `inbox_1788155556743_b0f9d03a` from `aitana-platform` —
 "convert API: expose --reference-doc templating over HTTP".
-**Follows**: [`CONTRACT_convert_endpoint.md`](../v0_32_0/CONTRACT_convert_endpoint.md)
+**Follows**: [`CONTRACT_convert_endpoint.md`](../../planned/v0_32_0/CONTRACT_convert_endpoint.md)
 — the contract this extends; and
-[`v0_39_0_reference_doc_followups.md`](../../implemented/v0_39_0/v0_39_0_reference_doc_followups.md),
+[`v0_39_0_reference_doc_followups.md`](../v0_39_0/v0_39_0_reference_doc_followups.md),
 whose **deferred item 4** ("how a hosted API receives a template — upload? sample
 id? gs:// ref? — is a design question, not a parameter") is exactly the question
 this doc answers.
@@ -30,6 +46,22 @@ that duplicates model routing is the wrong seam.
 
 Probed live at `https://docparse.ailang.sunholo.com` on 2026-08-31, and read
 against the working tree at `d5ec0bd`.
+
+**Re-probed 2026-09-01 after the docparse v0.22.0 deploy** (an earlier probe
+the same day, before the deploy, recorded all four steps as open — superseded
+by this):
+
+- **A1, A2 closed.** convert's `input_schema.properties` is now `filepath,
+  target, gcsRef, sourceUrl, pdfBackend, referenceDoc, referenceSection,
+  tableStyle` on dev, test and prod.
+- **A4, A5 closed.** `ailang_commit` is `v0.34.0` on all three environments,
+  above this package's `>=0.33.1` floor. docparse v0.21.0 shipped on
+  `ailang_parse` 0.39.2; v0.22.0 moved it to 0.39.3.
+- **A6, A7 still open.** Neither `/health` nor `capabilities` reports a
+  package version, so a caller still cannot tell which parser is serving.
+  Tracked separately now — see the status header.
+- **A8 still open.** SDK `convert()` signatures are unchanged; step 4 is in
+  progress.
 
 | # | Claim | Evidence |
 |---|---|---|
@@ -131,14 +163,14 @@ assertion a branded-output pipeline wants in its own tests.
 ## Handoff to `sunholo/docparse`
 
 The endpoint lives in the private deployment repo (see
-[`HANDOFF_docparse_api_convert.md`](../v0_32_0/HANDOFF_docparse_api_convert.md)
+[`HANDOFF_docparse_api_convert.md`](../../planned/v0_32_0/HANDOFF_docparse_api_convert.md)
 for the precedent). Ordered:
 
 1. **Redeploy on ailang_parse ≥ 0.39.2 and AILANG runtime ≥ 0.33.1** (A4, A5).
    Nothing below can be honoured before this, and this alone delivers every
    parser fix from v0.34–v0.39 to their upload path — including the list
    grouping work in
-   [`v0_40_0_list_grouping.md`](./v0_40_0_list_grouping.md), which they also
+   [`v0_40_0_list_grouping.md`](../../planned/v0_40_0/v0_40_0_list_grouping.md), which they also
    reported and which affects the same pipeline.
 2. Add `ailang_parse_version` to `/api/v1/health` and to the `capabilities`
    payload (A6, A7).
