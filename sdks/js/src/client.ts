@@ -205,8 +205,16 @@ export class DocParse {
    * await fs.writeFile(r.filename, r.content);
    * console.log((await client.convert("notes.md", { target: "html" })).text());
    * ```
+   *
+   * `referenceDoc` styles the generated document (DOCX target only) after a
+   * template's theme, fonts, headers/footers and page setup — the CLI's
+   * `--reference-doc`. It takes a URL or `gs://` ref here, not a local path
+   * (no multipart convert exists in this SDK yet). `referenceSection` picks
+   * which of the template's sections supplies the page setup (1-based; omit
+   * for the template's last section). `tableStyle` binds generated tables to
+   * one of the template's table styles and requires `referenceDoc`.
    */
-  async convert(filepath: string, opts: { target: string; sourceUrl?: string; gcsRef?: string; pdfBackend?: string }): Promise<ConvertResult> {
+  async convert(filepath: string, opts: { target: string; sourceUrl?: string; gcsRef?: string; pdfBackend?: string; referenceDoc?: string; referenceSection?: number; tableStyle?: string }): Promise<ConvertResult> {
     const url = this.baseUrl + "/api/v1/convert";
     const body: Record<string, string> = { target: opts.target };
     if (filepath) body.filepath = filepath;
@@ -214,6 +222,9 @@ export class DocParse {
     if (opts.sourceUrl) body.sourceUrl = opts.sourceUrl;
     if (opts.gcsRef) body.gcsRef = opts.gcsRef;
     if (opts.pdfBackend) body.pdfBackend = opts.pdfBackend;
+    if (opts.referenceDoc) body.referenceDoc = opts.referenceDoc;
+    if (opts.referenceSection !== undefined) body.referenceSection = String(opts.referenceSection);
+    if (opts.tableStyle) body.tableStyle = opts.tableStyle;
 
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.apiKey) headers["x-api-key"] = this.apiKey;
@@ -249,6 +260,8 @@ export class DocParse {
       sizeBytes: d.size_bytes ?? content.length,
       status: d.status ?? "",
       requestId: d.request_id ?? "",
+      referenceDocApplied: d.reference_doc_applied ?? false,
+      templatePartsCarried: d.template_parts_carried ?? 0,
       text() { return new TextDecoder().decode(this.content); },
     };
   }

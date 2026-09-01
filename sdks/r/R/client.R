@@ -116,15 +116,28 @@ DocParse <- R6::R6Class(
     #' @param source_url Fetch the source from this URL instead of a path.
     #' @param gcs_ref \code{gs://bucket/path}, Business tier only.
     #' @param pdf_backend One of \code{"" pdftotext docling liteparse ai}.
+    #' @param reference_doc Style the generated document (DOCX target only)
+    #'   after a template's theme, fonts, headers/footers and page setup —
+    #'   the CLI's \code{--reference-doc}. A URL or \code{gs://} ref here,
+    #'   not a local path; for a local template use \code{convert_file}.
+    #' @param reference_section Which of the template's sections supplies
+    #'   the page setup (1-based). Omit for the template's last section.
+    #' @param table_style Bind generated tables to one of the template's
+    #'   table styles, by styleId or Word name. Requires \code{reference_doc}.
     #' @return An \code{ailang_convert_result} S3 list. \code{$content} is a
     #'   raw vector regardless of how the wire encoded it.
     convert = function(filepath = NULL, target, source_url = NULL,
-                       gcs_ref = NULL, pdf_backend = NULL) {
+                       gcs_ref = NULL, pdf_backend = NULL,
+                       reference_doc = NULL, reference_section = NULL,
+                       table_style = NULL) {
       body <- list(target = jsonlite::unbox(target))
       if (!is.null(filepath)) body$filepath <- jsonlite::unbox(filepath)
       if (!is.null(source_url)) body$sourceUrl <- jsonlite::unbox(source_url)
       if (!is.null(gcs_ref)) body$gcsRef <- jsonlite::unbox(gcs_ref)
       if (!is.null(pdf_backend)) body$pdfBackend <- jsonlite::unbox(pdf_backend)
+      if (!is.null(reference_doc)) body$referenceDoc <- jsonlite::unbox(reference_doc)
+      if (!is.null(reference_section)) body$referenceSection <- jsonlite::unbox(as.character(reference_section))
+      if (!is.null(table_style)) body$tableStyle <- jsonlite::unbox(table_style)
       if (nzchar(self$api_key)) body$apiKey <- jsonlite::unbox(self$api_key)
       req <- .build_request(self$base_url, "/api/v1/convert",
                             self$api_key, self$timeout)
@@ -139,17 +152,29 @@ DocParse <- R6::R6Class(
     #' @description Upload a local file (multipart) and convert it.
     #' @param filepath Path to a local file.
     #' @param target Target format; see \code{convert}.
+    #' @param reference_doc Path to a local template .docx, uploaded
+    #'   alongside the source file — the CLI's \code{--reference-doc} (DOCX
+    #'   target only).
+    #' @param reference_section See \code{convert}.
+    #' @param table_style See \code{convert}.
     #' @return An \code{ailang_convert_result} S3 list.
-    convert_file = function(filepath, target) {
+    convert_file = function(filepath, target, reference_doc = NULL,
+                            reference_section = NULL, table_style = NULL) {
       stopifnot(file.exists(filepath))
-      req <- .build_request(self$base_url, "/api/v1/convert",
-                            self$api_key, self$timeout)
-      req <- httr2::req_body_multipart(
-        req,
+      parts <- list(
         filepath = curl::form_file(filepath, name = basename(filepath)),
         target   = target,
         apiKey   = self$api_key
       )
+      if (!is.null(reference_doc)) {
+        stopifnot(file.exists(reference_doc))
+        parts$referenceDoc <- curl::form_file(reference_doc, name = basename(reference_doc))
+      }
+      if (!is.null(reference_section)) parts$referenceSection <- as.character(reference_section)
+      if (!is.null(table_style)) parts$tableStyle <- table_style
+      req <- .build_request(self$base_url, "/api/v1/convert",
+                            self$api_key, self$timeout)
+      req <- do.call(httr2::req_body_multipart, c(list(req), parts))
       req <- .req_with_retry(req, self$retry)
       resp <- .perform(req)
       result <- .build_convert_result(.unwrap(resp$body))

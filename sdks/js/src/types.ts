@@ -133,6 +133,8 @@ export interface ConvertResult {
   sizeBytes: number;
   status: string;
   requestId: string;
+  referenceDocApplied: boolean;
+  templatePartsCarried: number;
   /** The document as text. Only meaningful for html/md/qmd targets. */
   text(): string;
   responseMeta?: ResponseMeta;

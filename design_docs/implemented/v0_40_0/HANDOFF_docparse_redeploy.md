@@ -8,7 +8,7 @@ both in `sunholo/docparse`, both live in prod.
 | 1 — redeploy | **done**, docparse v0.21.0. All three environments run AILANG runtime `v0.34.0` and `ailang_parse` 0.39.x (v0.22.0 moved it to 0.39.3), so every parser fix from v0.34–v0.39 now reaches the reporter's upload path — including the style-based numbering work that was the largest silent loss |
 | 2 — parser version discoverable | **open**, carved out as [`v0_40_0_parser_version_discoverability.md`](../../planned/v0_40_0/v0_40_0_parser_version_discoverability.md) so it is not buried here |
 | 3 — the three parameters | **done**, docparse v0.22.0, verified end-to-end on dev, test and prod |
-| 4 — SDKs | **in progress** in this repo |
+| 4 — SDKs | **code-complete, unpublished**. Python, JS, Go and R all gained `reference_doc` / `reference_section` / `table_style` pass-through (Python and R on both the JSON and multipart-upload convert methods; JS and Go only have a JSON convert method, so theirs takes a URL/`gs://` ref, not a local path) plus `reference_doc_applied` / `template_parts_carried` on the result. All four bumped to 0.13.0 and their existing test suites pass (Python 160, Go, JS 59). Python's `convert_file(reference_doc=...)` verified live against prod: `reference_doc_applied: true, template_parts_carried: 7`. Not yet released to PyPI / npm / the Go proxy / CRAN — that's a separate, external step |
 
 Step 3 shipped without step 2, inverting the order below. That was a judgement
 call at ship time: step 1 had already closed the failure step 2 guards against
@@ -21,8 +21,11 @@ surface. serve-api marks every generated tool parameter required, so adding one
 broke every existing `tools/call` immediately; docparse reverted it and pinned
 the arity with a test. Filed with AILANG core as `inbox_1788255233818_0805761b`.
 
-The CLI-side reword under "Not in this repo either" is in flight in this repo
-(`docparse/services/docx_generator.ail`).
+The CLI-side reword under "Not in this repo either" shipped in this repo
+(`docparse/services/docx_generator.ail`) — a zero-part reference doc now
+reports "0 template parts carried (template declares no theme, headers or
+fonts)". Verified against both cases: a docparse-generated reference (0
+parts) and an Office-authored one (7 parts).
 
 **Originally**: HANDOFF (2026-08-31) — for an agent working in the private
 `sunholo/docparse` deployment repo, not in this one.

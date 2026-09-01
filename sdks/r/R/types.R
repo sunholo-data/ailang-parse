@@ -61,7 +61,9 @@ NULL
       source_subtype = .s(d$source_subtype),
       size_bytes     = size,
       status         = .s(d$status),
-      request_id     = .s(d$request_id)
+      request_id     = .s(d$request_id),
+      reference_doc_applied  = .b(d$reference_doc_applied),
+      template_parts_carried = .i(d$template_parts_carried)
     ),
     class = "ailang_convert_result"
   )

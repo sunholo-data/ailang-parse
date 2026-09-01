@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -387,13 +388,24 @@ class DocParse:
 
     def convert(self, filepath: str = "", *, target: str = "",
                 source_url: str = "", gcs_ref: str = "",
-                pdf_backend: str = "") -> ConvertResult:
+                pdf_backend: str = "", reference_doc: str = "",
+                reference_section: Optional[int] = None,
+                table_style: str = "") -> ConvertResult:
         """Convert a document to another format via ``POST /api/v1/convert``.
 
         Targets: ``html md qmd docx pptx xlsx odt odp ods``. The target is
         normalised server-side (case-insensitive, leading dot stripped,
         ``markdown``/``htm``/``quarto`` aliased), so it is deliberately not
         validated here — a new target must not require an SDK release.
+
+        ``reference_doc`` styles the generated document (DOCX target only)
+        after a template's theme, fonts, headers/footers and page setup — the
+        CLI's ``--reference-doc``. Here it takes a URL or ``gs://`` ref, not a
+        local path; for a local template use :meth:`convert_file`.
+        ``reference_section`` picks which of the template's sections supplies
+        the page setup (1-based; omit for the template's last section).
+        ``table_style`` binds generated tables to one of the template's table
+        styles and requires ``reference_doc``.
 
         For uploading a local file use :meth:`convert_file`.
 
@@ -415,6 +427,12 @@ class DocParse:
             body["gcsRef"] = gcs_ref
         if pdf_backend:
             body["pdfBackend"] = pdf_backend
+        if reference_doc:
+            body["referenceDoc"] = reference_doc
+        if reference_section is not None:
+            body["referenceSection"] = str(reference_section)
+        if table_style:
+            body["tableStyle"] = table_style
         resp = self._post(url, json=body, timeout=self.timeout)
         self._raise_for_response(resp)
         result = ConvertResult.from_dict(self._unwrap(resp.json()))
@@ -422,21 +440,41 @@ class DocParse:
         return result
 
     def convert_file(self, filepath: str, *, target: str = "",
-                     pdf_backend: str = "") -> ConvertResult:
+                     pdf_backend: str = "", reference_doc: str = "",
+                     reference_section: Optional[int] = None,
+                     table_style: str = "") -> ConvertResult:
         """Upload a local file and convert it. Returns the document as bytes.
+
+        ``reference_doc`` is a path to a local template .docx, uploaded
+        alongside the source file — the CLI's ``--reference-doc`` (DOCX
+        target only). ``reference_section`` and ``table_style`` are as in
+        :meth:`convert`.
 
         Usage::
 
             client.convert_file("report.docx", target="pptx").save("deck.pptx")
+            client.convert_file("notes.md", target="docx",
+                                 reference_doc="letterhead.docx").save("offer.docx")
         """
         url = self.base_url + "/api/v1/convert"
         data: Dict[str, Any] = {"target": target, "apiKey": self.api_key}
         if pdf_backend:
             data["pdfBackend"] = pdf_backend
-        with open(filepath, "rb") as f:
+        if reference_section is not None:
+            data["referenceSection"] = str(reference_section)
+        if table_style:
+            data["tableStyle"] = table_style
+        with ExitStack() as stack:
+            files: Dict[str, Any] = {
+                "filepath": (Path(filepath).name, stack.enter_context(open(filepath, "rb")))
+            }
+            if reference_doc:
+                files["referenceDoc"] = (
+                    Path(reference_doc).name, stack.enter_context(open(reference_doc, "rb"))
+                )
             resp = self._post(
                 url,
-                files={"filepath": (Path(filepath).name, f)},
+                files=files,
                 data=data,
                 timeout=self.timeout,
             )

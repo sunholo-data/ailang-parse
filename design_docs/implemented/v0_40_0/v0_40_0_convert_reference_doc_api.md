@@ -11,7 +11,9 @@ Verified end-to-end on dev, test and prod with a real templated conversion:
 change was needed**, exactly as "the transport question" below predicted.
 **Residuals**, carved out rather than buried in an implemented doc: step 2 is
 now [`v0_40_0_parser_version_discoverability.md`](../../planned/v0_40_0/v0_40_0_parser_version_discoverability.md);
-step 4 (SDK pass-through) is in progress in this repo. One deviation from the
+step 4 (SDK pass-through) is code-complete in this repo (Python, JS, Go, R —
+see the handoff doc for detail) but not yet published to any registry. One
+deviation from the
 design: the three parameters are **not** on the MCP surface, because serve-api
 marks every generated tool parameter required and adding one broke every
 existing `tools/call` — filed with AILANG core as
@@ -60,8 +62,13 @@ by this):
 - **A6, A7 still open.** Neither `/health` nor `capabilities` reports a
   package version, so a caller still cannot tell which parser is serving.
   Tracked separately now — see the status header.
-- **A8 still open.** SDK `convert()` signatures are unchanged; step 4 is in
-  progress.
+- **A8 closed for the code, open for publishing.** All four SDKs
+  (`ailang-parse` PyPI, `@ailang/parse` npm, `ailang-parse-go`,
+  `ailangparse` CRAN) gained `reference_doc` / `reference_section` /
+  `table_style` and bumped to 0.13.0 in this repo; existing test suites pass.
+  Verified live: Python's `convert_file(reference_doc=...)` against prod
+  returns `reference_doc_applied: true, template_parts_carried: 7`. None of
+  the four registries have been published yet.
 
 | # | Claim | Evidence |
 |---|---|---|

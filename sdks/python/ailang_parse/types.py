@@ -325,6 +325,8 @@ class ConvertResult:
     size_bytes: int = 0
     status: str = ""
     request_id: str = ""
+    reference_doc_applied: bool = False
+    template_parts_carried: int = 0
     response_meta: Optional["ResponseMeta"] = None
 
     @property
@@ -357,6 +359,8 @@ class ConvertResult:
             size_bytes=d.get("size_bytes", len(content)),
             status=d.get("status", ""),
             request_id=d.get("request_id", ""),
+            reference_doc_applied=d.get("reference_doc_applied", False),
+            template_parts_carried=d.get("template_parts_carried", 0),
         )
 
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 // ConvertOptions configures a convert request.
@@ -22,6 +23,20 @@ type ConvertOptions struct {
 	SourceURL  string // fetch the source from this URL instead of a path
 	GCSRef     string // gs://bucket/path, Business tier only
 	PDFBackend string // "", pdftotext, docling, liteparse, ai
+
+	// ReferenceDoc styles the generated document (DOCX target only) after a
+	// template's theme, fonts, headers/footers and page setup — the CLI's
+	// --reference-doc. A URL or gs:// ref here, not a local path (this
+	// method has no multipart upload).
+	ReferenceDoc string
+
+	// ReferenceSection picks which of the template's sections supplies the
+	// page setup. 1-based; zero means the template's last section.
+	ReferenceSection int
+
+	// TableStyle binds generated tables to one of the template's table
+	// styles, by styleId or Word name. Requires ReferenceDoc.
+	TableStyle string
 }
 
 // ConvertResult is a converted document.
@@ -30,16 +45,18 @@ type ConvertOptions struct {
 // base64 for the container targets, UTF-8 for html/md/qmd. Branching on the
 // wire encoding is the SDK's job, not the caller's.
 type ConvertResult struct {
-	Content       []byte
-	Filename      string
-	ContentType   string
-	Target        string
-	SourceFormat  string
-	SourceSubtype string
-	SizeBytes     int
-	Status        string
-	RequestID     string
-	ResponseMeta  *ResponseMeta
+	Content              []byte
+	Filename             string
+	ContentType          string
+	Target               string
+	SourceFormat         string
+	SourceSubtype        string
+	SizeBytes            int
+	Status               string
+	RequestID            string
+	ReferenceDocApplied  bool
+	TemplatePartsCarried int
+	ResponseMeta         *ResponseMeta
 }
 
 // Text returns the document as a string. Only meaningful for html/md/qmd.
@@ -59,16 +76,18 @@ func (r *ConvertResult) Save(path string) (string, error) {
 
 // wire is the inner JSON of a convert response.
 type convertWire struct {
-	Status        string `json:"status"`
-	RequestID     string `json:"request_id"`
-	SourceFormat  string `json:"source_format"`
-	SourceSubtype string `json:"source_subtype"`
-	Target        string `json:"target"`
-	Filename      string `json:"filename"`
-	ContentType   string `json:"content_type"`
-	Encoding      string `json:"encoding"`
-	SizeBytes     int    `json:"size_bytes"`
-	Content       string `json:"content"`
+	Status               string `json:"status"`
+	RequestID            string `json:"request_id"`
+	SourceFormat         string `json:"source_format"`
+	SourceSubtype        string `json:"source_subtype"`
+	Target               string `json:"target"`
+	Filename             string `json:"filename"`
+	ContentType          string `json:"content_type"`
+	Encoding             string `json:"encoding"`
+	SizeBytes            int    `json:"size_bytes"`
+	Content              string `json:"content"`
+	ReferenceDocApplied  bool   `json:"reference_doc_applied"`
+	TemplatePartsCarried int    `json:"template_parts_carried"`
 }
 
 // Convert converts a document to another format.
@@ -88,6 +107,15 @@ func (c *Client) Convert(ctx context.Context, filePath string, opts ConvertOptio
 	}
 	if opts.PDFBackend != "" {
 		body["pdfBackend"] = opts.PDFBackend
+	}
+	if opts.ReferenceDoc != "" {
+		body["referenceDoc"] = opts.ReferenceDoc
+	}
+	if opts.ReferenceSection != 0 {
+		body["referenceSection"] = strconv.Itoa(opts.ReferenceSection)
+	}
+	if opts.TableStyle != "" {
+		body["tableStyle"] = opts.TableStyle
 	}
 	if c.APIKey != "" {
 		body["apiKey"] = c.APIKey
@@ -153,5 +181,6 @@ func buildConvertResult(inner []byte) (*ConvertResult, error) {
 		Content: content, Filename: w.Filename, ContentType: w.ContentType,
 		Target: w.Target, SourceFormat: w.SourceFormat, SourceSubtype: w.SourceSubtype,
 		SizeBytes: size, Status: w.Status, RequestID: w.RequestID,
+		ReferenceDocApplied: w.ReferenceDocApplied, TemplatePartsCarried: w.TemplatePartsCarried,
 	}, nil
 }
