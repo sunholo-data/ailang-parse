@@ -131,7 +131,12 @@ func docxWriteArchive(doc: ParsedDocument, outputPath: string, ref: DocxRefDoc) 
       docxAppendByteEntries(ref.entries, docxImageEntries(images, docxMediaPrefix(ref)))
     );
     match createArchiveWithBytes(outputPath, allEntries) {
-      Ok(_) => "Generated DOCX: ${outputPath} (reference doc applied, ${intToStr(listLength(ref.entries))} template parts carried)",
+      Ok(_) => {
+        let count = listLength(ref.entries);
+        if count == 0
+        then "Generated DOCX: ${outputPath} (reference doc applied, 0 template parts carried (template declares no theme, headers or fonts))"
+        else "Generated DOCX: ${outputPath} (reference doc applied, ${intToStr(count)} template parts carried)"
+      },
       Err(e) => "Error generating DOCX: ${e}"
     }
   } else if hasImages then {
