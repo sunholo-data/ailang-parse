@@ -9,6 +9,55 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## Unreleased
+
+### `docparse` installs without a git clone
+
+```bash
+curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh
+```
+
+Until now the only way to get the local CLI was cloning this repo. That was bad
+for consumers generally and blocking for the case the local CLI exists to serve:
+someone whose documents must not be uploaded, choosing between cloning an
+unfamiliar 24 MB repo and sending the confidential file to the hosted API.
+
+The cause was that `ailang publish` bundles only `ailang.toml`, `*.ail`,
+`AGENT.md` and `assets/**` — so `bin/docparse` and the PDF adapter were absent
+from **every published version**. The published `.ail` source was always
+runnable; it just had no wrapper to drive it and no adapter to shell out to.
+
+- `assets/bin/docparse` and `assets/pdf_backends/adapter.py` are now the real
+  files, with symlinks at the historical paths. One copy, no drift, and the
+  clone workflow is unchanged.
+- `scripts/install.sh` fetches the package (~400 KB, not the 24 MB repo
+  archive), verifies its sha256, materialises the layout, locks once, and links
+  onto `PATH`. Output from an installed CLI is byte-identical to a clone's.
+- The wrapper now finds its root by walking up for `docparse/main.ail` instead
+  of assuming it sits one level below it. That assumption held for exactly one
+  layout and broke silently for the rest.
+
+### `docparse --install-backends`
+
+Installs `docling` and `liteparse` through uv. On an installed prefix that
+resolves those two and nothing else; a clone keeps using the benchmark
+`competitors` extra, which also pulls `unstructured`, `llama-parse`,
+`markitdown` and `kreuzberg`.
+
+The `no text layer … and OCR found nothing` error now names this command. That
+message reads as "your PDF is corrupt", but the usual cause is that `docling`
+was never installed — and since the parser escalates `pdftotext → docling`
+automatically, a scanned PDF hits it on the **default** backend.
+
+### Install-from-published CI
+
+A new `install-smoke` workflow installs from the tarball with no checkout,
+parses a DOCX and a text-layer PDF, and asserts that a tarball missing
+`assets/` refuses to install. Nothing previously tested the published artifact,
+which is why a missing wrapper survived every release.
+
+---
+
 ## [v0.39.4](https://github.com/sunholo-data/ailang-parse/compare/v0.39.3...v0.39.4) — 2026-09-01
 
 ### "0 template parts carried" now says why

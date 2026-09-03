@@ -1,0 +1,161 @@
+name: Install smoke test
+
+# Installs docparse the way a USER does — from the package tarball, with no
+# repo clone in the install step — and parses real documents with it.
+#
+# This is the gate for a whole class of bug that nothing else here catches:
+# internal/pkg/tarball.go publishes only ailang.toml, *.ail, AGENT.md and
+# assets/**, so a runtime file that is not under assets/ silently vanishes from
+# every published version. bin/docparse and the PDF adapter were BOTH missing
+# from every release up to v0.39.4, and no test noticed, because every test ran
+# from a checkout. See design_docs/planned/v0_40_0/v0_40_0_cli_install_without_clone.md
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  install-from-tarball:
+    name: Install from package tarball, parse a DOCX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      # Same source as ci.yml — the released binary does not yet carry @route.
+      - name: Install ailang (dev branch)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /tmp/ailang
+          cd /tmp/ailang && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
+          ailang --version
+
+      # The published package will not carry assets/ until v0.40.0 ships, so
+      # pre-release runs install from a tarball built out of the working tree
+      # with tarball.go's exact rules. Release runs use the real registry URL.
+      - name: Build a package tarball from the working tree
+        run: python3 docs/scripts/build-package-tarball.py /tmp/package.tar.gz
+
+      - name: Install (no checkout used from here on)
+        run: |
+          sh scripts/install.sh \
+            --tarball /tmp/package.tar.gz \
+            --version ci \
+            --prefix "$HOME/.local/share/ailang-parse" \
+            --bindir "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Parse a DOCX with the installed CLI
+        run: |
+          mkdir -p /tmp/work && cd /tmp/work
+          cp "$GITHUB_WORKSPACE/data/test_files/comments.docx" .
+          docparse comments.docx --output-dir /tmp/out
+          test -s /tmp/out/comments.docx.json || { echo "::error::no JSON produced"; exit 1; }
+          test -s /tmp/out/comments.docx.md   || { echo "::error::no markdown produced"; exit 1; }
+          python3 -c "import json;d=json.load(open('/tmp/out/comments.docx.json'));assert d['document']['blocks'],'no blocks'"
+
+      - name: Re-running the installer is a no-op
+        run: |
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" --tarball /tmp/package.tar.gz --version ci \
+            --prefix "$HOME/.local/share/ailang-parse" --bindir "$HOME/.local/bin"
+          docparse --help > /dev/null
+
+      - name: Uninstall leaves nothing
+        run: |
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" --uninstall \
+            --prefix "$HOME/.local/share/ailang-parse" --bindir "$HOME/.local/bin"
+          test ! -e "$HOME/.local/share/ailang-parse" || { echo "::error::prefix survived"; exit 1; }
+          test ! -e "$HOME/.local/bin/docparse"       || { echo "::error::symlink survived"; exit 1; }
+
+  negative-test:
+    name: A tarball without assets/ must fail the install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Install ailang (dev branch)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /tmp/ailang
+          cd /tmp/ailang && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
+
+      # This is the regression gate. If someone moves the wrapper back out of
+      # assets/, the tarball silently loses it — and this job is what says so.
+      - name: Strip assets/ and assert the install refuses
+        run: |
+          python3 docs/scripts/build-package-tarball.py /tmp/full.tar.gz
+          python3 - <<'EOF'
+          import tarfile
+          with tarfile.open("/tmp/full.tar.gz") as i, tarfile.open("/tmp/stripped.tar.gz","w:gz") as o:
+              for m in i.getmembers():
+                  if not m.name.startswith("assets/"):
+                      o.addfile(m, i.extractfile(m))
+          EOF
+          if sh scripts/install.sh --tarball /tmp/stripped.tar.gz --version stripped \
+               --prefix /tmp/p --bindir /tmp/b > /tmp/log 2>&1; then
+            echo "::error::install succeeded on a tarball with no assets/ — the guard is gone"
+            exit 1
+          fi
+          grep -q "missing assets/bin/docparse" /tmp/log \
+            || { echo "::error::failed, but not with the expected message:"; cat /tmp/log; exit 1; }
+          echo "guard held"
+
+  pdf-backends:
+    name: Install, add backends, parse a text-layer PDF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Install ailang (dev branch)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /tmp/ailang
+          cd /tmp/ailang && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
+
+      - name: System deps
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install
+        run: |
+          python3 docs/scripts/build-package-tarball.py /tmp/package.tar.gz
+          sh scripts/install.sh --tarball /tmp/package.tar.gz --version ci \
+            --prefix "$HOME/.local/share/ailang-parse" --bindir "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Exercises assets/pdf_backends/adapter.py — the file that is absent from
+      # every published tarball before v0.40.0.
+      - name: Parse a text-layer PDF (default backend)
+        run: |
+          cd /tmp
+          cp "$GITHUB_WORKSPACE/data/test_files/simple_text.pdf" .
+          docparse simple_text.pdf --output-dir /tmp/out
+          test -s /tmp/out/simple_text.pdf.json || { echo "::error::no JSON"; exit 1; }
+
+      - name: --install-backends stays lean
+        run: |
+          docparse --install-backends
+          PREFIX="$HOME/.local/share/ailang-parse/ci"
+          for pkg in unstructured llama-parse markitdown kreuzberg; do
+            if uv pip list --project "$PREFIX" 2>/dev/null | grep -qi "^$pkg "; then
+              echo "::error::$pkg was installed — the lean extra is not being used"
+              exit 1
+            fi
+          done
+          docparse simple_text.pdf --pdf-backend docling --output-dir /tmp/out2
+          test -s /tmp/out2/simple_text.pdf.json || { echo "::error::docling produced nothing"; exit 1; }

@@ -13,13 +13,43 @@ Universal document parsing **and generation** in [AILANG](https://github.com/sun
 
 ## Install
 
-Requires [AILANG](https://github.com/sunholo-data/ailang) CLI.
+```bash
+curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh
+```
+
+Fetches the published package (~400 KB), installs the
+[AILANG](https://github.com/sunholo-data/ailang) runtime if you do not have it,
+and puts `docparse` on your `PATH`. `--version`, `--prefix` and `--uninstall`
+are supported; re-running is a no-op.
+
+That covers every deterministic format. PDF needs two more things, and they are
+easy to miss:
 
 ```bash
-# Clone and symlink
+brew install poppler        # pdftotext, the default PDF backend
+                            # (apt install poppler-utils on Debian/Ubuntu)
+docparse --install-backends # docling + liteparse, for scans and layout
+```
+
+`--install-backends` matters even if you never pass `--pdf-backend`: when
+`pdftotext` finds no text layer the parser escalates to `docling` on its own, so
+without it a **scanned** PDF fails on the default backend. AI backends
+authenticate with Google ADC (`gcloud auth application-default login`), not an
+API key.
+
+<details>
+<summary>Contributors: install from a clone instead</summary>
+
+```bash
 git clone https://github.com/sunholo-data/ailang-parse.git
 ln -s "$(pwd)/ailang-parse/bin/docparse" /usr/local/bin/docparse
 ```
+
+The wrapper finds the project root by walking up for `docparse/main.ail`, so it
+works from a clone, an installed prefix, or a symlink chain. Note that the CLI
+wrapper and the PDF adapter live under `assets/` — the only path the AILANG
+publisher bundles verbatim — with symlinks at their historical locations.
+</details>
 
 ## SDKs
 

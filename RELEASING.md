@@ -79,3 +79,17 @@ attachment chunking only builds on this machine.
     transcoding of RFC 2047 headers
   - [ailang#610](https://github.com/sunholo-data/ailang/issues/610) — retaining
     values from `mapE` over query rows costs ~49x a range loop
+
+## What ships in the package
+
+`ailang publish` bundles `ailang.toml`, every `*.ail`, `AGENT.md`, and
+**everything under `assets/`** — nothing else. The CLI wrapper
+(`assets/bin/docparse`), the PDF adapter (`assets/pdf_backends/adapter.py`) and
+`assets/backends-pyproject.toml` are real files there, with symlinks at their
+historical paths for the clone workflow.
+
+If you move any of those back out of `assets/`, they silently vanish from every
+published version — which is exactly what happened to `bin/docparse` and the PDF
+adapter up to v0.39.4. The `install-smoke` workflow is the gate: it installs
+from the tarball with no checkout and fails if `assets/bin/docparse` is missing.
+Do not disable it to get a release out.
