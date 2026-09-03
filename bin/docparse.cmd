@@ -5,8 +5,25 @@ setlocal enabledelayedexpansion
 :: Wrapper around ailang that handles caps, AI model, and flags automatically.
 
 set "SCRIPT_DIR=%~dp0"
-set "PROJECT_DIR=%SCRIPT_DIR%.."
 set "MAIN_AIL=docparse\main.ail"
+
+:: Walk up for MAIN_AIL rather than assuming the wrapper sits one level under
+:: the project root. True for the clone layout, false for an installed prefix
+:: or for the real file living under assets\bin. See bin/docparse.
+set "PROJECT_DIR=%SCRIPT_DIR:~0,-1%"
+:find_root
+if exist "%PROJECT_DIR%\%MAIN_AIL%" goto found_root
+for %%I in ("%PROJECT_DIR%") do set "PARENT_DIR=%%~dpI"
+set "PARENT_DIR=%PARENT_DIR:~0,-1%"
+if /i "%PARENT_DIR%"=="%PROJECT_DIR%" goto no_root
+set "PROJECT_DIR=%PARENT_DIR%"
+goto find_root
+:no_root
+echo docparse: cannot locate %MAIN_AIL% above %SCRIPT_DIR% 1>&2
+echo   The wrapper needs the AILANG sources beside it. Reinstall from: 1>&2
+echo     https://ailang.sunholo.com/docparse/ 1>&2
+exit /b 1
+:found_root
 set "DEFAULT_AI_MODEL=gemini-3-flash-preview"
 
 :: Supported extensions for folder scanning
