@@ -159,14 +159,21 @@ jobs:
         run: |
           docparse --install-backends
           PREFIX="$HOME/.local/share/ailang-parse/ci"
+          # `uv sync --project DIR` creates DIR/.venv. `uv pip list --project`
+          # does NOT select that environment — it resolves the ambient
+          # interpreter (/usr on the runner), which made an earlier version of
+          # this assertion pass vacuously. Address the venv directly.
+          VENV_PY="$PREFIX/.venv/bin/python"
+          test -x "$VENV_PY" || { echo "::error::no venv at $PREFIX/.venv"; exit 1; }
+          INSTALLED=$(uv pip list --python "$VENV_PY")
           for pkg in unstructured llama-parse markitdown kreuzberg; do
-            if uv pip list --project "$PREFIX" 2>/dev/null | grep -qiE "^$pkg[[:space:]]"; then
+            if printf '%s\n' "$INSTALLED" | grep -qiE "^$pkg[[:space:]]"; then
               echo "::error::$pkg was installed — the lean extra is not being used"
               exit 1
             fi
           done
-          # docling must be there, or the assertion above is vacuous.
-          uv pip list --project "$PREFIX" | grep -qiE "^docling[[:space:]]" \
+          # docling must be present, or the absence checks above prove nothing.
+          printf '%s\n' "$INSTALLED" | grep -qiE "^docling[[:space:]]" \
             || { echo "::error::docling absent — --install-backends did nothing"; exit 1; }
           cd /tmp/work && docparse simple_text.pdf --pdf-backend docling --output-dir /tmp/out2
           test -s /tmp/out2/simple_text.pdf.json || { echo "::error::docling produced nothing"; exit 1; }
