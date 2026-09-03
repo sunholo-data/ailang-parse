@@ -137,7 +137,11 @@ export func parsePdfWithFallback(backend: string, filepath: string, projectRoot:
       else match parsePdfViaBackend("docling", filepath, projectRoot) {
         Ok(res) => Ok({doc: res, backendUsed: "docling"}),
         Err(ocrErr) =>
-          Err("no text layer (pdftotext: ${firstErr}) and OCR found nothing (docling: ${ocrErr})")
+          -- Name the fix. This message reads as "your PDF is broken", but by far
+          -- the most common cause is that docling was never installed: the
+          -- escalation above is automatic, so a scanned PDF hits it on the
+          -- DEFAULT backend, not only when someone asks for docling by name.
+          Err("no text layer (pdftotext: ${firstErr}) and OCR found nothing (docling: ${ocrErr}) — if docling is not installed, run: docparse --install-backends")
       }
   }
 

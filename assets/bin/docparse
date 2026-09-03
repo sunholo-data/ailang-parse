@@ -171,6 +171,9 @@ Options:
   --output-dir DIR  Copy output files to DIR after parsing
   --no-attachment-data  EML/MBOX: omit attachment-data/attachment-ext base64
                     blocks from output (attachment-meta is kept)
+  --install-backends
+                    Install the local PDF backends (docling, liteparse) via uv
+                    (no file needed)
   --check           Type-check all modules (no file needed)
   --test            Run all inline tests (no file needed)
   --prove           Static Z3 contract verification (no file needed, requires z3)
@@ -402,11 +405,55 @@ REFERENCE_DOC=""
 REFERENCE_SECTION=""
 TABLE_STYLE=""
 
+# Install the local PDF backends (docling, liteparse) into the uv project that
+# pdf_backend_external resolves at runtime — $PROJECT_DIR, see backendProject().
+# In an installed prefix that is assets/backends-pyproject.toml (those two and
+# nothing else); in a clone it is the repo pyproject, whose `competitors` extra
+# also drags in unstructured, llama-parse, markitdown and kreuzberg.
+do_install_backends() {
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "docparse: uv is required to install the PDF backends" >&2
+    echo "  install it:  curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    echo "  then re-run: docparse --install-backends" >&2
+    return 1
+  fi
+
+  # Which extra carries the backends depends on WHICH pyproject uv will resolve,
+  # so ask that file rather than guessing from the layout. An installed prefix
+  # has the lean assets/backends-pyproject.toml copied to pyproject.toml
+  # (`backends`); a clone has the benchmark one (`competitors`). Checking for
+  # assets/backends-pyproject.toml does NOT work — the clone ships that file too.
+  local pyproject="$PROJECT_DIR/pyproject.toml"
+  local extra=""
+  if [ ! -f "$pyproject" ]; then
+    echo "docparse: no pyproject.toml in $PROJECT_DIR — nothing for uv to resolve" >&2
+    return 1
+  elif grep -q '^backends = \[' "$pyproject"; then
+    extra="backends"
+  elif grep -q '^competitors = \[' "$pyproject"; then
+    extra="competitors"
+  else
+    echo "docparse: $pyproject declares no backends/competitors extra" >&2
+    return 1
+  fi
+
+  echo "Installing PDF backends (docling, liteparse) into $PROJECT_DIR ..."
+  if ! uv sync --project "$PROJECT_DIR" --extra "$extra"; then
+    echo "docparse: uv sync --extra $extra failed" >&2
+    return 1
+  fi
+  echo "Done. Verify with:  docparse yourfile.pdf --pdf-backend docling"
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)
       usage
       exit 0
+      ;;
+    --install-backends)
+      do_install_backends
+      exit $?
       ;;
     --check)
       cd "$PROJECT_DIR"
