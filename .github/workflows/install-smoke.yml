@@ -129,7 +129,12 @@ jobs:
       - name: System deps
         run: sudo apt-get update && sudo apt-get install -y poppler-utils
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          # Nothing here is a uv project with a lockfile — the prefix's
+          # pyproject is materialised by the installer at runtime — so there is
+          # no sensible cache key.
+          enable-cache: false
 
       - name: Install
         run: |
@@ -140,11 +145,14 @@ jobs:
 
       # Exercises assets/pdf_backends/adapter.py — the file that is absent from
       # every published tarball before v0.40.0.
+      # Parse from OUTSIDE the checkout — each `run:` starts in the workspace,
+      # so the fixture is copied to /tmp and addressed absolutely rather than
+      # relying on a `cd` persisting between steps (it does not).
       - name: Parse a text-layer PDF (default backend)
         run: |
-          cd /tmp
-          cp "$GITHUB_WORKSPACE/data/test_files/simple_text.pdf" .
-          docparse simple_text.pdf --output-dir /tmp/out
+          mkdir -p /tmp/work
+          cp "$GITHUB_WORKSPACE/data/test_files/simple_text.pdf" /tmp/work/
+          cd /tmp/work && docparse simple_text.pdf --output-dir /tmp/out
           test -s /tmp/out/simple_text.pdf.json || { echo "::error::no JSON"; exit 1; }
 
       - name: --install-backends stays lean
@@ -152,10 +160,13 @@ jobs:
           docparse --install-backends
           PREFIX="$HOME/.local/share/ailang-parse/ci"
           for pkg in unstructured llama-parse markitdown kreuzberg; do
-            if uv pip list --project "$PREFIX" 2>/dev/null | grep -qi "^$pkg "; then
+            if uv pip list --project "$PREFIX" 2>/dev/null | grep -qiE "^$pkg[[:space:]]"; then
               echo "::error::$pkg was installed — the lean extra is not being used"
               exit 1
             fi
           done
-          docparse simple_text.pdf --pdf-backend docling --output-dir /tmp/out2
+          # docling must be there, or the assertion above is vacuous.
+          uv pip list --project "$PREFIX" | grep -qiE "^docling[[:space:]]" \
+            || { echo "::error::docling absent — --install-backends did nothing"; exit 1; }
+          cd /tmp/work && docparse simple_text.pdf --pdf-backend docling --output-dir /tmp/out2
           test -s /tmp/out2/simple_text.pdf.json || { echo "::error::docling produced nothing"; exit 1; }
