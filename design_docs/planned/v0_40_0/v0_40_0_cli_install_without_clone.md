@@ -93,7 +93,7 @@ working `docparse` in one command, and a working PDF path in two.
 
 **Success metrics**
 
-1. `curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh` on a clean
+1. `curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh` on a clean
    machine yields a `docparse` on `PATH` that parses a DOCX. No `git` required.
 2. Installed payload ≤ 1 MB (package is 394 KB today) — not the 24 MB repo (V9).
 3. `docparse --install-backends` gets `docling`/`liteparse` working without
@@ -137,7 +137,7 @@ while [ ! -f "$PROJECT_DIR/docparse/main.ail" ] && [ "$PROJECT_DIR" != "/" ]; do
 done
 [ -f "$PROJECT_DIR/docparse/main.ail" ] || {
   echo "docparse: cannot locate docparse/main.ail above $SCRIPT_DIR" >&2
-  echo "  reinstall: curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh" >&2
+  echo "  reinstall: curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh" >&2
   exit 1
 }
 ```
@@ -155,7 +155,7 @@ change out of the type-checked surface and off the `--prove` gate.
 
 ### Phase 2 — the installer (P0, ~1 day)
 
-`scripts/install.sh`, published at `https://ailang.sunholo.com/docparse/install.sh`.
+`scripts/install.sh`, published at `https://www.sunholo.com/ailang-parse/install.sh`.
 
 ```
 1. ailang present?            → else run the official installer, re-check

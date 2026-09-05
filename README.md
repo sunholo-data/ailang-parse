@@ -14,7 +14,7 @@ Universal document parsing **and generation** in [AILANG](https://github.com/sun
 ## Install
 
 ```bash
-curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh
+curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh
 ```
 
 Fetches the published package (~400 KB), installs the

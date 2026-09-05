@@ -9,12 +9,12 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## Unreleased
+## [v0.40.0](https://github.com/sunholo-data/ailang-parse/compare/v0.39.4...v0.40.0) — 2026-09-05
 
 ### `docparse` installs without a git clone
 
 ```bash
-curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh
+curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh
 ```
 
 Until now the only way to get the local CLI was cloning this repo. That was bad

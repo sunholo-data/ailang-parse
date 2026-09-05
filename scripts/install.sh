@@ -4,7 +4,7 @@
 # Installs `docparse` without a git clone, by fetching the published registry
 # package (~400KB) rather than the repo archive (~24MB).
 #
-#   curl -fsSL https://ailang.sunholo.com/docparse/install.sh | sh
+#   curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh
 #
 # The CLI is a wrapper around the `ailang` runtime, so both are installed. Only
 # deterministic formats work out of the box; PDF needs poppler, and the local

@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      # The published installer is copied from here at build time.
+      - 'scripts/install.sh'
       - 'docparse/services/**.ail'
       - 'docparse/types/**.ail'
       - '.github/workflows/pages.yml'
@@ -106,6 +108,12 @@ jobs:
           # Build a clean _site/ from docs/ (same pattern as ailang-demos)
           rm -rf _site
           cp -r docs/ _site/
+          # The install one-liner advertised in the README must actually serve.
+          # Copy rather than duplicate the file, so the published installer and
+          # scripts/install.sh can never drift.
+          cp scripts/install.sh _site/install.sh
+          chmod +x _site/install.sh
+          test -s _site/install.sh || { echo "::error::install.sh did not land in _site"; exit 1; }
           echo "::group::Site contents"
           ls -lh _site/wasm/
           echo "Total: $(du -sh _site/ | cut -f1)"
