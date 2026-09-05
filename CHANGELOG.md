@@ -9,6 +9,23 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## Unreleased
+
+### Installer checksum fix
+
+`install.sh` verified the downloaded tarball against `content_hash` instead of
+`tarball_hash` — `metadata.json` carries three `sha256:` fields and it matched
+the first. Every real install aborted with a mismatch. The published installer
+is served from the docs site, so pushing to `main` fixes it; no new package
+version is needed.
+
+CI never caught it because every smoke job passed `--tarball`, which skips the
+download and the checksum entirely. There is now an `install-from-registry` job
+that installs the published package with no escape hatch and fails if the line
+`sha256 verified` is absent from the output.
+
+---
+
 ## [v0.40.0](https://github.com/sunholo-data/ailang-parse/compare/v0.39.4...v0.40.0) — 2026-09-05
 
 ### `docparse` installs without a git clone

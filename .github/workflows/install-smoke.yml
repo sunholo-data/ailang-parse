@@ -75,6 +75,42 @@ jobs:
           test ! -e "$HOME/.local/share/ailang-parse" || { echo "::error::prefix survived"; exit 1; }
           test ! -e "$HOME/.local/bin/docparse"       || { echo "::error::symlink survived"; exit 1; }
 
+  install-from-registry:
+    name: Install from the live registry (download + sha256)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Install ailang (dev branch)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          git clone --depth 1 --branch dev https://github.com/sunholo-data/ailang.git /tmp/ailang
+          cd /tmp/ailang && go build -o ailang ./cmd/ailang && sudo mv ailang /usr/local/bin/
+
+      # Every other job here passes --tarball, which skips the download and the
+      # checksum entirely — so version resolution and sha256 verification were
+      # completely untested until a real install failed against the live
+      # registry (metadata.json has three sha256 fields and the installer was
+      # reading the first, content_hash, instead of tarball_hash).
+      - name: Install the published package, no --tarball
+        run: |
+          sh scripts/install.sh \
+            --prefix "$HOME/.local/share/ailang-parse" \
+            --bindir "$HOME/.local/bin" 2>&1 | tee /tmp/install.log
+          grep -q "sha256 verified" /tmp/install.log \
+            || { echo "::error::checksum was not verified — the guard is inert"; exit 1; }
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Parse with the registry-installed CLI
+        run: |
+          mkdir -p /tmp/work
+          cp "$GITHUB_WORKSPACE/data/test_files/comments.docx" /tmp/work/
+          cd /tmp/work && docparse comments.docx --output-dir /tmp/out
+          python3 -c "import json;d=json.load(open('/tmp/out/comments.docx.json'));assert d['document']['blocks'],'no blocks'"
+
   negative-test:
     name: A tarball without assets/ must fail the install
     runs-on: ubuntu-latest

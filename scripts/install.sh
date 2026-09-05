@@ -121,9 +121,13 @@ else
   SUMTOOL=""
   if need sha256sum; then SUMTOOL="sha256sum"; elif need shasum; then SUMTOOL="shasum -a 256"; fi
   if [ -n "$SUMTOOL" ]; then
+    # metadata.json carries THREE sha256 fields — content_hash, interface_hash
+    # and tarball_hash, in that order. Match the key, not just "sha256": taking
+    # the first one verifies the tarball against the content hash and always
+    # mismatches.
     EXPECTED=$(curl -fsSL "$BASE/metadata.json" 2>/dev/null \
-      | tr ',' '\n' | grep -i 'sha256' | head -1 \
-      | sed 's/.*[":]\([0-9a-f]\{64\}\).*/\1/' | grep -E '^[0-9a-f]{64}$' || true)
+      | tr ',' '\n' | grep '"tarball_hash"' | head -1 \
+      | sed 's/.*sha256:\([0-9a-f]\{64\}\).*/\1/' | grep -E '^[0-9a-f]{64}$' || true)
     ACTUAL=$($SUMTOOL "$TMP/package.tar.gz" | cut -d' ' -f1)
     if [ -n "$EXPECTED" ]; then
       [ "$EXPECTED" = "$ACTUAL" ] || die "sha256 mismatch: expected $EXPECTED, got $ACTUAL"
