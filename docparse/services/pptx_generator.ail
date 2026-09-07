@@ -1,11 +1,13 @@
 module docparse/services/pptx_generator
 
-import std/string (length, intToStr)
+import std/string (length, intToStr, find, substring)
 import std/list (foldl, length as listLength)
-import std/zip (createArchive)
+import std/zip (createArchive, createArchiveWithBytes)
+import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
+import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pptxTplDropSpans, pptxTplDropElems, pptxTplInsertBeforeFirst, pptxTplInsertBeforeLast)
 
 -- PPTX Generator — converts Block ADT to a valid .pptx file.
 --
@@ -27,9 +29,28 @@ import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 --   - Minimal styling
 
 -- Generate a PPTX file from ParsedDocument
+-- Generate against a reference deck: an existing .pptx whose theme, slide
+-- masters, layouts, table styles, embedded media and slide size are applied to
+-- this document's content.
+--
+-- An unreadable, non-PPTX or master-less reference is an error and writes
+-- NOTHING. Falling back to the built-in look would produce a plausible deck
+-- missing exactly the branding it was asked for — the failure nobody catches,
+-- because the file opens.
+export func generatePptxWithReference(doc: ParsedDocument, outputPath: string,
+                                      slideSize: string, referencePath: string) -> string ! {FS} =
+  if length(referencePath) == 0
+  then generatePptx(doc, outputPath, slideSize, pptxTplNone())
+  else match pptxTplLoad(referencePath) {
+    Err(e) => "Error generating PPTX: ${e}",
+    Ok(ref) => generatePptx(doc, outputPath, slideSize, ref)
+  }
+
 -- slideSize is "16:9" (default, and what an empty string means) or "4:3".
 -- Validated by the caller so an unknown value fails before anything is written.
-export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: string) -> string ! {FS}
+-- ref is pptxTplNone() when no --reference-doc was given; the untemplated path
+-- below is then byte-identical to what it produced before the flag existed.
+export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: string, ref: PptxRefDoc) -> string ! {FS}
   ensures { length(result) > 0 }
 {
   -- Split blocks into slides: each SectionBlock(kind="slide") is a slide,
@@ -69,12 +90,33 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
     {name: "ppt/tableStyles.xml", content: tableStyles}
   ];
 
+  if ref.active then {
+    -- Only four parts are ours; everything else the template declared is
+    -- carried untouched, which is what makes the theme, masters, layouts,
+    -- table styles and media all arrive without being re-derived.
+    let ourParts = pptxAppendEntries(
+      [
+        {name: "[Content_Types].xml", content: pptxRefContentTypes(ref, slideCount)},
+        {name: "ppt/presentation.xml", content: pptxRefPresentation(ref, slideCount, slideSize)},
+        {name: "ppt/_rels/presentation.xml.rels", content: pptxRefPresRels(ref, slideCount)}
+      ],
+      pptxRefSlideEntries(slideContents, 1),
+      pptxRefSlideRelEntries(slideCount, 1, ref.layoutTarget));
+    -- Carried parts are already base64, so the whole archive goes through
+    -- createArchiveWithBytes whether or not the content has images.
+    let allBytes = pptxAppendByteEntries(pptxPartsToByteEntries(ourParts), ref.entries);
+    match createArchiveWithBytes(outputPath, allBytes) {
+      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s))",
+      Err(e) => "Error generating PPTX: ${e}"
+    }
+  } else {
   let allEntries = pptxAppendEntries(baseEntries, slideEntries, slideRelEntries);
 
   let result = createArchive(outputPath, allEntries);
   match result {
     Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides)",
     Err(e) => "Error generating PPTX: ${e}"
+  }
   }
 }
 
@@ -164,6 +206,141 @@ pure func pptxSlideXml(blocks: [Block]) -> string {
   let shapes = pptxBlocksToShapes(blocks, 1);
   "${xmlDecl()}<p:sld ${ns}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>${shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
 }
+
+
+-- ============================================================
+-- Reference-deck assembly
+-- ============================================================
+--
+-- Our slide relationship ids are NON-NUMERIC ("rIdDP1"). The template's own
+-- presentation rels are carried whole and keep ids like rId1..rId12, so a
+-- numeric counter would eventually land on one of them. There is no arithmetic
+-- that makes "rIdDP1" collide.
+
+pure func pptxRefSlideRelId(idx: int) -> string = "rIdDP${intToStr(idx)}"
+
+-- The template's presentation.xml with ONLY <p:sldIdLst> swapped. Everything
+-- else it declares — sldMasterIdLst, notesSz, defaultTextStyle, and sldSz
+-- unless the user asked for a different one — is inherited by not being
+-- touched. Schema order matters here: sldIdLst precedes sldSz, sldSz precedes
+-- notesSz, so both inserts anchor on the element that must follow.
+pure func pptxRefPresentation(ref: PptxRefDoc, slideCount: int, slideSize: string) -> string {
+  let stripped = pptxTplDropElems(
+    pptxTplDropSpans(ref.presentationXml, "<p:sldIdLst>", "</p:sldIdLst>"),
+    "<p:sldIdLst", "sldIdLst");
+  let withIds = pptxTplInsertBeforeFirst(stripped, "<p:sldSz",
+    "<p:sldIdLst>${pptxRefSlideIds(slideCount, 1)}</p:sldIdLst>");
+  -- An explicit --slide-size overrides the template; without one the
+  -- template's own <p:sldSz> stands, which is the whole point of carrying it.
+  if length(slideSize) == 0 then withIds
+  else pptxTplInsertBeforeFirst(
+    pptxTplDropElems(withIds, "<p:sldSz", "cx="),
+    "<p:notesSz", pptxSldSzFor(slideSize))
+}
+
+pure func pptxRefSlideIds(count: int, idx: int) -> string =
+  if idx > count then ""
+  else "<p:sldId id=\"${intToStr(255 + idx)}\" r:id=\"${pptxRefSlideRelId(idx)}\"/>${pptxRefSlideIds(count, idx + 1)}"
+
+-- The template's presentation rels minus its own slide relationships, plus
+-- ours. Matched on the relationship TYPE, not the target: ".../relationships/slide"
+-- is exact, where a target substring like "slides/slide" would be a guess about
+-- naming that a hand-built deck need not follow.
+pure func pptxRefPresRels(ref: PptxRefDoc, slideCount: int) -> string =
+  pptxTplInsertBeforeLast(
+    pptxTplDropElems(ref.presentationRelsXml, "<Relationship", "/relationships/slide\""),
+    "</Relationships>",
+    pptxRefSlideRelEntriesXml(slideCount, 1))
+
+pure func pptxRefSlideRelEntriesXml(count: int, idx: int) -> string =
+  if idx > count then ""
+  else "<Relationship Id=\"${pptxRefSlideRelId(idx)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide${intToStr(idx)}.xml\"/>${pptxRefSlideRelEntriesXml(count, idx + 1)}"
+
+-- The template's [Content_Types].xml minus overrides for the parts we dropped,
+-- plus ours. The template's Default extension entries are what let its carried
+-- media (png, jpeg, embedded fonts) resolve, so they are left alone.
+pure func pptxRefContentTypes(ref: PptxRefDoc, slideCount: int) -> string =
+  pptxTplInsertBeforeLast(
+    pptxTplDropElems(
+      pptxTplDropElems(ref.contentTypesXml, "<Override", "/ppt/slides/slide"),
+      "<Override", "/ppt/notesSlides/"),
+    "</Types>",
+    pptxSlideContentTypes(slideCount, 1))
+
+pure func pptxRefSlideRels(layoutTarget: string) -> string =
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/${layoutTarget}\"/></Relationships>"
+
+pure func pptxRefSlideRelEntries(count: int, idx: int, layoutTarget: string) -> [{name: string, content: string}] =
+  if idx > count then []
+  else
+    let entry = {name: "ppt/slides/_rels/slide${intToStr(idx)}.xml.rels", content: pptxRefSlideRels(layoutTarget)} in
+    entry :: pptxRefSlideRelEntries(count, idx + 1, layoutTarget)
+
+pure func pptxRefSlideEntries(slides: [[Block]], idx: int) -> [{name: string, content: string}] =
+  match slides {
+    [] => [],
+    slide :: rest =>
+      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxStripOurTypography(pptxSlideXml(slide))} in
+      entry :: pptxRefSlideEntries(rest, idx + 1)
+  }
+
+-- Remove the typography this generator invented, so the template's governs.
+--
+-- Two things go, and one deliberately stays:
+--
+--   sz="NNNN"              ALWAYS ours. No parser puts a font size into an
+--                          InlineRun, so every sz in our output is one of this
+--                          module's hardcoded constants.
+--   <a:pPr algn="ctr"/>    ours, matched as a whole element so it cannot catch
+--                          alignment that meant something.
+--   b="1"                  STAYS. It is emitted both for our heading default
+--                          AND for a run the source document actually marked
+--                          bold, and the two are indistinguishable in the
+--                          finished XML. Dropping it would silently discard
+--                          real formatting to fix a cosmetic default. A title
+--                          under a non-bold brand style therefore stays bold —
+--                          a recorded limitation of the theme tier, and one
+--                          that placeholder binding removes properly, because
+--                          then the layout supplies typography and we emit no
+--                          run properties at all.
+export pure func pptxStripOurTypography(xml: string) -> string =
+  pptxDropAttrs(pptxDropAll(xml, "<a:pPr algn=\"ctr\"/>"), " sz=\"")
+
+pure func pptxDropAll(s: string, lit: string) -> string {
+  let i = find(s, lit);
+  if i < 0 then s
+  else pptxDropAll("${substring(s, 0, i)}${substring(s, i + length(lit), length(s))}", lit)
+}
+
+-- Removes every ` name="..."` attribute whose prefix matches, closing quote
+-- included. An unterminated attribute returns the input untouched rather than
+-- truncating the element.
+pure func pptxDropAttrs(s: string, prefix: string) -> string {
+  let i = find(s, prefix);
+  if i < 0 then s
+  else pptxDropAttrAt(s, prefix, i)
+}
+
+pure func pptxDropAttrAt(s: string, prefix: string, i: int) -> string {
+  let after = substring(s, i + length(prefix), length(s));
+  let j = find(after, "\"");
+  if j < 0 then s
+  else pptxDropAttrs("${substring(s, 0, i)}${substring(after, j + 1, length(after))}", prefix)
+}
+
+pure func pptxPartsToByteEntries(parts: [{name: string, content: string}]) -> [{name: string, data: string}] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      let entry = {name: p.name, data: toBase64(fromString(p.content))} in
+      entry :: pptxPartsToByteEntries(rest)
+  }
+
+pure func pptxAppendByteEntries(a: [{name: string, data: string}], b: [{name: string, data: string}]) -> [{name: string, data: string}] =
+  match a {
+    [] => b,
+    x :: rest => x :: pptxAppendByteEntries(rest, b)
+  }
 
 -- Convert blocks to PPTX shapes (text boxes positioned vertically)
 -- yOff tracks vertical position in EMUs (English Metric Units, 914400 per inch)

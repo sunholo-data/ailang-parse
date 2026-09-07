@@ -11,6 +11,41 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### `--reference-doc` for PPTX — brand a generated deck from a template
+
+`--reference-doc brand.pptx` now works for `.pptx` output, the way it already
+did for `.docx`. The reference deck supplies the theme, slide masters, layouts,
+table styles, embedded media and slide size; the generated slides supply the
+content.
+
+This is the **theme tier**: our slides keep their own shape tree (free-floating
+text boxes), so fonts, colours and background follow the template but the
+geometry does not. Binding slides to the master's placeholders — what makes
+"Reset Slide", outline view and autofit behave — is separate, larger work.
+
+It was not obvious the theme tier was worth shipping alone, since our shapes
+carry explicit geometry and run properties. It was measured first: in Keynote
+the theme alone restyles them, and in LibreOffice the master's `<p:txStyles>`
+and `<p:defaultTextStyle>` do. Both engines change what the reader sees.
+Reference mode therefore also drops the font sizes and centring this generator
+invented, so the template's typography governs. Bold is deliberately kept —
+it is indistinguishable from a run the source document marked bold, and
+dropping it would discard real formatting.
+
+An unreadable, non-PPTX or master-less reference is an error that writes
+nothing.
+
+### A failed generation now exits non-zero
+
+Generators report failure by returning a string starting `Error` — an
+unreadable reference, a template with no master, an unwritable archive. Each
+already declined to write a file, but the process still exited **0**, so
+`ailang run --batch` and CI scored a failed generation as a success. This is
+the same defect `benchmarks/failure_check.py` was written for on the parse side
+("a file on disk means a document was parsed"); the generate side had only half
+of it. Affects the DOCX `--reference-doc` path shipped in v0.39.0 as well as
+the new PPTX one.
+
 ### Generated decks are 16:9 by default (`--slide-size`)
 
 `p:sldSz` was hardcoded to 4:3, so every generated `.pptx` came out 4:3 no

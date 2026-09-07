@@ -30,7 +30,7 @@ import docparse/services/markdown_writer (renderMarkdown)
 import docparse/services/a2ui_formatter (documentToA2UI)
 import docparse/services/html_generator (generateHtml)
 import docparse/services/docx_generator (generateDocx)
-import docparse/services/pptx_generator (generatePptx)
+import docparse/services/pptx_generator (generatePptx, generatePptxWithReference)
 import docparse/services/xlsx_generator (generateXlsx)
 import docparse/services/odt_generator (generateOdt)
 import docparse/services/odp_generator (generateOdp)
@@ -273,7 +273,7 @@ func mcpGenerate(doc: ParsedDocument, outFmt: string, outPath: string) -> string
     -- "" is the 16:9 default. The MCP surface has no slide-size parameter yet;
     -- adding one belongs with the wider convert-endpoint work
     -- (v0_40_0_convert_reference_doc_api.md), not here.
-    let msg = generatePptx(doc, outPath, "");
+    let msg = generatePptxWithReference(doc, outPath, "", "");
     encode(jo([kv("output", js(outPath)), kv("format", js("pptx")), kv("message", js(msg))]))
   }
   else if outFmt == "xlsx" then {

@@ -2,7 +2,7 @@ module docparse/main
 
 import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile, mkdirAll)
 import std/json (encode)
-import std/string (length, intToStr, floatToStr, toLower, split, contains, stringToInt)
+import std/string (length, intToStr, floatToStr, toLower, split, contains, stringToInt, startsWith)
 import std/list (last, concat, any, map, flatMap as listFlatMap, filter, length as listLength)
 import std/option (Some, None)
 import std/bytes (fromBase64)
@@ -35,7 +35,7 @@ import docparse/services/markdown_writer (renderMarkdown)
 import docparse/services/eval (evalMain, evalNormalizeJson, evalJaccard, evalComputeScore)
 import docparse/services/html_generator (generateHtml)
 import docparse/services/docx_generator (generateDocxWithReference)
-import docparse/services/pptx_generator (generatePptx)
+import docparse/services/pptx_generator (generatePptx, generatePptxWithReference)
 import docparse/services/xlsx_generator (generateXlsx)
 import docparse/services/odt_generator (generateOdt)
 import docparse/services/odp_generator (generateOdp)
@@ -305,6 +305,23 @@ pure func getReferenceSection(args: [string]) -> int =
     _ :: rest => getReferenceSection(rest)
   }
 
+-- Print a generator's result and STOP if it failed.
+--
+-- Every generator reports failure by returning a string beginning "Error" —
+-- an unreadable reference deck, a template with no master, an archive that
+-- could not be written. Each of those already declines to write a file, but
+-- until this existed the process still exited 0, so `ailang run --batch` and CI
+-- both scored a failed generation as a success. That is the same defect
+-- benchmarks/failure_check.py was written for on the PARSE side ("a file on
+-- disk means a document was parsed"); the generate side had only half of it.
+func emitGenerated(msg: string) -> () ! {IO} =
+  if startsWith(msg, "Error")
+  then {
+    println(msg);
+    exit(1)
+  }
+  else println(msg)
+
 -- Extract --slide-size 16:9|4:3: the aspect ratio of a generated .pptx.
 -- Absent (empty) means 16:9. Anything else is rejected in main, before a file
 -- is written, rather than silently falling back to a default the user did not
@@ -382,27 +399,27 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
   }
   else if ext == "docx" then {
     let msg = generateDocxWithReference(doc, outputPath, referenceDoc, referenceSection, tableStyle);
-    println(msg)
+    emitGenerated(msg)
   }
   else if ext == "pptx" then {
-    let msg = generatePptx(doc, outputPath, slideSize);
-    println(msg)
+    let msg = generatePptxWithReference(doc, outputPath, slideSize, referenceDoc);
+    emitGenerated(msg)
   }
   else if ext == "xlsx" then {
     let msg = generateXlsx(doc, outputPath);
-    println(msg)
+    emitGenerated(msg)
   }
   else if ext == "odt" then {
     let msg = generateOdt(doc, outputPath);
-    println(msg)
+    emitGenerated(msg)
   }
   else if ext == "odp" then {
     let msg = generateOdp(doc, outputPath);
-    println(msg)
+    emitGenerated(msg)
   }
   else if ext == "ods" then {
     let msg = generateOds(doc, outputPath);
-    println(msg)
+    emitGenerated(msg)
   }
   else if ext == "md" then {
     let md = renderMarkdown(doc);
@@ -457,27 +474,27 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bo
     }
     else if convertExt == "docx" then {
       let msg = generateDocxWithReference(doc, convertTarget, referenceDoc, referenceSection, tableStyle);
-      println(msg)
+      emitGenerated(msg)
     }
     else if convertExt == "pptx" then {
-      let msg = generatePptx(doc, convertTarget, slideSize);
-      println(msg)
+      let msg = generatePptxWithReference(doc, convertTarget, slideSize, referenceDoc);
+      emitGenerated(msg)
     }
     else if convertExt == "xlsx" then {
       let msg = generateXlsx(doc, convertTarget);
-      println(msg)
+      emitGenerated(msg)
     }
     else if convertExt == "odt" then {
       let msg = generateOdt(doc, convertTarget);
-      println(msg)
+      emitGenerated(msg)
     }
     else if convertExt == "odp" then {
       let msg = generateOdp(doc, convertTarget);
-      println(msg)
+      emitGenerated(msg)
     }
     else if convertExt == "ods" then {
       let msg = generateOds(doc, convertTarget);
-      println(msg)
+      emitGenerated(msg)
     }
     else if convertExt == "md" then {
       let md = renderMarkdown(doc);

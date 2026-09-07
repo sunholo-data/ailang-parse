@@ -1,0 +1,309 @@
+module docparse/services/pptx_template
+
+import std/string (length, find, substring, contains, intToStr)
+import std/list (length as listLength)
+import std/zip (listEntries, readEntry, readEntryBytes)
+import std/result (Result, Ok, Err)
+
+-- Reference-deck support for PPTX generation — the PPTX half of the
+-- Quarto/Pandoc `reference-doc` idea. A reference deck supplies the LOOK
+-- (theme, slide masters, layouts, table styles, embedded media, slide size);
+-- the generated slides supply the CONTENT.
+--
+-- WHAT THIS DOES AND DOES NOT DO
+--
+-- This is the "theme tier". Our slides keep their own shape tree: free-floating
+-- text boxes with absolute geometry, exactly as before. They are NOT bound to
+-- the master's placeholders. Binding them is a separate, larger piece of work
+-- (it rewrites the default output and rebases every PPTX golden) and it is what
+-- makes "Reset Slide", outline view and text autofit behave properly.
+--
+-- It was not obvious that the theme tier was worth anything on its own — a
+-- shape with an explicit <a:xfrm> and an explicit <a:rPr> looks like it ignores
+-- the master entirely. It was measured before it was built (design doc Spike 0):
+--
+--   Keynote      the THEME ALONE restyles our text boxes — swapping the theme's
+--                minorFont moved the rendered font with nothing else changed.
+--   LibreOffice  the theme alone does nothing, but the master's <p:txStyles>
+--                and the presentation's <p:defaultTextStyle> do reach them.
+--
+-- Two engines, two routes, same conclusion: carrying the parts changes what the
+-- reader sees. That is why this tier exists as its own step, and why reference
+-- mode drops our hardcoded run properties (see pptx_generator) — leaving them
+-- in would keep our look while appearing to honour the template.
+--
+-- MECHANICS
+--
+-- Carry every part verbatim except the four the output must own, and rewrite
+-- those four by SURGERY on the template's copies rather than from our literals:
+--
+--   [Content_Types].xml            template's, minus its slide overrides
+--   ppt/presentation.xml           template's, with only <p:sldIdLst> swapped —
+--                                  so sldMasterIdLst, sldSz, notesSz AND
+--                                  defaultTextStyle all come along untouched
+--   ppt/_rels/presentation.xml.rels  template's, minus its slide relationships
+--   ppt/slides/**                  ours
+--
+-- Keeping the template's presentation.xml and editing one element is what makes
+-- this cheap: every other thing that part declares is inherited by not being
+-- touched. Rebuilding it from our own literals would mean re-deriving each of
+-- those, and getting one wrong is a silent rendering difference.
+--
+-- ppt/notesSlides/** is dropped with the slides: a notes slide relates back to
+-- a slide that no longer exists, and a dangling relationship is a repair
+-- prompt in PowerPoint.
+
+-- A loaded reference deck. `active` false is the no-template case, and every
+-- consumer branches on it, so one value type covers both paths and there is no
+-- second code path to drift.
+export type PptxRefDoc = {
+  active: bool,
+  entries: [{name: string, data: string}],
+  presentationXml: string,
+  presentationRelsXml: string,
+  contentTypesXml: string,
+  layoutTarget: string,
+  layoutCount: int,
+  masterCount: int,
+  sldSz: string
+}
+
+-- No reference deck. Every string empty so the generator's `active` branch is
+-- the only thing that decides, never a "" test on a payload field.
+export pure func pptxTplNone() -> PptxRefDoc = {
+  active: false,
+  entries: [],
+  presentationXml: "",
+  presentationRelsXml: "",
+  contentTypesXml: "",
+  layoutTarget: "",
+  layoutCount: 0,
+  masterCount: 0,
+  sldSz: ""
+}
+
+-- ============================================================
+-- Loading
+-- ============================================================
+
+-- A deck with no master is refused rather than carried: it would produce a
+-- package that opens and looks exactly like the untemplated output, which is
+-- the failure mode this whole feature exists to avoid (an instruction that
+-- silently does nothing).
+export func pptxTplLoad(path: string) -> Result[PptxRefDoc, string] ! {FS} =
+  match listEntries(path) {
+    Err(e) => Err("cannot open reference deck ${path}: ${e}"),
+    Ok(names) =>
+      if not pptxTplHas(names, "ppt/presentation.xml")
+      then Err("reference deck ${path} has no ppt/presentation.xml — not a PPTX")
+      else if pptxTplCountUnder(names, "ppt/slideMasters/slideMaster") == 0
+      then Err("reference deck ${path} declares no slide master — nothing to take fonts, colours or backgrounds from")
+      else if pptxTplCountUnder(names, "ppt/slideLayouts/slideLayout") == 0
+      then Err("reference deck ${path} declares no slide layout — generated slides would have nothing to reference")
+      else pptxTplBuild(path, names)
+  }
+
+func pptxTplBuild(path: string, names: [string]) -> Result[PptxRefDoc, string] ! {FS} {
+  let presXml = pptxTplRead(path, "ppt/presentation.xml");
+  let sldSz = pptxTplExtractSldSz(presXml);
+  if length(sldSz) == 0
+  then Err("reference deck ${path} has no <p:sldSz> — cannot tell what slide size it wants")
+  else match pptxTplCarry(path, names) {
+    Err(e) => Err(e),
+    Ok(carried) => Ok({
+      active: true,
+      entries: carried,
+      presentationXml: presXml,
+      presentationRelsXml: pptxTplReadIf(path, names, "ppt/_rels/presentation.xml.rels"),
+      contentTypesXml: pptxTplReadIf(path, names, "[Content_Types].xml"),
+      layoutTarget: pptxTplFirstLayout(names),
+      layoutCount: pptxTplCountUnder(names, "ppt/slideLayouts/slideLayout"),
+      masterCount: pptxTplCountUnder(names, "ppt/slideMasters/slideMaster"),
+      sldSz: sldSz
+    })
+  }
+}
+
+-- Every template part except the four the output regenerates, base64 so the
+-- binary ones — the theme's embedded images, a logo on the master, embedded
+-- fonts — survive byte-for-byte. A part that fails to read is an error, not a
+-- skip: a silently missing master is a deck that renders as though no template
+-- was given at all.
+@allow_empty_ok("base case of the recursion over part names — the empty tail of the list, not an empty result")
+func pptxTplCarry(path: string, names: [string]) -> Result[[{name: string, data: string}], string] ! {FS} =
+  match names {
+    [] => Ok([]),
+    n :: rest =>
+      if pptxTplSkipPart(n)
+      then pptxTplCarry(path, rest)
+      else match readEntryBytes(path, n) {
+        Err(e) => Err("reference deck part ${n} could not be read: ${e}"),
+        Ok(bytes) => match pptxTplCarry(path, rest) {
+          Err(e) => Err(e),
+          Ok(tail) => Ok({name: n, data: bytes} :: tail)
+        }
+      }
+  }
+
+-- The parts the output owns. Directory entries (trailing "/") are skipped too:
+-- a zip may carry them, and writing one back as a file corrupts the package.
+export pure func pptxTplSkipPart(n: string) -> bool =
+  n == "[Content_Types].xml"
+  || n == "ppt/presentation.xml"
+  || n == "ppt/_rels/presentation.xml.rels"
+  || pptxTplStartsWith(n, "ppt/slides/")
+  || pptxTplStartsWith(n, "ppt/notesSlides/")
+  || pptxTplEndsWithSlash(n)
+
+-- ============================================================
+-- Pure helpers (unit-testable without FS)
+-- ============================================================
+
+export pure func pptxTplStartsWith(s: string, prefix: string) -> bool =
+  if length(prefix) > length(s) then false
+  else substring(s, 0, length(prefix)) == prefix
+
+pure func pptxTplEndsWithSlash(s: string) -> bool =
+  if length(s) == 0 then false
+  else substring(s, length(s) - 1, length(s)) == "/"
+
+-- The whole <p:sldSz .../> element, verbatim. Returned as the element rather
+-- than parsed cx/cy because the generator substitutes it whole — and because a
+-- template may carry attributes (type=, or a custom ratio) we have no reason to
+-- re-derive.
+export pure func pptxTplExtractSldSz(presXml: string) -> string {
+  let i = find(presXml, "<p:sldSz");
+  if i < 0 then ""
+  else pptxTplElemAt(presXml, i)
+}
+
+pure func pptxTplElemAt(xml: string, start: int) -> string {
+  let rest = substring(xml, start, length(xml));
+  let e = find(rest, "/>");
+  if e < 0 then "" else substring(rest, 0, e + 2)
+}
+
+-- The first slideLayout part, as the RELATIVE target a slide's .rels needs
+-- ("slideLayout1.xml"). Ordinal choice, deliberately: picking a layout by
+-- INTENT needs the layout's <p:ph> set and a block-stream mapping, which is the
+-- placeholder-binding work this tier explicitly excludes. Recorded here so the
+-- choice is visible rather than looking like the final answer.
+export pure func pptxTplFirstLayout(names: [string]) -> string =
+  match names {
+    [] => "",
+    n :: rest =>
+      if pptxTplStartsWith(n, "ppt/slideLayouts/slideLayout") && pptxTplIsXml(n)
+      then substring(n, length("ppt/slideLayouts/"), length(n))
+      else pptxTplFirstLayout(rest)
+  }
+
+pure func pptxTplIsXml(n: string) -> bool =
+  if length(n) < 4 then false
+  else substring(n, length(n) - 4, length(n)) == ".xml"
+
+export pure func pptxTplHas(names: [string], want: string) -> bool =
+  match names {
+    [] => false,
+    n :: rest => if n == want then true else pptxTplHas(rest, want)
+  }
+
+-- Counts parts whose name starts with prefix AND ends ".xml", so a
+-- "ppt/slideLayouts/_rels/..." entry never inflates the layout count.
+export pure func pptxTplCountUnder(names: [string], prefix: string) -> int =
+  match names {
+    [] => 0,
+    n :: rest =>
+      let here = if pptxTplStartsWith(n, prefix) && pptxTplIsXml(n) then 1 else 0 in
+      here + pptxTplCountUnder(rest, prefix)
+  }
+
+-- ============================================================
+-- XML surgery
+-- ============================================================
+
+-- Remove every open..close span, inclusive. Unbalanced input is returned
+-- untouched: half-removing a span corrupts the XML, and the caller's fallback
+-- then regenerates the part outright instead of shipping a broken one.
+export pure func pptxTplDropSpans(s: string, open: string, close: string) -> string
+  requires { length(open) > 0 && length(close) > 0 }
+  ensures { length(result) <= length(s) }
+{
+  let i = find(s, open);
+  if i < 0 then s else pptxTplDropSpanAt(s, open, close, i)
+}
+
+pure func pptxTplDropSpanAt(s: string, open: string, close: string, i: int) -> string {
+  let j = find(substring(s, i, length(s)), close);
+  if j < 0 then s
+  else pptxTplDropSpans(
+    "${substring(s, 0, i)}${substring(s, i + j + length(close), length(s))}",
+    open, close)
+}
+
+-- Insert before the FIRST occurrence of marker. Used for the ordered children
+-- of <p:presentation>, where schema order matters: sldIdLst must precede
+-- sldSz, and sldSz must precede notesSz.
+export pure func pptxTplInsertBeforeFirst(xml: string, marker: string, payload: string) -> string {
+  let i = find(xml, marker);
+  if i < 0 then xml
+  else "${substring(xml, 0, i)}${payload}${substring(xml, i, length(xml))}"
+}
+
+export pure func pptxTplInsertBeforeLast(xml: string, marker: string, payload: string) -> string {
+  let i = pptxTplLastIndexOf(xml, marker);
+  if i < 0 then xml
+  else "${substring(xml, 0, i)}${payload}${substring(xml, i, length(xml))}"
+}
+
+export pure func pptxTplLastIndexOf(hay: string, needle: string) -> int
+  ensures { result == -1 || (result >= 0 && result + length(needle) <= length(hay)) }
+=
+  pptxTplLastIdxScan(hay, needle, 0, -1)
+
+pure func pptxTplLastIdxScan(hay: string, needle: string, offset: int, best: int) -> int {
+  let i = if offset >= length(hay) then -1
+          else find(substring(hay, offset, length(hay)), needle);
+  if i < 0 then best
+  else pptxTplLastIdxScan(hay, needle, offset + i + 1, offset + i)
+}
+
+-- Remove every self-closing element opening with openTag whose text contains
+-- needle. <Relationship .../> and <Override .../> are self-closing by schema,
+-- which is what makes "up to the next />" a safe bound.
+export pure func pptxTplDropElems(xml: string, openTag: string, needle: string) -> string =
+  pptxTplDropElemsScan(xml, openTag, needle, 0)
+
+pure func pptxTplDropElemsScan(xml: string, openTag: string, needle: string, from: int) -> string {
+  let i = if from >= length(xml) then -1
+          else find(substring(xml, from, length(xml)), openTag);
+  if i < 0 then xml
+  else pptxTplDropElemAt(xml, openTag, needle, from + i)
+}
+
+pure func pptxTplDropElemAt(xml: string, openTag: string, needle: string, start: int) -> string {
+  let rest = substring(xml, start, length(xml));
+  let e = find(rest, "/>");
+  if e < 0 then xml
+  else pptxTplDropElemDecide(xml, openTag, needle, start, start + e + 2, substring(rest, 0, e + 2))
+}
+
+pure func pptxTplDropElemDecide(xml: string, openTag: string, needle: string,
+                                start: int, stop: int, elem: string) -> string =
+  if contains(elem, needle)
+  then pptxTplDropElemsScan(
+    "${substring(xml, 0, start)}${substring(xml, stop, length(xml))}",
+    openTag, needle, start)
+  else pptxTplDropElemsScan(xml, openTag, needle, stop)
+
+-- ============================================================
+-- FS helpers
+-- ============================================================
+
+func pptxTplRead(path: string, name: string) -> string ! {FS} =
+  match readEntry(path, name) {
+    Ok(s) => s,
+    Err(_) => ""
+  }
+
+func pptxTplReadIf(path: string, names: [string], name: string) -> string ! {FS} =
+  if pptxTplHas(names, name) then pptxTplRead(path, name) else ""
