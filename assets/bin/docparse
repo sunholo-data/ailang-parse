@@ -149,6 +149,12 @@ Options:
                     styles, theme, embedded fonts, headers, footers and page
                     setup are applied to the new content (like Quarto's
                     reference-doc). DOCX, PPTX and ODT output.
+                    For HTML output pass a .css (its rules replace the
+                    built-in stylesheet) or an .html shell containing
+                    <!-- docparse:content --> where the content goes.
+                    Generated markup uses these classes, which a house
+                    stylesheet can target: section-header, section-footer,
+                    section-slide, section-textbox, merged, level-1..3.
   --reference-section N
                     Which section of --reference-doc supplies the page setup,
                     headers and footers (1 = first, Word's numbering).
@@ -535,7 +541,7 @@ while [ $# -gt 0 ]; do
       ;;
     --reference-doc)
       if [ $# -lt 2 ]; then
-        echo "Error: --reference-doc requires a .docx, .pptx or .odt path" >&2
+        echo "Error: --reference-doc requires a .docx, .pptx, .odt, .css or .html path" >&2
         exit 2
       fi
       REFERENCE_DOC="$2"

@@ -1,6 +1,8 @@
 module docparse/services/html_generator
 
-import std/string (length, join, intToStr, startsWith)
+import std/string (length, join, intToStr, startsWith, contains, find, substring)
+import std/fs (readFile)
+import std/result (Result, Ok, Err)
 import std/list (map, foldl, length as listLength)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
@@ -23,10 +25,68 @@ import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
 export pure func generateHtml(doc: ParsedDocument) -> string
   ensures { length(result) > 0 }
 {
+  generateHtmlStyled(doc, htmlStyle())
+}
+
+-- The marker an .html reference must contain to say where generated content
+-- goes. A comment, so the template stays a valid, viewable page on its own.
+export pure func htmlContentMarker() -> string = "<!-- docparse:content -->"
+
+-- The class names generated markup uses. A house stylesheet is written against
+-- these, so they are a contract: renaming one silently breaks every stylesheet
+-- in the wild. Exported so a doc test can assert the documented list matches.
+export pure func htmlClassContract() -> [string] = [
+  "section-header", "section-footer", "section-slide", "section-textbox",
+  "merged", "level-1", "level-2", "level-3"
+]
+
+-- styleBlock is dropped in verbatim between </title> and </head>, so a caller
+-- can pass our built-in <style> or a template's.
+export pure func generateHtmlStyled(doc: ParsedDocument, styleBlock: string) -> string
+  ensures { length(result) > 0 }
+{
   let title = if length(doc.metadata.title) > 0
     then xmlEscape(doc.metadata.title)
     else xmlEscape(doc.filename);
-  "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\"/>\n<title>${title}</title>\n${htmlStyle()}</head>\n<body>\n${htmlBlocksToStr(doc.blocks)}</body>\n</html>\n"
+  "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\"/>\n<title>${title}</title>\n${styleBlock}</head>\n<body>\n${htmlBlocksToStr(doc.blocks)}</body>\n</html>\n"
+}
+
+-- Generate against a reference: a .css whose rules replace the built-in
+-- stylesheet, or an .html shell our body is spliced into at htmlContentMarker().
+--
+-- A shell without the marker is an ERROR naming it, never an append. Appending
+-- would produce a page that opens, looks like the template, and silently omits
+-- or misplaces the content — and the caller cannot tell from the exit code.
+export func generateHtmlWithReference(doc: ParsedDocument, referencePath: string)
+  -> Result[string, string] ! {FS} =
+  if length(referencePath) == 0
+  then Ok(generateHtml(doc))
+  else {
+    -- readFile returns the contents directly; the caller checks existence
+    -- before we get here, so an empty result means an empty or unreadable
+    -- file, and either way there is no style to apply.
+    let text = readFile(referencePath);
+    if length(text) == 0
+    then Err("reference ${referencePath} is empty — no styles to apply")
+    else if htmlRefIsCss(referencePath)
+    then Ok(generateHtmlStyled(doc, "<style>\n${text}\n</style>\n"))
+    else if not contains(text, htmlContentMarker())
+    then Err("reference ${referencePath} contains no ${htmlContentMarker()} marker — nothing says where the generated content goes")
+    else Ok(htmlSpliceInto(text, htmlBlocksToStr(doc.blocks)))
+  }
+
+pure func htmlRefIsCss(path: string) -> bool =
+  if length(path) < 4 then false
+  else substring(path, length(path) - 4, length(path)) == ".css"
+
+-- Replace every marker occurrence with the body. Every, not the first: a
+-- two-column shell may legitimately want the content twice, and silently
+-- filling only one would be the same partial-success failure as appending.
+export pure func htmlSpliceInto(shell: string, body: string) -> string {
+  let m = htmlContentMarker();
+  let i = find(shell, m);
+  if i < 0 then shell
+  else htmlSpliceInto("${substring(shell, 0, i)}${body}${substring(shell, i + length(m), length(shell))}", body)
 }
 
 -- Generate just the body HTML from blocks (no wrapper)

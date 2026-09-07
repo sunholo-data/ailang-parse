@@ -11,6 +11,21 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### `--reference-doc` for HTML
+
+For `.html` output the reference is either a **`.css`**, whose rules replace the
+built-in stylesheet wholesale, or an **`.html` shell** containing
+`<!-- docparse:content -->` where the generated body is spliced in — every
+occurrence, so a two-column shell can place it twice.
+
+A shell without the marker is an error naming it, never an append: appending
+would produce a page that opens, looks like the template, and silently omits or
+misplaces the content.
+
+The class names generated markup uses are now a documented contract a house
+stylesheet can target: `section-header`, `section-footer`, `section-slide`,
+`section-textbox`, `merged`, `level-1`..`level-3`.
+
 ### `--reference-doc` for ODT
 
 `--reference-doc house.odt` now works for `.odt` output. ODF makes this the

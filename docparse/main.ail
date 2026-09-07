@@ -33,7 +33,7 @@ import docparse/services/output_formatter (formatResult)
 import docparse/services/console_report (printSummary, printBlocks)
 import docparse/services/markdown_writer (renderMarkdown)
 import docparse/services/eval (evalMain, evalNormalizeJson, evalJaccard, evalComputeScore)
-import docparse/services/html_generator (generateHtml)
+import docparse/services/html_generator (generateHtml, generateHtmlWithReference)
 import docparse/services/docx_generator (generateDocxWithReference)
 import docparse/services/pptx_generator (generatePptx, generatePptxWithReference)
 import docparse/services/xlsx_generator (generateXlsx)
@@ -406,9 +406,16 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
 
   -- Step 4: Generate the output file
   if ext == "html" || ext == "htm" then {
-    let html = generateHtml(doc);
-    writeFile(outputPath, html);
-    println("Generated HTML: ${outputPath}")
+    match generateHtmlWithReference(doc, referenceDoc) {
+      Err(e) => {
+        println("Error generating HTML: ${e}");
+        exit(1)
+      },
+      Ok(html) => {
+        writeFile(outputPath, html);
+        println("Generated HTML: ${outputPath}")
+      }
+    }
   }
   else if ext == "docx" then {
     let msg = generateDocxWithReference(doc, outputPath, referenceDoc, referenceSection, tableStyle);
@@ -481,9 +488,16 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bo
     println("");
     let convertExt = getExtension(convertTarget);
     if convertExt == "html" || convertExt == "htm" then {
-      let html = generateHtml(doc);
-      writeFile(convertTarget, html);
-      println("Converted to HTML: ${convertTarget}")
+      match generateHtmlWithReference(doc, referenceDoc) {
+        Err(e) => {
+          println("Error generating HTML: ${e}");
+          exit(1)
+        },
+        Ok(html) => {
+          writeFile(convertTarget, html);
+          println("Converted to HTML: ${convertTarget}")
+        }
+      }
     }
     else if convertExt == "docx" then {
       let msg = generateDocxWithReference(doc, convertTarget, referenceDoc, referenceSection, tableStyle);
