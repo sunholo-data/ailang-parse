@@ -68,7 +68,7 @@ pure func odtBlockToXml(block: Block) -> string =
   match block {
     HeadingBlock(h) =>
       let inner = if listLength(h.runs) > 0 then odfRunsToXml(h.runs) else odfEncodeText(h.text) in
-      "<text:h text:outline-level=\"${intToStr(h.level)}\">${inner}</text:h>",
+      "<text:h text:style-name=\"${odtHeadingStyleName(h.level)}\" text:outline-level=\"${intToStr(h.level)}\">${inner}</text:h>",
 
     TextBlock(t) =>
       if length(t.text) > 0
@@ -141,27 +141,75 @@ pure func odtTableCell(cell: TableCell) -> string {
 -- itemRuns is parallel to items but may be absent entirely. Both lists are
 -- walked together so a short or missing itemRuns falls back to plain text per
 -- item rather than pairing formatting with the wrong item.
+-- List items name List_20_Bullet / List_20_Number for the same reason headings
+-- name Heading_20_N: an unnamed text:p inherits the default paragraph style, so
+-- a template's list styling would have nothing to attach to.
 pure func odtListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> string =
-  "<text:list>${odtListItemsToXml(items, itemRuns)}</text:list>"
+  let styleName = if ordered then "List_20_Number" else "List_20_Bullet" in
+  "<text:list>${odtListItemsToXml(items, itemRuns, styleName)}</text:list>"
 
-pure func odtListItemsToXml(items: [string], itemRuns: [[InlineRun]]) -> string =
+pure func odtListItemsToXml(items: [string], itemRuns: [[InlineRun]], styleName: string) -> string =
   match items {
     [] => "",
     item :: rest =>
       match itemRuns {
-        [] => "${odtListItem(odfEncodeText(item))}${odtListItemsToXml(rest, [])}",
+        [] => "${odtListItem(odfEncodeText(item), styleName)}${odtListItemsToXml(rest, [], styleName)}",
         r :: rrest =>
           let body = if listLength(r) > 0 then odfRunsToXml(r) else odfEncodeText(item) in
-          "${odtListItem(body)}${odtListItemsToXml(rest, rrest)}"
+          "${odtListItem(body, styleName)}${odtListItemsToXml(rest, rrest, styleName)}"
       }
   }
 
-pure func odtListItem(body: string) -> string =
-  "<text:list-item><text:p>${body}</text:p></text:list-item>"
+pure func odtListItem(body: string, styleName: string) -> string =
+  "<text:list-item><text:p text:style-name=\"${styleName}\">${body}</text:p></text:list-item>"
 
--- Minimal styles.xml
+-- Every style this generator's body XML can reference, as (name, xml) pairs
+-- rather than one blob.
+--
+-- Two things depend on the pair shape. First, a reference doc can then inject
+-- only the names the template does NOT define, so the template's Heading_20_1
+-- wins while a missing List_20_Bullet is still filled in. Second, the set the
+-- body references and the set styles.xml defines are derived from ONE list, so
+-- they cannot disagree — a body naming a style nothing defines is the same
+-- class of bug as an orphaned styles.xml part, and it renders as plain body
+-- text with no indication why. (Measured: a template's Heading_20_1 at 55pt red
+-- had NO effect until the heading named it — see the design doc's E1a/E1b.)
+--
+-- ODF encodes a space in a style name as "_20_", so "Heading 1" is the display
+-- name and Heading_20_1 is the identifier. Both are emitted: consumers match on
+-- style:name, but style:display-name is what a user sees in LibreOffice's style
+-- list, and a template author needs to recognise them.
+export pure func odfStyleDefs() -> [{name: string, xml: string}] = [
+  {name: "Standard", xml: "<style:style style:name=\"Standard\" style:family=\"paragraph\"/>"},
+  {name: "Heading_20_1", xml: odtHeadingStyle(1, "130%")},
+  {name: "Heading_20_2", xml: odtHeadingStyle(2, "115%")},
+  {name: "Heading_20_3", xml: odtHeadingStyle(3, "101%")},
+  {name: "Heading_20_4", xml: odtHeadingStyle(4, "95%")},
+  {name: "Heading_20_5", xml: odtHeadingStyle(5, "85%")},
+  {name: "Heading_20_6", xml: odtHeadingStyle(6, "75%")},
+  {name: "List_20_Bullet", xml: "<style:style style:name=\"List_20_Bullet\" style:display-name=\"List Bullet\" style:family=\"paragraph\" style:parent-style-name=\"Standard\"/>"},
+  {name: "List_20_Number", xml: "<style:style style:name=\"List_20_Number\" style:display-name=\"List Number\" style:family=\"paragraph\" style:parent-style-name=\"Standard\"/>"}
+]
+
+-- Sizes are PERCENTAGES of the document default, not absolute points. A
+-- template that sets a 9pt body should get proportionate headings, and a
+-- hardcoded 28pt would fight it.
+pure func odtHeadingStyle(level: int, size: string) -> string =
+  "<style:style style:name=\"Heading_20_${intToStr(level)}\" style:display-name=\"Heading ${intToStr(level)}\" style:family=\"paragraph\" style:parent-style-name=\"Standard\" style:default-outline-level=\"${intToStr(level)}\"><style:text-properties fo:font-size=\"${size}\" fo:font-weight=\"bold\"/></style:style>"
+
+-- ODF outline levels run 1..6; a deeper heading names the deepest style that
+-- exists rather than a Heading_20_9 nothing defines.
+export pure func odtHeadingStyleName(level: int) -> string =
+  if level < 1 then "Heading_20_1"
+  else if level > 6 then "Heading_20_6"
+  else "Heading_20_${intToStr(level)}"
+
+pure func odtJoinStyleXml(defs: [{name: string, xml: string}]) -> string =
+  foldl(\acc d. "${acc}${d.xml}", "", defs)
+
+-- styles.xml, built from the one list above.
 pure func odtMinimalStyles() -> string =
-  "${xmlDecl()}<office:document-styles ${odfNs()} office:version=\"1.2\"><office:styles><style:style style:name=\"Standard\" style:family=\"paragraph\"/></office:styles></office:document-styles>"
+  "${xmlDecl()}<office:document-styles ${odfNs()} office:version=\"1.2\"><office:styles>${odtJoinStyleXml(odfStyleDefs())}</office:styles></office:document-styles>"
 
 -- Build meta.xml
 pure func odtBuildMeta(title: string, author: string) -> string {

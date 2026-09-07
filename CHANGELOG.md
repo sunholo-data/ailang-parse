@@ -11,6 +11,24 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### Generated ODT headings and lists now name a style
+
+`<text:h>` was emitted with an outline level but **no `text:style-name`**, and
+an unnamed heading inherits the default paragraph style. Measured consequence:
+a document defining `Heading 1` at 55pt red rendered its headings as ordinary
+body text, and there was no way to tell from the file that anything was wrong.
+Headings and list items now name `Heading_20_1..6`, `List_20_Bullet` and
+`List_20_Number`.
+
+Our own `styles.xml` grew those definitions in the same change — otherwise the
+default path would name styles nothing defines, which is the same defect from
+the other side. Both sets come from one `odfStyleDefs()` list, so they cannot
+disagree. Heading sizes are percentages of the document default rather than
+absolute points, so a template setting a 9pt body gets proportionate headings.
+
+Generated ODT bytes change. No benchmark golden moved: the ODT parser reads
+headings by outline level, not by style name.
+
 ### `--reference-doc` for PPTX — brand a generated deck from a template
 
 `--reference-doc brand.pptx` now works for `.pptx` output, the way it already
