@@ -158,6 +158,8 @@ Options:
                     --reference-doc (styleId or style name). Default: the
                     style named "Table", else the first table style the
                     template defines. Requires --reference-doc.
+  --slide-size S    Aspect ratio for generated .pptx: 16:9 (default) or 4:3.
+                    PPTX output only.
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
   --pdf-backend B   PDF backend: pdftotext (default, deterministic plain text),
@@ -404,6 +406,7 @@ PROMPT_TEXT=""
 REFERENCE_DOC=""
 REFERENCE_SECTION=""
 TABLE_STYLE=""
+SLIDE_SIZE=""
 
 # Install the local PDF backends (docling, liteparse) into the uv project that
 # pdf_backend_external resolves at runtime — $PROJECT_DIR, see backendProject().
@@ -555,6 +558,14 @@ while [ $# -gt 0 ]; do
           ;;
       esac
       REFERENCE_SECTION="$2"
+      shift 2
+      ;;
+    --slide-size)
+      if [ $# -lt 2 ]; then
+        echo "Error: --slide-size requires 16:9 or 4:3" >&2
+        exit 2
+      fi
+      SLIDE_SIZE="$2"
       shift 2
       ;;
     --table-style)
@@ -799,6 +810,9 @@ if [ -n "$REFERENCE_DOC" ]; then
 fi
 if [ -n "$REFERENCE_SECTION" ]; then
   AILANG_ARGS+=(--reference-section "$REFERENCE_SECTION")
+fi
+if [ -n "$SLIDE_SIZE" ]; then
+  AILANG_ARGS+=(--slide-size "$SLIDE_SIZE")
 fi
 if [ -n "$TABLE_STYLE" ]; then
   AILANG_ARGS+=(--table-style "$TABLE_STYLE")

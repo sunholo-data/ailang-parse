@@ -270,7 +270,10 @@ func mcpGenerate(doc: ParsedDocument, outFmt: string, outPath: string) -> string
     encode(jo([kv("output", js(outPath)), kv("format", js("docx")), kv("message", js(msg))]))
   }
   else if outFmt == "pptx" then {
-    let msg = generatePptx(doc, outPath);
+    -- "" is the 16:9 default. The MCP surface has no slide-size parameter yet;
+    -- adding one belongs with the wider convert-endpoint work
+    -- (v0_40_0_convert_reference_doc_api.md), not here.
+    let msg = generatePptx(doc, outPath, "");
     encode(jo([kv("output", js(outPath)), kv("format", js("pptx")), kv("message", js(msg))]))
   }
   else if outFmt == "xlsx" then {

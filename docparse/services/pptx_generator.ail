@@ -27,7 +27,9 @@ import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 --   - Minimal styling
 
 -- Generate a PPTX file from ParsedDocument
-export func generatePptx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
+-- slideSize is "16:9" (default, and what an empty string means) or "4:3".
+-- Validated by the caller so an unknown value fails before anything is written.
+export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: string) -> string ! {FS}
   ensures { length(result) > 0 }
 {
   -- Split blocks into slides: each SectionBlock(kind="slide") is a slide,
@@ -38,7 +40,7 @@ export func generatePptx(doc: ParsedDocument, outputPath: string) -> string ! {F
   -- Build all ZIP entries
   let contentTypes = pptxContentTypes(slideCount);
   let rootRels = pptxRootRels();
-  let presentation = pptxPresentation(slideCount);
+  let presentation = pptxPresentation(slideCount, pptxSldSzFor(slideSize));
   let presRels = pptxPresentationRels(slideCount);
   let slideEntries = pptxBuildSlideEntries(slideContents, 1);
   let slideRelEntries = pptxBuildSlideRelEntries(slideCount, 1);
@@ -345,9 +347,23 @@ pure func pptxSlideContentTypes(count: int, idx: int) -> string =
 pure func pptxRootRels() -> string =
   "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"ppt/presentation.xml\"/></Relationships>"
 
+-- The <p:sldSz> element for a named aspect ratio.
+--
+-- 16:9 is the default: PowerPoint has defaulted to widescreen since 2013, and
+-- every deck this generator produced before v0.41.0 came out 4:3 regardless of
+-- what the content wanted.
+--
+-- This returns the whole ELEMENT rather than cx/cy, because a reference doc
+-- supplies its own <p:sldSz> verbatim — one substitution point serves both the
+-- flag and the template.
+export pure func pptxSldSzFor(kind: string) -> string =
+  if kind == "4:3"
+  then "<p:sldSz cx=\"9144000\" cy=\"6858000\" type=\"screen4x3\"/>"
+  else "<p:sldSz cx=\"12192000\" cy=\"6858000\"/>"
+
 -- Presentation XML
-pure func pptxPresentation(slideCount: int) -> string =
-  "${xmlDecl()}<p:presentation xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst><p:sldIdLst>${pptxSlideIds(slideCount, 1)}</p:sldIdLst><p:sldSz cx=\"9144000\" cy=\"6858000\" type=\"screen4x3\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>"
+pure func pptxPresentation(slideCount: int, sldSz: string) -> string =
+  "${xmlDecl()}<p:presentation xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst><p:sldIdLst>${pptxSlideIds(slideCount, 1)}</p:sldIdLst>${sldSz}<p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>"
 
 pure func pptxSlideIds(count: int, idx: int) -> string =
   if idx > count then ""

@@ -114,10 +114,15 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
     println("Error: --table-style requires --reference-doc (a template supplies the style)");
     exit(1)
   } else ();
+  let slideSize = getSlideSize(args);
+  if length(slideSize) > 0 && slideSize != "16:9" && slideSize != "4:3" then {
+    println("Error: --slide-size accepts 16:9 or 4:3 (got: ${slideSize})");
+    exit(1)
+  } else ();
 
   -- AI Document Generation mode: --generate output.docx --prompt "..."
   if length(generateTarget) > 0 && length(promptText) > 0 then {
-    generateDocument(generateTarget, promptText, referenceDoc, referenceSection, tableStyle)
+    generateDocument(generateTarget, promptText, referenceDoc, referenceSection, tableStyle, slideSize)
   }
   else if length(generateTarget) > 0 then {
     println("Error: --generate requires --prompt \"description\"");
@@ -169,7 +174,7 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
       projectRoot: getEnvOr("DOCPARSE_PROJECT_ROOT", ""),
       noAttachmentData: hasFlag(args, "--no-attachment-data") || getEnvOr("DOCPARSE_NO_ATTACHMENT_DATA", "") == "1"
     };
-    runParse(filepath, opts, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle)
+    runParse(filepath, opts, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize)
   }
 }
 
@@ -206,7 +211,7 @@ func printNotes(notes: [string]) -> () ! {IO} =
 -- and merge order — the divergence that let the hosted API drop PDF annotations
 -- and silently truncate multi-file LaTeX.
 func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTarget: string,
-              referenceDoc: string, referenceSection: int, tableStyle: string)
+              referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string)
   -> () ! {IO, FS, AI, Env, Net, Process, Clock} {
   match parseDocument(filepath, opts) {
     -- Hard failure: print, write NOTHING, exit non-zero. The error text must
@@ -242,7 +247,7 @@ func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTa
       if countBlocks(doc.blocks) == 0
         then println("⚠ Warning: extraction produced no content blocks.")
         else ();
-      writeOutputs(doc, result, doSummarize, filepath, convertTarget, referenceDoc, referenceSection, tableStyle)
+      writeOutputs(doc, result, doSummarize, filepath, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize)
     }
   }
 }
@@ -300,6 +305,20 @@ pure func getReferenceSection(args: [string]) -> int =
     _ :: rest => getReferenceSection(rest)
   }
 
+-- Extract --slide-size 16:9|4:3: the aspect ratio of a generated .pptx.
+-- Absent (empty) means 16:9. Anything else is rejected in main, before a file
+-- is written, rather than silently falling back to a default the user did not
+-- ask for.
+pure func getSlideSize(args: [string]) -> string =
+  match args {
+    [] => "",
+    "--slide-size" :: rest => match rest {
+      [] => "invalid",
+      v :: _ => v
+    },
+    _ :: rest => getSlideSize(rest)
+  }
+
 -- Extract --table-style NAME: bind generated tables to this table style of
 -- the reference doc (styleId first, then w:name). Requires --reference-doc:
 -- without a carried styles.xml the reference would name a style nothing
@@ -326,7 +345,7 @@ pure func getPromptText(args: [string]) -> string =
   }
 
 -- AI Document Generation: prompt -> AI -> [Block] -> format generator -> file
-func generateDocument(outputPath: string, prompt: string, referenceDoc: string, referenceSection: int, tableStyle: string) -> () ! {IO, FS, AI, Env} {
+func generateDocument(outputPath: string, prompt: string, referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string) -> () ! {IO, FS, AI, Env} {
   let ext = getExtension(outputPath);
   println("--- AI Document Generation ---");
   println("Output:   ${outputPath}");
@@ -366,7 +385,7 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
     println(msg)
   }
   else if ext == "pptx" then {
-    let msg = generatePptx(doc, outputPath);
+    let msg = generatePptx(doc, outputPath, slideSize);
     println(msg)
   }
   else if ext == "xlsx" then {
@@ -406,7 +425,7 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
 -- Output dir: DOCPARSE_OUTPUT_DIR env var (default: docparse/data)
 -- convertTarget: if non-empty, generate output in target format (e.g., "out.html", "out.docx")
 func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bool, filepath: string,
-                  convertTarget: string, referenceDoc: string, referenceSection: int, tableStyle: string) -> () ! {IO, FS, AI, Env} {
+                  convertTarget: string, referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string) -> () ! {IO, FS, AI, Env} {
   let outDir = getEnvOr("DOCPARSE_OUTPUT_DIR", "docparse/data");
   let basename = mainBasename(filepath);
 
@@ -441,7 +460,7 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bo
       println(msg)
     }
     else if convertExt == "pptx" then {
-      let msg = generatePptx(doc, convertTarget);
+      let msg = generatePptx(doc, convertTarget, slideSize);
       println(msg)
     }
     else if convertExt == "xlsx" then {

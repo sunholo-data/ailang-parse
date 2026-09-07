@@ -11,6 +11,19 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### Generated decks are 16:9 by default (`--slide-size`)
+
+`p:sldSz` was hardcoded to 4:3, so every generated `.pptx` came out 4:3 no
+matter what the content or the user wanted — two of the eight in-repo PPTX
+fixtures are already 16:9.
+
+**The default output geometry changes**: new decks are `12192000x6858000`
+(16:9). `--slide-size 4:3` restores the previous `9144000x6858000
+type="screen4x3"` exactly. Any other value is an error that writes nothing.
+
+This also makes the slide size a parameter rather than a literal, which is the
+prerequisite for a reference deck supplying its own `<p:sldSz>`.
+
 ### Installer checksum fix
 
 `install.sh` verified the downloaded tarball against `content_hash` instead of
