@@ -147,13 +147,27 @@ func pptxTplCarry(path: string, names: [string]) -> Result[[{name: string, data:
 
 -- The parts the output owns. Directory entries (trailing "/") are skipped too:
 -- a zip may carry them, and writing one back as a file corrupts the package.
-export pure func pptxTplSkipPart(n: string) -> bool =
+export pure func pptxTplSkipPart(n: string) -> bool
+  tests [
+    ("ppt/theme/theme1.xml", false),
+    ("ppt/slideMasters/slideMaster1.xml", false),
+    ("ppt/media/image1.png", false),
+    ("[Content_Types].xml", true),
+    ("ppt/presentation.xml", true),
+    ("ppt/_rels/presentation.xml.rels", true),
+    ("ppt/slides/slide1.xml", true),
+    ("ppt/slides/_rels/slide1.xml.rels", true),
+    ("ppt/notesSlides/notesSlide1.xml", true),
+    ("ppt/media/", true)
+  ]
+{
   n == "[Content_Types].xml"
   || n == "ppt/presentation.xml"
   || n == "ppt/_rels/presentation.xml.rels"
   || pptxTplStartsWith(n, "ppt/slides/")
   || pptxTplStartsWith(n, "ppt/notesSlides/")
   || pptxTplEndsWithSlash(n)
+}
 
 -- ============================================================
 -- Pure helpers (unit-testable without FS)
@@ -171,7 +185,18 @@ pure func pptxTplEndsWithSlash(s: string) -> bool =
 -- than parsed cx/cy because the generator substitutes it whole — and because a
 -- template may carry attributes (type=, or a custom ratio) we have no reason to
 -- re-derive.
-export pure func pptxTplExtractSldSz(presXml: string) -> string {
+export pure func pptxTplExtractSldSz(presXml: string) -> string
+  ensures { length(result) == 0 || contains(result, "<p:sldSz") }
+  tests [
+    ("", ""),
+    ("<p:presentation><p:sldIdLst/></p:presentation>", ""),
+    ("<p:presentation><p:sldSz cx=\"12192000\" cy=\"6858000\"/><p:notesSz/></p:presentation>",
+     "<p:sldSz cx=\"12192000\" cy=\"6858000\"/>"),
+    ("<p:sldSz cx=\"9144000\" cy=\"6858000\" type=\"screen4x3\"/>",
+     "<p:sldSz cx=\"9144000\" cy=\"6858000\" type=\"screen4x3\"/>"),
+    ("<p:sldSz cx=\"1\" cy=\"2\"", "")
+  ]
+{
   let i = find(presXml, "<p:sldSz");
   if i < 0 then ""
   else pptxTplElemAt(presXml, i)
@@ -188,7 +213,16 @@ pure func pptxTplElemAt(xml: string, start: int) -> string {
 -- INTENT needs the layout's <p:ph> set and a block-stream mapping, which is the
 -- placeholder-binding work this tier explicitly excludes. Recorded here so the
 -- choice is visible rather than looking like the final answer.
-export pure func pptxTplFirstLayout(names: [string]) -> string =
+export pure func pptxTplFirstLayout(names: [string]) -> string
+  tests [
+    ([], ""),
+    (["ppt/presentation.xml"], ""),
+    (["ppt/slideLayouts/_rels/slideLayout1.xml.rels", "ppt/slideLayouts/slideLayout1.xml"],
+     "slideLayout1.xml"),
+    (["ppt/slideLayouts/slideLayout7.xml", "ppt/slideLayouts/slideLayout2.xml"],
+     "slideLayout7.xml")
+  ]
+{
   match names {
     [] => "",
     n :: rest =>
@@ -196,6 +230,7 @@ export pure func pptxTplFirstLayout(names: [string]) -> string =
       then substring(n, length("ppt/slideLayouts/"), length(n))
       else pptxTplFirstLayout(rest)
   }
+}
 
 pure func pptxTplIsXml(n: string) -> bool =
   if length(n) < 4 then false
@@ -294,6 +329,37 @@ pure func pptxTplDropElemDecide(xml: string, openTag: string, needle: string,
     "${substring(xml, 0, start)}${substring(xml, stop, length(xml))}",
     openTag, needle, start)
   else pptxTplDropElemsScan(xml, openTag, needle, stop)
+
+
+-- Single-argument seams so the surgery above is covered by inline tests.
+-- These are the EXACT calls pptx_generator makes, so a test here is a test of
+-- the real behaviour rather than of a plausible-looking argument set.
+--
+-- The slide-relationship case is the one that matters: slideMaster and
+-- slideLayout relationships must SURVIVE while slide ones go, and matching on
+-- a target substring rather than the type URL is how that goes wrong.
+pure func pptxTplDropSlideRels(rels: string) -> string
+  tests [
+    ("<Relationships><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster\" Target=\"slideMasters/slideMaster1.xml\"/></Relationships>",
+     "<Relationships><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster\" Target=\"slideMasters/slideMaster1.xml\"/></Relationships>"),
+    ("<Relationships><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide1.xml\"/></Relationships>",
+     "<Relationships></Relationships>"),
+    ("<Relationships><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide\" Target=\"notesSlides/notesSlide1.xml\"/></Relationships>",
+     "<Relationships><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide\" Target=\"notesSlides/notesSlide1.xml\"/></Relationships>")
+  ]
+{ pptxTplDropElems(rels, "<Relationship", "/relationships/slide\"") }
+
+-- Dropping the slide id list is what lets the template's presentation.xml keep
+-- everything else; an unbalanced span must be left ALONE rather than half-cut.
+pure func pptxTplDropSldIdLst(xml: string) -> string
+  tests [
+    ("<p:presentation><p:sldIdLst><p:sldId id=\"256\"/></p:sldIdLst><p:sldSz/></p:presentation>",
+     "<p:presentation><p:sldSz/></p:presentation>"),
+    ("<p:presentation><p:sldSz/></p:presentation>", "<p:presentation><p:sldSz/></p:presentation>"),
+    ("<p:presentation><p:sldIdLst><p:sldId/></p:presentation>",
+     "<p:presentation><p:sldIdLst><p:sldId/></p:presentation>")
+  ]
+{ pptxTplDropSpans(xml, "<p:sldIdLst>", "</p:sldIdLst>") }
 
 -- ============================================================
 -- FS helpers

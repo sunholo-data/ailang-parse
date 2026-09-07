@@ -223,6 +223,42 @@ export pure func odfTplHeadingName(ref: OdfRefDoc, level: int, fallback: string)
   if length(found) > 0 then found else fallback
 }
 
+
+-- Single-argument seams so the resolution order above is covered by inline
+-- tests. This is the highest-risk logic in the module: assuming Heading_20_N
+-- agrees with every file the usual tools emit and silently mis-binds against a
+-- hand-built template, so each of the three fallbacks is pinned here.
+pure func odfTplHeading1(styles: string) -> string
+  tests [
+    ("<office:styles></office:styles>", ""),
+    ("<office:styles><style:style style:name=\"Heading_20_1\" style:family=\"paragraph\"/></office:styles>",
+     "Heading_20_1"),
+    ("<office:styles><style:style style:name=\"HouseTitle\" style:display-name=\"Heading 1\" style:family=\"paragraph\"/></office:styles>",
+     "HouseTitle"),
+    ("<office:styles><style:style style:name=\"Kop1\" style:default-outline-level=\"1\" style:family=\"paragraph\"/></office:styles>",
+     "Kop1"),
+    ("<office:styles><style:style style:name=\"NotAHeading\" style:display-name=\"Heading 2\" style:family=\"paragraph\"/></office:styles>",
+     ""),
+    ("<office:styles><style:style style:name=\"TableHead\" style:display-name=\"Heading 1\" style:family=\"table\"/></office:styles>",
+     "")
+  ]
+{ odfTplResolveHeading(styles, 1) }
+
+-- The family guard in the last case above is not hypothetical: a table or
+-- graphic style legitimately named "Heading 1" would otherwise bind a
+-- paragraph to something that is not a paragraph style at all.
+
+-- style:name must not match inside style:display-name — the leading space in
+-- the attribute search is the whole reason that works.
+pure func odfTplNameAttr(tag: string) -> string
+  tests [
+    ("<style:style style:name=\"Kop1\" style:family=\"paragraph\">", "Kop1"),
+    ("<style:style style:display-name=\"Heading 1\" style:name=\"HouseTitle\">", "HouseTitle"),
+    ("<style:style style:display-name=\"Heading 1\">", ""),
+    ("<style:style>", "")
+  ]
+{ odfTplAttr(tag, "style:name") }
+
 -- ============================================================
 -- Carrying
 -- ============================================================
@@ -231,12 +267,25 @@ export pure func odfTplHeadingName(ref: OdfRefDoc, level: int, fallback: string)
 -- merged. Everything else the template declared — Pictures, Configurations2,
 -- Thumbnails, and META-INF/manifest.xml which lists them — is carried, so the
 -- manifest and the parts it names stay consistent without being rebuilt.
-export pure func odfTplSkipPart(n: string) -> bool =
+export pure func odfTplSkipPart(n: string) -> bool
+  tests [
+    ("Pictures/img1.png", false),
+    ("META-INF/manifest.xml", false),
+    ("Configurations2/accelerator/current.xml", false),
+    ("Thumbnails/thumbnail.png", false),
+    ("mimetype", true),
+    ("content.xml", true),
+    ("styles.xml", true),
+    ("meta.xml", true),
+    ("Pictures/", true)
+  ]
+{
   n == "mimetype"
   || n == "content.xml"
   || n == "styles.xml"
   || n == "meta.xml"
   || odfTplEndsWithSlash(n)
+}
 
 pure func odfTplEndsWithSlash(s: string) -> bool =
   if length(s) == 0 then false
