@@ -4,6 +4,16 @@
 commitment implied by filing.
 **Source**: ailang message `inbox_1788155557570_f8f91f6c` from `aitana-platform` —
 "Question: is a --reference-doc equivalent planned for .pptx (master slides)?"
+**Recommendation revised (2026-09-07)** by
+[`v0_41_0_reference_doc_beyond_docx.md`](../v0_41_0/v0_41_0_reference_doc_beyond_docx.md).
+P1-P7 below all re-verified at `ed8f82f` (v0.40.0) and stand. But its measurement **E2b**
+contradicts the "Half A changes nothing visible" conclusion: swapping the theme
+alone indeed changes nothing (E2a), yet a master carrying `<p:txStyles>` plus a
+`<p:defaultTextStyle>` in `presentation.xml` **does** restyle our
+non-placeholder text boxes — typeface and colour both followed. So there is a
+cheap PPTX tier this doc concluded did not exist. Read the two together; the
+newer doc owns the plan.
+
 **Follows**: [`v0_39_0_reference_doc_followups.md`](../../implemented/v0_39_0/v0_39_0_reference_doc_followups.md)
 **deferred item 6** — "ODT/PPTX templates: same mechanic, different packages.
 PPTX is bigger (layout ids). Each deserves its own doc." This is that doc for PPTX.
