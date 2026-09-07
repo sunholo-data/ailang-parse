@@ -423,8 +423,33 @@ Nothing ships without all four standing suites (CLAUDE.md hard rule):
 **Spike 0 (blocks Sprint 1's commitment, ~half a day).** Re-run E2b's artifact
 in **PowerPoint and Keynote**, not only LibreOffice. If non-placeholder shapes
 do not inherit `<p:defaultTextStyle>` / `<p:otherStyle>` there, the theme tier
-is worth nothing to most users and Sprint 1 merges into Sprint 3. Record the
-result in this doc either way.
+is worth nothing to most users and Sprint 1 merges into Sprint 3.
+
+> **ANSWERED 2026-09-07 on the studio — Keynote PASSES, more generously than
+> LibreOffice.** Artifacts rebuilt there (`p:ph` count 0 on the baseline,
+> re-confirming C7 on a second machine), exported via Keynote to PDF, fonts read
+> with `pdffonts` and fill colours read out of the decompressed content streams:
+>
+> | variant | theme font | master `txStyles` | rendered font | rendered colour |
+> |---|---|---|---|---|
+> | `base` | Calibri | none | Calibri | black `sc 0 0 0` |
+> | `varA` | Courier New | none | **CourierNewPSMT** | black |
+> | `varB` | Courier New | Courier New + `FF0000` | CourierNewPS(-Bold)MT | **red `sc 1 0 0`** |
+>
+> **E2a does not replicate in Keynote — and that is good news.** In LibreOffice
+> the theme alone reached nothing and `<p:txStyles>` was required; in Keynote
+> the **theme alone is already enough** (`varA`: Courier, still black), and the
+> master's text styles carry colour on top (`varB`: red). The two engines agree
+> on the conclusion by different routes, and both align with the OOXML
+> inheritance chain for non-placeholder shapes. Carrying theme + master +
+> `defaultTextStyle` therefore restyles our output in both.
+>
+> **PowerPoint itself remains untested** — it is not installed on the studio and
+> could not be obtained. Two independent engines agreeing, plus spec alignment,
+> puts the residual risk low but not zero; the M6 render assertion is the
+> standing guard.
+>
+> **Consequence: Sprint 1 (PPTX theme tier) is UNBLOCKED and returns to rank 1.**
 
 New `verify_generated.py` stages, each asserting **binding** (L7):
 
