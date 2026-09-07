@@ -37,7 +37,7 @@ import docparse/services/html_generator (generateHtml)
 import docparse/services/docx_generator (generateDocxWithReference)
 import docparse/services/pptx_generator (generatePptx, generatePptxWithReference)
 import docparse/services/xlsx_generator (generateXlsx)
-import docparse/services/odt_generator (generateOdt)
+import docparse/services/odt_generator (generateOdt, generateOdtWithReference)
 import docparse/services/odp_generator (generateOdp)
 import docparse/services/ods_generator (generateOds)
 import docparse/services/qmd_generator (generateQmd)
@@ -112,6 +112,19 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
   } else ();
   if length(tableStyle) > 0 && length(referenceDoc) == 0 then {
     println("Error: --table-style requires --reference-doc (a template supplies the style)");
+    exit(1)
+  } else ();
+  -- --reference-section and --table-style read DOCX-specific parts
+  -- (<w:sectPr>, <w:tblStyle>) that have no counterpart in an ODF or
+  -- PresentationML package. Accepting them silently for those outputs would
+  -- look like they had been honoured.
+  let refExt = getExtension(if length(generateTarget) > 0 then generateTarget else convertTarget);
+  if length(refExt) > 0 && refExt != "docx" && referenceSection > 0 then {
+    println("Error: --reference-section applies to .docx output only (target is .${refExt})");
+    exit(1)
+  } else ();
+  if length(refExt) > 0 && refExt != "docx" && length(tableStyle) > 0 then {
+    println("Error: --table-style applies to .docx output only (target is .${refExt})");
     exit(1)
   } else ();
   let slideSize = getSlideSize(args);
@@ -410,7 +423,7 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
     emitGenerated(msg)
   }
   else if ext == "odt" then {
-    let msg = generateOdt(doc, outputPath);
+    let msg = generateOdtWithReference(doc, outputPath, referenceDoc);
     emitGenerated(msg)
   }
   else if ext == "odp" then {
@@ -485,7 +498,7 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bo
       emitGenerated(msg)
     }
     else if convertExt == "odt" then {
-      let msg = generateOdt(doc, convertTarget);
+      let msg = generateOdtWithReference(doc, convertTarget, referenceDoc);
       emitGenerated(msg)
     }
     else if convertExt == "odp" then {

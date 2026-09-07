@@ -1,13 +1,15 @@
 module docparse/services/odt_generator
 
-import std/string (length, intToStr)
+import std/string (length, intToStr, contains)
 import std/list (foldl, length as listLength)
-import std/zip (createArchive)
+import std/zip (createArchive, createArchiveWithBytes)
+import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
 import docparse/services/odf_runs (odfCollectRunStyles, odfRunsToXml)
+import docparse/services/odf_template (OdfRefDoc, odfTplNone, odfTplLoad, odfTplHeadingName, odfTplHasStyleNamed, odfTplInsertBeforeLast)
 
 -- ODT Generator — converts Block ADT to a valid .odt file.
 --
@@ -27,48 +29,116 @@ import docparse/services/odf_runs (odfCollectRunStyles, odfRunsToXml)
 --   office: — document structure
 --   style:  — style definitions
 
+-- Generate against a reference document: an existing .odt whose styles, fonts,
+-- page geometry, headers and footers are applied to this document's content.
+--
+-- An unreadable or non-ODF reference is an error and writes NOTHING. Falling
+-- back to the built-in styling would produce a plausible file missing exactly
+-- the house style it was asked for.
+export func generateOdtWithReference(doc: ParsedDocument, outputPath: string,
+                                     referencePath: string) -> string ! {FS} =
+  if length(referencePath) == 0
+  then odtWriteArchive(doc, outputPath, odfTplNone())
+  else match odfTplLoad(referencePath) {
+    Err(e) => "Error generating ODT: ${e}",
+    Ok(ref) => odtWriteArchive(doc, outputPath, ref)
+  }
+
 -- Generate an ODT file from ParsedDocument
 export func generateOdt(doc: ParsedDocument, outputPath: string) -> string ! {FS}
   ensures { length(result) > 0 }
 {
-  let contentXml = odtBuildContent(doc.blocks);
-  let stylesXml = odtMinimalStyles();
+  odtWriteArchive(doc, outputPath, odfTplNone())
+}
+
+func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) -> string ! {FS} {
+  let contentXml = odtBuildContent(doc.blocks, ref);
+  let stylesXml = odtStylesFor(ref);
   let metaXml = odtBuildMeta(doc.metadata.title, doc.metadata.author);
   let manifest = odtManifest();
   let mimetype = "application/vnd.oasis.opendocument.text";
 
-  let entries = [
-    {name: "mimetype", content: mimetype},
-    {name: "META-INF/manifest.xml", content: manifest},
-    {name: "content.xml", content: contentXml},
-    {name: "styles.xml", content: stylesXml},
-    {name: "meta.xml", content: metaXml}
-  ];
-
-  let result = createArchive(outputPath, entries);
-  match result {
-    Ok(_) => "Generated ODT: ${outputPath}",
-    Err(e) => "Error generating ODT: ${e}"
+  if ref.active then {
+    -- mimetype must be the FIRST entry in an ODF package, so it leads the list
+    -- and the carried parts follow ours. META-INF/manifest.xml comes from the
+    -- template, which already lists the parts being carried.
+    let ourParts = [
+      {name: "mimetype", content: mimetype},
+      {name: "content.xml", content: contentXml},
+      {name: "styles.xml", content: stylesXml},
+      {name: "meta.xml", content: metaXml}
+    ];
+    let allBytes = odtAppendByteEntries(odtPartsToByteEntries(ourParts), ref.entries);
+    match createArchiveWithBytes(outputPath, allBytes) {
+      Ok(_) =>
+        if ref.resolvedCount == 0
+        then "Generated ODT: ${outputPath} (reference applied: ${intToStr(listLength(ref.entries))} parts carried; the template defines no heading styles, so headings use the built-in ones)"
+        else "Generated ODT: ${outputPath} (reference applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.resolvedCount)} of 6 heading levels from the template)",
+      Err(e) => "Error generating ODT: ${e}"
+    }
+  } else {
+    let entries = [
+      {name: "mimetype", content: mimetype},
+      {name: "META-INF/manifest.xml", content: manifest},
+      {name: "content.xml", content: contentXml},
+      {name: "styles.xml", content: stylesXml},
+      {name: "meta.xml", content: metaXml}
+    ];
+    match createArchive(outputPath, entries) {
+      Ok(_) => "Generated ODT: ${outputPath}",
+      Err(e) => "Error generating ODT: ${e}"
+    }
   }
 }
+
+-- styles.xml: ours outright, or the template's plus ONLY the definitions it
+-- lacks. Injecting only the missing ones is what lets the template's Heading 1
+-- win while a style it never defined is still resolvable — the same merge
+-- docx_generator does with docxStyleDefs.
+pure func odtStylesFor(ref: OdfRefDoc) -> string =
+  if not ref.active then odtMinimalStyles()
+  else odfTplInsertBeforeLast(ref.stylesXml, "</office:styles>",
+                              odtMissingStyleXml(odfStyleDefs(), ref.stylesXml))
+
+pure func odtMissingStyleXml(defs: [{name: string, xml: string}], stylesXml: string) -> string =
+  match defs {
+    [] => "",
+    d :: rest =>
+      let here = if odfTplHasStyleNamed(stylesXml, d.name) then "" else d.xml in
+      "${here}${odtMissingStyleXml(rest, stylesXml)}"
+  }
+
+pure func odtPartsToByteEntries(parts: [{name: string, content: string}]) -> [{name: string, data: string}] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      let entry = {name: p.name, data: toBase64(fromString(p.content))} in
+      entry :: odtPartsToByteEntries(rest)
+  }
+
+pure func odtAppendByteEntries(a: [{name: string, data: string}], b: [{name: string, data: string}]) -> [{name: string, data: string}] =
+  match a {
+    [] => b,
+    x :: rest => x :: odtAppendByteEntries(rest, b)
+  }
 
 -- ODF namespace declaration string
 pure func odfNs() -> string =
   "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:meta=\"urn:oasis:names:tc:opendocument:xmlns:meta:1.0\""
 
 -- Build content.xml
-pure func odtBuildContent(blocks: [Block]) -> string {
-  let body = foldl(\acc b. "${acc}${odtBlockToXml(b)}", "", blocks);
+pure func odtBuildContent(blocks: [Block], ref: OdfRefDoc) -> string {
+  let body = foldl(\acc b. "${acc}${odtBlockToXml(b, ref)}", "", blocks);
   let styles = odfCollectRunStyles(blocks);
   "${xmlDecl()}<office:document-content ${odfNs()} office:version=\"1.2\"><office:automatic-styles>${styles}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>"
 }
 
 -- Convert a Block to ODF XML
-pure func odtBlockToXml(block: Block) -> string =
+pure func odtBlockToXml(block: Block, ref: OdfRefDoc) -> string =
   match block {
     HeadingBlock(h) =>
       let inner = if listLength(h.runs) > 0 then odfRunsToXml(h.runs) else odfEncodeText(h.text) in
-      "<text:h text:style-name=\"${odtHeadingStyleName(h.level)}\" text:outline-level=\"${intToStr(h.level)}\">${inner}</text:h>",
+      "<text:h text:style-name=\"${odfTplHeadingName(ref, h.level, odtHeadingStyleName(h.level))}\" text:outline-level=\"${intToStr(h.level)}\">${inner}</text:h>",
 
     TextBlock(t) =>
       if length(t.text) > 0
@@ -81,7 +151,7 @@ pure func odtBlockToXml(block: Block) -> string =
       odtTableToXml(t.headers, t.rows),
 
     ListBlock(l) =>
-      odtListToXml(l.items, l.ordered, l.itemRuns),
+      odtListToXml(l.items, l.ordered, l.itemRuns, ref),
 
     ImageBlock(i) =>
       "<text:p text:style-name=\"Standard\">[Image: ${odfEncodeText(i.description)}]</text:p>",
@@ -93,7 +163,7 @@ pure func odtBlockToXml(block: Block) -> string =
       "<text:p text:style-name=\"Standard\">[Video: ${odfEncodeText(v.description)}]</text:p>",
 
     SectionBlock(s) =>
-      "<text:section text:name=\"${xmlEscape(s.kind)}\">${foldl(\acc b. "${acc}${odtBlockToXml(b)}", "", s.blocks)}</text:section>",
+      "<text:section text:name=\"${xmlEscape(s.kind)}\">${foldl(\acc b. "${acc}${odtBlockToXml(b, ref)}", "", s.blocks)}</text:section>",
 
     ChangeBlock(c) =>
       "<text:p text:style-name=\"Standard\">${odfEncodeText(c.text)} (${odfEncodeText(c.changeType)} by ${odfEncodeText(c.author)}, ${odfEncodeText(c.date)})</text:p>",
@@ -144,8 +214,10 @@ pure func odtTableCell(cell: TableCell) -> string {
 -- List items name List_20_Bullet / List_20_Number for the same reason headings
 -- name Heading_20_N: an unnamed text:p inherits the default paragraph style, so
 -- a template's list styling would have nothing to attach to.
-pure func odtListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> string =
-  let styleName = if ordered then "List_20_Number" else "List_20_Bullet" in
+pure func odtListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]], ref: OdfRefDoc) -> string =
+  let ours = if ordered then "List_20_Number" else "List_20_Bullet" in
+  let fromTpl = if ordered then ref.numberId else ref.bulletId in
+  let styleName = if ref.active && length(fromTpl) > 0 then fromTpl else ours in
   "<text:list>${odtListItemsToXml(items, itemRuns, styleName)}</text:list>"
 
 pure func odtListItemsToXml(items: [string], itemRuns: [[InlineRun]], styleName: string) -> string =

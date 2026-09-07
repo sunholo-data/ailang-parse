@@ -1,0 +1,271 @@
+module docparse/services/odf_template
+
+import std/string (length, find, substring, contains, intToStr)
+import std/list (length as listLength, nth_or)
+import std/zip (listEntries, readEntry, readEntryBytes)
+import std/result (Result, Ok, Err)
+
+-- Reference-document support for ODT generation — the ODF half of the
+-- Quarto/Pandoc `reference-doc` idea.
+--
+-- ODF makes this the easiest of the three formats, for one structural reason:
+-- styles.xml carries <office:styles> AND <office:master-styles> AND the page
+-- layout in a single part. Carrying that one part brings the house fonts, the
+-- page geometry, the headers and the footers with it. The DOCX path needs a
+-- separate <w:sectPr> lift to get the same result (see docx_template), and the
+-- PPTX path needs a rels graph rewrite (see pptx_template). Here there is
+-- nothing to lift: the part IS the look.
+--
+-- What made this NOT work before v0.41.0 was the other side of the binding.
+-- Generated headings carried an outline level and no text:style-name, and an
+-- unnamed heading inherits the default paragraph style — so a template's
+-- Heading 1 at 55pt red had no effect at all, and the file gave no hint that
+-- anything had been ignored. odt_generator now names a style for every heading
+-- and list item; this module resolves WHICH name to use from the template.
+--
+-- Division of responsibility:
+--   template wins   page geometry, headers, footers, body font, heading styles
+--   we own          content.xml, meta.xml, mimetype
+--   merged          styles.xml — the template's, plus only the style names it
+--                   does not already define
+--   carried         everything else (Pictures, Configurations2, Thumbnails and
+--                   the manifest that lists them), base64, byte-for-byte
+
+export type OdfRefDoc = {
+  active: bool,
+  entries: [{name: string, data: string}],
+  stylesXml: string,
+  headingIds: [string],
+  bulletId: string,
+  numberId: string,
+  resolvedCount: int
+}
+
+export pure func odfTplNone() -> OdfRefDoc = {
+  active: false,
+  entries: [],
+  stylesXml: "",
+  headingIds: [],
+  bulletId: "",
+  numberId: "",
+  resolvedCount: 0
+}
+
+-- ============================================================
+-- Loading
+-- ============================================================
+
+export func odfTplLoad(path: string) -> Result[OdfRefDoc, string] ! {FS} =
+  match listEntries(path) {
+    Err(e) => Err("cannot open reference document ${path}: ${e}"),
+    Ok(names) =>
+      if not odfTplHas(names, "content.xml")
+      then Err("reference document ${path} has no content.xml — not an ODF package")
+      else if not odfTplHas(names, "styles.xml")
+      then Err("reference document ${path} has no styles.xml — nothing to take fonts, headings or page setup from")
+      else odfTplBuild(path, names)
+  }
+
+func odfTplBuild(path: string, names: [string]) -> Result[OdfRefDoc, string] ! {FS} {
+  let styles = odfTplRead(path, "styles.xml");
+  -- The merge appends our missing definitions before this closing tag. Without
+  -- it there is nowhere to put them, and proceeding would emit a document whose
+  -- headings name styles nothing defines — the exact silent failure this
+  -- feature exists to prevent.
+  if not contains(styles, "</office:styles>")
+  then Err("reference document ${path} has no <office:styles> section to merge into")
+  else match odfTplCarry(path, names) {
+    Err(e) => Err(e),
+    Ok(carried) => {
+      let ids = odfTplHeadingIds(styles);
+      Ok({
+        active: true,
+        entries: carried,
+        stylesXml: styles,
+        headingIds: ids,
+        bulletId: odfTplResolveNamed(styles, "List_20_Bullet", "List Bullet"),
+        numberId: odfTplResolveNamed(styles, "List_20_Number", "List Number"),
+        resolvedCount: odfTplCountResolved(ids)
+      })
+    }
+  }
+}
+
+-- A template that defines no heading styles is NOT an error.
+--
+-- The first instinct was to reject it, on the grounds that headings would then
+-- get our styling while the body got the template's — a mixed result the user
+-- cannot see. But the repo already settled this case the other way for DOCX
+-- (commit 70cdec0, "name the reason when 0 template parts are carried"): a
+-- reference that legitimately carries little is reported, not refused, because
+-- a letterhead whose only contribution is page geometry and a body font is a
+-- real and reasonable template. resolvedCount is what the generator reports, so
+-- the outcome is stated rather than silent.
+pure func odfTplCountResolved(ids: [string]) -> int =
+  match ids {
+    [] => 0,
+    i :: rest => (if length(i) > 0 then 1 else 0) + odfTplCountResolved(rest)
+  }
+
+-- Six entries, one per outline level. "" means the template defines nothing for
+-- that level and the generator should use — and inject — our own definition.
+pure func odfTplHeadingIds(styles: string) -> [string] = [
+  odfTplResolveHeading(styles, 1),
+  odfTplResolveHeading(styles, 2),
+  odfTplResolveHeading(styles, 3),
+  odfTplResolveHeading(styles, 4),
+  odfTplResolveHeading(styles, 5),
+  odfTplResolveHeading(styles, 6)
+]
+
+-- Resolution order, and why it is not just "Heading_20_N".
+--
+-- Assuming the conventional identifier is the same class of guess as deciding
+-- bullet-vs-numbered from `numId != "1"` — it agrees with every file produced
+-- by the usual tools and silently mis-binds against a hand-built one. So the
+-- identifier is READ from the template, three ways:
+--
+--   1. style:name = "Heading_20_N"          the ODF convention, when present
+--   2. style:display-name = "Heading N"     what a localised or hand-authored
+--                                           template may carry instead
+--   3. style:default-outline-level = "N"    the semantic answer: whatever style
+--                                           the template itself declares to BE
+--                                           the level-N heading, under any name
+pure func odfTplResolveHeading(styles: string, level: int) -> string {
+  let conventional = "Heading_20_${intToStr(level)}";
+  if odfTplHasStyleNamed(styles, conventional) then conventional
+  else
+    let byDisplay = odfTplFindByAttr(styles, "style:display-name", "Heading ${intToStr(level)}") in
+    if length(byDisplay) > 0 then byDisplay
+    else odfTplFindByAttr(styles, "style:default-outline-level", intToStr(level))
+}
+
+pure func odfTplResolveNamed(styles: string, conventional: string, display: string) -> string =
+  if odfTplHasStyleNamed(styles, conventional) then conventional
+  else odfTplFindByAttr(styles, "style:display-name", display)
+
+-- ============================================================
+-- styles.xml inspection
+-- ============================================================
+
+-- <style:style> carries children, so it is not self-closing and the "up to />"
+-- bound used for <Relationship/> and <Override/> does not apply. Each opening
+-- tag is taken up to its first ">" instead, which is where the attributes end.
+export pure func odfTplHasStyleNamed(styles: string, name: string) -> bool =
+  length(odfTplFindByAttr(styles, "style:name", name)) > 0
+
+-- The style:name of the first paragraph-family style whose `attr` equals
+-- `want`, or "" if none matches. Paragraph family only: a table or graphic
+-- style named "Heading 1" would bind a heading to something that is not a
+-- paragraph style at all.
+export pure func odfTplFindByAttr(styles: string, attr: string, want: string) -> string =
+  odfTplScanTags(styles, attr, want, 0)
+
+pure func odfTplScanTags(styles: string, attr: string, want: string, from: int) -> string {
+  let i = if from >= length(styles) then -1
+          else find(substring(styles, from, length(styles)), "<style:style");
+  if i < 0 then ""
+  else odfTplTagAt(styles, attr, want, from + i)
+}
+
+pure func odfTplTagAt(styles: string, attr: string, want: string, start: int) -> string {
+  let rest = substring(styles, start, length(styles));
+  let e = find(rest, ">");
+  if e < 0 then ""
+  else odfTplTagDecide(styles, attr, want, start + e + 1, substring(rest, 0, e + 1))
+}
+
+pure func odfTplTagDecide(styles: string, attr: string, want: string,
+                          next: int, tag: string) -> string =
+  if odfTplAttr(tag, "style:family") == "paragraph" && odfTplAttr(tag, attr) == want
+  then odfTplAttr(tag, "style:name")
+  else odfTplScanTags(styles, attr, want, next)
+
+-- Value of `name="..."` in an opening tag, or "" when absent. The leading space
+-- in the search keeps `style:name` from matching inside `style:display-name`.
+export pure func odfTplAttr(tag: string, name: string) -> string {
+  let key = " ${name}=\"";
+  let i = find(tag, key);
+  if i < 0 then ""
+  else odfTplAttrValueAt(tag, i + length(key))
+}
+
+pure func odfTplAttrValueAt(tag: string, from: int) -> string {
+  let rest = substring(tag, from, length(tag));
+  let e = find(rest, "\"");
+  if e < 0 then "" else substring(rest, 0, e)
+}
+
+-- Insert before the last closing tag; used for </office:styles>.
+export pure func odfTplInsertBeforeLast(xml: string, marker: string, payload: string) -> string {
+  let i = odfTplLastIndexOf(xml, marker);
+  if i < 0 then xml
+  else "${substring(xml, 0, i)}${payload}${substring(xml, i, length(xml))}"
+}
+
+export pure func odfTplLastIndexOf(hay: string, needle: string) -> int
+  ensures { result == -1 || (result >= 0 && result + length(needle) <= length(hay)) }
+=
+  odfTplLastIdxScan(hay, needle, 0, -1)
+
+pure func odfTplLastIdxScan(hay: string, needle: string, offset: int, best: int) -> int {
+  let i = if offset >= length(hay) then -1
+          else find(substring(hay, offset, length(hay)), needle);
+  if i < 0 then best
+  else odfTplLastIdxScan(hay, needle, offset + i + 1, offset + i)
+}
+
+-- The style name to use for outline level N: the template's if it resolved one,
+-- else our own (which the merge guarantees is defined).
+export pure func odfTplHeadingName(ref: OdfRefDoc, level: int, fallback: string) -> string {
+  let idx = if level < 1 then 0 else if level > 6 then 5 else level - 1;
+  let found = nth_or(ref.headingIds, idx, "");
+  if length(found) > 0 then found else fallback
+}
+
+-- ============================================================
+-- Carrying
+-- ============================================================
+
+-- mimetype is ours and must be written FIRST; content/styles/meta are ours or
+-- merged. Everything else the template declared — Pictures, Configurations2,
+-- Thumbnails, and META-INF/manifest.xml which lists them — is carried, so the
+-- manifest and the parts it names stay consistent without being rebuilt.
+export pure func odfTplSkipPart(n: string) -> bool =
+  n == "mimetype"
+  || n == "content.xml"
+  || n == "styles.xml"
+  || n == "meta.xml"
+  || odfTplEndsWithSlash(n)
+
+pure func odfTplEndsWithSlash(s: string) -> bool =
+  if length(s) == 0 then false
+  else substring(s, length(s) - 1, length(s)) == "/"
+
+@allow_empty_ok("base case of the recursion over part names — the empty tail of the list, not an empty result")
+func odfTplCarry(path: string, names: [string]) -> Result[[{name: string, data: string}], string] ! {FS} =
+  match names {
+    [] => Ok([]),
+    n :: rest =>
+      if odfTplSkipPart(n)
+      then odfTplCarry(path, rest)
+      else match readEntryBytes(path, n) {
+        Err(e) => Err("reference document part ${n} could not be read: ${e}"),
+        Ok(bytes) => match odfTplCarry(path, rest) {
+          Err(e) => Err(e),
+          Ok(tail) => Ok({name: n, data: bytes} :: tail)
+        }
+      }
+  }
+
+export pure func odfTplHas(names: [string], want: string) -> bool =
+  match names {
+    [] => false,
+    n :: rest => if n == want then true else odfTplHas(rest, want)
+  }
+
+func odfTplRead(path: string, name: string) -> string ! {FS} =
+  match readEntry(path, name) {
+    Ok(s) => s,
+    Err(_) => ""
+  }

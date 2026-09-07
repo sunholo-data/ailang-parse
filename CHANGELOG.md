@@ -11,6 +11,33 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### `--reference-doc` for ODT
+
+`--reference-doc house.odt` now works for `.odt` output. ODF makes this the
+easiest of the three formats for one structural reason: `styles.xml` carries
+the styles, the master page and the page layout in a single part, so carrying
+that one part brings house fonts, page geometry, headers and footers with it —
+no `<w:sectPr>` lift, no relationship-graph rewrite.
+
+The template's `styles.xml` is carried whole and only the style names it does
+**not** define are injected, so its `Heading 1` wins while a `List Bullet` it
+never defined is still resolvable.
+
+Heading style ids are **read from the template**, not assumed: `style:name`
+first, then `style:display-name`, then `style:default-outline-level`. Assuming
+`Heading_20_N` would agree with every file the usual tools produce and silently
+mis-bind against a hand-built one — the same class of guess as deciding
+bullet-vs-numbered from `numId != "1"`. A template whose level-1 heading is
+called `HouseTitle` or `Kop1` binds correctly.
+
+A template that defines no heading styles is reported, not refused — the
+outcome message says how many of the six levels came from the template. A
+letterhead whose only contribution is page geometry and a body font is a real
+template.
+
+`--reference-section` and `--table-style` now error for non-DOCX output rather
+than being silently ignored.
+
 ### Generated ODT headings and lists now name a style
 
 `<text:h>` was emitted with an outline level but **no `text:style-name`**, and
