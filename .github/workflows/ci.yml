@@ -430,6 +430,16 @@ jobs:
       - name: Install poppler (pdftotext backend)
         run: sudo apt-get update && sudo apt-get install -y poppler-utils
 
+      # LibreOffice renders a document and reports the COMPUTED style
+      # properties, which is the only way to prove a carried template style is
+      # actually REACHED. verify_generated.py's L7 stages degrade to SKIP
+      # without it, so an absent LibreOffice would turn the style-template
+      # checks green while testing nothing — the same shape as the poppler gap
+      # above. Installed in the same commit as the first render assertion,
+      # deliberately, rather than after the first red run.
+      - name: Install LibreOffice (render assertions for style templates)
+        run: sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress
+
       - name: Download test files
         run: bash benchmarks/download_test_files.sh
 
@@ -442,3 +452,16 @@ jobs:
       # batch counted the file as parsed.
       - name: Run failure check (failed parses must not write output)
         run: uv run benchmarks/failure_check.py
+
+      # These two are named in .claude/rules/benchmarks.md as the guards for
+      # "the blind spot" — parse-side goldens and "does the file open" both
+      # pass structurally invalid output through — but neither had ever run in
+      # CI. The office suite scores JSON goldens and no golden is markdown, so
+      # nothing scored the markdown writer; and nothing read a generated
+      # document's structure BACK. Three defects reached releases through green
+      # CI for exactly this reason.
+      - name: Run round-trip check (parse -> markdown -> parse)
+        run: uv run benchmarks/roundtrip_check.py
+
+      - name: Verify generated documents (structure, grids, style binding)
+        run: uv run benchmarks/verify_generated.py

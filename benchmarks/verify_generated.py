@@ -710,6 +710,288 @@ def verify_no_injection() -> bool:
     return True
 
 
+
+# ---------------------------------------------------------------------------
+# L7 — style templates beyond DOCX (v0.41.0)
+# ---------------------------------------------------------------------------
+#
+# These check BINDING, not presence, because styling adds a failure the other
+# levels cannot see: a document can be structurally perfect, carry the
+# template's every part, and still ignore it completely. That was the measured
+# starting state for ODT — a template's Heading 1 at 55pt red had no effect
+# because generated headings named no style — and the file gave no hint.
+#
+# So "the output contains the template's Heading_20_1 definition" is not the
+# assertion. "Every heading names a style that resolves" is, and one stage goes
+# further and RENDERS, because only a renderer can prove a carried style is
+# actually reached.
+
+STYLE_SRC = """---
+title: Style Template Check
+---
+
+# Top Heading
+
+Body paragraph one.
+
+## Second Level
+
+- first bullet
+- second bullet
+"""
+
+# A template whose heading styles are unmistakable when they apply: nothing
+# else in the pipeline produces 55pt or #ff0000.
+STYLED_ODT_STYLES = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<office:document-styles '
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'office:version="1.2"><office:styles>'
+    '<style:style style:name="Standard" style:family="paragraph">'
+    '<style:text-properties fo:font-size="9pt"/></style:style>'
+    '<style:style style:name="Heading_20_1" style:display-name="Heading 1" '
+    'style:family="paragraph" style:parent-style-name="Standard">'
+    '<style:text-properties fo:font-size="55pt" fo:color="#ff0000"/></style:style>'
+    '</office:styles></office:document-styles>'
+)
+
+
+def _soffice() -> str | None:
+    for cand in ("soffice", "/Applications/LibreOffice.app/Contents/MacOS/soffice"):
+        if cand.startswith("/"):
+            if Path(cand).exists():
+                return cand
+        else:
+            from shutil import which
+            found = which(cand)
+            if found:
+                return found
+    return None
+
+
+def _render_html(path: Path, outdir: Path) -> str:
+    """Render a document with LibreOffice and return the computed HTML.
+
+    LibreOffice's HTML export resolves the style chain and writes the COMPUTED
+    properties, which is exactly what a binding check needs: it answers "did
+    the template's style reach this text", where reading the source XML only
+    answers "is the template's style present in the file".
+    """
+    exe = _soffice()
+    if not exe:
+        return ""
+    outdir.mkdir(parents=True, exist_ok=True)
+    subprocess.run([exe, "--headless", "--convert-to", "html", str(path),
+                    "--outdir", str(outdir)],
+                   capture_output=True, text=True, timeout=180)
+    rendered = list(outdir.glob("*.html"))
+    return rendered[0].read_text(encoding="utf-8", errors="replace") if rendered else ""
+
+
+def _run_docparse(repo: Path, args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run([str(repo / "bin" / "docparse")] + args,
+                          capture_output=True, text=True, errors="replace",
+                          cwd=str(repo), timeout=180)
+
+
+def _odt_dangling_styles(path: Path) -> list[str]:
+    """Style names the body references that nothing defines.
+
+    A dangling text:style-name is not an error in any reader — it silently
+    falls back to the default paragraph style. That is precisely why it needs
+    a check: the document opens and the styling is simply absent.
+    """
+    with zipfile.ZipFile(path) as z:
+        body = z.read("content.xml").decode("utf-8", errors="replace")
+        styles = z.read("styles.xml").decode("utf-8", errors="replace")
+    import re
+    used = set(re.findall(r'text:style-name="([^"]+)"', body))
+    # Automatic styles declared inside content.xml count as defined.
+    defined = set(re.findall(r'style:name="([^"]+)"', styles))
+    defined |= set(re.findall(r'style:name="([^"]+)"', body))
+    return sorted(used - defined)
+
+
+def verify_style_templates() -> bool:
+    repo = Path(__file__).resolve().parent.parent
+    test_dir = repo / "data" / "test_files"
+    print("── style templates ──")
+    ok = True
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpd = Path(tmp)
+        src = tmpd / "style_source.md"
+        src.write_text(STYLE_SRC, encoding="utf-8")
+
+        # --- L7 RefOdtDefault: the no-template path must resolve its own names
+        out = tmpd / "plain.odt"
+        r = _run_docparse(repo, [str(src), "--convert", str(out)])
+        if r.returncode != 0 or not out.exists():
+            print("  L7 OdtDefault: FAIL (generation failed)")
+            ok = False
+        else:
+            dangling = _odt_dangling_styles(out)
+            if dangling:
+                print(f"  L7 OdtDefault: FAIL (body names undefined styles: {dangling})")
+                ok = False
+            else:
+                print("  L7 OdtDefault: PASS (every style the body names is defined)")
+
+        # --- L7 RefOdt: a template's heading style must BIND and RENDER
+        template = tmpd / "styled_template.odt"
+        base = tmpd / "base_for_template.odt"
+        _run_docparse(repo, [str(src), "--convert", str(base)])
+        if base.exists():
+            import shutil
+            shutil.copy(base, template)
+            # Replace styles.xml in place.
+            with zipfile.ZipFile(base) as zin:
+                names = [n for n in zin.namelist() if n != "styles.xml"]
+                keep = {n: zin.read(n) for n in names}
+            with zipfile.ZipFile(template, "w", zipfile.ZIP_DEFLATED) as zout:
+                for n, data in keep.items():
+                    zout.writestr(n, data)
+                zout.writestr("styles.xml", STYLED_ODT_STYLES)
+
+            styled = tmpd / "styled.odt"
+            r = _run_docparse(repo, [str(src), "--convert", str(styled),
+                                     "--reference-doc", str(template)])
+            if r.returncode != 0 or not styled.exists():
+                print("  L7 RefOdt:     FAIL (generation under template failed)")
+                ok = False
+            else:
+                dangling = _odt_dangling_styles(styled)
+                html = _render_html(styled, tmpd / "render_odt")
+                if dangling:
+                    print(f"  L7 RefOdt:     FAIL (dangling styles: {dangling})")
+                    ok = False
+                elif not html:
+                    print("  L7 RefOdt:     SKIP (LibreOffice not installed — "
+                          "binding checked, rendering not)")
+                elif "55pt" not in html:
+                    print("  L7 RefOdt:     FAIL (template Heading 1 carried but "
+                          "NOT rendered — 55pt absent from computed output)")
+                    ok = False
+                else:
+                    print("  L7 RefOdt:     PASS (template heading style renders at 55pt)")
+
+        # --- L7 RefPptx: template parts carried, and the template's font renders
+        deck_tpl = test_dir / "pandoc_basic.pptx"
+        if not deck_tpl.exists():
+            print("  L7 RefPptx:    SKIP (pandoc_basic.pptx missing)")
+        else:
+            deck = tmpd / "styled.pptx"
+            r = _run_docparse(repo, [str(src), "--convert", str(deck),
+                                     "--reference-doc", str(deck_tpl)])
+            if r.returncode != 0 or not deck.exists():
+                print("  L7 RefPptx:    FAIL (generation under deck template failed)")
+                ok = False
+            else:
+                with zipfile.ZipFile(deck) as z:
+                    names = z.namelist()
+                    pres = z.read("ppt/presentation.xml").decode("utf-8", errors="replace")
+                    rels = z.read("ppt/_rels/presentation.xml.rels").decode("utf-8", errors="replace")
+                layouts = [n for n in names if n.startswith("ppt/slideLayouts/slideLayout")
+                           and n.endswith(".xml")]
+                masters = [n for n in names if n.startswith("ppt/slideMasters/slideMaster")
+                           and n.endswith(".xml")]
+                errs = []
+                if len(layouts) < 2:
+                    errs.append(f"only {len(layouts)} layout(s) carried")
+                if not masters:
+                    errs.append("no master carried")
+                # every slide's layout reference must resolve to a carried part
+                for n in names:
+                    if n.startswith("ppt/slides/_rels/"):
+                        with zipfile.ZipFile(deck) as z:
+                            rx = z.read(n).decode("utf-8", errors="replace")
+                        import re as _re
+                        for tgt in _re.findall(r'Target="\.\./slideLayouts/([^"]+)"', rx):
+                            if f"ppt/slideLayouts/{tgt}" not in names:
+                                errs.append(f"{n} points at missing layout {tgt}")
+                if "12192000" not in pres:
+                    errs.append("template slide size (16:9) not carried")
+                if "/relationships/slide\"" not in rels:
+                    errs.append("no slide relationships emitted")
+                if errs:
+                    print(f"  L7 RefPptx:    FAIL ({'; '.join(errs)})")
+                    ok = False
+                else:
+                    print(f"  L7 RefPptx:    PASS ({len(layouts)} layouts, "
+                          f"{len(masters)} master(s), template size carried)")
+
+                html = _render_html(deck, tmpd / "render_pptx")
+                if not html:
+                    print("  L7 RefPptxRnd: SKIP (LibreOffice not installed)")
+                elif "Aptos" not in html:
+                    print("  L7 RefPptxRnd: FAIL (template theme font carried but "
+                          "NOT rendered — Aptos absent from computed output)")
+                    ok = False
+                else:
+                    print("  L7 RefPptxRnd: PASS (deck renders in the template's theme font)")
+
+        # --- L7 SlideSize
+        d16 = tmpd / "s169.pptx"
+        d43 = tmpd / "s43.pptx"
+        _run_docparse(repo, [str(src), "--convert", str(d16)])
+        _run_docparse(repo, [str(src), "--convert", str(d43), "--slide-size", "4:3"])
+        bad = tmpd / "sbad.pptx"
+        rb = _run_docparse(repo, [str(src), "--convert", str(bad), "--slide-size", "21:9"])
+        errs = []
+        if d16.exists():
+            with zipfile.ZipFile(d16) as z:
+                if "12192000" not in z.read("ppt/presentation.xml").decode("utf-8", "replace"):
+                    errs.append("default is not 16:9")
+        else:
+            errs.append("default generation failed")
+        if d43.exists():
+            with zipfile.ZipFile(d43) as z:
+                if "screen4x3" not in z.read("ppt/presentation.xml").decode("utf-8", "replace"):
+                    errs.append("--slide-size 4:3 did not restore 4:3")
+        else:
+            errs.append("4:3 generation failed")
+        if rb.returncode == 0 or bad.exists():
+            errs.append("invalid --slide-size was accepted or wrote a file")
+        if errs:
+            print(f"  L7 SlideSize:  FAIL ({'; '.join(errs)})")
+            ok = False
+        else:
+            print("  L7 SlideSize:  PASS (16:9 default, 4:3 exact, bad value refused)")
+
+        # --- L7 RefMismatch: every wrong reference exits non-zero, writes nothing
+        cases = [
+            ("docx template for pptx output", "m1.pptx", test_dir / "sample.docx"),
+            ("pptx template for odt output", "m2.odt", deck_tpl),
+            ("pptx template for docx output", "m3.docx", deck_tpl),
+        ]
+        bad_marker = tmpd / "nomarker.html"
+        bad_marker.write_text("<html><body>no marker</body></html>", encoding="utf-8")
+        cases.append(("html shell without marker", "m4.html", bad_marker))
+        errs = []
+        for label, outname, ref in cases:
+            if not Path(ref).exists():
+                continue
+            target = tmpd / outname
+            if target.exists():
+                target.unlink()
+            rr = _run_docparse(repo, [str(src), "--convert", str(target),
+                                      "--reference-doc", str(ref)])
+            if rr.returncode == 0:
+                errs.append(f"{label}: exited 0")
+            if target.exists():
+                errs.append(f"{label}: wrote a file")
+        if errs:
+            print(f"  L7 RefMismatch:FAIL ({'; '.join(errs)})")
+            ok = False
+        else:
+            print("  L7 RefMismatch:PASS (bad references exit non-zero, write nothing)")
+
+    return ok
+
+
 def main():
     print("=== DocParse Generated File Verification ===\n")
 
@@ -725,6 +1007,8 @@ def main():
     all_pass = verify_no_injection() and all_pass
     print()
     all_pass = verify_reference_doc() and all_pass
+    print()
+    all_pass = verify_style_templates() and all_pass
     print()
     for path in files:
         print(f"── {path.name} ──")

@@ -11,6 +11,26 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### Style templates are verified by binding and by rendering, and in CI
+
+`verify_generated.py` gained six L7 stages. They check **binding**, not
+presence, because styling adds a failure the other levels cannot see: a
+document can be structurally perfect, carry the template's every part, and
+ignore it completely — which is exactly what generated ODT did before this
+release, with nothing in the file to say so.
+
+One stage renders with LibreOffice and asserts the template's 55pt heading
+appears in the computed output. It was checked by reverting the fix: the stage
+fails with "template Heading 1 carried but NOT rendered", so it constrains
+something rather than reading green by construction.
+
+**`roundtrip_check.py` and `verify_generated.py` had never run in CI.** Only the
+office suite and the failure check did. `.claude/rules/benchmarks.md` names
+those two as the guards for the blind spot that let three defects reach
+releases — and neither was wired. Both now run in the benchmark job, with
+LibreOffice installed alongside poppler in the same commit as the first render
+assertion rather than after the first red run.
+
 ### `--reference-doc` for HTML
 
 For `.html` output the reference is either a **`.css`**, whose rules replace the
