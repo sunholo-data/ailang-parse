@@ -1,7 +1,7 @@
 # Document quality and portable verification
 
-**Status:** Implemented locally; unreleased
-**Target:** v0.41.0 / next release
+**Status:** Implemented in v0.41.0
+**Release:** v0.41.0
 **Priority:** P1
 **Created:** 2026-09-10
 **Estimated effort:** 3–5 engineering days including verification and documentation
@@ -148,8 +148,8 @@ timeouts. Existing Block ADT/public generation signatures remain compatible.
 ## Related documents
 
 - [Reference DOCX follow-ups](../../implemented/v0_39_0/v0_39_0_reference_doc_followups.md)
-- [Templates beyond DOCX](v0_41_0_reference_doc_beyond_docx.md)
-- [Legal DOCX writeback](../v0_18_0/v0_18_0_legal_docx_writeback.md)
+- [Templates beyond DOCX](../../planned/v0_41_0/v0_41_0_reference_doc_beyond_docx.md)
+- [Legal DOCX writeback](../../planned/v0_18_0/v0_18_0_legal_docx_writeback.md)
 
 ## Implementation report
 
@@ -189,5 +189,4 @@ Remaining boundaries: structural audit is deliberately bounded (no full style
 inheritance, accessibility certification, or comment-order validation), comparison
 is page-index raster equality rather than semantic alignment or diff overlays,
 and render completion leaves visual review pending. Windows and hosted/browser
-execution of local Process-based QA were not tested. No package release is made;
-this document remains under planned until released.
+execution of local Process-based QA were not tested. The implementation ships in the v0.41.0 package release.

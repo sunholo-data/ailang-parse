@@ -136,7 +136,7 @@ alignment and column spans.
 Headers, footers, comments and tracked changes have no Markdown syntax; those
 are preserved when converting from a document that already contains them.
 
-### Local document verification (unreleased)
+### Local document verification (v0.41.0+)
 
 `docparse-audit` and `docparse-render` are AILANG companions to the CLI. They run
 locally and require no hosted account. The installer links them when present in

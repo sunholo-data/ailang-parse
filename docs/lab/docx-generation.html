@@ -197,11 +197,14 @@
     // per-module budget is tight, so only this page pays for it.
     log('loading docx_generator…');
     log('loading docx_template…');
-    // Order matters: docx_generator imports docx_template, which imports
-    // nothing from the services layer. docparse_generate then imports
-    // docx_generator.
+    // Order matters: load the template and layout helpers before the
+    // generator; docparse_generate then imports docx_generator.
     window.docparseWasm.loadExtraModule('docparse/services/docx_template',
                                         'docparse/services/docx_template.ail')
+      .then(function () {
+        return window.docparseWasm.loadExtraModule('docparse/services/docx_layout',
+                                                   'docparse/services/docx_layout.ail');
+      })
       .then(function () {
         return window.docparseWasm.loadExtraModule('docparse/services/docx_generator',
                                                    'docparse/services/docx_generator.ail');

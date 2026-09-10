@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+## [0.41.0](https://github.com/sunholo-data/ailang-parse/compare/v0.40.0...v0.41.0) — 2026-09-10
+
 ### Document quality and local verification in AILANG
 
 - Add `docparse-render`: local LibreOffice/Poppler rendering, fresh output
