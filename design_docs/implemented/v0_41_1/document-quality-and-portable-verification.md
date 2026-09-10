@@ -1,12 +1,12 @@
 # Document quality and portable verification
 
-**Status:** Implemented in v0.41.0
-**Release:** v0.41.0
+**Status:** Implemented in v0.41.1
+**Release:** v0.41.1
 **Priority:** P1
 **Created:** 2026-09-10
 **Estimated effort:** 3–5 engineering days including verification and documentation
 **Baseline:** 160c7f1 (AILANG Parse), 24a0f22 (docparse-skill)
-**Dependencies:** AILANG runtime; LibreOffice and Poppler for optional rendering;
+**Dependencies:** AILANG runtime >=0.35.0 (`renameFileResult`); LibreOffice and Poppler for optional rendering;
 No hosted API, AI, Python, or Pillow is required by the new package features.
 
 ## Problem
@@ -189,4 +189,4 @@ Remaining boundaries: structural audit is deliberately bounded (no full style
 inheritance, accessibility certification, or comment-order validation), comparison
 is page-index raster equality rather than semantic alignment or diff overlays,
 and render completion leaves visual review pending. Windows and hosted/browser
-execution of local Process-based QA were not tested. The implementation ships in the v0.41.0 package release.
+execution of local Process-based QA were not tested. The implementation ships in the v0.41.1 package release.
