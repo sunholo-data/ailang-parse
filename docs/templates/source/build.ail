@@ -1,0 +1,44 @@
+module source/build
+
+import std/fs (readFile, readFileBytes, mkdirAll)
+import std/zip (createArchiveWithBytes)
+import std/bytes (fromString, toBase64)
+import std/result (Ok, Err)
+import std/string (replace)
+import std/io (println, exit)
+
+type Brand = {name: string, slug: string, tagline: string, web: string, logo: string}
+
+func part(file: string, name: string, b: Brand) -> {name: string, data: string} ! {FS} {
+  let xml = readFile("source/parts/${file}");
+  let rendered = replace(replace(replace(xml, "{{BRAND}}", b.name), "{{TAGLINE}}", b.tagline), "{{WEB}}", b.web);
+  {name: name, data: toBase64(fromString(rendered))}
+}
+
+func build(b: Brand) -> () ! {FS, IO} {
+  let logo = match readFileBytes("assets/${b.logo}-logo.png") {Ok(s) => s, Err(e) => {println(e); exit(1); ""}};
+  let parts = [
+    part("content-types.xml", "[Content_Types].xml", b),
+    part("root.rels", "_rels/.rels", b),
+    part("document.xml", "word/document.xml", b),
+    part("styles.xml", "word/styles.xml", b),
+    part("header.xml", "word/header.xml", b),
+    part("header-first.xml", "word/header-first.xml", b),
+    part("footer.xml", "word/footer.xml", b),
+    part("document.xml.rels", "word/_rels/document.xml.rels", b),
+    part("header.xml.rels", "word/_rels/header.xml.rels", b),
+    part("header.xml.rels", "word/_rels/header-first.xml.rels", b),
+    {name: "word/media/brand.png", data: logo}
+  ];
+  match createArchiveWithBytes("output/references/${b.slug}-reference.docx", parts) {
+    Ok(_) => println("Built ${b.name} reference"),
+    Err(e) => {println(e); exit(1)}
+  }
+}
+
+export func main() -> () ! {FS, IO} {
+  mkdirAll("output/references");
+  build({name: "Sunholo", slug: "sunholo", tagline: "AI systems designed to last", web: "sunholo.com", logo: "sunholo"});
+  build({name: "Holosun ApS", slug: "holosun", tagline: "Technology · Engineering · Delivery", web: "sunholo.com", logo: "sunholo"});
+  build({name: "AILANG", slug: "ailang", tagline: "Trustworthy AI code", web: "ailang.sunholo.com", logo: "ailang"})
+}

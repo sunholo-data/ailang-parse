@@ -114,6 +114,13 @@ jobs:
           cp scripts/install.sh _site/install.sh
           chmod +x _site/install.sh
           test -s _site/install.sh || { echo "::error::install.sh did not land in _site"; exit 1; }
+          # Bundle the Word template kit so templates.html can offer one download.
+          # Zipped from _site/ rather than committed, so the archive can never
+          # drift from the individual files served next to it.
+          (cd _site/templates && zip -qr ../templates/sunholo-proposal-templates.zip . \
+            -x '.gitignore' -x '*.zip' -x '.build/*' -x '*/.ailang/*' -x '*/.DS_Store')
+          test -s _site/templates/sunholo-proposal-templates.zip || { echo "::error::template kit zip was not built"; exit 1; }
+          echo "Template kit: $(du -h _site/templates/sunholo-proposal-templates.zip | cut -f1)"
           echo "::group::Site contents"
           ls -lh _site/wasm/
           echo "Total: $(du -sh _site/ | cut -f1)"
