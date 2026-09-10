@@ -58,7 +58,9 @@ done
 # ---------------------------------------------------------------- uninstall
 if [ "$UNINSTALL" -eq 1 ]; then
   step "Uninstalling"
-  if [ -L "$BINDIR/docparse" ]; then rm -f "$BINDIR/docparse"; info "removed $BINDIR/docparse"; fi
+  for tool in docparse docparse-render docparse-audit; do
+    if [ -L "$BINDIR/$tool" ]; then rm -f "$BINDIR/$tool"; info "removed $BINDIR/$tool"; fi
+  done
   if [ -d "$PREFIX" ]; then rm -rf "$PREFIX"; info "removed $PREFIX"; fi
   printf '\nDone. The ailang runtime was left alone.\n'
   exit 0
@@ -156,6 +158,13 @@ mkdir -p "$DEST/bin" "$DEST/docparse/services/pdf_backends"
 cp "$DEST/assets/bin/docparse" "$DEST/bin/docparse"
 # tar entries are written with mode 0644 by the publisher, so restore the bit.
 chmod +x "$DEST/bin/docparse"
+# Optional companions are absent from older release tarballs.
+for tool in docparse-render docparse-audit; do
+  if [ -f "$DEST/assets/bin/$tool" ]; then
+    cp "$DEST/assets/bin/$tool" "$DEST/bin/$tool"
+    chmod +x "$DEST/bin/$tool"
+  fi
+done
 if [ -d "$DEST/assets/pdf_backends" ]; then
   cp "$DEST/assets/pdf_backends/"* "$DEST/docparse/services/pdf_backends/" 2>/dev/null || true
 fi
@@ -173,8 +182,12 @@ info "locked"
 # ------------------------------------------------------------------- symlink
 step "Linking"
 mkdir -p "$BINDIR"
-ln -sf "$DEST/bin/docparse" "$BINDIR/docparse"
-info "$BINDIR/docparse -> $DEST/bin/docparse"
+for tool in docparse docparse-render docparse-audit; do
+  if [ -f "$DEST/bin/$tool" ]; then
+    ln -sf "$DEST/bin/$tool" "$BINDIR/$tool"
+    info "$BINDIR/$tool -> $DEST/bin/$tool"
+  fi
+done
 
 case ":$PATH:" in
   *":$BINDIR:"*) ;;

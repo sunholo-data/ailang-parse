@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# AILANG Parse CLI — Universal Document Parsing
+# Wrapper around ailang that handles caps, AI model, and flags automatically.
+
+# Disable auto-trace for production (2-5x speedup); set AILANG_NO_TRACE=0 to re-enable
+export AILANG_NO_TRACE="${AILANG_NO_TRACE:-1}"
+
+# Resolve symlinks to find the real script location
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+MAIN_AIL="docparse/main.ail"
+
+# Find the project root by walking up for MAIN_AIL rather than assuming the
+# wrapper sits exactly one level under it. `dirname "$SCRIPT_DIR"` was true for
+# the clone layout (<repo>/bin/docparse) and false for every other one — an
+# installed prefix, or the real file living under assets/ so it ships in the
+# registry tarball. Walking up is correct for all of them, and turns a silent
+# misresolution into a named error.
+PROJECT_DIR="$SCRIPT_DIR"
+while [ ! -f "$PROJECT_DIR/$MAIN_AIL" ] && [ "$PROJECT_DIR" != "/" ]; do
+  PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+done
+if [ ! -f "$PROJECT_DIR/$MAIN_AIL" ]; then
+  echo "docparse: cannot locate $MAIN_AIL above $SCRIPT_DIR" >&2
+  echo "  The wrapper needs the AILANG sources beside it. Reinstall with:" >&2
+  echo "    curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh" >&2
+  exit 1
+fi
+usage() {
+  echo 'Usage: docparse-render FILE --output-dir NEW_DIR [--compare FILE] [--dpi 144] [--timeout 120] [--soffice PATH] [--pdftoppm PATH]'
+}
+fail() { echo "docparse-render: $*" >&2; exit 2; }
+[[ $# -gt 0 ]] || { usage; exit 2; }
+[[ "$1" != --help && "$1" != -h ]] || { usage; exit 0; }
+input="$1"; shift
+output=''; other=''; dpi=144; timeout=120
+soffice="${DOCPARSE_SOFFICE:-}"; poppler="${DOCPARSE_PDFTOPPM:-}"
+while [[ $# -gt 0 ]]; do
+  [[ $# -ge 2 ]] || fail "missing value for $1"
+  case "$1" in
+    --output-dir) output="$2" ;;
+    --compare) other="$2" ;;
+    --dpi) dpi="$2" ;;
+    --timeout) timeout="$2" ;;
+    --soffice) soffice="$2" ;;
+    --pdftoppm) poppler="$2" ;;
+    *) fail "unknown option: $1" ;;
+  esac
+  shift 2
+done
+[[ "$dpi" =~ ^[1-9][0-9]*$ ]] && (( dpi <= 600 )) || fail 'DPI must be an integer from 1 to 600'
+[[ "$timeout" =~ ^[1-9][0-9]*$ ]] && (( timeout <= 3600 )) || fail 'timeout must be seconds from 1 to 3600'
+[[ -n "$output" ]] || fail '--output-dir is required'
+absolute_input() {
+  [[ -f "$1" ]] || fail "input does not exist: $1"
+  case "$1" in *.docx|*.odt|*.pptx|*.xlsx|*.pdf) ;; *) fail 'supported inputs: .docx .odt .pptx .xlsx .pdf' ;; esac
+  printf '%s/%s\n' "$(cd "$(dirname "$1")" && pwd -P)" "$(basename "$1")"
+}
+input="$(absolute_input "$input")"
+[[ -z "$other" ]] || other="$(absolute_input "$other")"
+[[ ! -e "$output" && ! -L "$output" ]] || fail "output already exists: $output"
+mkdir -p "$(dirname "$output")"
+output="$(cd "$(dirname "$output")" && pwd -P)/$(basename "$output")"
+resolve_tool() {
+  local candidate="$1" default="$2"
+  [[ -n "$candidate" ]] || candidate="$(command -v "$default" || true)"
+  if [[ -z "$candidate" && "$default" == soffice && -x /Applications/LibreOffice.app/Contents/MacOS/soffice ]]; then
+    candidate=/Applications/LibreOffice.app/Contents/MacOS/soffice
+  fi
+  [[ -n "$candidate" ]] || fail "missing $default; install LibreOffice and Poppler or pass its explicit path"
+  candidate="$(command -v "$candidate" || true)"
+  [[ -n "$candidate" && -x "$candidate" ]] || fail "cannot execute $default"
+  [[ "$candidate" != *,* ]] || fail 'executable paths cannot contain commas (AILANG allowlist separator)'
+  printf '%s/%s\n' "$(cd "$(dirname "$candidate")" && pwd -P)" "$(basename "$candidate")"
+}
+# PDFs need only Poppler. Keep a placeholder that is never executed in that case.
+if [[ "$input" == *.pdf && ( -z "$other" || "$other" == *.pdf ) ]]; then
+  soffice='unused-for-pdf'
+else
+  soffice="$(resolve_tool "$soffice" soffice)"
+fi
+poppler="$(resolve_tool "$poppler" pdftoppm)"
+cd "$PROJECT_DIR"
+exec ailang run --quiet --entry main --caps IO,FS,Env,Process \
+  --process-allowlist "$soffice,$poppler,mktemp,mkdir" \
+  --process-timeout "${timeout}s" --process-max-output 2097152 \
+  docparse/services/document_render.ail -- "$input" "$other" "$output" "$soffice" "$poppler" "$dpi"

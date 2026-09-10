@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# AILANG Parse CLI — Universal Document Parsing
+# Wrapper around ailang that handles caps, AI model, and flags automatically.
+
+# Disable auto-trace for production (2-5x speedup); set AILANG_NO_TRACE=0 to re-enable
+export AILANG_NO_TRACE="${AILANG_NO_TRACE:-1}"
+
+# Resolve symlinks to find the real script location
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+MAIN_AIL="docparse/main.ail"
+
+# Find the project root by walking up for MAIN_AIL rather than assuming the
+# wrapper sits exactly one level under it. `dirname "$SCRIPT_DIR"` was true for
+# the clone layout (<repo>/bin/docparse) and false for every other one — an
+# installed prefix, or the real file living under assets/ so it ships in the
+# registry tarball. Walking up is correct for all of them, and turns a silent
+# misresolution into a named error.
+PROJECT_DIR="$SCRIPT_DIR"
+while [ ! -f "$PROJECT_DIR/$MAIN_AIL" ] && [ "$PROJECT_DIR" != "/" ]; do
+  PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+done
+if [ ! -f "$PROJECT_DIR/$MAIN_AIL" ]; then
+  echo "docparse: cannot locate $MAIN_AIL above $SCRIPT_DIR" >&2
+  echo "  The wrapper needs the AILANG sources beside it. Reinstall with:" >&2
+  echo "    curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh" >&2
+  exit 1
+fi
+if [ "$#" -lt 1 ]; then
+  echo 'Usage: docparse-audit FILE.docx [--strict]' >&2
+  exit 2
+fi
+# Resolve against the caller before switching to the AILANG project root.
+DOC_INPUT="$1"
+case "$DOC_INPUT" in /*) ;; *) DOC_INPUT="$PWD/$DOC_INPUT" ;; esac
+shift
+cd "$PROJECT_DIR"
+exec ailang run --quiet --entry main --caps IO,FS,Env docparse/services/docx_audit.ail -- "$DOC_INPUT" "$@"

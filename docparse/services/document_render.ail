@@ -1,0 +1,241 @@
+module docparse/services/document_render
+
+import std/process (exec)
+import std/fs (fileExists, isDir, listDir, mkdirAll, readFileBytes, writeFileBytes, writeFile, renameFileResult, removeFileResult)
+import std/bytes (fromBase64, toString, length as bytesLength)
+import std/crypto (sha256Bytes)
+import std/result (Result, Ok, Err)
+import std/option (Some, None, getOrElse)
+import std/string (trim, length, endsWith, startsWith, split, join, stringToInt, intToStr)
+import std/list (map, filter, sortBy, length as listLength, nth_or, foldl)
+import std/json (Json, jo, ja, js, jint, kv, encode)
+import std/env (getArgs)
+import std/io (exit)
+
+type Rendered = {input: string, sha256: string, pages: [string], pixelHashes: [string]}
+
+-- subprocess timeout/output limits and the command allowlist are supplied by
+-- the CLI wrapper. No shell evaluation and no Net or AI capability is needed.
+func runCommand(command: string, args: [string]) -> Result[string, string] ! {Process} =
+  match exec(command, args) {
+    Err(e) => Err("${command}: ${show(e)}"),
+    Ok(p) => if p.exitCode != 0 then Err("${command} exited ${intToStr(p.exitCode)}: ${toString(p.stderr)}")
+      else Ok(toString(p.stdout))
+  }
+
+func fileHash(path: string) -> Result[string, string] ! {FS} =
+  match readFileBytes(path) {
+    Err(e) => Err(e),
+    Ok(data) => match fromBase64(data) {
+      None => Err("Cannot decode file bytes: ${path}"),
+      Some(raw) => if bytesLength(raw) == 0 then Err("Empty file: ${path}") else Ok(sha256Bytes(raw))
+    }
+  }
+
+func copyFile(source: string, destination: string) -> Result[(), string] ! {FS} =
+  match readFileBytes(source) {
+    Err(e) => Err(e),
+    Ok(data) => match fromBase64(data) {
+      None => Err("Cannot decode file bytes: ${source}"),
+      Some(raw) => { writeFileBytes(destination, raw); Ok(()) }
+    }
+  }
+
+pure func suffix(path: string) -> string = {
+  let parts = split(path, ".");
+  nth_or(parts, listLength(parts) - 1, "")
+}
+
+-- The private profile path can contain spaces even though commands use argv.
+pure func fileUri(path: string) -> string = {
+  let percent = join("%25", split(path, "%"));
+  let spaces = join("%20", split(percent, " "));
+  let hashes = join("%23", split(spaces, "#"));
+  "file://${join("%3F", split(hashes, "?"))}"
+}
+
+pure func pageNumber(name: string) -> int = {
+  let stem = nth_or(split(name, "."), 0, "");
+  getOrElse(stringToInt(nth_or(split(stem, "-"), 1, "0")), 0)
+}
+
+@allow_empty_ok("The recursive suffix is empty after all pages have been normalized")
+func normalisePages(dir: string, names: [string], index: int) -> Result[[string], string] ! {FS} =
+  match names {
+    [] => Ok([]),
+    name :: rest => {
+      let target = "page-${intToStr(index)}.png";
+      -- Different prefix during normalization avoids collisions with padded
+      -- source names (page-01.png / page-1.png).
+      match renameFileResult("${dir}/${name}", "${dir}/normalised-${intToStr(index)}.png") {
+        Err(e) => Err(e),
+        Ok(_) => match normalisePages(dir, rest, index + 1) {
+          Err(e) => Err(e),
+          Ok(others) => match renameFileResult("${dir}/normalised-${intToStr(index)}.png", "${dir}/${target}") {
+            Err(e) => Err(e), Ok(_) => Ok(target :: others)
+          }
+        }
+      }
+    }
+  }
+
+@allow_empty_ok("The empty suffix of a finite list of rendered page paths has no hashes")
+func hashFiles(dir: string, names: [string]) -> Result[[string], string] ! {FS} =
+  match names {
+    [] => Ok([]),
+    name :: rest => match fileHash("${dir}/${name}") {
+      Err(e) => Err(e),
+      Ok(hash) => match hashFiles(dir, rest) {
+        Err(e) => Err(e), Ok(hashes) => Ok(hash :: hashes)
+      }
+    }
+  }
+
+func makePdf(source: string, dir: string, soffice: string) -> Result[(), string] ! {FS, Process} =
+  if suffix(source) == "pdf" then copyFile(source, "${dir}/document.pdf")
+  else match copyFile(source, "${dir}/input.${suffix(source)}") {
+    Err(e) => Err(e),
+    Ok(_) => {
+      mkdirAll("${dir}/profile");
+      match runCommand(soffice, ["-env:UserInstallation=${fileUri("${dir}/profile")}", "--headless", "--convert-to", "pdf", "--outdir", dir, "${dir}/input.${suffix(source)}"]) {
+        Err(e) => Err(e),
+        Ok(_) => if not fileExists("${dir}/input.pdf") then Err("LibreOffice exited without producing a PDF")
+          else renameFileResult("${dir}/input.pdf", "${dir}/document.pdf")
+      }
+    }
+  }
+
+-- PPM is Poppler's uncompressed raster format: compare those bytes, not PNG
+-- compression streams. Same tool/DPI gives repeatable pixel comparisons without
+-- a Python image library. Page geometry is represented in the PPM header.
+func rasterise(dir: string, poppler: string, dpi: string, compare: bool) -> Result[[string], string] ! {FS, Process} =
+  match fileHash("${dir}/document.pdf") {
+    Err(e) => Err(e),
+    Ok(_) => match runCommand(poppler, ["-r", dpi, "-png", "${dir}/document.pdf", "${dir}/page"]) {
+      Err(e) => Err(e),
+      Ok(_) => {
+        let names = sortBy(\a b. pageNumber(a) - pageNumber(b), filter(\n. startsWith(n, "page-") && endsWith(n, ".png"), listDir(dir)));
+        if listLength(names) == 0 then Err("Poppler produced no page images")
+        else match normalisePages(dir, names, 1) {
+          Err(e) => Err(e),
+          Ok(pages) => match hashFiles(dir, pages) {
+            Err(e) => Err(e),
+            Ok(_) => if compare then match runCommand(poppler, ["-r", dpi, "${dir}/document.pdf", "${dir}/pixels"]) {
+              Err(e) => Err(e), Ok(_) => Ok(pages)
+            } else Ok(pages)
+          }
+        }
+      }
+    }
+  }
+
+func renderOne(source: string, dir: string, soffice: string, poppler: string, dpi: string, compare: bool) -> Result[Rendered, string] ! {FS, Process} =
+  match fileHash(source) {
+    Err(e) => Err(e),
+    Ok(before) => {
+      mkdirAll(dir);
+      match makePdf(source, dir, soffice) {
+        Err(e) => Err(e),
+        Ok(_) => match rasterise(dir, poppler, dpi, compare) {
+          Err(e) => Err(e),
+          Ok(pages) => {
+            let pixels = sortBy(\a b. pageNumber(a) - pageNumber(b), filter(\n. startsWith(n, "pixels-") && endsWith(n, ".ppm"), listDir(dir)));
+            if compare && listLength(pixels) != listLength(pages) then Err("PPM/PNG page count mismatch")
+            else match hashFiles(dir, pixels) {
+              Err(e) => Err(e),
+              Ok(hashes) => match fileHash(source) {
+                Err(e) => Err(e),
+                Ok(after) => if after != before then Err("Input changed while rendering")
+                  else {
+                    removeTree("${dir}/profile");
+                    removeTree("${dir}/input.${suffix(source)}");
+                    removeChildren(dir, pixels);
+                    Ok({input: source, sha256: before, pages: pages, pixelHashes: hashes})
+                  }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+pure func renderedJson(doc: Rendered, directory: string) -> Json = jo([
+  kv("directory", js(directory)), kv("input", js(doc.input)), kv("sha256", js(doc.sha256)),
+  kv("page_count", jint(listLength(doc.pages))), kv("pages", ja(map(js, doc.pages))),
+  kv("visual_review", js("pending"))
+])
+
+export pure func changedPages(first: [string], second: [string], index: int) -> [Json] =
+  match (first, second) {
+    ([], []) => [],
+    ([], b :: bs) => jo([kv("page", jint(index)), kv("change", js("added"))]) :: changedPages([], bs, index + 1),
+    (a :: xs, []) => jo([kv("page", jint(index)), kv("change", js("removed"))]) :: changedPages(xs, [], index + 1),
+    (a :: xs, b :: ys) => if a == b then changedPages(xs, ys, index + 1)
+      else jo([kv("page", jint(index)), kv("change", js("changed"))]) :: changedPages(xs, ys, index + 1)
+  }
+
+-- Remove only our private temporary directory, never user inputs or a preexisting
+-- output. Profiles/copies and uncompressed comparison pixels are QA intermediates.
+func removeTree(path: string) -> () ! {FS} {
+  if isDir(path) then removeChildren(path, listDir(path)) else ();
+  let removed = removeFileResult(path);
+  ()
+}
+func removeChildren(dir: string, names: [string]) -> () ! {FS} =
+  match names { [] => (), name :: rest => { removeTree("${dir}/${name}"); removeChildren(dir, rest) } }
+
+func publishChildren(stage: string, output: string, names: [string]) -> Result[(), string] ! {FS} =
+  match names {
+    [] => Ok(()),
+    name :: rest => match renameFileResult("${stage}/${name}", "${output}/${name}") {
+      Err(e) => Err(e), Ok(_) => publishChildren(stage, output, rest)
+    }
+  }
+
+func renderSet(source: string, other: string, stage: string, soffice: string, poppler: string, dpi: string) -> Result[Json, string] ! {FS, Process} =
+  match renderOne(source, "${stage}/render-1", soffice, poppler, dpi, length(other) > 0) {
+    Err(e) => Err(e),
+    Ok(first) => {
+      let tools = jo([kv("soffice", js(soffice)), kv("pdftoppm", js(poppler))]);
+      if length(other) == 0 then Ok(jo([kv("schema_version", jint(1)), kv("tools", tools), kv("dpi", js(dpi)), kv("visual_review", js("pending")), kv("documents", ja([renderedJson(first, "render-1")]))]))
+      else match renderOne(other, "${stage}/render-2", soffice, poppler, dpi, true) {
+        Err(e) => Err(e),
+        Ok(second) => Ok(jo([kv("schema_version", jint(1)), kv("tools", tools), kv("dpi", js(dpi)), kv("visual_review", js("pending")), kv("documents", ja([renderedJson(first, "render-1"), renderedJson(second, "render-2")])), kv("changes", ja(changedPages(first.pixelHashes, second.pixelHashes, 1))), kv("comparison", js("Exact Poppler PPM raster comparison; inspect changed pages side by side. Pagination changes can affect many pages."))]))
+      }
+    }
+  }
+
+export func renderDocuments(source: string, other: string, output: string, soffice: string, poppler: string, dpi: string) -> Result[string, string] ! {FS, Process} =
+  if fileExists(output) then Err("Output already exists; choose a fresh QA directory: ${output}")
+  else match runCommand("mktemp", ["-d", "${output}.tmp.XXXXXX"]) {
+    Err(e) => Err(e),
+    Ok(tempOutput) => {
+      let stage = trim(tempOutput);
+      match renderSet(source, other, stage, soffice, poppler, dpi) {
+        Err(e) => { removeTree(stage); Err(e) },
+        Ok(manifest) => match runCommand("mkdir", [output]) {
+          Err(e) => { removeTree(stage); Err(e) },
+          Ok(_) => match publishChildren(stage, output, listDir(stage)) {
+            Err(e) => { removeTree(stage); removeTree(output); Err(e) },
+            Ok(_) => {
+              -- Written last; no manifest means QA was not completed.
+              writeFile("${output}/manifest.json", encode(manifest));
+              removeTree(stage);
+              Ok("${output}/manifest.json")
+            }
+          }
+        }
+      }
+    }
+  }
+
+export func main() -> () ! {IO, FS, Env, Process} {
+  match getArgs() {
+    source :: other :: output :: soffice :: poppler :: dpi :: [] => match renderDocuments(source, other, output, soffice, poppler, dpi) {
+      Err(e) => { println(encode(jo([kv("error", js(e))]))); exit(2) },
+      Ok(manifest) => println(encode(jo([kv("manifest", js(manifest)), kv("visual_review", js("pending"))])))
+    },
+    _ => { println("Use bin/docparse-render FILE --output-dir NEW_DIR [--compare FILE]"); exit(2) }
+  }
+}

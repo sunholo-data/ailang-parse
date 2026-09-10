@@ -11,6 +11,19 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
+### Document quality and local verification in AILANG
+
+- Add `docparse-render`: local LibreOffice/Poppler rendering, fresh output
+  directories, source hashes, page PNGs and optional raster comparison.
+- Add `docparse-audit`: read-only DOCX inventories and structural findings, with
+  strict exit codes for automation.
+- Fit generated DOCX tables to the selected reference section and column width;
+  allocate bounded content-sensitive columns, preserve span geometry and mark
+  repeating header rows.
+- Add AILANG regression verification and installer links for both companions.
+  The new implementation uses AILANG and Bash, with no new Python scripts.
+
+
 ### Style templates are verified by binding and by rendering, and in CI
 
 `verify_generated.py` gained six L7 stages. They check **binding**, not

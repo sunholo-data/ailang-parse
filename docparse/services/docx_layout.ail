@@ -1,0 +1,110 @@
+module docparse/services/docx_layout
+
+import std/xml (parse, findFirst, findAll, getAttr, XmlNode)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/string (stringToInt, length)
+import std/list (map, foldl, nth_or, length as listLength, take, drop)
+import docparse/types/document (TableCell)
+
+-- Shared geometry for generation and read-only audits. A reference sectPr may
+-- inherit omitted page settings; use the generator's Letter defaults for those.
+export pure func docxUsableWidth(sectXml: string) -> int
+  ensures { result > 0 }
+{
+  match parse("<root xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">${sectXml}</root>") {
+    Err(_) => 9360,
+    Ok(root) => {
+      let pageW = attrOf(root, "w:pgSz", "w:w", 12240);
+      let left = attrOf(root, "w:pgMar", "w:left", 1440);
+      let right = attrOf(root, "w:pgMar", "w:right", 1440);
+      let gutter = attrOf(root, "w:pgMar", "w:gutter", 0);
+      let usable = pageW - left - right - gutter;
+      let safe = if usable > 0 then usable else 9360;
+      let count = attrOf(root, "w:cols", "w:num", 1);
+      let gap = attrOf(root, "w:cols", "w:space", 720);
+      let explicit = map(\c. positiveAttr(c, "w:w", safe), findAll(root, "w:col"));
+      let unequal = match findFirst(root, "w:cols") {
+        None => false,
+        Some(cols) => { let eq = getOrElse(getAttr(cols, "w:equalWidth"), "true"); eq == "0" || eq == "false" || eq == "off" }
+      };
+      if unequal && listLength(explicit) > 0
+      then foldl(\acc x. if x > 0 && x < acc then x else acc, safe, explicit)
+      else if count > 1 && count <= 100 && safe > (count - 1) * gap
+      then { let width = (safe - (count - 1) * gap) / count; if width > 0 then width else 1 }
+      else safe
+    }
+  }
+}
+
+pure func attrOf(node: XmlNode, tag: string, attr: string, fallback: int) -> int =
+  match findFirst(node, tag) {
+    None => fallback,
+    Some(n) => positiveAttr(n, attr, fallback)
+  }
+
+pure func positiveAttr(node: XmlNode, attr: string, fallback: int) -> int =
+  match stringToInt(getOrElse(getAttr(node, attr), "")) {
+    Some(n) => if n >= 0 && n <= 1000000 then n else fallback,
+    None => fallback
+  }
+
+-- Share merged-cell text over the columns it covers, skip horizontal
+-- continuation cells, and cap influence so one paragraph cannot starve IDs.
+export pure func docxColumnWidths(headers: [TableCell], rows: [[TableCell]], count: int, total: int) -> [int] =
+  if count <= 0 then []
+  else {
+    let weights = columnWeights(headers :: rows, 0, count);
+    let sumW = foldl(\acc w. acc + w, 0, weights);
+    let safeTotal = if total >= count then total else count;
+    allocateWidths(weights, sumW, safeTotal, count)
+  }
+
+pure func columnWeights(rows: [[TableCell]], index: int, count: int) -> [int] =
+  if index >= count then []
+  else {
+    let weight = foldl(\acc row. {
+      let n = cellWeightAt(row, index, 0, 0);
+      if n > acc then n else acc
+    }, 8, rows);
+    weight :: columnWeights(rows, index + 1, count)
+  }
+
+pure func cellWeightAt(cells: [TableCell], target: int, position: int, covered: int) -> int =
+  match cells {
+    [] => 8,
+    c :: rest =>
+      if c.merged && covered > 0 then cellWeightAt(rest, target, position, covered - 1)
+      else {
+        let span = if c.colSpan > 1 then c.colSpan else 1;
+        if target >= position && target < position + span then {
+          let raw = length(c.text) / span;
+          if raw < 8 then 8 else if raw > 48 then 48 else raw
+        } else cellWeightAt(rest, target, position + span, span - 1)
+      }
+  }
+
+-- Reserve one twip per remaining column before distributing weight, avoiding
+-- zero-width columns and putting only rounding remainder into the final column.
+pure func allocateWidths(weights: [int], sumW: int, total: int, count: int) -> [int] =
+  match weights {
+    [] => [],
+    w :: rest =>
+      if count <= 1 then [total]
+      else {
+        let allocated = 1 + (total - count) * w / sumW;
+        allocated :: allocateWidths(rest, sumW - w, total - allocated, count - 1)
+      }
+  }
+
+export pure func docxSpanWidth(widths: [int], start: int, span: int) -> int =
+  foldl(\acc w. acc + w, 0, take(span, drop(start, widths)))
+
+export pure func testUsableWidth() -> bool
+  tests [((), true)]
+{
+  docxUsableWidth("") == 9360 &&
+  docxUsableWidth("<w:sectPr><w:pgSz w:w=\"10000\"/><w:pgMar w:left=\"1000\" w:right=\"1500\" w:gutter=\"500\"/></w:sectPr>") == 7000 &&
+  docxUsableWidth("<w:sectPr><w:cols w:num=\"2\" w:space=\"720\"/></w:sectPr>") == 4320 &&
+  docxUsableWidth("<w:sectPr><w:cols w:equalWidth=\"0\"><w:col w:w=\"3000\"/><w:col w:w=\"4000\"/></w:cols></w:sectPr>") == 3000
+}

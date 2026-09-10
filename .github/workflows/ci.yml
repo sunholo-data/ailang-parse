@@ -465,3 +465,11 @@ jobs:
 
       - name: Verify generated documents (structure, grids, style binding)
         run: uv run benchmarks/verify_generated.py
+
+      - name: Document quality and portable QA regressions
+        run: |
+          ailang run --quiet --entry main --caps IO,FS,Env,Process \
+            --process-allowlist "true,false,mktemp,mkdir,$(command -v soffice),$(command -v pdftoppm)" \
+            --process-timeout 120s scripts/verify_document_quality.ail -- \
+            "$RUNNER_TEMP/docparse-quality-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            "$(command -v soffice)" "$(command -v pdftoppm)"

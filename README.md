@@ -136,6 +136,45 @@ alignment and column spans.
 Headers, footers, comments and tracked changes have no Markdown syntax; those
 are preserved when converting from a document that already contains them.
 
+### Local document verification (unreleased)
+
+`docparse-audit` and `docparse-render` are AILANG companions to the CLI. They run
+locally and require no hosted account. The installer links them when present in
+the installed release; in a checkout use `./bin/docparse-audit` and
+`./bin/docparse-render`.
+
+```bash
+docparse-audit report.docx --strict
+docparse-render report.docx --output-dir qa/report
+docparse-render before.docx --compare after.docx --output-dir qa/comparison
+```
+
+The read-only DOCX audit emits JSON inventories and findings for table grids and
+headers, heading gaps, image descriptions, links, comments and fields. Exit codes
+are 0 for a completed audit, 1 for findings with `--strict`, and 2 for unreadable
+input. It is a bounded structural check; it does not certify accessibility or
+resolve arbitrary style inheritance.
+
+Rendering supports `.docx`, `.odt`, `.pptx`, `.xlsx` and `.pdf`. Install LibreOffice
+and Poppler for Office input; PDF needs only Poppler. No new Python dependency is
+needed. Select tools with `--soffice` / `--pdftoppm` (or `DOCPARSE_SOFFICE` /
+`DOCPARSE_PDFTOPPM`). `--dpi` defaults to 144 and `--timeout` to 120 seconds per
+process. The output directory must be new. Each document gets a PDF and numbered
+PNG pages; the manifest records source hashes, tool paths and page directories.
+Comparison identifies changed/added/removed pages using uncompressed raster
+hashes. Inspect the two PNG sets side by side; no diff overlays are generated.
+`visual_review: pending` means page images still need inspection.
+
+The implementation is in `docparse/services/document_render.ail` and
+`docparse/services/docx_audit.ail`; regression verification is AILANG too:
+
+```bash
+ailang run --entry main --caps IO,FS,Env,Process \
+  --process-allowlist "true,false,mktemp,mkdir,$(command -v soffice),$(command -v pdftoppm)" \
+  --process-timeout 120s scripts/verify_document_quality.ail -- \
+  /tmp/docparse-quality-new "$(command -v soffice)" "$(command -v pdftoppm)"
+```
+
 ### Styling a generated DOCX from a template
 
 `--reference-doc` is the Quarto/Pandoc `reference-doc` feature: an existing
@@ -144,6 +183,10 @@ are preserved when converting from a document that already contains them.
 ```bash
 docparse annex.md --convert annex.docx --reference-doc letterhead.docx
 ```
+
+Generated tables use the selected section's usable width, with bounded content
+weights for columns and repeating semantic headers. Merged-cell widths sum the
+columns they cover.
 
 The template's `styles.xml`, `numbering.xml`, theme, embedded fonts, headers,
 footers and page setup are applied to the new content. Everything the merge does

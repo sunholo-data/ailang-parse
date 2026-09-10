@@ -1,0 +1,179 @@
+module docparse/services/docx_audit
+
+import std/xml (XmlNode, parse, findAll, findFirst, getAttr, getText, serialize, getChildren, getTag)
+import std/zip (listEntries, readEntry)
+import std/result (Result, Ok, Err)
+import std/option (Some, None, getOrElse)
+import std/list (map, foldl, filter, flatMap, member, length as listLength)
+import std/string (startsWith, endsWith, contains, trim, stringToInt, substring, length)
+import std/json (Json, jo, ja, js, jint, jb, kv, encode)
+import std/env (getArgs)
+import std/io (exit)
+import docparse/services/docx_layout (docxUsableWidth)
+
+type Story = {part: string, root: XmlNode}
+type Finding = {kind: string, part: string, message: string}
+
+pure func attr(node: XmlNode, name: string) -> string = getOrElse(getAttr(node, name), "")
+pure func attrInt(node: XmlNode, name: string) -> int = getOrElse(stringToInt(attr(node, name)), 0)
+pure func finding(kind: string, part: string, message: string) -> Finding = {kind: kind, part: part, message: message}
+pure func findingJson(f: Finding) -> Json = jo([kv("kind", js(f.kind)), kv("part", js(f.part)), kv("message", js(f.message))])
+
+pure func storyName(name: string) -> bool =
+  name == "word/document.xml" || name == "word/footnotes.xml" || name == "word/endnotes.xml" ||
+  (startsWith(name, "word/header") && endsWith(name, ".xml")) ||
+  (startsWith(name, "word/footer") && endsWith(name, ".xml"))
+
+@allow_empty_ok("An empty list of optional story parts is a valid inventory, not a failed read")
+func readStories(path: string, names: [string]) -> Result[[Story], string] ! {FS} =
+  match names {
+    [] => Ok([]),
+    name :: rest => match readEntry(path, name) {
+      Err(e) => Err("${name}: ${e}"),
+      Ok(xml) => match parse(xml) {
+        Err(e) => Err("${name}: ${e}"),
+        Ok(root) => match readStories(path, rest) {
+          Err(e) => Err(e),
+          Ok(others) => Ok({part: name, root: root} :: others)
+        }
+      }
+    }
+  }
+
+pure func on(node: XmlNode) -> bool = {
+  let value = attr(node, "w:val");
+  not (value == "0" || value == "false" || value == "off")
+}
+
+pure func children(node: XmlNode, tag: string) -> [XmlNode] =
+  filter(\n. getTag(n) == tag, getChildren(node))
+
+pure func tableFlags(node: XmlNode) -> [XmlNode] =
+  flatMap(\row. flatMap(\props. children(props, "w:tblHeader"), children(row, "w:trPr")), children(node, "w:tr"))
+
+pure func gridColumns(node: XmlNode) -> [XmlNode] =
+  flatMap(\grid. children(grid, "w:gridCol"), children(node, "w:tblGrid"))
+
+pure func tableFindings(s: Story) -> [Finding] =
+  flatMap(\table. {
+    let flags = tableFlags(table);
+    let headers = if listLength(filter(on, flags)) == 0
+      then [finding("table_header_missing", s.part, "No repeating header row; check whether this table has a semantic header.")]
+      else [];
+    let widths = map(\n. attrInt(n, "w:w"), gridColumns(table));
+    let invalid = if listLength(widths) == 0 || listLength(filter(\w. w <= 0, widths)) > 0
+      then [finding("table_grid_invalid", s.part, "Missing or non-positive grid column widths.")]
+      else [];
+    headers ++ invalid
+  }, findAll(s.root, "w:tbl"))
+
+pure func headingLevel(p: XmlNode) -> int =
+  match findFirst(p, "w:outlineLvl") {
+    Some(n) => attrInt(n, "w:val") + 1,
+    None => match findFirst(p, "w:pStyle") {
+      None => 0,
+      Some(n) => {
+        let style = attr(n, "w:val");
+        if startsWith(style, "Heading") && length(style) > 7
+        then getOrElse(stringToInt(trim(substring(style, 7, length(style)))), 0)
+        else 0
+      }
+    }
+  }
+
+pure func headingFindings(s: Story) -> [Finding] = {
+  let walk = foldl(\acc p. {
+    let level = headingLevel(p);
+    if level <= 0 || level > 9 then acc
+    else {
+      previous: level,
+      issues: if level > acc.previous + 1
+        then acc.issues ++ [finding("heading_gap", s.part, getText(p))]
+        else acc.issues
+    }
+  }, {previous: 0, issues: []}, findAll(s.root, "w:p"));
+  walk.issues
+}
+
+pure func imageFindings(s: Story) -> [Finding] =
+  map(\n. finding("image_alt_missing", s.part, "Image ${attr(n, "name")} has no description."),
+      filter(\n. length(trim(attr(n, "descr"))) == 0, findAll(s.root, "wp:docPr")))
+
+pure func linkFindings(s: Story) -> [Finding] =
+  map(\n. finding("link_text_unhelpful", s.part, getText(n)),
+    filter(\n. { let label = trim(getText(n)); label == "click here" || label == "here" || label == "" }, findAll(s.root, "w:hyperlink")))
+
+pure func fields(s: Story) -> [Json] =
+  map(\n. jo([kv("part", js(s.part)), kv("instruction", js(getText(n)))]), findAll(s.root, "w:instrText")) ++
+  map(\n. jo([kv("part", js(s.part)), kv("instruction", js(attr(n, "w:instr")))]), findAll(s.root, "w:fldSimple"))
+
+pure func fieldFindings(s: Story) -> [Finding] =
+  if contains(getText(s.root), "Error! Reference source not found.") || contains(getText(s.root), "Error! Bookmark not defined.")
+  then [finding("field_unresolved", s.part, "Cached field text contains an unresolved reference error.")]
+  else []
+
+pure func sectionJson(node: XmlNode) -> Json = jo([
+  kv("usable_width_twips", jint(docxUsableWidth(serialize(node)))),
+  kv("xml", js(serialize(node)))
+])
+
+pure func tableJson(s: Story, node: XmlNode) -> Json = jo([
+  kv("part", js(s.part)),
+  kv("column_widths_twips", ja(map(\n. jint(attrInt(n, "w:w")), gridColumns(node)))),
+  kv("rows", jint(listLength(children(node, "w:tr")))),
+  kv("header_flags", jint(listLength(filter(on, tableFlags(node)))))
+])
+
+pure func storyIds(stories: [Story], tag: string) -> [string] =
+  flatMap(\s. map(\n. attr(n, "w:id"), findAll(s.root, tag)), stories)
+
+pure func commentIssues(stories: [Story], comments: [Story]) -> [Finding] = {
+  let ids = storyIds(comments, "w:comment");
+  let refs = storyIds(stories, "w:commentReference");
+  let starts = storyIds(stories, "w:commentRangeStart");
+  let ends = storyIds(stories, "w:commentRangeEnd");
+  map(\id. finding("comment_body_missing", "word/comments.xml", "Reference ${id} has no comment body."), filter(\id. not member(id, ids), refs)) ++
+  map(\id. finding("comment_anchor_missing", "word/comments.xml", "Comment ${id} has no reference."), filter(\id. not member(id, refs), ids)) ++
+  map(\id. finding("comment_range_unpaired", "word/document.xml", "Range ${id} has no matching end or reference."), filter(\id. not member(id, ends) || not member(id, refs), starts)) ++
+  map(\id. finding("comment_range_unpaired", "word/document.xml", "Range ${id} has no matching start."), filter(\id. not member(id, starts), ends))
+}
+
+-- Read-only audit: warnings are evidence for review, not certification or fixes.
+export func auditDocx(path: string) -> Result[{report: Json, count: int}, string] ! {FS} =
+  match listEntries(path) {
+    Err(e) => Err(e),
+    Ok(names) =>
+      if not member("word/document.xml", names) then Err("Not a DOCX package: word/document.xml is missing")
+      else match readStories(path, filter(storyName, names)) {
+        Err(e) => Err(e),
+        Ok(stories) => match readStories(path, filter(\n. n == "word/comments.xml", names)) {
+          Err(e) => Err(e),
+          Ok(comments) => {
+            let findings = flatMap(\s. tableFindings(s) ++ headingFindings(s) ++ imageFindings(s) ++ linkFindings(s) ++ fieldFindings(s), stories) ++ commentIssues(stories, comments);
+            let count = listLength(findings);
+            Ok({count: count, report: jo([
+              kv("input", js(path)), kv("finding_count", jint(count)),
+              kv("findings", ja(map(findingJson, findings))),
+              kv("sections", ja(flatMap(\s. map(sectionJson, findAll(s.root, "w:sectPr")), stories))),
+              kv("tables", ja(flatMap(\s. map(\n. tableJson(s, n), findAll(s.root, "w:tbl")), stories))),
+              kv("fields", ja(flatMap(fields, stories))),
+              kv("images", ja(flatMap(\s. map(\n. jo([kv("part", js(s.part)), kv("name", js(attr(n, "name"))), kv("description", js(attr(n, "descr")))]), findAll(s.root, "wp:docPr")), stories))),
+              kv("comments", ja(flatMap(\s. map(\n. jo([kv("id", js(attr(n, "w:id"))), kv("author", js(attr(n, "w:author"))), kv("text", js(getText(n)))]), findAll(s.root, "w:comment")), comments))),
+              kv("visual_review", js("not_performed")),
+              kv("limitations", js("Read-only structural checks, not full accessibility validation. Heading checks cover HeadingN styles and direct outline levels, not arbitrary style inheritance. Field instructions may be split across runs; freshness needs an editor/render check. Table/header findings require semantic review. Comment checks test ID membership, not anchor ordering or full relationship validity."))
+            ])})
+          }
+        }
+      }
+  }
+
+export func main() -> () ! {IO, FS, Env} {
+  let args = getArgs();
+  match args {
+    path :: rest => match auditDocx(path) {
+      Err(e) => { println(encode(jo([kv("error", js(e))]))); exit(2) },
+      Ok(audit) => { println(encode(audit.report)); if member("--strict", rest) && audit.count > 0 then exit(1) else () }
+    },
+    _ => { println("Usage: docparse-audit FILE.docx [--strict]"); exit(2) }
+  }
+}

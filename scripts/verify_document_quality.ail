@@ -1,0 +1,138 @@
+module scripts/verify_document_quality
+
+import docparse/services/docx_generator (generateDocx, generateDocxWithReference, docxPartsFor)
+import docparse/services/docx_layout (docxUsableWidth, testUsableWidth)
+import docparse/services/docx_audit (auditDocx)
+import docparse/services/document_render (renderDocuments, changedPages)
+import docparse/services/markdown_parser (parseMarkdown, parseMarkdownMeta)
+import docparse/types/document (ParsedDocument, mkTable, simpleCell)
+import std/fs (mkdirAll, readFile, fileExists, writeFile)
+import std/zip (createArchive, readEntry)
+import std/xml (parse, findAll, findFirst, getAttr, getText, XmlNode)
+import std/result (Result, Ok, Err)
+import std/option (Some, None, getOrElse)
+import std/string (contains, replace, stringToInt)
+import std/list (map, length, foldl, nth_or)
+import std/json (encode, ja)
+import std/env (getArgs)
+import std/io (exit)
+
+func check(label: string, ok: bool) -> () ! {IO} {
+  if ok then println("PASS ${label}") else { println("FAIL ${label}"); exit(1) }
+}
+
+pure func fixture() -> ParsedDocument = {
+  let md = "# Quality check\n\n| ID | Description | State |\n|---|---|---|\n| 1 | A long explanation of the decision and the supporting evidence for review. | Ready |\n| 2 | Second record with enough detail to read comfortably. | Open |\n| Summary {colspan=3} | {merged} | {merged} |\n";
+  {format: "markdown", filename: "quality.md", metadata: parseMarkdownMeta(md), blocks: parseMarkdown(md)}
+}
+
+pure func attrInt(node: XmlNode, key: string) -> int =
+  getOrElse(stringToInt(getOrElse(getAttr(node, key), "")), 0)
+
+func tableCheck(path: string, expected: int) -> () ! {FS, IO} {
+  match readEntry(path, "word/document.xml") {
+    Err(e) => { println(e); exit(1) },
+    Ok(xml) => match parse(xml) {
+      Err(e) => { println(e); exit(1) },
+      Ok(root) => {
+        let widths = map(\n. attrInt(n, "w:w"), findAll(root, "w:gridCol"));
+        check("grid sums to section width", foldl(\a b. a + b, 0, widths) == expected);
+        check("description gets more room than ID", nth_or(widths, 1, 0) > nth_or(widths, 0, 0));
+        check("all grid columns positive", length(widths) == 3 && foldl(\a b. a && b > 0, true, widths));
+        let cells = findAll(root, "w:tcW");
+        check("spanning cell uses full grid", attrInt(nth_or(cells, length(cells) - 1, root), "w:w") == expected);
+        check("only header row repeats", length(findAll(root, "w:tblHeader")) == 1);
+        check("merged text retained", contains(getText(root), "Summary"))
+      }
+    }
+  }
+}
+
+func referenceCheck(dir: string, name: string, section: string, expected: int, index: int) -> () ! {FS, IO} {
+  let parts = map(\p. if p.name == "word/document.xml" then {
+    name: p.name,
+    content: "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>${section}</w:body></w:document>"
+  } else p, docxPartsFor(fixture()));
+  let template = "${dir}/${name}-reference.docx";
+  match createArchive(template, parts) {
+    Err(e) => { println(e); exit(1) },
+    Ok(_) => {
+      let path = "${dir}/${name}.docx";
+      check("generate ${name}", not contains(generateDocxWithReference(fixture(), path, template, index, ""), "Error"));
+      tableCheck(path, expected)
+    }
+  }
+}
+
+pure func failed(result: Result[string, string]) -> bool = match result {Err(_) => true, Ok(_) => false}
+
+export func main() -> () ! {FS, IO, Env, Process} {
+  let args = getArgs();
+  let dir = nth_or(args, 0, "");
+  check("fresh test directory supplied", dir != "" && not fileExists(dir));
+  mkdirAll(dir);
+  check("section geometry cases", testUsableWidth());
+  let path = "${dir}/base.docx";
+  check("generate default", not contains(generateDocx(fixture(), path), "Error"));
+  tableCheck(path, 9360);
+  referenceCheck(dir, "narrow", "<w:sectPr><w:pgSz w:w=\"10000\"/><w:pgMar w:left=\"1000\" w:right=\"1500\" w:gutter=\"500\"/></w:sectPr>", 7000, 0);
+  referenceCheck(dir, "landscape", "<w:sectPr><w:pgSz w:w=\"17280\" w:h=\"12240\" w:orient=\"landscape\"/><w:pgMar w:left=\"1440\" w:right=\"1440\"/></w:sectPr>", 14400, 0);
+  referenceCheck(dir, "columns", "<w:sectPr><w:cols w:num=\"2\" w:space=\"720\"/></w:sectPr>", 4320, 0);
+  let mixed = "<w:p><w:pPr><w:sectPr><w:pgSz w:w=\"10000\"/><w:pgMar w:left=\"1000\" w:right=\"1500\" w:gutter=\"500\"/></w:sectPr></w:pPr></w:p><w:sectPr/>";
+  referenceCheck(dir, "first-section", mixed, 7000, 1);
+  referenceCheck(dir, "last-section", mixed, 9360, 0);
+  let originalDoc = fixture();
+  let noHeader = {originalDoc | blocks: [mkTable([[simpleCell("Only data")]], [])]};
+  let noHeaderXml = foldl(\acc p. if p.name == "word/document.xml" then p.content else acc, "", docxPartsFor(noHeader));
+  check("headerless data row never repeats", not contains(noHeaderXml, "w:tblHeader"));
+  match auditDocx(path) {Err(e) => {println(e); exit(1)}, Ok(a) => check("clean audit", a.count == 0)};
+  let broken = "${dir}/broken.docx";
+  let parts = map(\p. if p.name == "word/document.xml" then {name: p.name, content: replace(p.content, "<w:tblHeader/>", "")} else p, docxPartsFor(fixture()));
+  match createArchive(broken, parts) {Err(e) => {println(e); exit(1)}, Ok(_) => ()};
+  match auditDocx(broken) {Err(e) => {println(e); exit(1)}, Ok(a) => check("missing table header detected", contains(encode(a.report), "table_header_missing"))};
+  let issuesXml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Heading3\"/></w:pPr><w:r><w:t>Skipped heading</w:t></w:r></w:p><w:p><w:hyperlink><w:r><w:t>click here</w:t></w:r></w:hyperlink><w:r><w:drawing><wp:docPr id=\"1\" name=\"Missing alt\"/></w:drawing><w:instrText>REF missing</w:instrText><w:t>Error! Reference source not found.</w:t></w:r><w:commentRangeStart w:id=\"42\"/><w:r><w:commentReference w:id=\"42\"/></w:r></w:p><w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl></w:body></w:document>";
+  let issueParts = map(\p. if p.name == "word/document.xml" then {name: p.name, content: issuesXml} else p, docxPartsFor(fixture()));
+  match createArchive("${dir}/issues.docx", issueParts) {Err(e) => {println(e); exit(1)}, Ok(_) => ()};
+  match auditDocx("${dir}/issues.docx") {
+    Err(e) => {println(e); exit(1)},
+    Ok(a) => {
+      let report = encode(a.report);
+      check("heading gap detected", contains(report, "heading_gap"));
+      check("missing image description detected", contains(report, "image_alt_missing"));
+      check("unhelpful link detected", contains(report, "link_text_unhelpful"));
+      check("unresolved field detected", contains(report, "field_unresolved"));
+      check("field instruction inventoried", contains(report, "REF missing"));
+      check("missing comment body detected", contains(report, "comment_body_missing"));
+      check("unpaired comment anchor detected", contains(report, "comment_range_unpaired"));
+      check("invalid grid detected", contains(report, "table_grid_invalid"))
+    }
+  };
+  writeFile("${dir}/invalid.docx", "not a ZIP");
+  check("unreadable audit fails", match auditDocx("${dir}/invalid.docx") {Err(_) => true, Ok(_) => false});
+  check("raster comparison equal", length(changedPages(["a"], ["a"], 1)) == 0);
+  check("raster comparison changed and added", contains(encode(ja(changedPages(["a"], ["b", "c"], 1))), "added") && length(changedPages(["a"], ["b", "c"], 1)) == 2);
+  check("raster comparison removed", contains(encode(ja(changedPages(["a", "b"], ["a"], 1))), "removed"));
+  check("existing output rejected", failed(renderDocuments(path, "", dir, "true", "true", "72")));
+  check("zero exit without PDF rejected", failed(renderDocuments(path, "", "${dir}/no-pdf", "true", "true", "72")));
+  check("failed render publishes nothing", not fileExists("${dir}/no-pdf"));
+  check("process failure rejected", failed(renderDocuments(path, "", "${dir}/failed", "false", "true", "72")));
+  if length(args) >= 3 then {
+    let out = "${dir}/render";
+    match renderDocuments(path, path, out, nth_or(args, 1, ""), nth_or(args, 2, ""), "72") {
+      Err(e) => {println(e); exit(1)},
+      Ok(manifest) => {
+        check("real render produces pages", fileExists("${out}/render-1/page-1.png") && fileExists("${out}/render-2/page-1.png"));
+        check("same input has no raster changes", contains(readFile(manifest), "\"changes\":[]"));
+        check("visual review remains pending", contains(readFile(manifest), "\"visual_review\":\"pending\""))
+      }
+    }
+    ; let changed = "${dir}/changed.docx";
+    let original = fixture();
+    check("generate deliberate change", not contains(generateDocx({original | blocks: parseMarkdown("# A visibly changed document\n\nDifferent content for comparison.\n")}, changed), "Error"));
+    match renderDocuments(path, changed, "${dir}/changed-render", nth_or(args, 1, ""), nth_or(args, 2, ""), "72") {
+      Err(e) => {println(e); exit(1)},
+      Ok(manifest) => check("real changed page detected", contains(readFile(manifest), "\"change\":\"changed\""))
+    }
+  } else println("Real render not requested; supply soffice and pdftoppm paths to exercise it.");
+  println("Document quality checks passed.")
+}

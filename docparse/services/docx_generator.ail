@@ -2,6 +2,7 @@ module docparse/services/docx_generator
 
 import std/string (length, intToStr, split, contains, startsWith)
 import std/list (map, foldl, length as listLength)
+import docparse/services/docx_layout (docxUsableWidth, docxColumnWidths, docxSpanWidth)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
@@ -85,8 +86,8 @@ pure func docxPlan(doc: ParsedDocument, ref: DocxRefDoc) -> {documentXml: string
     hasNumbering: docxHasList(body)
   };
 
-  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1, numBase: ref.numIdBase, tblStyle: ref.tableStyleId});
   let sectPr = if ref.active then ref.sectPr else docxSectPr(parts.headers, parts.footers);
+  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1, numBase: ref.numIdBase, tblStyle: ref.tableStyleId, tableWidth: docxUsableWidth(sectPr)});
   { documentXml: docxBuildDocument("${bodyResult.xml}${sectPr}"), parts: parts }
 }
 
@@ -266,7 +267,7 @@ pure func docxBlockToXml(block: Block) -> string =
       -- the built-in table look. Reference-doc mode drops our header parts
       -- entirely, so this never reaches a package whose styles came from a
       -- template.
-      docxTableToXml(t.headers, t.rows, ""),
+      docxTableToXml(t.headers, t.rows, "", 9360),
 
     -- Header and footer bodies are rendered standalone, so they use the
     -- built-in numbering ids. Reference-doc mode drops our header parts
@@ -422,7 +423,7 @@ pure func docxRunPropsInner(r: InlineRun) -> string {
 -- <w:tbl> elements bind to, resolved once at template load. "" = none (no
 -- reference doc, or the template defines no usable table style) and tables
 -- keep the hardcoded borders they have always had.
-type DocxIdx = { img: int, link: int, rev: int, cmt: int, numBase: int, tblStyle: string }
+type DocxIdx = { img: int, link: int, rev: int, cmt: int, numBase: int, tblStyle: string, tableWidth: int }
 
 type DocxBlockResult = { xml: string, idx: DocxIdx }
 
@@ -444,7 +445,7 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       if docxIsBinaryPayload(i.data, i.mime)
       then {
         xml: docxInlineImage(idx.img, i.description),
-        idx: {img: idx.img + 1, link: idx.link, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle}
+        idx: {img: idx.img + 1, link: idx.link, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
       }
       else {xml: docxBlockToXml(block), idx: idx},
 
@@ -452,18 +453,18 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       if length(l.href) > 0
       then {
         xml: docxHyperlinkPara(idx.link, l.text, l.title),
-        idx: {img: idx.img, link: idx.link + 1, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle}
+        idx: {img: idx.img, link: idx.link + 1, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
       }
       else {xml: docxBlockToXml(block), idx: idx},
 
     ChangeBlock(c) => {
       xml: docxRevisionPara(idx.rev, c.changeType, c.author, c.date, c.text),
-      idx: {img: idx.img, link: idx.link, rev: idx.rev + 1, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle}
+      idx: {img: idx.img, link: idx.link, rev: idx.rev + 1, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
     },
 
     CommentBlock(c) => {
       xml: docxCommentAnchorPara(idx.cmt, c.anchorText, c.anchored),
-      idx: {img: idx.img, link: idx.link, rev: idx.rev, cmt: idx.cmt + 1, numBase: idx.numBase, tblStyle: idx.tblStyle}
+      idx: {img: idx.img, link: idx.link, rev: idx.rev, cmt: idx.cmt + 1, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
     },
 
     SectionBlock(s) =>
@@ -480,7 +481,7 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       {xml: docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, idx.numBase), idx: idx},
 
     TableBlock(t) =>
-      {xml: docxTableToXml(t.headers, t.rows, idx.tblStyle), idx: idx},
+      {xml: docxTableToXml(t.headers, t.rows, idx.tblStyle, idx.tableWidth), idx: idx},
 
     _ => {xml: docxBlockToXml(block), idx: idx}
   }
@@ -512,29 +513,27 @@ pure func docxInlineImage(imgIdx: int, description: string) -> string {
 }
 
 -- Build a DOCX table: <w:tbl> with <w:tr>/<w:tc>
--- Usable width of a US Letter page with 1" margins, in twips. Word auto-fits a
+-- Use the selected section width in twips. Word auto-fits a
 -- table with no explicit widths, but that is Word being forgiving: ECMA-376
 -- §17.4.49 makes w:tblGrid part of the table's definition, and a reader that
 -- follows the spec (Pages, for one) collapses every column to its minimum —
 -- one character per line.
-pure func docxContentWidthTwips() -> int = 9360
-
-pure func docxTableToXml(headers: [TableCell], rows: [[TableCell]], tblStyle: string) -> string {
+pure func docxTableToXml(headers: [TableCell], rows: [[TableCell]], tblStyle: string, totalWidth: int) -> string {
   let cols = docxTableColCount(headers, rows);
-  let colW = if cols > 0 then docxContentWidthTwips() / cols else docxContentWidthTwips();
+  let widths = docxColumnWidths(headers, rows, cols, totalWidth);
+  let tableWidth = foldl(\acc w. acc + w, 0, widths);
   -- Under a template table style the style carries the borders — hardcoded
   -- direct formatting would override it and defeat the binding — so only the
-  -- styleless path emits them. tblW and tblLayout stay ours either way: width
-  -- is content, layout is ours to own. The no-style XML is byte-identical to
-  -- what this generator has always written.
+  -- styleless path emits them. Geometry follows the selected page/column
+  -- width, with bounded content weights rather than a fixed Letter grid.
   let tblPr = if length(tblStyle) > 0
-    then "<w:tblPr><w:tblStyle w:val=\"${tblStyle}\"/><w:tblW w:w=\"${intToStr(docxContentWidthTwips())}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>"
-    else "<w:tblPr><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders><w:tblW w:w=\"${intToStr(docxContentWidthTwips())}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>";
-  let grid = "<w:tblGrid>${docxGridCols(cols, colW)}</w:tblGrid>";
+    then "<w:tblPr><w:tblStyle w:val=\"${tblStyle}\"/><w:tblW w:w=\"${intToStr(tableWidth)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>"
+    else "<w:tblPr><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders><w:tblW w:w=\"${intToStr(tableWidth)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>";
+  let grid = "<w:tblGrid>${docxGridCols(widths)}</w:tblGrid>";
   let headerRow = if listLength(headers) > 0
-    then "<w:tr>${docxHeaderCellsToXml(headers, colW)}</w:tr>"
+    then "<w:tr><w:trPr><w:tblHeader/></w:trPr>${docxHeaderCellsToXml(headers, widths)}</w:tr>"
     else "";
-  let dataRows = foldl(\acc row. "${acc}<w:tr>${docxDataCellsToXml(row, colW)}</w:tr>", "", rows);
+  let dataRows = foldl(\acc row. "${acc}<w:tr>${docxDataCellsToXml(row, widths)}</w:tr>", "", rows);
   "<w:tbl>${tblPr}${grid}${headerRow}${dataRows}</w:tbl>"
 }
 
@@ -564,9 +563,8 @@ pure func docxCellSpan(c: TableCell) -> int = if c.colSpan > 1 then c.colSpan el
 -- Grid positions a cell claims beyond the one it sits in.
 pure func docxCoverAfter(c: TableCell) -> int = docxCellSpan(c) - 1
 
-pure func docxGridCols(n: int, w: int) -> string =
-  if n <= 0 then ""
-  else "<w:gridCol w:w=\"${intToStr(w)}\"/>${docxGridCols(n - 1, w)}"
+pure func docxGridCols(widths: [int]) -> string =
+  foldl(\acc w. "${acc}<w:gridCol w:w=\"${intToStr(w)}\"/>", "", widths)
 
 -- Header cells as bold <w:tc>
 -- Emit cells left to right, skipping any merged cell that a preceding
@@ -579,17 +577,17 @@ pure func docxGridCols(n: int, w: int) -> string =
 -- row above that has no cell at that offset. python-docx refuses to read such
 -- a row; Word offers to repair the file. vMerge is correct only when nothing
 -- in this row covers the position.
-pure func docxHeaderCellsToXml(cells: [TableCell], colW: int) -> string =
-  docxHeaderCellsWalk(cells, colW, 0, "")
+pure func docxHeaderCellsToXml(cells: [TableCell], widths: [int]) -> string =
+  docxHeaderCellsWalk(cells, widths, 0, 0, "")
 
-pure func docxHeaderCellsWalk(cells: [TableCell], colW: int, cover: int, acc: string) -> string =
+pure func docxHeaderCellsWalk(cells: [TableCell], widths: [int], pos: int, cover: int, acc: string) -> string =
   match cells {
     [] => acc,
     c :: rest =>
       if c.merged && cover > 0
-      then docxHeaderCellsWalk(rest, colW, cover - 1, acc)
-      else docxHeaderCellsWalk(rest, colW, docxCoverAfter(c),
-                               "${acc}${docxHeaderCellToXml(c, colW)}")
+      then docxHeaderCellsWalk(rest, widths, pos, cover - 1, acc)
+      else docxHeaderCellsWalk(rest, widths, pos + docxCellSpan(c), docxCoverAfter(c),
+                               "${acc}${docxHeaderCellToXml(c, docxSpanWidth(widths, pos, docxCellSpan(c)))}")
   }
 
 pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
@@ -604,22 +602,22 @@ pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
     let body = if listLength(cell.runs) > 0
       then docxRunsToXml(map(\r. {r | bold: true}, cell.runs))
       else "<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r>";
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p>${docxHeaderAlignPr(cell.align)}${body}</w:p></w:tc>"
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p>${docxHeaderAlignPr(cell.align)}${body}</w:p></w:tc>"
   }
 }
 
 -- Data cells as normal <w:tc>, with the same horizontal-continuation skip.
-pure func docxDataCellsToXml(cells: [TableCell], colW: int) -> string =
-  docxDataCellsWalk(cells, colW, 0, "")
+pure func docxDataCellsToXml(cells: [TableCell], widths: [int]) -> string =
+  docxDataCellsWalk(cells, widths, 0, 0, "")
 
-pure func docxDataCellsWalk(cells: [TableCell], colW: int, cover: int, acc: string) -> string =
+pure func docxDataCellsWalk(cells: [TableCell], widths: [int], pos: int, cover: int, acc: string) -> string =
   match cells {
     [] => acc,
     c :: rest =>
       if c.merged && cover > 0
-      then docxDataCellsWalk(rest, colW, cover - 1, acc)
-      else docxDataCellsWalk(rest, colW, docxCoverAfter(c),
-                             "${acc}${docxDataCellToXml(c, colW)}")
+      then docxDataCellsWalk(rest, widths, pos, cover - 1, acc)
+      else docxDataCellsWalk(rest, widths, pos + docxCellSpan(c), docxCoverAfter(c),
+                             "${acc}${docxDataCellToXml(c, docxSpanWidth(widths, pos, docxCellSpan(c)))}")
   }
 
 pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
@@ -633,7 +631,7 @@ pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
     -- **bold** term inside a cell renders as a real Word run instead of
     -- reaching the page as literal backtick/asterisk characters.
     let body = if listLength(cell.runs) > 0 then docxRunsToXml(cell.runs) else docxRun(cell.text);
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW * (if cell.colSpan > 1 then cell.colSpan else 1))}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph("${docxAlignPr(cell.align)}${body}")}</w:tc>"
+    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph("${docxAlignPr(cell.align)}${body}")}</w:tc>"
   }
 }
 
