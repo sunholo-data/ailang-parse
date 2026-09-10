@@ -1,6 +1,6 @@
 # AILANG Parse Design Documentation
 
-Released in v0.41.1: [Document quality and portable verification](implemented/v0_41_1/document-quality-and-portable-verification.md)
+Released in v0.41.2: [Document quality and portable verification](implemented/v0_41_2/document-quality-and-portable-verification.md)
 (AILANG rendering, audits and DOCX table geometry).
 
 ## Structure

@@ -11,10 +11,11 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## Unreleased
 
-## [0.41.1](https://github.com/sunholo-data/ailang-parse/compare/v0.40.0...v0.41.1) — 2026-09-10
+## [0.41.2](https://github.com/sunholo-data/ailang-parse/compare/v0.40.0...v0.41.2) — 2026-09-10
 
-The v0.41.0 publication was cancelled before upload to correct the runtime
-minimum. These changes first ship in v0.41.1.
+The v0.41.0 publication was cancelled to correct the runtime minimum; v0.41.1
+was rejected by package validation for missing explicit IO imports. These
+changes first ship in v0.41.2, with the imports and template exports corrected.
 
 ### Document quality and local verification in AILANG
 
