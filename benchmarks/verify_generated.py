@@ -224,6 +224,10 @@ def verify_docx_parts(path: Path) -> list[str]:
                 styles = {p.style.name for p in Document(str(path)).paragraphs if p.style}
                 if not any(s.startswith("Heading") for s in styles):
                     errors.append("document uses Heading styles but none resolve (orphaned styles.xml?)")
+            except ModuleNotFoundError:
+                # python-docx is optional, same as in verify_library() (L2) —
+                # its absence degrades this check to unrun, not failed.
+                pass
             except Exception as e:
                 errors.append(f"heading-style check failed: {type(e).__name__}: {e}")
 
@@ -441,6 +445,10 @@ def _reference_doc_errors(template: Path, out: Path) -> list[str]:
         errors.extend(_docx_table_grid_errors(d))
         if not any((p.style.name or "").startswith("Heading") for p in d.paragraphs if p.style):
             errors.append("no heading resolved through the template's styles")
+    except ModuleNotFoundError:
+        # python-docx is optional, same as in verify_library() (L2) — its
+        # absence degrades this check to unrun, not failed.
+        pass
     except Exception as e:
         errors.append(f"python-docx could not open the output: {type(e).__name__}: {e}")
 
