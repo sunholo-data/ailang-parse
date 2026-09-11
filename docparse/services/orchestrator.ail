@@ -55,7 +55,7 @@ import std/result (Ok, Err)
 import std/ai (AIError)
 
 import docparse/types/document (mkText, Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterImages, mkSection, mkNamedSection, ImageBlock, mkImage)
-import docparse/services/format_router (detectFormat, getExtension, officeType)
+import docparse/services/format_router (detectFormat, getExtension, officeType, resolveFormat)
 
 -- Deterministic parsers (all ! {FS} or pure)
 import docparse/services/docx_parser (
@@ -147,6 +147,24 @@ pure func mkOutcome(format: string, filepath: string, meta: DocMetadata,
 -- Deterministic path — ! {FS}
 -- =====================================================================
 
+-- The extension to dispatch on, which is not always the one in the filename.
+--
+-- Every entry point below keyed straight off getExtension(). That is right for
+-- a path a human typed and wrong for one a machine made: a hosted fetch of
+-- https://host/files/7 writes /tmp/docparse-url-<ts>-7, and a perfectly good
+-- DOCX was refused as 'unknown' 50 times in 30 days of production because of it.
+--
+-- format_router already knew — resolveFormat() sniffs and returns "docx" for
+-- that file. It was simply never asked here. Consulted only when the extension
+-- yields nothing, so a normal .docx path pays no extra read and no existing
+-- dispatch changes behaviour.
+func orchDispatchExt(filepath: string) -> string ! {FS} {
+  let ext = toLower(getExtension(filepath));
+  if isTarGz(filepath) then ext
+  else if detectFormat(ext) == "unknown" then toLower(resolveFormat(filepath).ext)
+  else ext
+}
+
 -- Parse a document using only filesystem access: no AI, no network, no
 -- subprocess. Covers every format an MCP embedder granting {FS} can serve.
 --
@@ -155,7 +173,7 @@ pure func mkOutcome(format: string, filepath: string, meta: DocMetadata,
 -- that gets Ok can trust the document is complete for its format.
 export func parseDocumentPure(filepath: string, opts: ParseOptions)
   -> Result[ParseOutcome, string] ! {FS} = {
-  let ext = toLower(getExtension(filepath));
+  let ext = orchDispatchExt(filepath);
   let format = detectFormat(ext);
   if format == "zip-office" then orchOffice(filepath, ext, opts)
   else if format == "zip-odf" then Ok(orchOdf(filepath, ext))
@@ -411,7 +429,7 @@ func orchText(filepath: string) -> ParseOutcome ! {FS} = {
 -- handles the formats that need more capability.
 export func parseDocument(filepath: string, opts: ParseOptions)
   -> Result[ParseOutcome, AIError] ! {IO, FS, AI, Env, Net, Process, Clock} = {
-  let ext = toLower(getExtension(filepath));
+  let ext = orchDispatchExt(filepath);
   -- getExtension returns only the last dotted suffix (".gz"), so arXiv source
   -- bundles must be recognised by full filename before format detection.
   let format = if isTarGz(filepath) then "latex" else detectFormat(ext);
@@ -790,7 +808,7 @@ func orchEmailDeep(outcome: ParseOutcome, opts: ParseOptions)
 -- unknown.
 export func parseDocumentAI(filepath: string, opts: ParseOptions)
   -> Result[ParseOutcome, AIError] ! {AI, Clock, Env, FS, IO, Net} = {
-  let ext = toLower(getExtension(filepath));
+  let ext = orchDispatchExt(filepath);
   let format = detectFormat(ext);
   if format == "pdf" then match parsePdfResult(filepath) {
     Err(e) => Err(e),

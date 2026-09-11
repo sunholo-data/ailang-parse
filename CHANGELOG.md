@@ -9,7 +9,30 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## Unreleased
+## [v0.41.3](https://github.com/sunholo-data/ailang-parse/compare/v0.41.2...v0.41.3) — 2026-09-11
+
+### Extensionless files from a hosted fetch no longer refuse as "unknown"
+
+`format_router` has sniffed file content since the signed-URL fix
+(`resolveFormat()`), but the orchestrator's three entry points
+(`parseDocumentPure`, `parseDocument`, `parseDocumentAI`) kept dispatching on
+`getExtension()` alone and never called it. A hosted fetch of e.g.
+`https://host/files/7` writes a temp path with no extension
+(`/tmp/docparse-url-<ts>-7`), so a perfectly good DOCX was refused as
+`unknown` — measured at 50 times in 30 days of production. The CLI hit the
+identical bug on any extensionless path.
+
+Fixed by having all three entry points ask `resolveFormat()` when the plain
+extension yields nothing, via a new `orchDispatchExt()` helper. A normal path
+with a real extension pays no extra read; the sniff only runs on the
+already-failing case. Covers every format `sniffByBase64Prefix` recognizes —
+PDF, PNG, JPG, GIF, MP3, WAV/WebP, and ZIP-based Office/ODF/EPUB — not just
+DOCX.
+
+`scripts/test_format_sniffing.ail` previously only asserted `resolveFormat()`
+in isolation, which is exactly how this shipped undetected: the detector was
+right and the parser ignored it. It now also parses the same extensionless
+fixture through `parseDocumentPure` end-to-end and requires blocks back.
 
 ## [0.41.2](https://github.com/sunholo-data/ailang-parse/compare/v0.40.0...v0.41.2) — 2026-09-10
 

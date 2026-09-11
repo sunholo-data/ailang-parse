@@ -6,6 +6,8 @@ import std/bytes (fromBase64)
 import std/option (Some, None)
 import std/result (Ok, Err)
 import docparse/services/format_router (sniffFormat, resolveFormat, ResolvedFormat)
+import docparse/services/orchestrator (parseDocumentPure, defaultParseOptions)
+import docparse/types/document (countBlocks)
 
 -- Exercise sniffFormat + resolveFormat against real test files and assert
 -- they produce expected results. Compares to a hand-built table so any
@@ -87,8 +89,24 @@ export func main() -> () ! {FS, IO} {
   let resolved = resolveFormat(stripped);
   let sniffed = sniffFormat(stripped);
   let bugOk = resolved.ext == "docx" && resolved.format == "zip-office" && resolved.source == "content" && sniffed == "docx";
-  if bugOk then
+  let _ = if bugOk then
     println("  PASS  no-extension docx  ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}")
   else
-    println("  FAIL  no-extension docx — got ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}")
+    println("  FAIL  no-extension docx — got ext=${resolved.ext} format=${resolved.format} source=${resolved.source} sniff=${sniffed}");
+
+  -- The detector being right in isolation is not the bug fix — the
+  -- orchestrator has to actually ask it. This is the assertion that was
+  -- missing: parse the SAME extensionless file end-to-end and require
+  -- blocks back, not just a resolveFormat() call that nothing consumes.
+  let _ = println("");
+  let _ = println("End-to-end: extensionless docx through parseDocumentPure:");
+  match parseDocumentPure(stripped, defaultParseOptions()) {
+    Ok(outcome) => {
+      let n = countBlocks(outcome.document.blocks);
+      if n > 0
+        then println("  PASS  no-extension docx parsed end-to-end  format=${outcome.document.format} blocks=${show(n)}")
+        else println("  FAIL  no-extension docx parsed but returned 0 blocks")
+    },
+    Err(msg) => println("  FAIL  no-extension docx refused by parseDocumentPure: ${msg}")
+  }
 }
