@@ -263,7 +263,10 @@ pure func docxTplCollectFrom(cleaned: string, from: int, acc: [string]) -> [stri
     let gt = find(rest, "<w:sectPr>");
     let relSp = if sp < 0 then length(rest) else sp;
     let relGt = if gt < 0 then length(rest) else gt;
-    let rel = if relSp <= relGt then relSp else relGt;
+    let closed = find(rest, "<w:sectPr/>");
+    let relClosed = if closed < 0 then length(rest) else closed;
+    let regular = if relSp <= relGt then relSp else relGt;
+    let rel = if relClosed < regular then relClosed else regular;
     if rel >= length(rest) then reverse(acc)
     else {
       let span = docxTplSectPrSpanFrom(cleaned, from + rel);
