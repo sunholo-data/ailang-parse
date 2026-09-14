@@ -14,6 +14,8 @@ author: Holosun ApS
 
 **Version:** «1.0» · **Valid until:** «DD Month YYYY»
 
+![Architectural illustration of AI engineering: connected structural forms in slate linework with an orange ink wash](assets/illustrations/engineering.png)
+
 ## The opportunity
 
 «Describe the current situation in the client’s own terms. State the problem, why it matters now, and the practical constraints. Keep this to one short paragraph.»

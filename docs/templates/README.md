@@ -55,14 +55,16 @@ for what the merge carries over and what it regenerates.
 
 ## Design
 
-A4 portrait; 23 mm side margins; white page; Montserrat headings; 11 pt Arial
-body. Colours from sunholo.com: vermilion `#E73C17`, blue-grey `#314352`, pale
-grey `#F6F8FA`; small link text uses a darker vermilion `#B52D10`.
+A4 portrait; 23 mm side margins; white page; Montserrat headings and body.
+Colours from sunholo.com: vermilion `#E73C17`, blue-grey `#314352`, pale grey
+`#F6F8FA`; small link text and Heading 3 use action orange `#BD3012`.
 
 First-page branding is larger; continuation pages use a compact header.
 Level-two and level-three headings keep with the following text. Table headers
-repeat across pages. The three-page outline covers the opportunity, delivery
-and commercial next steps — content may run longer, so render after editing.
+repeat across pages. The proposal opens with the Sunholo "AI engineering"
+illustration from the shared illustration kit (`assets/illustrations/`), then
+covers the opportunity, delivery and commercial next steps across four pages —
+content may run longer, so render after editing.
 
 Montserrat Regular and Bold ship in `assets/fonts/` under the SIL Open Font
 License (`OFL.txt`). Install them for the closest Word layout, or share the PDF.
@@ -100,4 +102,5 @@ SIL Open Font License. The Sunholo and AILANG logos are Holosun ApS marks;
 replace them with your own if you are issuing proposals as a different party.
 
 This is a document adaptation of the sunholo.com visual language, not a formal
-brand guide. Brand sources inspected 10 September 2026.
+brand guide. Brand sources inspected 14 September 2026, against the current
+tokens in `sunholo-data/website/src/assets/visuals/site-ui.css`.
