@@ -1,11 +1,12 @@
 module docparse/services/xlsx_parser
 
-import std/xml (parseLenient, sanitizeXml, parseElements, parseFold, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
-import std/zip (scanFold)
+import std/xml (parseLenient, sanitizeXml, parseElements, parseFoldStep, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
+import std/zip (scanFold, scanFoldStep)
+import std/iter (FoldStep, Continue, Stop)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr, split)
-import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl)
+import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl, foldlE, any, dedup)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
 import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
@@ -36,7 +37,7 @@ export func parseXlsx(filepath: string) -> [Block] ! {FS} {
   let sheetNames = readWorkbookSheetNames(filepath);
   -- Find and parse each sheet
   let sheetEntries = findSheetEntries(filepath);
-  let sheetBlocks = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames, 0);
+  let sheetBlocks = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames);
   -- Warn if shared strings were truncated
   if stringCount >= 50000
   then {
@@ -75,16 +76,15 @@ type XlsxComment = {
   threaded: bool
 }
 
--- Read every comment attached to one worksheet, anchored to its cell.
-func xlsxSheetComments(filepath: string, sheetXml: string, ss: Map[int, string],
-                        sheetIdx: int) -> [Block] ! {FS} {
+-- Read every comment attached to one worksheet as raw records. The threaded
+-- copy wins over the legacy compatibility shim for the same cell. Anchor
+-- resolution happens against the streamed sheet rows in the caller.
+func xlsxSheetCommentRecords(filepath: string, sheetIdx: int) -> [XlsxComment] ! {FS} {
   let legacy = xlsxReadLegacyComments(filepath, sheetIdx);
   let threaded = xlsxReadThreadedComments(filepath, sheetIdx);
   -- Threaded comments supersede the legacy compatibility copy for the same cell
   let threadedRefs = map(\c. c.ref, threaded);
-  let keptLegacy = filter(\c. not xlsxRefSeen(c.ref, threadedRefs), legacy);
-  let all = concat(threaded, keptLegacy);
-  map(\c. xlsxCommentBlock(c, sheetXml, ss), all)
+  concat(threaded, filter(\c. not xlsxRefSeen(c.ref, threadedRefs), legacy))
 }
 
 pure func xlsxRefSeen(ref: string, refs: [string]) -> bool =
@@ -96,32 +96,19 @@ pure func xlsxRefSeen(ref: string, refs: [string]) -> bool =
 -- Build the CommentBlock, resolving the commented cell's text as the anchor.
 -- A comment on an empty cell still anchors — to the cell reference — because
 -- the reference is itself an unambiguous target; only a missing ref degrades.
-pure func xlsxCommentBlock(c: XlsxComment, sheetXml: string, ss: Map[int, string]) -> Block {
+-- The cell texts were collected during the sheet's streaming row pass, so no
+-- second (materialised) parse of the sheet is needed.
+pure func xlsxCommentBlock(c: XlsxComment, texts: [(string, string)]) -> Block {
   if length(c.ref) == 0
   then mkUnanchoredComment(c.id, c.author, c.date, c.text, c.parentId, false)
   else {
-    let cellText = xlsxCellTextAt(sheetXml, ss, c.ref);
+    let cellText = match filter(\t. xlsxPairKey(t) == c.ref, texts) {
+      [] => "",
+      t :: _ => xlsxPairVal(t)
+    };
     let anchor = if length(cellText) > 0 then "${c.ref}: ${cellText}" else c.ref;
     mkAnchoredComment(c.id, c.author, c.date, c.text, anchor, "cell", 0, c.parentId, false)
   }
-}
-
--- Find one cell's displayed text by reference. Streams over <c> elements so a
--- large sheet costs O(1) memory; only runs when a sheet actually has comments.
-pure func xlsxCellTextAt(sheetXml: string, ss: Map[int, string], ref: string) -> string {
-  if length(sheetXml) == 0 then ""
-  else match parseFold(sanitizeXml(sheetXml), "c", { ss: ss, ref: ref, found: "" }, xlsxFoldFindCell) {
-    Ok(acc) => acc.found,
-    Err(_) => ""
-  }
-}
-
-pure func xlsxFoldFindCell(acc: { ss: Map[int, string], ref: string, found: string }, c: XmlNode)
-    -> { ss: Map[int, string], ref: string, found: string } {
-  if length(acc.found) > 0 then acc
-  else if getOrElse(getAttr(c, "r"), "") == acc.ref
-  then { ss: acc.ss, ref: acc.ref, found: trim(parseXlsxCell(c, acc.ss).text) }
-  else acc
 }
 
 -- Legacy notes: xl/comments1.xml (or xl/comments/comment1.xml)
@@ -464,56 +451,167 @@ pure func xlsxGetSheetName(names: [string], idx: int, entry: string) -> string =
     None => xlsxCleanSheetName(entry)
   }
 
--- Parse each sheet entry into blocks, using real sheet names
--- Uses readZipEntry + parseElements for worksheets (benefits from early termination
--- at 5000-row cap), while shared strings use scanFold (no XML string materialization).
-func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Map[int, string], names: [string], idx: int) -> [Block] ! {FS} =
+-- Parse each sheet entry into blocks, using real sheet names.
+--
+-- Memory discipline (m-v1-memory-footprint): the per-sheet work lives in
+-- xlsxParseOneSheet, a function the loop CALLS via foldlE. The tree-walking
+-- evaluator has no tail-call optimisation, so a self-recursive loop keeps
+-- every frame's let bindings reachable until the whole recursion unwinds —
+-- a binding only dies with the callee's frame. Here each sheet's data (and
+-- the streaming fold state) dies when xlsxParseOneSheet returns; only the
+-- small blocks accumulator stays live across sheets.
+--
+-- Worksheets are streamed with std/zip.scanFoldStep on "row" (and
+-- "mergeCell"), like shared strings already are, so the sheet XML string is
+-- never materialised and readZipEntry no longer appears on this path.
+func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Map[int, string], names: [string]) -> [Block] ! {FS} =
+  foldlE(func(acc: [Block], item: (string, int)) -> [Block] ! {FS} {
+    concat(acc, xlsxParseOneSheet(filepath, xlsxEntryName(item), sharedStrings, names, xlsxEntryIdx(item)))
+  }, [], xlsxIndexed(entries, 0))
+
+pure func xlsxEntryName(item: (string, int)) -> string = match item { (e, _) => e }
+pure func xlsxEntryIdx(item: (string, int)) -> int = match item { (_, i) => i }
+
+-- Pair each sheet entry with its ordinal for the fold above.
+pure func xlsxIndexed(entries: [string], idx: int) -> [(string, int)] =
   match entries {
     [] => [],
-    entry :: rest => {
-      let xml = readZipEntry(filepath, entry);
-      let sheetName = xlsxGetSheetName(names, idx, entry);
-      let blocks = parseSheetXml(xml, sharedStrings, sheetName);
-      -- Cell comments follow their sheet, each anchored to the cell (and the
-      -- cell's value) it annotates.
-      let comments = xlsxSheetComments(filepath, xml, sharedStrings, idx);
-      let wrapped = map(xlsxWrapComment, comments);
-      let moreBlocks = parseSheetsWithNames(filepath, rest, sharedStrings, names, idx + 1);
-      concat(concat(blocks, wrapped), moreBlocks)
-    }
+    e :: rest => (e, idx) :: xlsxIndexed(rest, idx + 1)
   }
+
+-- Parse ONE worksheet entry completely: comments first (their anchor cells
+-- are resolved from the streamed rows), then the sheet itself, streamed.
+-- Everything large here is local to this frame, so it is freeable on return.
+func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, string], names: [string], idx: int) -> [Block] ! {FS} {
+  let sheetName = xlsxGetSheetName(names, idx, entry);
+  -- Cell comments follow their sheet, each anchored to the cell (and the
+  -- cell's value) it annotates. Read the comment records before streaming so
+  -- the row fold can collect the anchor cells' text as it goes.
+  let comments = xlsxSheetCommentRecords(filepath, idx);
+  let refs = filter(\r. length(r) > 0, dedup(map(\c. c.ref, comments)));
+  let streamed = xlsxStreamSheet(filepath, entry, sharedStrings, refs);
+  let blocks = xlsxSheetBlocks(streamed.rows, sheetName);
+  let wrapped = map(\c. xlsxWrapComment(xlsxCommentBlock(c, streamed.texts)), comments);
+  concat(blocks, wrapped)
+}
+
+-- Fold-accumulator record for streaming one worksheet out of the ZIP.
+type XlsxStreamFold = {
+  rows: [[TableCell]],
+  count: int,
+  ss: Map[int, string],
+  merges: [XlsxMerge],
+  refs: [string],
+  texts: [(string, string)]
+}
+
+-- Stream one worksheet straight out of the ZIP archive: one streaming pass
+-- over <mergeCell> (capped at 500, matching parseElements) and one over
+-- <row>. Returns rows in document order plus the displayed text of any cell
+-- referenced by a comment. The sheet XML string is never materialised.
+func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], refs: [string]) -> { rows: [[TableCell]], texts: [(string, string)] } ! {FS} {
+  let merges = match scanFoldStep(filepath, entry, "mergeCell", { merges: [], count: 0 }, xlsxFoldMerge) {
+    Ok(acc) => reverse(acc.merges),
+    Err(_) => []
+  };
+  match scanFoldStep(filepath, entry, "row",
+    { rows: [], count: 0, ss: ss, merges: merges, refs: refs, texts: [] },
+    xlsxFoldRowStep) {
+    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts },
+    Err(_) => { rows: [], texts: [] }
+  }
+}
+
+-- Streaming fold over <mergeCell>: accumulate regions, cap at 500.
+pure func xlsxFoldMerge(acc: { merges: [XlsxMerge], count: int }, node: XmlNode)
+    -> FoldStep[{ merges: [XlsxMerge], count: int }] {
+  if acc.count >= 500 then Stop(acc)
+  else Continue({ merges: xlsxParseMergeRef(getOrElse(getAttr(node, "ref"), "")) :: acc.merges,
+                  count: acc.count + 1 })
+}
+
+-- Streaming fold over <row>: parse rows (merge-aware, capped at 5000) and
+-- collect the displayed text of any comment-anchor cell on the way past.
+-- Stops early once the row cap is reached AND every anchor has been found;
+-- otherwise keeps scanning (O(1) per skipped row) so anchors beyond the cap
+-- still resolve, as the previous whole-XML pass did.
+pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[XlsxStreamFold] {
+  if acc.count >= 5000 then
+    (if xlsxRefsAllFound(acc.refs, acc.texts) then Stop(acc) else Continue(acc))
+  else {
+    let cells = if listLength(acc.merges) > 0
+      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.merges,
+                                  xlsxRowNumber(rowNode), 0)
+      else parseXlsxRow(rowNode, acc.ss);
+    let texts = if listLength(acc.refs) > 0
+      then xlsxCollectRefTexts(findAll(rowNode, "c"), acc.ss, acc.refs, acc.texts)
+      else acc.texts;
+    let acc2 = { acc | texts: texts };
+    let acc3 = if listLength(cells) > 0
+      then { acc2 | rows: cells :: acc2.rows, count: acc2.count + 1 }
+      else acc2;
+    if acc3.count >= 5000 && xlsxRefsAllFound(acc3.refs, acc3.texts)
+    then Stop(acc3)
+    else Continue(acc3)
+  }
+}
+
+-- Collect the displayed text of any cell in this row whose ref is a comment
+-- anchor. parseXlsxCell is the exact resolver the whole-XML pass used.
+pure func xlsxCollectRefTexts(cells: [XmlNode], ss: Map[int, string], refs: [string], texts: [(string, string)]) -> [(string, string)] =
+  foldl(func(acc: [(string, string)], c: XmlNode) -> [(string, string)] {
+    let ref = getOrElse(getAttr(c, "r"), "");
+    if length(ref) > 0 && xlsxRefSeen(ref, refs) && not xlsxRefCollected(ref, acc)
+    then (ref, trim(parseXlsxCell(c, ss).text)) :: acc
+    else acc
+  }, texts, cells)
+
+pure func xlsxRefCollected(ref: string, texts: [(string, string)]) -> bool =
+  any(\t. xlsxPairKey(t) == ref, texts)
+
+pure func xlsxRefsAllFound(refs: [string], texts: [(string, string)]) -> bool =
+  not any(\r. not xlsxRefCollected(r, texts), refs)
 
 -- Keep the SectionBlock(kind: "comment") wrapper used by every other format
 pure func xlsxWrapComment(b: Block) -> Block =
   mkSection("comment", [b])
 
--- Parse a single worksheet's XML into blocks
--- Emits a HeadingBlock with the sheet name followed by the table data.
+-- Build a sheet's blocks (heading, or a named section with heading + table)
+-- from parsed rows. Shared by the streaming ZIP path and parseSheetXml.
+pure func xlsxSheetBlocks(parsedRows: [[TableCell]], sheetName: string) -> [Block] {
+  let cleanName = xlsxCleanSheetName(sheetName);
+  let heading = mkHeading(cleanName, 1);
+  match parsedRows {
+    [] => [heading],
+    firstRow :: dataRows => {
+      let tableBlock = mkTable(dataRows, firstRow);
+      let section = mkNamedSection("sheet", cleanName, [heading, tableBlock]);
+      [section]
+    }
+  }
+}
+
+-- Parse a single worksheet's XML into blocks (materialised-string variant).
+-- Kept for API compatibility; the in-package parse path uses xlsxStreamSheet
+-- so the XML string is never materialised. Emits a HeadingBlock with the
+-- sheet name followed by the table data.
 export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetName: string) -> [Block] ! {} {
   if length(xml) == 0 then []
   else {
-    -- Use parseFold for streaming: fold directly over <row> elements without
-    -- collecting them into a list first. O(1) memory per row, 5K row cap.
+    -- Same streaming row fold as the ZIP path, but over a held string; no
+    -- comment pass here, so the anchor refs are empty.
     let merges = match parseElements(xml, "mergeCell", 500) {
       Ok(nodes) => xlsxParseMergeNodes(nodes),
       Err(_) => []
     };
-    let foldResult = parseFold(sanitizeXml(xml), "row",
-      { rows: [], count: 0, ss: sharedStrings, merges: merges },
-      xlsxFoldRow);
+    let foldResult = parseFoldStep(sanitizeXml(xml), "row",
+      { rows: [], count: 0, ss: sharedStrings, merges: merges, refs: [], texts: [] },
+      xlsxFoldRowStep);
     let parsedRows = match foldResult {
       Ok(acc2) => reverse(acc2.rows),
       Err(_) => []
     };
-    let heading = mkHeading(xlsxCleanSheetName(sheetName), 1);
-    match parsedRows {
-      [] => [heading],
-      firstRow :: dataRows => {
-        let tableBlock = mkTable(dataRows, firstRow);
-        let section = mkNamedSection("sheet", xlsxCleanSheetName(sheetName), [heading, tableBlock]);
-        [section]
-      }
-    }
+    xlsxSheetBlocks(parsedRows, sheetName)
   }
 }
 
