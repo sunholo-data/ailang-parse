@@ -1,7 +1,7 @@
 module docparse/services/markdown_writer
 
-import std/string (length, replaceMany, startsWith, substring, repeat)
-import std/list (foldl, length as listLength)
+import std/string (length, replaceMany, startsWith, substring, repeat, join)
+import std/list (map, length as listLength)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText)
 
 -- Markdown writer — renders a ParsedDocument to markdown for LLM consumption.
@@ -43,7 +43,7 @@ pure func renderMetadataHeader(meta: DocMetadata, format: string, filename: stri
 }
 
 pure func renderBlocksMd(blocks: [Block]) -> string =
-  foldl(\acc b. "${acc}${renderBlockMd(b)}", "", blocks)
+  join("", map(renderBlockMd, blocks))
 
 export pure func renderBlockMd(block: Block) -> string =
   match block {
@@ -270,7 +270,7 @@ pure func alignDashes(align: string) -> string =
   else "---"
 
 pure func renderRowsMd(rows: [[TableCell]]) -> string =
-  foldl(\acc row. "${acc}| ${renderCellsMd(row)}\n", "", rows)
+  join("", map(\row. "| ${renderCellsMd(row)}\n", rows))
 
 -- Render list items. itemRuns is parallel to items but may be empty entirely
 -- (nothing formatted) or shorter than items, so both are walked together and
