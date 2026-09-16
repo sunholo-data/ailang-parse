@@ -2,8 +2,10 @@ module docparse/services/zip_extract
 
 import std/zip (listEntries, readEntry, readEntryBytes)
 import std/string (contains, length, endsWith, startsWith, split, substring)
-import std/list (last as listLast)
+import std/list (last as listLast, reverse, length as listLength)
 import std/result (Ok, Err)
+import std/bytes (fromBase64)
+import std/fs (mkdirAllResult, writeFileBytes, readFileBytes)
 import docparse/types/document (Block, ImageBlock, SectionBlock, mkImage, mkNamedSection)
 
 -- ZIP extraction layer for Office documents
@@ -421,3 +423,122 @@ pure func zipIsZipPath(data: string) -> bool {
   startsWith(data, "data:") == false &&
   (contains(data, "/") || contains(data, "."))
 }
+
+-- ============================================================
+-- Temp-file image extraction (memory audit m-v1-memory-footprint, ask D3)
+-- ============================================================
+--
+-- The Office parsers used to read every media entry straight into an
+-- ImageBlock as base64 — a 4/3 blow-up on top of the raw bytes, held for the
+-- document's lifetime and copied again by every downstream consumer. These
+-- helpers instead write each image to a temp file and put the PATH in the
+-- block (classifyImageSource reads it back as LocalFile, and mediaJsonFields
+-- emits it as `src`); bytes re-enter memory only on demand, via
+-- imageDataUriFromFile. A per-document cap on the decoded byte total bounds a
+-- media-heavy (or malicious) archive to a typed error instead of unbounded
+-- memory growth.
+
+export type ImageExtractError
+  = ImageCapExceeded({entry: string, capBytes: int, runningBytes: int})
+  | ImageWriteFailed({entry: string, detail: string})
+
+-- Cap on decoded image bytes per document. Also the de-facto per-image cap:
+-- a single entry over the budget trips it immediately.
+export pure func imageBytesCap() -> int = 67108864   -- 64 MiB
+
+export pure func imageTempDir() -> string = "/tmp/docparse-images"
+
+-- Human-readable form for warnings/notes. The parse functions return [Block]
+-- and cannot surface the ADT itself without a breaking export change, so they
+-- render the typed error through this.
+export pure func imageExtractErrorText(e: ImageExtractError) -> string =
+  match e {
+    ImageCapExceeded(c) =>
+      "Warning: image extraction stopped at ${c.entry} — ${show(c.runningBytes)} bytes of embedded images exceeds the ${show(c.capBytes)}-byte per-document cap; remaining media entries were not extracted",
+    ImageWriteFailed(w) =>
+      "Warning: could not write image temp file for ${w.entry}: ${w.detail}"
+  }
+
+export type MediaFiles = {
+  blocks: [Block],      -- one ImageBlock per media entry, data = temp path
+  bytesWritten: int,    -- decoded bytes written under tempDir
+  fileCount: int
+}
+
+-- Extract media entries to temp files, one ImageBlock per entry whose `data`
+-- holds the temp file PATH. Fails with a typed Err once the running decoded
+-- total would exceed imageBytesCap().
+export func extractMediaToFiles(zipPath: string, entries: [string], tempDir: string)
+  -> Result[MediaFiles, ImageExtractError] ! {FS} = {
+  match mkdirAllResult(tempDir) {
+    Err(msg) => Err(ImageWriteFailed({entry: tempDir, detail: msg})),
+    Ok(_) => mediaToFilesFrom(zipPath, entries, tempDir, 0, [], 0, 0)
+  }
+}
+
+func mediaToFilesFrom(zipPath: string, entries: [string], tempDir: string,
+                      counter: int, acc: [Block], bytesSoFar: int, files: int)
+  -> Result[MediaFiles, ImageExtractError] ! {FS} =
+  match entries {
+    [] => Ok({blocks: reverse(acc), bytesWritten: bytesSoFar, fileCount: files}),
+    entry :: rest => {
+      let b64 = readImageEntry(zipPath, entry);
+      let mime = mediaMimeType(entry);
+      if length(b64) == 0
+        -- Read failure keeps the historical shape: an empty-data block, not a
+        -- hole in the list — and it does not count against the cap.
+      then mediaToFilesFrom(zipPath, rest, tempDir, counter,
+                            mkImage("", "", mime) :: acc, bytesSoFar, files)
+      else {
+        -- Raw size estimated from the base64 length (ceil(n*3/4)) and checked
+        -- BEFORE decoding, so an oversized entry costs nothing to reject.
+        let rawLen = (length(b64) * 3) / 4;
+        if bytesSoFar + rawLen > imageBytesCap()
+        then Err(ImageCapExceeded({entry: entry, capBytes: imageBytesCap(),
+                                   runningBytes: bytesSoFar + rawLen}))
+        else {
+          let path = "${tempDir}/docparse-img-${show(counter)}${mediaExtension(entry)}";
+          match fromBase64(b64) {
+            Some(bytes) => {
+              writeFileBytes(path, bytes);
+              mediaToFilesFrom(zipPath, rest, tempDir, counter + 1,
+                               mkImage(path, "", mime) :: acc,
+                               bytesSoFar + rawLen, files + 1)
+            },
+            -- Not valid base64: keep the empty-data block rather than failing
+            -- the whole document over one corrupt entry.
+            None => mediaToFilesFrom(zipPath, rest, tempDir, counter,
+                                     mkImage("", "", mime) :: acc, bytesSoFar, files)
+          }
+        }
+      }
+    }
+  }
+
+-- "word/media/image1.png" -> ".png". Extension-less names get ".bin" so the
+-- temp file still carries a usable name for mime-sniffing consumers.
+pure func mediaExtension(filename: string) -> string {
+  let parts = split(filename, "/");
+  match listLast(parts) {
+    Some(base) => {
+      let segs = split(base, ".");
+      if listLength(segs) < 2 then ".bin"
+      else match listLast(segs) {
+        Some(ext) => ".${ext}",
+        None => ".bin"
+      }
+    },
+    None => ".bin"
+  }
+}
+
+-- Inline bytes ON DEMAND, at output time. Nothing in the parse path calls
+-- this: the point of the temp-file layout is that a document's images never
+-- sit in memory as base64. A caller that genuinely needs a data: URI (an SDK
+-- response shape that promises inline bytes) reads the file back here, per
+-- image, at the moment it serialises.
+export func imageDataUriFromFile(path: string, mime: string) -> Result[string, string] ! {FS} =
+  match readFileBytes(path) {
+    Ok(b64) => Ok("data:${mime};base64,${b64}"),
+    Err(msg) => Err(msg)
+  }
