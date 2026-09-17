@@ -3,7 +3,7 @@ module docparse/services/markdown_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, charCode, foldChars, join, replace, replaceMany, stringToInt)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, TableCell, simpleCell, mergedCell, spanCell, simpleCellRuns, spanCellRuns, mkTable)
+import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, ChangeBlock, mkAnchoredComment, mkUnanchoredComment, TableCell, simpleCell, mergedCell, spanCell, simpleCellRuns, spanCellRuns, mkTable)
 
 -- Markdown Parser — converts Markdown text to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -14,12 +14,12 @@ import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeading
 --   - Unordered lists (- or * prefix)
 --   - Ordered lists (1. 2. etc prefix)
 --   - Simple tables (| col | col | format)
---
--- Does NOT handle (yet):
---   - Code blocks (``` fenced)
---   - Inline formatting (bold, italic, links)
 --   - Blockquotes (>)
---   - Images (![alt](url))
+--   - Code blocks (``` fenced)
+--   - Comments and track changes, in the exact blockquote syntax
+--     markdown_writer.renderCommentMd / renderChangeMd emit, so the
+--     docx -> md -> docx waypoint is lossless instead of silently demoting
+--     both to inert quote text.
 --
 -- Usage:
 --   let blocks = parseMarkdown(content)
@@ -229,13 +229,209 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     { s | textLines: trimmedLine :: s.textLines }
 }
 
--- Flush accumulated blockquote lines into a TextBlock with style "quote"
+-- Flush accumulated blockquote lines into blocks.
+--
+-- A blockquote that came from markdown_writer (renderCommentMd /
+-- renderChangeMd) is read back into the CommentBlock / ChangeBlock it came
+-- from, so the markdown waypoint is lossless instead of silently demoting
+-- comments and track changes to inert quote text. Anything else keeps the
+-- plain quoted-paragraph reading.
 pure func flushQuote(state: MdParseState) -> MdParseState =
   if mdIsEmptyList(state.quoteLines) then state
-  else {
-    let text = mdJoinLines(reverse(state.quoteLines));
-    { state | blocks: mdTextBlock(text, "quote", 0) :: state.blocks, quoteLines: [] }
+  else match mdQuoteBlocks(reverse(state.quoteLines)) {
+    Some(bs) => { state | blocks: mdPrependBlocks(bs, state.blocks), quoteLines: [] },
+    None => {
+      let text = mdJoinLines(reverse(state.quoteLines));
+      { state | blocks: mdTextBlock(text, "quote", 0) :: state.blocks, quoteLines: [] }
+    }
   }
+
+-- Prepend blocks (in document order) onto the reversed accumulated list.
+pure func mdPrependBlocks(bs: [Block], acc: [Block]) -> [Block] =
+  match bs {
+    [] => acc,
+    b :: rest => b :: mdPrependBlocks(rest, acc)
+  }
+
+-- Read a writer-rendered blockquote (lines in document order) into the blocks
+-- it encodes, or None when it is an ordinary quote.
+pure func mdQuoteBlocks(ls: [string]) -> Option[[Block]] {
+  match mdQuoteCommentAt(ls, 0) {
+    Some(hit) =>
+      match hit {
+        (i, h) => Some(mdCommentBlocks(ls, i, h))
+      },
+    None =>
+      match ls {
+        first :: rest =>
+          match mdChangeHead(first) {
+            Some(ch) => Some([mdChangeBlock(ch, rest)]),
+            None => None
+          },
+        [] => None
+      }
+  }
+}
+
+-- First comment-header line in the quote, with its index.
+pure func mdQuoteCommentAt(ls: [string], i: int) -> Option[(int, MdCommentHead)] =
+  match ls {
+    [] => None,
+    l :: rest =>
+      match mdCommentHead(l) {
+        Some(h) => Some((i, h)),
+        None => mdQuoteCommentAt(rest, i + 1)
+      }
+  }
+
+-- The writer's anchored form is "> anchor\n>\n> **Comment (…):** text": the
+-- anchor is every line before the blank separator. Without the separator — or
+-- when the byline itself said "unanchored" — the comment stands alone.
+pure func mdCommentBlocks(ls: [string], i: int, h: MdCommentHead) -> [Block] {
+  let text = mdCommentText(h.text, join(" ", mdAfter(ls, i + 1)));
+  let anchored = not h.declaredUnanchored && i >= 2 && mdLineAt(ls, i - 1) == "";
+  if anchored
+  then let anchor = join(" ", mdFirstN(i - 1, ls)) in
+    [mkAnchoredComment("", h.author, h.date, text, anchor, "range", 0 - 1, "", false)]
+  else [mkUnanchoredComment("", h.author, h.date, text, "", false)]
+}
+
+-- Comment text: the header line's remainder plus any wrapped continuation
+-- lines (the writer does not flatten newlines out of comment text).
+pure func mdCommentText(first: string, more: string) -> string =
+  if length(more) > 0 && length(first) > 0 then "${first} ${more}"
+  else if length(more) > 0 then more
+  else first
+
+-- Lines strictly after index i.
+pure func mdAfter(ls: [string], i: int) -> [string] =
+  if i <= 0 then ls
+  else match ls { [] => [], _ :: rest => mdAfter(rest, i - 1) }
+
+-- The first n lines.
+pure func mdFirstN(n: int, ls: [string]) -> [string] =
+  if n <= 0 then []
+  else match ls { [] => [], x :: rest => x :: mdFirstN(n - 1, rest) }
+
+-- The line at index i, "" when out of range.
+pure func mdLineAt(ls: [string], i: int) -> string =
+  match ls { [] => "", x :: rest => if i <= 0 then x else mdLineAt(rest, i - 1) }
+
+-- === Writer round-trip: comments ========================================
+--
+-- markdown_writer.renderCommentMd emits:
+--   **Comment (Author, 2026-05-09T16:13:00Z):** text
+--   **Comment (Author, unanchored):** text
+
+-- The "**Comment (…):**" byline.
+type MdCommentHead = { author: string, date: string, text: string, declaredUnanchored: bool }
+
+pure func mdCommentHead(line: string) -> Option[MdCommentHead] {
+  let t = trim(line);
+  if not startsWith(t, "**Comment (") then None
+  else {
+    let close = find(t, "):**");
+    if close < 0 then None
+    else {
+      let inner = substring(t, 11, close);
+      let body = trim(substring(t, close + 4, length(t)));
+      if endsWith(inner, ", unanchored")
+      then Some(mdByline(substring(inner, 0, length(inner) - 12), body, true))
+      else Some(mdByline(inner, body, false))
+    }
+  }
+}
+
+-- "Author" | "Author, date" — split on the LAST ", ", so the date takes the
+-- tail and an author whose name itself carries a comma keeps most of it.
+pure func mdByline(s: string, text: string, unanchored: bool) -> MdCommentHead {
+  let idx = mdLastCommaIdx(s, 0, 0 - 1);
+  if idx < 0
+  then { author: s, date: "", text: text, declaredUnanchored: unanchored }
+  else { author: substring(s, 0, idx),
+         date: trim(substring(s, idx + 2, length(s))),
+         text: text, declaredUnanchored: unanchored }
+}
+
+-- Index of the last ", " in s, -1 when absent.
+pure func mdLastCommaIdx(s: string, i: int, best: int) -> int =
+{
+  if i + 1 >= length(s) then best
+  else if charAt(s, i) == "," && charAt(s, i + 1) == " "
+  then mdLastCommaIdx(s, i + 1, i)
+  else mdLastCommaIdx(s, i + 1, best)
+}
+
+-- === Writer round-trip: track changes ===================================
+--
+-- markdown_writer.renderChangeMd emits:
+--   > [insert by Alice on 2026-03-29] text
+--   > [delete by Bob on 2026-03-29] ~~text~~
+
+-- The "[<type> by <author> on <date>]" attribution prefix.
+type MdChangeHead = { changeType: string, author: string, date: string,
+                      text: string, struck: bool }
+
+pure func mdChangeHead(line: string) -> Option[MdChangeHead] {
+  let t = trim(line);
+  if not startsWith(t, "[") then None
+  else {
+    let close = find(t, "] ");
+    if close < 1 then None
+    else {
+      let header = substring(t, 1, close);
+      let body = trim(substring(t, close + 2, length(t)));
+      let byIdx = find(header, " by ");
+      if byIdx <= 0 then None
+      else {
+        let ct = trim(substring(header, 0, byIdx));
+        if not mdIsChangeType(ct) then None
+        else {
+          let who = trim(substring(header, byIdx + 4, length(header)));
+          let onIdx = find(who, " on ");
+          let author = if onIdx >= 0 then trim(substring(who, 0, onIdx)) else who;
+          let date = if onIdx >= 0 then trim(substring(who, onIdx + 4, length(who))) else "";
+          Some({ changeType: ct, author: author, date: date, text: body,
+                 struck: ct == "delete" || ct == "move-from" })
+        }
+      }
+    }
+  }
+}
+
+-- The writer only emits real revision types (insert / delete / move-to /
+-- move-from), and requiring a single lowercase hyphenated word keeps an
+-- ordinary quoted "[Chapter 1 by Smith]" from being read as a track change.
+pure func mdIsChangeType(s: string) -> bool
+  tests [
+    ("insert", true),
+    ("move-from", true),
+    ("Chapter 1", false),
+    ("Insert", false),
+    ("", false)
+  ]
+{ length(s) > 0 && mdIsChangeTypeFrom(s, 0) }
+
+pure func mdIsChangeTypeFrom(s: string, i: int) -> bool =
+  if i >= length(s) then true
+  else {
+    let c = charAt(s, i);
+    let n = charCode(c);
+    (c == "-" || (n >= 97 && n <= 122)) && mdIsChangeTypeFrom(s, i + 1)
+  }
+
+-- Build the ChangeBlock. The struck flag says the writer wrapped the body in
+-- ~~ markers so it reads as struck-through; the ChangeBlock carries plain
+-- text like every other parser's, so unwrap — including the case where the
+-- wrapping pair got split across wrapped quote lines.
+pure func mdChangeBlock(ch: MdChangeHead, more: [string]) -> Block {
+  let raw = mdCommentText(ch.text, join(" ", more));
+  let opened = if ch.struck && startsWith(raw, "~~") && length(raw) >= 2
+    then substring(raw, 2, length(raw)) else raw;
+  let closed = if ch.struck && endsWith(opened, "~~") && length(opened) >= 2
+    then substring(opened, 0, length(opened) - 2) else opened;
+  ChangeBlock({ changeType: ch.changeType, author: ch.author, date: ch.date, text: closed })
+}
 
 pure func mdHeadingState(state: MdParseState, trimmedLine: string, level: int) -> MdParseState {
   let s = flushToState(state);
