@@ -13,14 +13,35 @@ Universal document parsing **and generation** in [AILANG](https://github.com/sun
 
 ## Install
 
+Two routes; both put a `docparse` command on your `PATH`, and both write output
+next to the file you parse (`--output-dir DIR` or `DOCPARSE_OUTPUT_DIR` to
+change that).
+
+**Already have [AILANG](https://github.com/sunholo-data/ailang)?** (0.42.0+ of
+this package, AILANG v0.40.0 dev or later)
+
+```bash
+ailang install sunholo/ailang_parse
+docparse report.docx
+```
+
+The package's `[bin]` table gives you a shim in `~/.ailang/bin` that runs
+straight out of the registry cache: parse one file, or `--convert` it. It is
+deliberately the thin path — `describe`/`summarize`, batch mode, PDF backends
+and `--install-backends` are not on it (see below). `ailang bin list` /
+`ailang bin uninstall docparse` manage it.
+
+**Otherwise, or for the full CLI:**
+
 ```bash
 curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh
 ```
 
-Fetches the published package (~400 KB), installs the
-[AILANG](https://github.com/sunholo-data/ailang) runtime if you do not have it,
-and puts `docparse` on your `PATH`. `--version`, `--prefix` and `--uninstall`
-are supported; re-running is a no-op.
+Fetches the published package (~400 KB), installs the AILANG runtime if you do
+not have it, and links the full `docparse` wrapper (plus `docparse-audit` and
+`docparse-render`) into `~/.local/bin`. `--version`, `--prefix` and
+`--uninstall` are supported; re-running is a no-op. If you install both,
+`ailang install` tells you which one `docparse` resolves to.
 
 That covers every deterministic format. PDF needs two more things, and they are
 easy to miss:

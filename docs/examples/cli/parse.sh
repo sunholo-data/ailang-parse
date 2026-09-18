@@ -1,3 +1,2 @@
-# Parse a DOCX file
-ailang run --entry main --caps IO,FS,Env \
-  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail your-file.docx
+# Parse a DOCX file — output lands next to it as your-file.docx.json / .md
+docparse your-file.docx

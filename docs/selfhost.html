@@ -111,7 +111,7 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I install AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Run curl -fsSL https://ailang.sunholo.com/install.sh | bash to install AILANG, then ailang install sunholo/ailang_parse to install the parsing package. Office parsing has zero external dependencies."}},
+    {"@type": "Question", "name": "How do I install AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Run curl -fsSL https://ailang.sunholo.com/install.sh | bash to install AILANG, then ailang install sunholo/ailang_parse to install the parsing package and put the docparse command on your PATH. Office parsing has zero external dependencies."}},
     {"@type": "Question", "name": "What are the system requirements?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini or Claude, or a local Ollama model."}},
     {"@type": "Question", "name": "What is the difference between the API and running locally?", "acceptedAnswer": {"@type": "Answer", "text": "The hosted API gives you zero-maintenance scaling with Python, JS, and Go SDKs — 1,000 free requests per month included. Running locally gives you unlimited free parsing with full privacy, but requires installing AILANG on your machine."}},
     {"@type": "Question", "name": "Does local parsing require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline — no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline."}},
@@ -223,17 +223,15 @@ curl -fsSL https://ailang.sunholo.com/install.sh | bash
 # Install AILANG Parse from the package registry
 ailang install sunholo/ailang_parse</code></pre>
 
-      <p>Now parse a document:</p>
-      <pre><code class="language-bash" data-src="examples/cli/parse.sh"># Parse a DOCX file
-ailang run --entry main --caps IO,FS,Env \
-  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail your-file.docx</code></pre>
+      <p>That puts a <code>docparse</code> command on your <code>PATH</code> (package 0.42.0+). Now parse a document &mdash; output lands next to it:</p>
+      <pre><code class="language-bash" data-src="examples/cli/parse.sh"># Parse a DOCX file — output lands next to it as your-file.docx.json / .md
+docparse your-file.docx</code></pre>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Want the convenience wrapper?</strong> Clone the repo for the <code>docparse</code> CLI (<code>./bin/docparse</code> on macOS/Linux, <code>bin\docparse.cmd</code> on Windows), test files, and benchmarks:
-          <pre style="margin:8px 0 0"><code class="language-bash">git clone https://github.com/sunholo-data/ailang-parse.git
-cd ailang-parse
-./bin/docparse data/test_files/sample.docx</code></pre>
+        <div><strong>Need AI descriptions, batch mode or PDF backends?</strong> The <code>ailang install</code> shim is the thin path: one file in, JSON/Markdown or a <code>--convert</code> out. The full <code>docparse</code> wrapper adds <code>--describe</code>, batch folders, <code>--output-dir</code>, PDF backends and <code>--install-backends</code>, and its installer also sets up the AILANG runtime if you skipped step one:
+          <pre style="margin:8px 0 0"><code class="language-bash">curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh</code></pre>
+          Contributors: <code>git clone https://github.com/sunholo-data/ailang-parse.git</code> and run <code>./bin/docparse</code> (<code>bin\docparse.cmd</code> on Windows) from the checkout.
         </div>
       </div>
 
