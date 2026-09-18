@@ -92,9 +92,10 @@ ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
 
 ## Output
 
-Every run produces:
-- `docparse/data/output.json` — Structured JSON with typed blocks
-- `docparse/data/output.md` — LLM-ready markdown
+Every run produces, in the directory you ran from (`--output-dir DIR` or
+`DOCPARSE_OUTPUT_DIR` to change it):
+- `<filename>.json` — Structured JSON with typed blocks
+- `<filename>.md` — LLM-ready markdown
 
 ## What AILANG Parse Extracts
 

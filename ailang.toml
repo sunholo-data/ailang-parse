@@ -1,7 +1,7 @@
 [package]
 name = "sunholo/ailang_parse"
 module_prefix = "docparse"
-version = "0.41.3"
+version = "0.42.0"
 edition = "1"
 ailang = ">=0.35.0"
 description = "Universal document parsing and generation"
@@ -82,3 +82,13 @@ ai_summary = "Universal document parsing for Office, PDF, and image formats"
 
 [stability]
 level = "experimental"
+
+# `ailang install sunholo/ailang_parse` puts `docparse` on PATH (~/.ailang/bin).
+# The shim is a thin `ailang run` of docparse/main from wherever you are: parse
+# and convert one file, output beside you. AI is left out of caps on purpose:
+# `--caps AI` without `--ai <model>` warns on stderr on every run, and the
+# `describe`/`summarize` flows need a model and a key, which the full
+# bin/docparse wrapper handles. Batch, --output-dir, PDF backends and
+# --install-backends also stay with the wrapper.
+[bin]
+docparse = { module = "docparse/main", caps = "IO,FS,Env", run_flags = ["--max-recursion-depth", "50000"] }

@@ -39,7 +39,7 @@ run_backend_test() {
   local backend=$1
   echo "--- backend: $backend ---"
   rm -f "$OUT_JSON"
-  if ./bin/docparse "$PDF" --pdf-backend "$backend" > /tmp/docparse-$backend.log 2>&1; then
+  if ./bin/docparse "$PDF" --pdf-backend "$backend" --output-dir docparse/data > /tmp/docparse-$backend.log 2>&1; then
     assert_headings_present "$backend"
   else
     echo "  [$backend] FAIL: CLI exit non-zero. Last 20 lines of log:"

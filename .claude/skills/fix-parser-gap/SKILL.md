@@ -77,9 +77,9 @@ Modify the parser file (see reference.md for which file). Follow these principle
 After implementing, run the test to confirm it passes (GREEN):
 ```bash
 # Parse the challenge file
-./bin/docparse data/test_files/challenge/challenge_*.docx
+./bin/docparse data/test_files/challenge/challenge_*.docx --output-dir docparse/data
 
-# Check the output
+# Check the output (outputs land in your cwd unless --output-dir says otherwise)
 cat docparse/data/challenge_*.docx.json | python3 -m json.tool | head -50
 
 # Run gap analysis — the specific check should now score > 0%

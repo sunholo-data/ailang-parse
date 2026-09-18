@@ -208,7 +208,7 @@ Supported formats:
 Output:
   <out>/<filename>.json   Structured JSON with typed blocks
   <out>/<filename>.md     LLM-ready markdown
-  Default <out> is docparse/data; --output-dir DIR overrides it. In batch
+  Default <out> is the directory you ran from; --output-dir DIR overrides it. In batch
   mode each file's outputs are written as soon as that file finishes — you
   can inspect completed files mid-batch and nothing is lost on Ctrl+C.
 EOF
@@ -832,26 +832,32 @@ if [ -n "$TABLE_STYLE" ]; then
 fi
 
 # --- Resolve output dir to absolute path before cd ---
+#
+# We cd into PROJECT_DIR to run, so the default has to be pinned to the
+# caller's directory here or every parse would land in the checkout (or the
+# install prefix) instead of next to the user. main.ail's own default is "."
+# for the same reason; this keeps the wrapper and the [bin] shim in agreement.
+# Precedence: --output-dir, then a DOCPARSE_OUTPUT_DIR already in the
+# environment, then the caller's cwd.
 
-if [ -n "$OUTPUT_DIR" ]; then
-  if [[ ! "$OUTPUT_DIR" = /* ]]; then
-    OUTPUT_DIR="$(pwd)/$OUTPUT_DIR"
-  fi
+if [ -z "$OUTPUT_DIR" ]; then
+  OUTPUT_DIR="${DOCPARSE_OUTPUT_DIR:-$(pwd)}"
+fi
+if [[ ! "$OUTPUT_DIR" = /* ]]; then
+  OUTPUT_DIR="$(pwd)/$OUTPUT_DIR"
 fi
 
 # --- Run ---
 
 cd "$PROJECT_DIR"
 
-# When --output-dir is set, AILANG writes outputs there directly (per file,
-# eagerly as each file finishes) via the DOCPARSE_OUTPUT_DIR env var.
-# This means: completed files are visible mid-batch, nothing is lost on
-# Ctrl+C, and there's no bulk post-copy step.
+# AILANG writes outputs to OUTPUT_DIR directly (per file, eagerly as each
+# file finishes) via the DOCPARSE_OUTPUT_DIR env var. This means: completed
+# files are visible mid-batch, nothing is lost on Ctrl+C, and there's no bulk
+# post-copy step.
 ENV_PREFIX=()
-if [ -n "$OUTPUT_DIR" ]; then
-  mkdir -p "$OUTPUT_DIR"
-  ENV_PREFIX+=(DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR")
-fi
+mkdir -p "$OUTPUT_DIR"
+ENV_PREFIX+=(DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR")
 if $USE_AI; then
   ENV_PREFIX+=(GOOGLE_API_KEY="")
 fi
@@ -883,9 +889,7 @@ run_cmd() {
 if $USE_BATCH; then
   TOTAL=${#RESOLVED_FILES[@]}
   echo "Batch mode: parsing ${TOTAL} files (compile once)..."
-  if [ -n "$OUTPUT_DIR" ]; then
-    echo "Outputs streaming to $OUTPUT_DIR/ as each file completes."
-  fi
+  echo "Outputs streaming to $OUTPUT_DIR/ as each file completes."
   echo ""
   START=$(date +%s)
 

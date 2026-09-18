@@ -459,11 +459,14 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
 
 -- Write all output files: JSON, markdown, optional conversion, and optional AI summary
 -- Output filenames are derived from input: sample.docx -> sample.docx.json, sample.docx.md
--- Output dir: DOCPARSE_OUTPUT_DIR env var (default: docparse/data)
+-- Output dir: DOCPARSE_OUTPUT_DIR env var (default: ".", the caller's cwd).
+-- The default used to be docparse/data, which only made sense when the only
+-- way to run this was from a checkout; an installed `docparse` (the [bin]
+-- shim, or bin/docparse from PATH) should leave its output where the user is.
 -- convertTarget: if non-empty, generate output in target format (e.g., "out.html", "out.docx")
 func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bool, filepath: string,
                   convertTarget: string, referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string) -> () ! {IO, FS, AI, Env} {
-  let outDir = getEnvOr("DOCPARSE_OUTPUT_DIR", "docparse/data");
+  let outDir = getEnvOr("DOCPARSE_OUTPUT_DIR", ".");
   let basename = mainBasename(filepath);
 
   -- Ensure the output directory exists (defensive — bin/docparse already

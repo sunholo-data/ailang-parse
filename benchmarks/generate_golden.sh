@@ -42,7 +42,7 @@ sleep 1  # ensure marker is older than any output about to be written
 # Run batch mode with portable timeout (background + watchdog)
 START=$(date +%s)
 
-ailang run --entry main --caps IO,FS,Env \
+DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR" ailang run --entry main --caps IO,FS,Env \
     --max-recursion-depth 50000 --batch \
     docparse/main.ail "${FILES[@]}" > /dev/null 2>&1 &
 BATCH_PID=$!

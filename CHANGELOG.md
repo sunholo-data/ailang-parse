@@ -9,6 +9,62 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.42.0](https://github.com/sunholo-data/ailang-parse/compare/v0.41.3...v0.42.0) — 2026-09-18
+
+### `docparse` on PATH from `ailang install`, and output lands where you are
+
+The manifest gains a `[bin]` table (AILANG v0.40.0 dev, `ailang install`
+writes a shim per entry into `~/.ailang/bin`):
+
+```toml
+[bin]
+docparse = { module = "docparse/main", caps = "IO,FS,Env", run_flags = ["--max-recursion-depth", "50000"] }
+```
+
+`ailang install sunholo/ailang_parse` now gives a `docparse` command with no
+checkout and no installer: a thin `ailang run` of `docparse/main` from
+whatever directory you are in. It parses and converts one file. `AI` is left
+out of its caps on purpose — `--caps AI` without `--ai <model>` prints a
+four-line warning on stderr on every run — so `describe`/`summarize`, batch
+mode, PDF backends and `--install-backends` stay with the full
+`bin/docparse` wrapper. `ailang install` warns when an older `docparse`
+earlier on PATH (the repo's `~/.local/bin` symlink, say) would shadow the
+shim.
+
+**Default output directory is now the caller's cwd.** It used to be
+`docparse/data`, which only made sense when the one way to run this was from
+a checkout: under the shim it created a `docparse/data/` directory wherever
+you happened to be, and under the wrapper every parse landed in the repo
+instead of next to you. `docparse/main.ail` now defaults
+`DOCPARSE_OUTPUT_DIR` to `.`; `bin/docparse` pins that to the directory you
+ran from *before* it `cd`s into the project, so both entry points agree.
+Precedence is `--output-dir DIR`, then a `DOCPARSE_OUTPUT_DIR` already in
+your environment, then cwd. The two benchmark scripts that assert on
+`docparse/data/*.json` now ask for it explicitly.
+
+### Memory footprint (m-v1-memory-footprint audit, D1–D3)
+
+Three changes from the package-maintainer agent, merged as #44–#46, ship in
+this version:
+
+- **Office images go to temp files, not base64 in the block.** DOCX and PPTX
+  media used to be read straight into `ImageBlock.data` as base64 — a 4/3
+  blow-up held for the document's lifetime and copied by every consumer.
+  Each image is now written under `/tmp/docparse-images/` and the block
+  carries the *path* (emitted as `src`); bytes are inlined on demand at
+  output time. A 64 MiB per-document cap on decoded image bytes turns a
+  media-heavy or malicious archive into a typed error instead of unbounded
+  growth. Consumers that read `data` as base64 directly should read `src`.
+- **XLSX sheets are freed one at a time.** The evaluator has no tail-call
+  optimisation, so a self-recursive sheet loop kept every sheet's rows live
+  until the whole workbook finished. Per-sheet work now runs in a called
+  function whose frame dies on return, and worksheets are streamed with
+  `scanFoldStep` instead of materialising the sheet XML.
+- **`markdown_writer` string accumulation is O(n).** `foldl` string
+  concatenation over blocks and table rows replaced with `join`.
+
+---
+
 ## [v0.41.3](https://github.com/sunholo-data/ailang-parse/compare/v0.41.2...v0.41.3) — 2026-09-11
 
 ### Extensionless files from a hosted fetch no longer refuse as "unknown"
