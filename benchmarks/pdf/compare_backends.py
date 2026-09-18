@@ -91,7 +91,9 @@ def run_ailang_gemini(pdf: Path) -> tuple[str, list[str], float]:
         "--ai", "gemini-2.5-flash",
         "docparse/main.ail", str(pdf),
     ]
-    subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_DIR), timeout=120)
+    # main.ail writes beside the caller by default; pin it to AILANG_OUT_DIR.
+    subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_DIR), timeout=120,
+                   env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(AILANG_OUT_DIR)})
     elapsed = (time.time() - start) * 1000
     out_file = AILANG_OUT_DIR / f"{pdf.name}.json"
     if not out_file.exists():

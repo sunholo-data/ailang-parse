@@ -104,6 +104,8 @@ def run_ailang(
     env = os.environ.copy()
     if needs_ai:
         env["GOOGLE_API_KEY"] = ""  # Force ADC
+    # main.ail writes beside the caller by default; pin it to where AILANG_OUTPUT is read.
+    env["DOCPARSE_OUTPUT_DIR"] = str(AILANG_OUTPUT.parent)
 
     # Record pre-run mtime to detect stale output.json (parallel run protection)
     pre_mtime = AILANG_OUTPUT.stat().st_mtime if AILANG_OUTPUT.exists() else 0

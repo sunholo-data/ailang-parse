@@ -170,6 +170,8 @@ def run_docparse(filepath: str, ai_model: str) -> dict | None:
     # Use ADC if no explicit API key
     if not env.get("GOOGLE_API_KEY") and "gemini" in ai_model.lower():
         env["GOOGLE_API_KEY"] = ""
+    # main.ail writes beside the caller by default; pin it to where out_path is read.
+    env["DOCPARSE_OUTPUT_DIR"] = str(REPO_DIR / "docparse" / "data")
 
     # writeOutputs names the file after the input basename (docparse/data/<name>.json),
     # not a fixed output.json. Delete any prior run's file first so a failed parse

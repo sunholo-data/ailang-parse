@@ -32,6 +32,8 @@ def parse_file(filepath: Path) -> dict | None:
          "docparse/main.ail", str(filepath)],
         capture_output=True, text=True, cwd=str(REPO_DIR),
         timeout=120,
+        # main.ail writes beside the caller by default; pin it to OUTPUT_DIR.
+        env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(OUTPUT_DIR)},
     )
     if result.returncode != 0:
         return None
@@ -657,6 +659,8 @@ def parse_file_deep(filepath: Path) -> dict | None:
          "docparse/main.ail", str(filepath), "--deep"],
         capture_output=True, text=True, cwd=str(REPO_DIR),
         timeout=120,
+        # main.ail writes beside the caller by default; pin it to OUTPUT_DIR.
+        env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(OUTPUT_DIR)},
     )
     if result.returncode != 0:
         return None
@@ -744,6 +748,8 @@ def parse_file_threaded(filepath: Path) -> dict | None:
          "docparse/main.ail", str(filepath), "--threaded"],
         capture_output=True, text=True, cwd=str(REPO_DIR),
         timeout=120,
+        # main.ail writes beside the caller by default; pin it to OUTPUT_DIR.
+        env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(OUTPUT_DIR)},
     )
     if result.returncode != 0:
         return None

@@ -22,6 +22,12 @@ import zipfile
 from pathlib import Path
 
 REPO_DIR = Path(__file__).parent.parent
+
+# bin/docparse writes <file>.json/.md beside the caller unless told otherwise,
+# and every call below runs with cwd=REPO. Those sidecars are not what this
+# script checks, so keep them out of the repo root. setdefault: an explicit
+# DOCPARSE_OUTPUT_DIR from the caller still wins.
+os.environ.setdefault("DOCPARSE_OUTPUT_DIR", tempfile.mkdtemp(prefix="docparse-sidecar-"))
 EXAMPLES_DIR = REPO_DIR / "data" / "examples"
 
 # ── Level 1: Structural Checks ──────────────────────────────────────────────

@@ -38,6 +38,8 @@ def parse_file(filepath: Path) -> dict | None:
         + (["--deep"] if filepath.suffix in (".eml", ".mbox") else []),
         capture_output=True, text=True, cwd=str(REPO_DIR),
         timeout=120,
+        # main.ail writes beside the caller by default; pin it to OUTPUT_DIR.
+        env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(OUTPUT_DIR)},
     )
     if result.returncode != 0:
         return None

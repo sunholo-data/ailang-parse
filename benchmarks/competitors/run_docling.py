@@ -112,7 +112,9 @@ def run_ailang(filepath: Path) -> tuple[list[NormalizedElement], float]:
         "ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
         "docparse/main.ail", str(filepath),
     ]
-    subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_DIR), timeout=60)
+    # main.ail writes beside the caller by default; pin it to where AILANG_OUTPUT is read.
+    subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_DIR), timeout=60,
+                   env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(AILANG_OUTPUT.parent)})
     elapsed = (time.time() - start) * 1000
 
     if not AILANG_OUTPUT.exists():

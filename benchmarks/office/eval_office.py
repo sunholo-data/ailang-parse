@@ -313,6 +313,8 @@ def run_batch(test_files: list[Path]) -> tuple[float, bool]:
              "docparse/main.ail"] + [str(f) for f in test_files],
             capture_output=True, text=True, cwd=str(REPO_DIR),
             timeout=300,
+            # main.ail writes beside the caller by default; pin it to OUTPUT_DIR.
+            env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(OUTPUT_DIR)},
             # Only the exit code is used here; stdout is progress chatter. Some
             # corpus files (EML attachments with non-UTF-8 bytes) make a strict
             # decode raise, which would fail the whole batch on a detail this

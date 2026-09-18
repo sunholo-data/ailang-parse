@@ -110,6 +110,8 @@ def run_docparse(image_path: Path, ai_model: str) -> dict | None:
     env = os.environ.copy()
     if not env.get("GOOGLE_API_KEY") and "gemini" in ai_model.lower():
         env["GOOGLE_API_KEY"] = ""
+    # main.ail writes beside the caller by default; pin it to where OUTPUT_JSON is read.
+    env["DOCPARSE_OUTPUT_DIR"] = str(OUTPUT_JSON.parent)
 
     try:
         result = subprocess.run(

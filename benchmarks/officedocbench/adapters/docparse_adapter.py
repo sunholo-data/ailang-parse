@@ -44,7 +44,8 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         if basename in self._batch_cache:
             return self._batch_cache.pop(basename)
 
-        env = {**os.environ, "AILANG_NO_TRACE": "1"}
+        # main.ail writes beside the caller by default; pin it to OUTPUT_DIR.
+        env = {**os.environ, "AILANG_NO_TRACE": "1", "DOCPARSE_OUTPUT_DIR": str(OUTPUT_DIR)}
         result = subprocess.run(
             ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env",
              "--max-recursion-depth", "50000",

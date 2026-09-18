@@ -39,8 +39,8 @@ instead of next to you. `docparse/main.ail` now defaults
 `DOCPARSE_OUTPUT_DIR` to `.`; `bin/docparse` pins that to the directory you
 ran from *before* it `cd`s into the project, so both entry points agree.
 Precedence is `--output-dir DIR`, then a `DOCPARSE_OUTPUT_DIR` already in
-your environment, then cwd. The two benchmark scripts that assert on
-`docparse/data/*.json` now ask for it explicitly.
+your environment, then cwd. The benchmark scripts that read
+`docparse/data/*.json` back now pin `DOCPARSE_OUTPUT_DIR` there explicitly.
 
 ### Memory footprint (m-v1-memory-footprint audit, D1–D3)
 

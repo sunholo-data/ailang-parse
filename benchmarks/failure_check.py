@@ -33,6 +33,7 @@ Usage:
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TEST_DIR = REPO / "data" / "test_files"
 DOCPARSE = REPO / "bin" / "docparse"
+
+# bin/docparse writes <file>.json/.md beside the caller unless told otherwise,
+# and every call below runs with cwd=REPO. Those sidecars are not what this
+# script checks, so keep them out of the repo root. setdefault: an explicit
+# DOCPARSE_OUTPUT_DIR from the caller still wins.
+os.environ.setdefault("DOCPARSE_OUTPUT_DIR", tempfile.mkdtemp(prefix="docparse-sidecar-"))
 
 # A PDF header with no xref table or trailer. poppler rejects it, so the
 # adapter exits non-zero — a backend failure with no network, no AI, no OCR

@@ -142,7 +142,9 @@ def run_ailang_on_pdf(pdf_path: Path) -> dict:
         ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env,AI",
          "--ai", "gemini-2.5-flash", "docparse/main.ail", str(pdf_path)],
         capture_output=True, text=True, cwd=str(DEMO_ROOT),
-        env={**os.environ, "GOOGLE_API_KEY": ""}, timeout=120,
+        env={**os.environ, "GOOGLE_API_KEY": "",
+             # main.ail writes beside the caller by default; pin it to where output_path is read.
+             "DOCPARSE_OUTPUT_DIR": str(DEMO_ROOT / "docparse" / "data")}, timeout=120,
     )
     elapsed = time.perf_counter() - start
 

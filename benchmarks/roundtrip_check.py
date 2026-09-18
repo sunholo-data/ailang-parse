@@ -22,6 +22,7 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,7 +53,9 @@ def batch_parse(files: list[Path], timeout: int = 300) -> None:
            "--max-recursion-depth", "50000", "--batch",
            "docparse/main.ail", *[str(f) for f in files]]
     subprocess.run(cmd, cwd=str(REPO), stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, timeout=timeout)
+                   stderr=subprocess.DEVNULL, timeout=timeout,
+                   # main.ail writes beside the caller by default; pin it to OUT_DIR.
+                   env={**os.environ, "DOCPARSE_OUTPUT_DIR": str(OUT_DIR)})
 
 
 def walk(blocks: list[dict]):
