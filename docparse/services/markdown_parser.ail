@@ -16,9 +16,7 @@ import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeading
 --   - Simple tables (| col | col | format)
 --
 -- Does NOT handle (yet):
---   - Code blocks (``` fenced)
 --   - Inline formatting (bold, italic, links)
---   - Blockquotes (>)
 --   - Images (![alt](url))
 --
 -- Usage:
@@ -100,6 +98,7 @@ type MdParseState = {
   tableRows: [[string]], -- accumulated table rows (reversed)
   textLines: [string],   -- accumulated paragraph lines (reversed)
   codeLines: [string],   -- accumulated fenced-code lines (reversed)
+  indentCode: [string],  -- accumulated indented-code-block lines (reversed)
   quoteLines: [string],  -- accumulated blockquote lines (reversed)
   tableAligns: [string], -- per-column alignment from the separator row
   itemLevels: [int],     -- nesting depth per list item (reversed)
@@ -122,6 +121,7 @@ pure func emptyParseState() -> MdParseState
   tableRows: [],
   textLines: [],
   codeLines: [],
+  indentCode: [],
   quoteLines: [],
   tableAligns: [],
   itemLevels: [],
@@ -145,8 +145,13 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     let s = flushToState(state) in
     { s | inCode: true, codeLang: trim(substring(trimmedLine, 3, length(trimmedLine))), codeLines: [] }
 
-  -- Blank line: flush current paragraph/list
-  else if length(trimmedLine) == 0 then flushToState(state)
+  -- Blank line: flush current paragraph/list. Inside an indented code block a
+  -- blank line is content (CommonMark keeps interior blanks), not a terminator
+  -- — the block ends only on a dedented non-blank line.
+  else if length(trimmedLine) == 0 then
+    if not mdIsEmptyList(state.indentCode)
+    then { state | indentCode: "" :: state.indentCode }
+    else flushToState(state)
 
   -- Heading: # through ######
   else if startsWith(trimmedLine, "######") then mdHeadingState(state, trimmedLine, 6)
@@ -166,7 +171,7 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- Unordered list item: - or *. Depth comes from the RAW line's indentation,
   -- which is why it is measured before trimming.
   else if startsWith(trimmedLine, "- ") || startsWith(trimmedLine, "* ") then
-    let s = flushText(flushTable(state)) in
+    let s = flushText(flushTable(flushIndentCode(state))) in
     let item = trim(substring(trimmedLine, 2, length(trimmedLine))) in
     { s | listItems: item :: s.listItems, listOrdered: false,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
@@ -182,14 +187,14 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- are live punctuation in prose (ranges, ellipses) and would false-fire.
 
   else if mdIsUnicodeBullet(trimmedLine) then
-    let s = flushText(flushTable(state)) in
+    let s = flushText(flushTable(flushIndentCode(state))) in
     let item = trim(substring(trimmedLine, 1, length(trimmedLine))) in
     { s | listItems: item :: s.listItems, listOrdered: false,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
 
   -- Ordered list item: starts with digit followed by ". "
   else if mdIsOrderedListItem(trimmedLine) then
-    let s = flushText(flushTable(state)) in
+    let s = flushText(flushTable(flushIndentCode(state))) in
     let item = mdExtractOrderedItem(trimmedLine) in
     { s | listItems: item :: s.listItems, listOrdered: true,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
@@ -202,7 +207,7 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     if mdIsTableSeparator(trimmedLine)
     then { state | tableAligns: map(mdCellAlign, mdSplitCells(trimmedLine)) }
     else
-      let s = flushText(flushList(state)) in
+      let s = flushText(flushList(flushIndentCode(state))) in
       let cells = mdParseTableRow(trimmedLine) in
       { s | tableRows: cells :: s.tableRows }
 
@@ -210,10 +215,26 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- paragraph. Without this the ">" survived as a literal character in the
   -- text and every generator rendered it as punctuation.
   else if startsWith(trimmedLine, ">") then {
-    let s = flushList(flushTable(flushText(state)));
+    let s = flushList(flushTable(flushText(flushIndentCode(state))));
     let body = trim(substring(trimmedLine, 1, length(trimmedLine)));
     { s | quoteLines: body :: s.quoteLines }
   }
+
+  -- Indented code block: four or more columns of indentation with nothing
+  -- else open. CommonMark treats it exactly like a fenced block, and every
+  -- consumer of this parser does too (an aligned ASCII address table must
+  -- keep its column spacing, not collapse into one run-on paragraph).
+  -- The check sits here, AFTER the marker branches, deliberately: indented
+  -- "- item" / "* item" / "1. item" lines are nested list items (the list
+  -- branches read nesting depth off the raw line), and demoting them to code
+  -- would destroy every nested list this parser accepts. Strict CommonMark
+  -- precedence for indented headings/tables/thematic breaks is likewise left
+  -- to the existing branches; the indented-code branch claims only what
+  -- everything above lets fall through, and only with no paragraph or list
+  -- open (an indented line inside either is a lazy continuation).
+  else if mdIsEmptyList(state.listItems) && mdIsEmptyList(state.textLines) &&
+          mdCodeIndentCount(line, 0, 0) >= 4 then
+    { state | indentCode: mdStripCodeIndent(line) :: state.indentCode }
 
   -- Regular text line: a wrapped continuation of the open list item's
   -- paragraph (CommonMark lazy continuation) joins onto that item, so a
@@ -225,7 +246,7 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
       [] => state
     }
   else
-    let s = flushList(flushTable(flushQuote(state))) in
+    let s = flushList(flushTable(flushQuote(flushIndentCode(state)))) in
     { s | textLines: trimmedLine :: s.textLines }
 }
 
@@ -253,6 +274,62 @@ pure func mdFlushCode(state: MdParseState) -> MdParseState {
             codeLines: [], inCode: false, codeLang: "" }
 }
 
+-- Flush accumulated indented-code lines into a TextBlock with style "code",
+-- exactly the shape mdFlushCode emits for a fence, so every generator renders
+-- both forms identically. Lines are verbatim (no inline scan, no trimming);
+-- trailing blank lines are dropped, interior ones kept.
+pure func flushIndentCode(state: MdParseState) -> MdParseState =
+  if mdIsEmptyList(state.indentCode) then state
+  else {
+    let lines = mdDropTrailingBlanks(reverse(state.indentCode));
+    let body = join("\n", lines);
+    { state | blocks: mkText(body, "code", 0) :: state.blocks, indentCode: [] }
+}
+
+pure func mdDropTrailingBlanks(xs: [string]) -> [string] =
+  reverse(mdDropLeadingBlanks(reverse(xs)))
+
+pure func mdDropLeadingBlanks(xs: [string]) -> [string] =
+  match xs {
+    [] => [],
+    x :: rest => if length(x) == 0 then mdDropLeadingBlanks(rest) else xs
+  }
+
+-- Columns of indentation: a space is 1, a tab is 4 (CommonMark's tab stop for
+-- the code-block indent). Distinct from mdCountIndent, whose tab=2 is the
+-- LIST nesting rule — one tab must still qualify as an indented code line.
+pure func mdCodeIndentCount(line: string, i: int, acc: int) -> int =
+  if i >= length(line) then acc
+  else {
+    let c = charAt(line, i);
+    if c == " " then mdCodeIndentCount(line, i + 1, acc + 1)
+    else if c == "\t" then mdCodeIndentCount(line, i + 1, acc + 4)
+    else acc
+  }
+
+-- The line minus up to 4 columns of leading indent (tab = 4 columns),
+-- CommonMark's "strip one indent unit". Whatever is left is the code line.
+pure func mdStripCodeIndent(line: string) -> string
+  tests [
+    ("    a    b", "a    b"),
+    ("      deeper", "  deeper"),
+    ("\tcode line", "code line"),
+    ("  \tcode line", "code line"),
+    ("  only two", "  only two"),
+    ("", "")
+  ]
+{ mdStripIndent(line, 0, 0) }
+
+pure func mdStripIndent(line: string, i: int, acc: int) -> string =
+  if i >= length(line) then ""
+  else if acc >= 4 then substring(line, i, length(line))
+  else {
+    let c = charAt(line, i);
+    if c == " " then mdStripIndent(line, i + 1, acc + 1)
+    else if c == "\t" then mdStripIndent(line, i + 1, acc + 4)
+    else line   -- under 4 columns before content: not an indented line, keep it
+  }
+
 -- Flush all accumulated state into blocks
 pure func flushState(state: MdParseState) -> [Block] {
   let s = flushToState(state);
@@ -264,7 +341,7 @@ pure func flushToState(state: MdParseState) -> MdParseState {
   let s = if state.inCode && not mdIsEmptyList(state.codeLines)
     then mdFlushCode(state)   -- unterminated fence: keep the code, don't drop it
     else state;
-  flushQuote(flushText(flushList(flushTable(s))))
+  flushQuote(flushText(flushList(flushTable(flushIndentCode(s)))))
 }
 
 -- Flush accumulated text lines into a TextBlock
