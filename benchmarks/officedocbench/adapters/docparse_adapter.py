@@ -235,12 +235,21 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         return result
 
     def _extract_sheet_names(self, blocks: list[dict]) -> list[str]:
-        """Extract sheet names from section blocks."""
+        """Extract sheet names from section blocks.
+
+        Sections carry the sheet name in the `name` field with `kind` as the
+        bare container type ("sheet") — the parser stopped packing the name
+        into the kind ("sheet:Q1 Revenue") because consumers matched kind by
+        exact equality and matched nothing. Older outputs that still pack it
+        are handled for compatibility.
+        """
         names = []
         for block in blocks:
             if block.get("type") == "section":
                 kind = block.get("kind", "")
                 if kind.startswith("sheet:"):
                     names.append(kind.removeprefix("sheet:").strip())
+                elif kind == "sheet" and block.get("name"):
+                    names.append(str(block["name"]).strip())
                 names.extend(self._extract_sheet_names(block.get("blocks", [])))
         return names
