@@ -6,6 +6,9 @@
 # 1. Bump the version in BOTH manifests
 #    ailang.toml  version = "X.Y.Z"
 #    pyproject.toml version = "X.Y.Z"
+#    and set ailang.toml [release] kind = fix | feature | breaking | security.
+#    The registry refuses the upload without it (PUB002) — AFTER the tag is
+#    pushed. Check before tagging: `ailang pkg quality .` must end "no gates".
 
 # 2. Turn the CHANGELOG's `## Unreleased` into a version heading with a
 #    compare link and today's date.

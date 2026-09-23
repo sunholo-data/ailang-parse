@@ -9,6 +9,13 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.43.1](https://github.com/sunholo-data/ailang-parse/compare/v0.42.0...v0.43.1) — 2026-09-23
+
+v0.43.0 was tagged but never published: the registry now refuses a version
+whose `ailang.toml` does not declare what kind of release it is (`PUB002`,
+a hard gate since AILANG v0.41.0). `[release] kind = "feature"` is declared.
+The contents are otherwise v0.43.0's, below.
+
 ## [v0.43.0](https://github.com/sunholo-data/ailang-parse/compare/v0.42.0...v0.43.0) — 2026-09-23
 
 ### XLSX cell colour is extracted, and colour that isn't is reported
