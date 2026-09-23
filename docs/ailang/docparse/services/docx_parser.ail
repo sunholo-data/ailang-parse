@@ -7,7 +7,7 @@ import std/string (contains, length, trim, stringToInt, join, charCode, chars)
 import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
 import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
-import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended)
+import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
 
 -- DOCX Parser
@@ -767,8 +767,8 @@ pure func parseCell(tc: XmlNode, rels: Map[string, string]) -> TableCell {
   let cs = getCellGridSpan(tc);
   let vm = getCellVMerge(tc);
   if vm == "continue"
-  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: []}
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: []}
+  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: ""}
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: ""}
 }
 
 -- Get gridSpan value from w:tcPr/w:gridSpan[@w:val]
@@ -823,16 +823,19 @@ export pure func getMetaField(root: XmlNode, tagName: string) -> string =
   getOrElse(optMap(getText, findFirst(root, tagName)), "")
 
 -- Extract images from media entries
+--
+-- Memory audit (m-v1-memory-footprint, ask D3): this loop used to read every
+-- media entry through readEmbeddedImage and keep the base64 in the ImageBlock
+-- for the document's lifetime — a 4/3 blow-up held in memory per image. The
+-- block now carries a temp-file PATH (a LocalFile to classifyImageSource and
+-- every generator, emitted as `src` in JSON); inline base64 is available on
+-- demand at output time via zip_extract.imageDataUriFromFile. A per-document
+-- byte cap returns a typed Err, surfaced here as a warning block so the rest
+-- of the document still parses.
 func extractImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
-  match entries {
-    [] => [],
-    entry :: rest => {
-      let imageData = readEmbeddedImage(filepath, entry);
-      let mime = mediaMimeType(entry);
-      let block = mkImage(imageData, "", mime);
-      let moreBlocks = extractImages(filepath, rest);
-      block :: moreBlocks
-    }
+  match extractMediaToFiles(filepath, entries, imageTempDir()) {
+    Ok(m) => m.blocks,
+    Err(e) => [mkText(imageExtractErrorText(e), "warning", 0)]
   }
 
 -- === Comment anchoring (ECMA-376 §17.13.1) ================================

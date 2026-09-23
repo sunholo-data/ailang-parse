@@ -5,10 +5,11 @@ import std/zip (scanFold, scanFoldStep)
 import std/iter (FoldStep, Continue, Stop)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr, split)
+import std/string (contains, length, trim, stringToInt, join, startsWith, substring, intToStr, split, find)
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl, foldlE, any, dedup)
-import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList)
-import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection)
+import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList, values as mapValues)
+import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withCellColours)
+import docparse/services/colour (normaliseHex, applyTint, parseTint, indexedColour, themeSlotName)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
 -- XLSX Parser
@@ -29,25 +30,36 @@ import docparse/services/zip_extract (readCoreProperties, findSheetEntries, read
 -- Each worksheet becomes a TableBlock with the first row as headers.
 
 -- Parse all worksheets from an XLSX file
-export func parseXlsx(filepath: string) -> [Block] ! {FS} {
+export func parseXlsx(filepath: string) -> [Block] ! {FS} =
+  parseXlsxWithWarnings(filepath).blocks
+
+-- Parse all worksheets, plus the warnings a caller should see: colour the
+-- workbook carries that the blocks do not (conditional formatting, gradient
+-- and pattern fills, theme colours with no theme to resolve them against).
+-- A file whose colour is silently dropped reads exactly like a file with no
+-- colour — that is the defect these exist to prevent.
+export func parseXlsxWithWarnings(filepath: string) -> XlsxParsed ! {FS} {
   -- Load shared strings table via streaming fold (O(1) memory per element, capped at 100K)
   let sharedStrings = loadSharedStrings(filepath);
   let stringCount = mapSize(sharedStrings);
+  -- Direct cell colours, resolved once per workbook and keyed by xf index
+  let styles = loadXlsxStyles(filepath);
   -- Get real sheet names from workbook.xml
   let sheetNames = readWorkbookSheetNames(filepath);
   -- Find and parse each sheet
   let sheetEntries = findSheetEntries(filepath);
-  let sheetBlocks = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, sheetNames);
+  let parsed = parseSheetsWithNames(filepath, sheetEntries, sharedStrings, styles, sheetNames);
   -- Warn if shared strings were truncated
-  if stringCount >= 50000
+  let blocks = if stringCount >= 50000
   then {
     let warning = mkText(
       "Warning: spreadsheet has more than 50,000 unique text values. Some cell text may be missing. For large datasets, consider CSV format.",
       "warning", 0
     );
-    warning :: sheetBlocks
+    warning :: parsed.blocks
   }
-  else sheetBlocks
+  else parsed.blocks;
+  { blocks: blocks, warnings: parsed.warnings }
 }
 
 -- === Cell comments (ECMA-376 §18.7) ======================================
@@ -254,9 +266,9 @@ pure func xlsxFoldRow(acc: { rows: [[TableCell]], count: int, ss: Map[int, strin
     -- The merge-aware walk also fills the cells Excel omits, so it is only
     -- worth its cost when the sheet actually declares merge regions.
     let cells = if listLength(acc.merges) > 0
-      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.merges,
+      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, emptyMap(), acc.merges,
                                   xlsxRowNumber(rowNode), 0)
-      else parseXlsxRow(rowNode, acc.ss);
+      else parseXlsxRow(rowNode, acc.ss, emptyMap());
     if listLength(cells) > 0
     then { rows: cells :: acc.rows, count: acc.count + 1, ss: acc.ss, merges: acc.merges }
     else acc
@@ -388,18 +400,18 @@ pure func xlsxFillGap(merges: [XlsxMerge], rowNum: int, from: int, to: int) -> [
 
 -- Walk the row's cells in order, filling the gaps Excel left out and marking
 -- span widths on the origins.
-pure func xlsxBuildRowWithMerges(cells: [XmlNode], ss: Map[int, string],
+pure func xlsxBuildRowWithMerges(cells: [XmlNode], ss: Map[int, string], styles: Map[int, XlsxXfColour],
                                  merges: [XlsxMerge], rowNum: int, nextCol: int) -> [TableCell] =
   match cells {
     [] => xlsxFillGap(merges, rowNum, nextCol, xlsxMaxColForRow(merges, rowNum) + 1),
     c :: rest => {
       let cellCol = xlsxCellRefCol(getOrElse(getAttr(c, "r"), "A1"));
       let gapCells = xlsxFillGap(merges, rowNum, nextCol, cellCol);
-      let base = parseXlsxCell(c, ss);
+      let base = parseXlsxStyledCell(c, ss, styles);
       let cs = xlsxGetColSpan(merges, cellCol, rowNum);
-      let cell = if cs > 1 then spanCell(base.text, cs) else base;
+      let cell = if cs > 1 then withCellColours(spanCell(base.text, cs), base.fill, base.color) else base;
       concat(concat(gapCells, [cell]),
-             xlsxBuildRowWithMerges(rest, ss, merges, rowNum, cellCol + 1))
+             xlsxBuildRowWithMerges(rest, ss, styles, merges, rowNum, cellCol + 1))
     }
   }
 
@@ -464,10 +476,14 @@ pure func xlsxGetSheetName(names: [string], idx: int, entry: string) -> string =
 -- Worksheets are streamed with std/zip.scanFoldStep on "row" (and
 -- "mergeCell"), like shared strings already are, so the sheet XML string is
 -- never materialised and readZipEntry no longer appears on this path.
-func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Map[int, string], names: [string]) -> [Block] ! {FS} =
-  foldlE(func(acc: [Block], item: (string, int)) -> [Block] ! {FS} {
-    concat(acc, xlsxParseOneSheet(filepath, xlsxEntryName(item), sharedStrings, names, xlsxEntryIdx(item)))
-  }, [], xlsxIndexed(entries, 0))
+type XlsxParsed = { blocks: [Block], warnings: [string] }
+
+func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Map[int, string],
+                          styles: Map[int, XlsxXfColour], names: [string]) -> XlsxParsed ! {FS} =
+  foldlE(func(acc: XlsxParsed, item: (string, int)) -> XlsxParsed ! {FS} {
+    let one = xlsxParseOneSheet(filepath, xlsxEntryName(item), sharedStrings, styles, names, xlsxEntryIdx(item));
+    { blocks: concat(acc.blocks, one.blocks), warnings: concat(acc.warnings, one.warnings) }
+  }, { blocks: [], warnings: [] }, xlsxIndexed(entries, 0))
 
 pure func xlsxEntryName(item: (string, int)) -> string = match item { (e, _) => e }
 pure func xlsxEntryIdx(item: (string, int)) -> int = match item { (_, i) => i }
@@ -482,17 +498,21 @@ pure func xlsxIndexed(entries: [string], idx: int) -> [(string, int)] =
 -- Parse ONE worksheet entry completely: comments first (their anchor cells
 -- are resolved from the streamed rows), then the sheet itself, streamed.
 -- Everything large here is local to this frame, so it is freeable on return.
-func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, string], names: [string], idx: int) -> [Block] ! {FS} {
+func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, string],
+                       styles: Map[int, XlsxXfColour], names: [string], idx: int) -> XlsxParsed ! {FS} {
   let sheetName = xlsxGetSheetName(names, idx, entry);
   -- Cell comments follow their sheet, each anchored to the cell (and the
   -- cell's value) it annotates. Read the comment records before streaming so
   -- the row fold can collect the anchor cells' text as it goes.
   let comments = xlsxSheetCommentRecords(filepath, idx);
   let refs = filter(\r. length(r) > 0, dedup(map(\c. c.ref, comments)));
-  let streamed = xlsxStreamSheet(filepath, entry, sharedStrings, refs);
+  let streamed = xlsxStreamSheet(filepath, entry, sharedStrings, styles, refs);
   let blocks = xlsxSheetBlocks(streamed.rows, sheetName);
   let wrapped = map(\c. xlsxWrapComment(xlsxCommentBlock(c, streamed.texts)), comments);
-  concat(blocks, wrapped)
+  let condFmt = xlsxConditionalFormats(filepath, entry);
+  let cleanName = xlsxCleanSheetName(sheetName);
+  { blocks: concat(blocks, wrapped),
+    warnings: concat(xlsxCondFmtWarning(cleanName, condFmt), xlsxFlagWarnings(cleanName, streamed.flags)) }
 }
 
 -- Fold-accumulator record for streaming one worksheet out of the ZIP.
@@ -500,6 +520,13 @@ type XlsxStreamFold = {
   rows: [[TableCell]],
   count: int,
   ss: Map[int, string],
+  -- Carried in the accumulator for the same reason ss is: a closure over it
+  -- would be cloned per cell (see parseXlsxCells).
+  styles: Map[int, XlsxXfColour],
+  -- Only when some xf carries a flag is a row re-scanned to collect flags,
+  -- so a workbook with plain solid fills pays nothing for the warnings.
+  flagged: bool,
+  flags: [string],
   merges: [XlsxMerge],
   refs: [string],
   texts: [(string, string)]
@@ -509,16 +536,18 @@ type XlsxStreamFold = {
 -- over <mergeCell> (capped at 500, matching parseElements) and one over
 -- <row>. Returns rows in document order plus the displayed text of any cell
 -- referenced by a comment. The sheet XML string is never materialised.
-func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], refs: [string]) -> { rows: [[TableCell]], texts: [(string, string)] } ! {FS} {
+func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], styles: Map[int, XlsxXfColour], refs: [string])
+    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string] } ! {FS} {
   let merges = match scanFoldStep(filepath, entry, "mergeCell", { merges: [], count: 0 }, xlsxFoldMerge) {
     Ok(acc) => reverse(acc.merges),
     Err(_) => []
   };
   match scanFoldStep(filepath, entry, "row",
-    { rows: [], count: 0, ss: ss, merges: merges, refs: refs, texts: [] },
+    { rows: [], count: 0, ss: ss, styles: styles, flagged: xlsxAnyFlagged(styles), flags: [],
+      merges: merges, refs: refs, texts: [] },
     xlsxFoldRowStep) {
-    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts },
-    Err(_) => { rows: [], texts: [] }
+    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags },
+    Err(_) => { rows: [], texts: [], flags: [] }
   }
 }
 
@@ -540,13 +569,16 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
     (if xlsxRefsAllFound(acc.refs, acc.texts) then Stop(acc) else Continue(acc))
   else {
     let cells = if listLength(acc.merges) > 0
-      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.merges,
+      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.styles, acc.merges,
                                   xlsxRowNumber(rowNode), 0)
-      else parseXlsxRow(rowNode, acc.ss);
+      else parseXlsxRow(rowNode, acc.ss, acc.styles);
     let texts = if listLength(acc.refs) > 0
       then xlsxCollectRefTexts(findAll(rowNode, "c"), acc.ss, acc.refs, acc.texts)
       else acc.texts;
-    let acc2 = { acc | texts: texts };
+    let flags = if acc.flagged
+      then xlsxCollectFlags(findAll(rowNode, "c"), acc.styles, acc.flags)
+      else acc.flags;
+    let acc2 = { acc | texts: texts, flags: flags };
     let acc3 = if listLength(cells) > 0
       then { acc2 | rows: cells :: acc2.rows, count: acc2.count + 1 }
       else acc2;
@@ -604,8 +636,11 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
       Ok(nodes) => xlsxParseMergeNodes(nodes),
       Err(_) => []
     };
+    -- No styles.xml here (the caller hands over one sheet's XML), so cells
+    -- carry no colour on this path.
     let foldResult = parseFoldStep(sanitizeXml(xml), "row",
-      { rows: [], count: 0, ss: sharedStrings, merges: merges, refs: [], texts: [] },
+      { rows: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
+        merges: merges, refs: [], texts: [] },
       xlsxFoldRowStep);
     let parsedRows = match foldResult {
       Ok(acc2) => reverse(acc2.rows),
@@ -663,7 +698,7 @@ pure func parseXlsxRows(rows: [XmlNode], sharedStrings: Map[int, string]) -> [[T
   match rows {
     [] => [],
     row :: rest => {
-      let cells = parseXlsxRow(row, sharedStrings);
+      let cells = parseXlsxRow(row, sharedStrings, emptyMap());
       if listLength(cells) > 0
       then cells :: parseXlsxRows(rest, sharedStrings)
       else parseXlsxRows(rest, sharedStrings)
@@ -671,22 +706,42 @@ pure func parseXlsxRows(rows: [XmlNode], sharedStrings: Map[int, string]) -> [[T
   }
 
 -- Parse a single row
-pure func parseXlsxRow(row: XmlNode, sharedStrings: Map[int, string]) -> [TableCell] {
+pure func parseXlsxRow(row: XmlNode, sharedStrings: Map[int, string], styles: Map[int, XlsxXfColour]) -> [TableCell] {
   let cells = findAll(row, "c");
-  parseXlsxCells(cells, sharedStrings)
+  parseXlsxCells(cells, sharedStrings, styles)
 }
 
 -- Parse all cells in a row
 -- Uses direct recursion instead of map+lambda to avoid per-cell
 -- environment cloning (sharedStrings map clone per cell was 13.9% of CPU)
-pure func parseXlsxCells(cells: [XmlNode], sharedStrings: Map[int, string]) -> [TableCell]
+pure func parseXlsxCells(cells: [XmlNode], sharedStrings: Map[int, string], styles: Map[int, XlsxXfColour]) -> [TableCell]
   ensures { listLength(result) == listLength(cells) }
 {
   match cells {
     [] => [],
-    cell :: rest => parseXlsxCell(cell, sharedStrings) :: parseXlsxCells(rest, sharedStrings)
+    cell :: rest => parseXlsxStyledCell(cell, sharedStrings, styles) :: parseXlsxCells(rest, sharedStrings, styles)
   }
 }
+
+-- A cell with its direct colour: <c s="n"> indexes cellXfs, resolved once per
+-- workbook into `styles`. A cell with no s, or an xf with no colour, is
+-- returned exactly as parseXlsxCell gives it.
+pure func parseXlsxStyledCell(c: XmlNode, sharedStrings: Map[int, string], styles: Map[int, XlsxXfColour]) -> TableCell {
+  let base = parseXlsxCell(c, sharedStrings);
+  match xlsxCellXf(c, styles) {
+    Some(x) => withCellColours(base, x.fill, x.color),
+    None => base
+  }
+}
+
+pure func xlsxCellXf(c: XmlNode, styles: Map[int, XlsxXfColour]) -> Option[XlsxXfColour] =
+  match getAttr(c, "s") {
+    Some(sv) => match stringToInt(sv) {
+      Some(i) => mapLookup(styles, i),
+      None => None
+    },
+    None => None
+  }
 
 -- Parse a single cell
 -- Reads t= attribute for type, resolves shared strings
@@ -747,3 +802,245 @@ pure func extractXlsxMeta(root: XmlNode) -> DocMetadata {
 
 pure func getXlsxMetaField(root: XmlNode, tagName: string) -> string =
   getOrElse(optMap(getText, findFirst(root, tagName)), "")
+
+-- === Cell colour (ECMA-376 §18.8: styles part; §20.1.6.2 theme) ===========
+--
+-- A cell's colour is three hops from the cell: <c s="n"> -> cellXfs/xf[n]
+-- -> fills/fill[fillId] and fonts/font[fontId] -> a CT_Color that is one of
+-- rgb (ARGB), theme (+tint), indexed (legacy palette) or auto. Everything is
+-- resolved ONCE per workbook into a map keyed by xf index, so the per-cell
+-- cost in the streaming fold is a single lookup.
+--
+-- Only these sections are read, and only by their direct children: <fill>
+-- and <xf> also appear under <dxfs> (conditional-formatting styles) and
+-- <cellStyleXfs>, and a document-wide findAll would index into the wrong list.
+--
+-- Colour that is NOT extracted is flagged, and the flag becomes a warning on
+-- the outcome: a gradient has no single colour; a non-solid pattern is
+-- reported as its foreground; a theme reference with no theme part cannot be
+-- resolved. Direct formatting only — row/column default styles and table
+-- styles are not applied (design doc, Phase 4).
+
+-- fill/color are "#rrggbb" or ""; flag is "" | "pattern" | "gradient" | "theme-missing"
+type XlsxXfColour = { fill: string, color: string, flag: string }
+
+type XlsxColourCtx = { theme: Map[string, string], palette: [string] }
+
+func loadXlsxStyles(filepath: string) -> Map[int, XlsxXfColour] ! {FS} {
+  let xml = readZipEntry(filepath, "xl/styles.xml");
+  if length(xml) == 0 then emptyMap()
+  else match parseLenient(xml) {
+    Ok(root) => {
+      let ctx = { theme: loadXlsxTheme(filepath), palette: xlsxCustomPalette(root) };
+      let fills = mapFromList(xlsxIndexedList(map(\n. xlsxFillColour(n, ctx), xlsxSectionChildren(root, "fills", "fill")), 0));
+      let fonts = mapFromList(xlsxIndexedList(map(\n. xlsxFontColour(n, ctx), xlsxSectionChildren(root, "fonts", "font")), 0));
+      -- fonts[0] is the Normal style's font. Its colour (typically theme 1,
+      -- black) is the workbook's default text colour, not something an author
+      -- applied: reporting it would colour every styled cell #000000.
+      let defaultColour = getOrElse(mapLookup(fonts, 0), xlsxNoColour()).color;
+      xlsxXfMap(xlsxSectionChildren(root, "cellXfs", "xf"), fills, fonts, defaultColour, 0, emptyMap())
+    },
+    Err(_) => emptyMap()
+  }
+}
+
+-- Direct children with tag `child` of the first `section` element.
+pure func xlsxSectionChildren(root: XmlNode, section: string, child: string) -> [XmlNode] =
+  match findFirst(root, section) {
+    Some(sec) => filter(\n. getTag(n) == child, getChildren(sec)),
+    None => []
+  }
+
+pure func xlsxIndexedList(xs: [XlsxXfColour], i: int) -> [(int, XlsxXfColour)] =
+  match xs {
+    [] => [],
+    x :: rest => (i, x) :: xlsxIndexedList(rest, i + 1)
+  }
+
+-- Keep only xfs that carry a colour or a flag: most xfs in a real workbook
+-- exist for number formats and borders, and an absent key is the same answer.
+func xlsxXfMap(xfs: [XmlNode], fills: Map[int, XlsxXfColour], fonts: Map[int, XlsxXfColour],
+               defaultColour: string, i: int, acc: Map[int, XlsxXfColour]) -> Map[int, XlsxXfColour] =
+  match xfs {
+    [] => acc,
+    xf :: rest => {
+      let fill = getOrElse(mapLookup(fills, xlsxAttrInt(xf, "fillId", 0 - 1)), xlsxNoColour());
+      let fontId = xlsxAttrInt(xf, "fontId", 0 - 1);
+      let font = getOrElse(mapLookup(fonts, fontId), xlsxNoColour());
+      -- The default font's colour is ignored below, so its unresolvable
+      -- theme reference is not a loss worth warning about either.
+      let fontFlag = if fontId == 0 then "" else font.flag;
+      let flag = if length(fill.flag) > 0 then fill.flag else fontFlag;
+      let color = if font.color == defaultColour then "" else font.color;
+      let entry = { fill: fill.fill, color: color, flag: flag };
+      let acc2 = if length(entry.fill) > 0 || length(entry.color) > 0 || length(entry.flag) > 0
+                 then mapInsert(acc, i, entry) else acc;
+      xlsxXfMap(rest, fills, fonts, defaultColour, i + 1, acc2)
+    }
+  }
+
+pure func xlsxNoColour() -> XlsxXfColour = { fill: "", color: "", flag: "" }
+
+pure func xlsxAttrInt(n: XmlNode, name: string, dflt: int) -> int =
+  match getAttr(n, name) {
+    Some(v) => getOrElse(stringToInt(v), dflt),
+    None => dflt
+  }
+
+-- <fill><patternFill patternType="solid"><fgColor .../></patternFill></fill>
+-- A patternFill without patternType is "none" (§18.18.55 default); gray125 is
+-- the reserved fill 1 and carries no colour of its own.
+pure func xlsxFillColour(fill: XmlNode, ctx: XlsxColourCtx) -> XlsxXfColour =
+  match findFirst(fill, "gradientFill") {
+    Some(_) => { fill: "", color: "", flag: "gradient" },
+    None => match findFirst(fill, "patternFill") {
+      None => xlsxNoColour(),
+      Some(pf) => {
+        let ptype = getOrElse(getAttr(pf, "patternType"), "none");
+        if ptype == "none" || ptype == "gray125" then xlsxNoColour()
+        else {
+          let fg = match findFirst(pf, "fgColor") {
+            Some(c) => xlsxResolveColour(c, ctx),
+            None => { hex: "", themeMissing: false }
+          };
+          let flag = if fg.themeMissing then "theme-missing"
+                     else if ptype == "solid" then "" else "pattern";
+          { fill: fg.hex, color: "", flag: flag }
+        }
+      }
+    }
+  }
+
+-- <font><color .../></font>; the font's own children only.
+pure func xlsxFontColour(font: XmlNode, ctx: XlsxColourCtx) -> XlsxXfColour =
+  match filter(\n. getTag(n) == "color", getChildren(font)) {
+    c :: _ => {
+      let r = xlsxResolveColour(c, ctx);
+      { fill: "", color: r.hex, flag: if r.themeMissing then "theme-missing" else "" }
+    },
+    [] => xlsxNoColour()
+  }
+
+-- CT_Color: rgb | theme | indexed | auto, then @tint applied to whichever base.
+pure func xlsxResolveColour(c: XmlNode, ctx: XlsxColourCtx) -> { hex: string, themeMissing: bool } {
+  let base = match getAttr(c, "rgb") {
+    Some(rgb) => { hex: normaliseHex(rgb), themeMissing: false },
+    None => match getAttr(c, "theme") {
+      Some(t) => {
+        let slot = themeSlotName(getOrElse(stringToInt(t), 0 - 1));
+        match mapLookup(ctx.theme, slot) {
+          Some(h) => { hex: h, themeMissing: false },
+          None => { hex: "", themeMissing: true }
+        }
+      },
+      None => match getAttr(c, "indexed") {
+        Some(ix) => { hex: xlsxPaletteColour(ctx.palette, getOrElse(stringToInt(ix), 0 - 1)), themeMissing: false },
+        None => { hex: "", themeMissing: false }
+      }
+    }
+  };
+  match getAttr(c, "tint") {
+    Some(t) => { hex: applyTint(base.hex, parseTint(t)), themeMissing: base.themeMissing },
+    None => base
+  }
+}
+
+-- A workbook may replace the legacy palette (<colors><indexedColors>). 64/65
+-- stay viewer-decided either way.
+pure func xlsxPaletteColour(palette: [string], i: int) -> string =
+  if i >= 64 then ""
+  else match palette {
+    [] => indexedColour(i),
+    _ => getOrElse(nth(palette, i), indexedColour(i))
+  }
+
+pure func xlsxCustomPalette(root: XmlNode) -> [string] =
+  match findFirst(root, "indexedColors") {
+    Some(ic) => map(\n. normaliseHex(getOrElse(getAttr(n, "rgb"), "")),
+                    filter(\n. getTag(n) == "rgbColor", getChildren(ic))),
+    None => []
+  }
+
+-- Scheme colours by element NAME (dk1, lt1, accent1, ...). theme="n" is then
+-- resolved through themeSlotName, which carries the lt/dk index swap; looking
+-- slots up by position in this file would silently swap text and background.
+-- sysClr (window/windowText) uses its lastClr, the value Excel last rendered.
+func loadXlsxTheme(filepath: string) -> Map[string, string] ! {FS} {
+  let xml = readZipEntry(filepath, "xl/theme/theme1.xml");
+  if length(xml) == 0 then emptyMap()
+  else match parseLenient(xml) {
+    Ok(root) => match findFirst(root, "a:clrScheme") {
+      Some(scheme) => mapFromList(flatMap(xlsxThemeSlot, getChildren(scheme))),
+      None => emptyMap()
+    },
+    Err(_) => emptyMap()
+  }
+}
+
+pure func xlsxThemeSlot(n: XmlNode) -> [(string, string)] {
+  let name = xlsxLocalName(getTag(n));
+  let hex = match findFirst(n, "a:srgbClr") {
+    Some(c) => normaliseHex(getOrElse(getAttr(c, "val"), "")),
+    None => match findFirst(n, "a:sysClr") {
+      Some(c) => normaliseHex(getOrElse(getAttr(c, "lastClr"), "")),
+      None => ""
+    }
+  };
+  if length(name) > 0 && length(hex) > 0 then [(name, hex)] else []
+}
+
+-- "a:dk1" -> "dk1"
+pure func xlsxLocalName(tag: string) -> string {
+  let i = find(tag, ":");
+  if i >= 0 then substring(tag, i + 1, length(tag)) else tag
+}
+
+pure func xlsxAnyFlagged(styles: Map[int, XlsxXfColour]) -> bool =
+  any(\x. length(x.flag) > 0, mapValues(styles))
+
+func xlsxCollectFlags(cells: [XmlNode], styles: Map[int, XlsxXfColour], flags: [string]) -> [string] =
+  foldl(func(acc: [string], c: XmlNode) -> [string] {
+    match xlsxCellXf(c, styles) {
+      Some(x) => if length(x.flag) > 0 then x.flag :: acc else acc,
+      None => acc
+    }
+  }, flags, cells)
+
+-- One warning per sheet and kind, with the number of cells affected.
+pure func xlsxFlagWarnings(sheet: string, flags: [string]) -> [string] {
+  let n = \k. listLength(filter(\f. f == k, flags));
+  let pattern = n("pattern");
+  let gradient = n("gradient");
+  let theme = n("theme-missing");
+  concat(
+    if pattern > 0 then ["Sheet \"${sheet}\": ${show(pattern)} cell(s) use pattern fills; reported as the pattern's foreground colour"] else [],
+    concat(
+      if gradient > 0 then ["Sheet \"${sheet}\": ${show(gradient)} cell(s) use gradient fills; their colour is not extracted"] else [],
+      if theme > 0 then ["Sheet \"${sheet}\": ${show(theme)} cell(s) use theme colours but the workbook has no readable theme; those colours are not extracted"] else []))
+}
+
+-- Conditional formatting (§18.3.1.18) is a set of rules the VIEWER evaluates,
+-- not colour stored on a cell, so it cannot be extracted without a formula
+-- engine. It is counted instead, so the caller knows colour exists that the
+-- output does not carry. Streamed like rows; capped at 200 blocks.
+func xlsxConditionalFormats(filepath: string, entry: string) -> { ranges: [string], rules: int } ! {FS} =
+  match scanFoldStep(filepath, entry, "conditionalFormatting", { ranges: [], rules: 0, count: 0 }, xlsxFoldCondFmt) {
+    Ok(acc) => { ranges: reverse(acc.ranges), rules: acc.rules },
+    Err(_) => { ranges: [], rules: 0 }
+  }
+
+pure func xlsxFoldCondFmt(acc: { ranges: [string], rules: int, count: int }, node: XmlNode)
+    -> FoldStep[{ ranges: [string], rules: int, count: int }] {
+  if acc.count >= 200 then Stop(acc)
+  else Continue({ ranges: getOrElse(getAttr(node, "sqref"), "") :: acc.ranges,
+                  rules: acc.rules + listLength(findAll(node, "cfRule")),
+                  count: acc.count + 1 })
+}
+
+pure func xlsxCondFmtWarning(sheet: string, cf: { ranges: [string], rules: int }) -> [string] =
+  if cf.rules == 0 then []
+  else {
+    let shown = take(5, cf.ranges);
+    let more = if listLength(cf.ranges) > 5 then ", …" else "";
+    ["Sheet \"${sheet}\": ${show(cf.rules)} conditional formatting rule(s) on ${join(", ", shown)}${more} — colours they produce are not extracted"]
+  }

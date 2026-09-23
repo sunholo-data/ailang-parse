@@ -98,6 +98,7 @@ fi
 mkdir -p "$MODULES_DIR/types" "$MODULES_DIR/services"
 MODULES=(
   "types/document.ail"
+  "services/colour.ail"
   "services/format_router.ail"
   "services/zip_extract.ail"
   "services/omml.ail"

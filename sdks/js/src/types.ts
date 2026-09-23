@@ -91,6 +91,10 @@ export interface Cell {
   merged: boolean;
   /** "" | "left" | "center" | "right"; absent when unspecified. */
   align?: string;
+  /** Background colour, "#rrggbb" lowercase; absent when none was specified (not white). */
+  fill?: string;
+  /** Cell-level font colour, "#rrggbb" lowercase; absent when none was specified. */
+  color?: string;
 }
 
 // ── Block (discriminated union via type field) ──

@@ -31,7 +31,9 @@ NULL
       text     = .s(raw$text),
       col_span = .i(raw$colSpan, 1L),
       merged   = .b(raw$merged),
-      align    = .s(raw$align)
+      align    = .s(raw$align),
+      fill     = .s(raw$fill),
+      color    = .s(raw$color)
     ))
   }
   list(text = as.character(raw), col_span = 1L, merged = FALSE)

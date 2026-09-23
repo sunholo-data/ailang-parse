@@ -6,7 +6,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
 import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection)
-import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget)
+import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
 
 -- PPTX Parser
@@ -453,8 +453,8 @@ pure func parsePptxCell(tc: XmlNode) -> TableCell {
   let hm = getPptxHMerge(tc);
   let vm = getPptxVMerge(tc);
   if hm || vm
-  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: []}
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: []}
+  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: ""}
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: ""}
 }
 
 pure func extractPptxCellText(tc: XmlNode) -> string {
@@ -516,16 +516,16 @@ pure func getPptxMetaField(root: XmlNode, tagName: string) -> string =
   getOrElse(optMap(getText, findFirst(root, tagName)), "")
 
 -- Extract images from media entries
+--
+-- Memory audit (m-v1-memory-footprint, ask D3): same treatment as
+-- docx_parser.extractImages — the block carries a temp-file PATH, inline
+-- base64 re-enters memory only on demand (zip_extract.imageDataUriFromFile),
+-- and a per-document byte cap degrades to a warning block instead of
+-- unbounded memory growth.
 func extractPptxImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
-  match entries {
-    [] => [],
-    entry :: rest => {
-      let imageData = readImageEntry(filepath, entry);
-      let mime = mediaMimeType(entry);
-      let block = mkImage(imageData, "", mime);
-      let moreBlocks = extractPptxImages(filepath, rest);
-      block :: moreBlocks
-    }
+  match extractMediaToFiles(filepath, entries, imageTempDir()) {
+    Ok(m) => m.blocks,
+    Err(e) => [mkText(imageExtractErrorText(e), "warning", 0)]
   }
 
 -- Check if a block list has content

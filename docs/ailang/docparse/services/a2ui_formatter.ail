@@ -19,6 +19,7 @@ import std/list (map, foldl, concat, length as listLength, flatMap)
 import std/math (intToFloat)
 import std/option (getOrElse)
 import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
+import docparse/services/colour (normaliseHex)
 import docparse/types/document (InlineRun, mkHeadingRuns, mkListRuns, mkTextRuns, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable, mkNamedSection)
 
 -- Convert a full ParsedDocument to A2UI JSON string.
@@ -309,7 +310,7 @@ pure func a2ui_jsonToCells(arr: [Json]) -> [TableCell] =
 
 pure func a2ui_jsonToCell(j: Json) -> TableCell {
   match asString(j) {
-    Some(s) => {text: s, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: []},
+    Some(s) => {text: s, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""},
     None => {
       text: getOrElse(getString(j, "text"), ""),
       colSpan: getOrElse(getInt(j, "colSpan"), 1),
@@ -317,7 +318,11 @@ pure func a2ui_jsonToCell(j: Json) -> TableCell {
       merged: getOrElse(getBool(j, "merged"), false),
       scope: getOrElse(getString(j, "scope"), ""),
       align: getOrElse(getString(j, "align"), ""),
-      runs: []
+      runs: [],
+      -- Normalised on the way in, so hand-written JSON ("#FFFF00", ARGB)
+      -- cannot put a non-canonical colour on a cell.
+      fill: normaliseHex(getOrElse(getString(j, "fill"), "")),
+      color: normaliseHex(getOrElse(getString(j, "color"), ""))
     }
   }
 }

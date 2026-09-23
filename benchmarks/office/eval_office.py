@@ -255,6 +255,60 @@ def check_images(golden_els: list[NormalizedElement], actual_els: list[Normalize
     }
 
 
+def _coloured_cells(doc: dict) -> dict:
+    """(table#, row#, col#) -> (text, fill, color) for every cell with colour.
+
+    Keyed by POSITION, not collected as a bag of hexes: a fill that lands on
+    the wrong cell (off-by-one after a merge gap, header/body mix-up) has to
+    fail, and a set of colours would not notice. Row 0 is the header row.
+    """
+    out = {}
+    tables = []
+
+    def walk(blocks):
+        for b in blocks:
+            if b.get("type") == "table":
+                tables.append(b)
+            walk(b.get("blocks", []))
+
+    walk(doc.get("document", {}).get("blocks", []))
+    for ti, t in enumerate(tables):
+        for ri, row in enumerate([t.get("headers", [])] + t.get("rows", [])):
+            for ci, c in enumerate(row):
+                if isinstance(c, dict) and (c.get("fill") or c.get("color")):
+                    out[(ti, ri, ci)] = (c.get("text", ""), c.get("fill", ""), c.get("color", ""))
+    return out
+
+
+def _colour_warnings(doc: dict) -> set:
+    return {w for w in doc.get("warnings", [])
+            if "colour" in w.lower() or "conditional formatting" in w.lower()}
+
+
+def check_colours(golden_json: dict, actual_json: dict) -> dict:
+    """Cell fill/font colour and the warnings for colour that is not extracted.
+
+    Applicable only when the golden carries colour or a colour warning. Before
+    this existed no xlsx fixture had a single fill and nothing here looked at
+    colour, so a parser dropping every colour scored 100%.
+    """
+    golden, actual = _coloured_cells(golden_json), _coloured_cells(actual_json)
+    gw, aw = _colour_warnings(golden_json), _colour_warnings(actual_json)
+    if not golden and not gw:
+        # Still catch colour appearing where the golden has none.
+        return {"applicable": bool(actual or aw), "colour_match": not actual and not aw,
+                "golden_cells": 0, "actual_cells": len(actual)}
+    wrong = sorted(k for k in set(golden) | set(actual) if golden.get(k) != actual.get(k))
+    return {
+        "applicable": True,
+        "colour_match": not wrong,
+        "warnings_match": gw == aw,
+        "golden_cells": len(golden),
+        "actual_cells": len(actual),
+        "mismatches": [{"at": list(k), "golden": golden.get(k), "actual": actual.get(k)} for k in wrong[:10]],
+    }
+
+
 def check_metadata(golden_json: dict, actual_json: dict) -> dict:
     """Check document metadata extraction."""
     golden_meta = golden_json.get("document", {}).get("metadata", {})
@@ -357,6 +411,7 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
         "images": check_images(golden_els, actual_els),
         "text_similarity": check_text_jaccard(golden_els, actual_els),
         "metadata": check_metadata(golden_json, actual_json),
+        "colours": check_colours(golden_json, actual_json),
     }
 
     # Compute overall score (applicable checks that pass)
