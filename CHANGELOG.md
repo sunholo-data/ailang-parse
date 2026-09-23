@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## Unreleased
+## [v0.43.0](https://github.com/sunholo-data/ailang-parse/compare/v0.42.0...v0.43.0) — 2026-09-23
 
 ### XLSX cell colour is extracted, and colour that isn't is reported
 
