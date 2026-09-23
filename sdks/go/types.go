@@ -88,6 +88,10 @@ type Cell struct {
 	Merged  bool   `json:"merged,omitempty"`
 	// "" | "left" | "center" | "right"; empty means unspecified.
 	Align string `json:"align,omitempty"`
+	// Direct cell colour, "#rrggbb" lowercase; empty means none was specified
+	// (not white). Fill is the background, Color the cell-level font colour.
+	Fill  string `json:"fill,omitempty"`
+	Color string `json:"color,omitempty"`
 }
 
 // UnmarshalJSON handles both string ("A") and object ({"text":"A","colSpan":2}) forms.

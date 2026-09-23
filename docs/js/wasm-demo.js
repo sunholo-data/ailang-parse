@@ -52,6 +52,8 @@
 
   var MODULES_TO_LOAD = [
     { name: 'docparse/types/document',           path: 'docparse/types/document.ail' },
+    // colour before xlsx_parser and a2ui_formatter — both import normaliseHex
+    { name: 'docparse/services/colour',           path: 'docparse/services/colour.ail' },
     { name: 'docparse/services/format_router',    path: 'docparse/services/format_router.ail' },
     { name: 'docparse/services/zip_extract',      path: 'docparse/services/zip_extract.ail' },
     // omml before docx_parser/pptx_parser — both import renderOmml from it

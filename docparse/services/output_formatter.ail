@@ -280,10 +280,11 @@ export pure func cellsToJson(cells: [TableCell]) -> [Json]
 
 -- Convert a single TableCell to JSON
 -- Simple cells (no merges) output as just the text string for compact JSON
--- Merged/spanned cells include full metadata
+-- Merged/spanned/coloured cells use the object form. fill/color are emitted
+-- only when set, so a file without colour produces byte-identical JSON.
 export pure func cellToJson(cell: TableCell) -> Json {
   if cell.colSpan == 1 && not cell.merged && length(cell.scope) == 0
-       && length(cell.align) == 0
+       && length(cell.align) == 0 && length(cell.fill) == 0 && length(cell.color) == 0
   then js(cell.text)
   else {
     let base = [
@@ -297,7 +298,13 @@ export pure func cellToJson(cell: TableCell) -> Json {
     let withAlign = if length(cell.align) > 0
                     then concat(withScope, [kv("align", js(cell.align))])
                     else withScope;
-    jo(withAlign)
+    let withFill = if length(cell.fill) > 0
+                   then concat(withAlign, [kv("fill", js(cell.fill))])
+                   else withAlign;
+    let withColor = if length(cell.color) > 0
+                    then concat(withFill, [kv("color", js(cell.color))])
+                    else withFill;
+    jo(withColor)
   }
 }
 

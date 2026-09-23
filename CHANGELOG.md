@@ -9,6 +9,35 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## Unreleased
+
+### XLSX cell colour is extracted, and colour that isn't is reported
+
+Reported as "xlsx: cell fill colour dropped with no warning". The parser never
+opened `xl/styles.xml`, so every fill was lost. No xlsx fixture contained a
+fill, so the office suite still scored 100%.
+
+- `TableCell` gains `fill` and `color`: `"#rrggbb"` lowercase, or absent when
+  none was specified. Absent is not white. `color` is reported only when it
+  differs from the workbook's default text colour. Both fields are in the JSON
+  output (a coloured cell uses the object form) and in the Python, JS, Go and
+  R SDKs. Files without colour produce byte-identical output.
+- Resolves `rgb`, `theme` + `tint`, `indexed` (including a workbook's own
+  `indexedColors` palette), solid fills and font colour. The shared normaliser
+  is `docparse/services/colour.ail`, ready for the other formats.
+- New `warnings` on the parse outcome, shown in the JSON and on the terminal:
+  conditional formatting (rules and ranges, since the viewer computes those
+  colours), pattern fills (reported as their foreground colour), gradient
+  fills, and theme colours in a workbook with no readable theme.
+- Known gaps: row/column default styles are not applied, and the browser/WASM
+  path carries no colour. See
+  [the design doc](design_docs/planned/v0_43_0/v0_43_0_colour_extraction.md).
+- Four new fixtures, built by `benchmarks/create_colour_fixtures.py`. Its
+  `--verify` mode checks the parser against colours computed independently.
+  A new `check_colours` office-suite check is keyed by cell position.
+
+---
+
 ## [v0.42.0](https://github.com/sunholo-data/ailang-parse/compare/v0.41.3...v0.42.0) — 2026-09-18
 
 ### `docparse` on PATH from `ailang install`, and output lands where you are

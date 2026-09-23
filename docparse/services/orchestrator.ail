@@ -63,7 +63,7 @@ import docparse/services/docx_parser (
   parseDocxFootnotes, parseDocxEndnotes, parseDocxImages, parseDocxMetadata
 )
 import docparse/services/pptx_parser (parsePptx, parsePptxImages, parsePptxMetadata)
-import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
+import docparse/services/xlsx_parser (parseXlsx, parseXlsxWithWarnings, parseXlsxMetadata)
 import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeadersFooters)
 import docparse/services/odp_parser (parseOdp, parseOdpMetadata)
 import docparse/services/ods_parser (parseOds, parseOdsMetadata)
@@ -249,9 +249,11 @@ func orchOffice(filepath: string, ext: string, opts: ParseOptions)
       ["Parsed PPTX: ${show(countBlocks(blocks))} blocks"], [], 0))
   }
   else if kind == "excel" then {
-    let blocks = parseXlsx(filepath);
-    Ok(mkOutcome("xlsx", filepath, parseXlsxMetadata(filepath), blocks,
-      ["Parsed XLSX: ${show(countBlocks(blocks))} blocks"], [], 0))
+    -- Warnings name colour the workbook carries that the blocks do not
+    -- (conditional formatting, gradient/pattern fills, unresolvable theme).
+    let parsed = parseXlsxWithWarnings(filepath);
+    Ok(mkOutcome("xlsx", filepath, parseXlsxMetadata(filepath), parsed.blocks,
+      ["Parsed XLSX: ${show(countBlocks(parsed.blocks))} blocks"], parsed.warnings, 0))
   }
   else Err("unknown Office type for extension '${ext}'")
 }

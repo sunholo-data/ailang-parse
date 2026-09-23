@@ -1,0 +1,176 @@
+module docparse/services/colour
+
+import std/string (length, substring, toLower, trim, startsWith, chars, stringToFloat, charCode)
+import std/list (any, nth)
+import std/option (getOrElse)
+import std/math (floatToInt, intToFloat, round)
+
+-- Colour normalisation shared by every parser that extracts colour.
+--
+-- One representation everywhere: "#rrggbb" lowercase, or "" meaning *no
+-- colour was specified*. "" is deliberately not white — almost every cell in
+-- every sheet is unfilled, and reading unfilled as white would make every cell
+-- look coloured. Same convention as TableCell.align.
+--
+-- Alpha is dropped, never interpreted. XLSX writes ARGB, and openpyxl writes
+-- alpha 00 by default ("00FFFF00") on fills Excel renders fully opaque — so
+-- treating alpha 00 as transparent would erase every openpyxl-authored fill.
+
+-- True when s is exactly "#" followed by six lowercase hex digits.
+export pure func isCanonicalHex(s: string) -> bool
+  tests [("#ffff00", true), ("#FFFF00", false), ("ffff00", false), ("#fff", false), ("", false), ("#ggg000", false)]
+{
+  length(s) == 7 && startsWith(s, "#") &&
+    not any(\c. not colourIsLowerHexChar(c), chars(substring(s, 1, 7)))
+}
+
+pure func colourIsLowerHexChar(c: string) -> bool = colourHexVal(c) >= 0 && c == toLower(c)
+
+-- Value of one hex digit (either case), or -1.
+pure func colourHexVal(c: string) -> int {
+  let code = charCode(c);
+  if length(c) != 1 then 0 - 1
+  else if code >= 48 && code <= 57 then code - 48
+  else if code >= 97 && code <= 102 then code - 87
+  else if code >= 65 && code <= 70 then code - 55
+  else 0 - 1
+}
+
+pure func colourIsHex(s: string) -> bool = not any(\c. colourHexVal(c) < 0, chars(s))
+
+-- Normalise any raw colour value to "#rrggbb" or "".
+--   "FFFF00" / "#FFFF00" / "ffff00"  -> "#ffff00"
+--   "00FFFF00" / "FFFFFF00" (ARGB)   -> "#ffff00"   (alpha dropped)
+--   "#f00"                           -> "#ff0000"
+--   auto / none / transparent / nil / windowText / anything malformed -> ""
+export pure func normaliseHex(raw: string) -> string
+  ensures { result == "" || isCanonicalHex(result) }
+{
+  let s0 = toLower(trim(raw));
+  let s = if startsWith(s0, "#") then substring(s0, 1, length(s0)) else s0;
+  if not colourIsHex(s) then ""
+  else if length(s) == 6 then "#${s}"
+  else if length(s) == 8 then "#${substring(s, 2, 8)}"
+  else if length(s) == 3 then {
+    let r = substring(s, 0, 1);
+    let g = substring(s, 1, 2);
+    let b = substring(s, 2, 3);
+    "#${r}${r}${g}${g}${b}${b}"
+  }
+  else ""
+}
+
+-- Two lowercase hex digits for 0..255 (clamped).
+pure func colourByteHex(n: int) -> string {
+  let v = if n < 0 then 0 else if n > 255 then 255 else n;
+  let digits = "0123456789abcdef";
+  "${substring(digits, v / 16, v / 16 + 1)}${substring(digits, v % 16, v % 16 + 1)}"
+}
+
+pure func colourByteAt(hex: string, i: int) -> int =
+  colourHexVal(substring(hex, i, i + 1)) * 16 + colourHexVal(substring(hex, i + 1, i + 2))
+
+-- === Tint (ECMA-376 §18.8.19, CT_Color/@tint) ============================
+--
+-- Tint shifts luminance in HLS space: negative darkens (lum * (1 + tint)),
+-- positive lightens (lum * (1 - tint) + tint). Hue and saturation are kept.
+-- `hex` must already be canonical; anything else passes through unchanged.
+export pure func applyTint(hex: string, tint: float) -> string {
+  if not isCanonicalHex(hex) || tint == 0.0 then hex
+  else {
+    let r = intToFloat(colourByteAt(hex, 1)) / 255.0;
+    let g = intToFloat(colourByteAt(hex, 3)) / 255.0;
+    let b = intToFloat(colourByteAt(hex, 5)) / 255.0;
+    let mx = colourMax3(r, g, b);
+    let mn = colourMin3(r, g, b);
+    let l = (mx + mn) / 2.0;
+    let d = mx - mn;
+    let s = if d == 0.0 then 0.0
+            else if l > 0.5 then d / (2.0 - mx - mn)
+            else d / (mx + mn);
+    let h = if d == 0.0 then 0.0
+            else if mx == r then colourHueWrap((g - b) / d) / 6.0
+            else if mx == g then ((b - r) / d + 2.0) / 6.0
+            else ((r - g) / d + 4.0) / 6.0;
+    let l2 = if tint < 0.0 then l * (1.0 + tint) else l * (1.0 - tint) + tint;
+    colourHslToHex(h, s, l2)
+  }
+}
+
+pure func colourHueWrap(x: float) -> float = if x < 0.0 then x + 6.0 else x
+
+pure func colourMax3(a: float, b: float, c: float) -> float {
+  let ab = if a > b then a else b;
+  if ab > c then ab else c
+}
+
+pure func colourMin3(a: float, b: float, c: float) -> float {
+  let ab = if a < b then a else b;
+  if ab < c then ab else c
+}
+
+pure func colourHslToHex(h: float, s: float, l: float) -> string {
+  if s == 0.0 then {
+    let v = colourUnit(l);
+    "#${v}${v}${v}"
+  }
+  else {
+    let q = if l < 0.5 then l * (1.0 + s) else l + s - l * s;
+    let p = 2.0 * l - q;
+    let r = colourHueToRgb(p, q, h + 1.0 / 3.0);
+    let g = colourHueToRgb(p, q, h);
+    let b = colourHueToRgb(p, q, h - 1.0 / 3.0);
+    "#${colourUnit(r)}${colourUnit(g)}${colourUnit(b)}"
+  }
+}
+
+pure func colourHueToRgb(p: float, q: float, t0: float) -> float {
+  let t = if t0 < 0.0 then t0 + 1.0 else if t0 > 1.0 then t0 - 1.0 else t0;
+  if t < 1.0 / 6.0 then p + (q - p) * 6.0 * t
+  else if t < 0.5 then q
+  else if t < 2.0 / 3.0 then p + (q - p) * (2.0 / 3.0 - t) * 6.0
+  else p
+}
+
+-- 0.0..1.0 -> two hex digits, rounded half up.
+pure func colourUnit(x: float) -> string = colourByteHex(floatToInt(round(x * 255.0)))
+
+-- Parse a tint attribute ("-0.249977111117893"); unparseable reads as no tint.
+export pure func parseTint(raw: string) -> float = getOrElse(stringToFloat(trim(raw)), 0.0)
+
+-- === Indexed colours (ECMA-376 §18.8.27, the default legacy palette) =====
+--
+-- 64 = system foreground, 65 = system background: viewer-decided, so "".
+export pure func indexedColour(i: int) -> string
+  ensures { result == "" || isCanonicalHex(result) }
+{
+  if i < 0 then ""
+  else getOrElse(nth(colourIndexedPalette(), i), "")
+}
+
+pure func colourIndexedPalette() -> [string] = [
+  "#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+  "#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+  "#800000", "#008000", "#000080", "#808000", "#800080", "#008080", "#c0c0c0", "#808080",
+  "#9999ff", "#993366", "#ffffcc", "#ccffff", "#660066", "#ff8080", "#0066cc", "#ccccff",
+  "#000080", "#ff00ff", "#ffff00", "#00ffff", "#800080", "#800000", "#008080", "#0000ff",
+  "#00ccff", "#ccffff", "#ccffcc", "#ffff99", "#99ccff", "#ff99cc", "#cc99ff", "#ffcc99",
+  "#3366ff", "#33cccc", "#99cc00", "#ffcc00", "#ff9900", "#ff6600", "#666699", "#969696",
+  "#003366", "#339966", "#003300", "#333300", "#993300", "#993366", "#333399", "#333333"
+]
+
+-- === Theme colour slots ===================================================
+--
+-- A theme="n" reference indexes the scheme in THIS order, which is not the
+-- order the elements appear in theme1.xml (dk1, lt1, dk2, lt2, ...): the
+-- first two pairs are swapped. Resolving by element NAME rather than by
+-- position is what keeps that swap from biting.
+export pure func themeSlotName(i: int) -> string
+  tests [(0, "lt1"), (1, "dk1"), (2, "lt2"), (3, "dk2"), (4, "accent1"), (9, "accent6"), (10, "hlink"), (11, "folHlink"), (12, "")]
+{
+  if i == 0 then "lt1" else if i == 1 then "dk1"
+  else if i == 2 then "lt2" else if i == 3 then "dk2"
+  else if i >= 4 && i <= 9 then "accent${show(i - 3)}"
+  else if i == 10 then "hlink" else if i == 11 then "folHlink"
+  else ""
+}

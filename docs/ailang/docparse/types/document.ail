@@ -28,7 +28,16 @@ export type TableCell = {
   -- separator row (|:---|---:|); every other format has its own notion. Empty
   -- means "not specified", which is not the same as left.
   align: string,
-  runs: [InlineRun]
+  runs: [InlineRun],
+  -- Direct cell colour, "#rrggbb" lowercase or "" when none was specified
+  -- ("" is NOT white — see services/colour.ail). `fill` is the background;
+  -- `color` the cell-level font colour, which XLSX/ODS style per cell rather
+  -- than per run, and only when it differs from the document's default text
+  -- colour (a black font on every styled cell is not a signal). Only direct formatting: colour a viewer computes (XLSX
+  -- conditional formatting) or inherits from a table style is not here, and
+  -- the parser says so in the outcome's warnings instead.
+  fill: string,
+  color: string
 }
 
 -- A span of text within a paragraph carrying character formatting.
@@ -250,7 +259,7 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: []}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
 }
 
 -- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
@@ -259,21 +268,21 @@ export pure func simpleCell(text: string) -> TableCell
 export pure func scopedCell(text: string, scope: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: []}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: ""}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: []}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: ""}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: []}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
 }
 
 -- Same as simpleCell/spanCell, plus the tokenized inline runs (markdown_parser
@@ -281,13 +290,21 @@ export pure func spanCell(text: string, cs: int) -> TableCell
 export pure func simpleCellRuns(text: string, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
 }
 
 export pure func spanCellRuns(text: string, cs: int, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+}
+
+-- The same cell carrying a direct fill and font colour (both already
+-- normalised by services/colour.ail).
+export pure func withCellColours(cell: TableCell, fill: string, color: string) -> TableCell
+  ensures { result.fill == fill && result.color == color && result.text == cell.text }
+{
+  { cell | fill: fill, color: color }
 }
 
 -- Construct a TableBlock with no caption (most non-HTML parsers).

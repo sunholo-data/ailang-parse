@@ -137,6 +137,10 @@ class Cell:
     # "" | "left" | "center" | "right". Declared column alignment; empty means
     # unspecified, which is not the same as left.
     align: str = ""
+    # Direct cell colour, "#rrggbb" lowercase; empty means none was specified
+    # (not white). fill is the background, color the cell-level font colour.
+    fill: str = ""
+    color: str = ""
 
     @classmethod
     def from_raw(cls, raw: Any) -> "Cell":
@@ -148,6 +152,8 @@ class Cell:
                 col_span=raw.get("colSpan", 1),
                 merged=raw.get("merged", False),
                 align=raw.get("align", ""),
+                fill=raw.get("fill", ""),
+                color=raw.get("color", ""),
             )
         return cls(text=str(raw))
 
