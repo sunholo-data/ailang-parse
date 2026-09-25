@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased]
+## [v0.44.0](https://github.com/sunholo-data/ailang-parse/compare/v0.43.1...v0.44.0) — 2026-09-25
 
 ### PDF backends work straight from `ailang install`
 
