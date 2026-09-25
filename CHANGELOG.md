@@ -107,6 +107,14 @@ env now simply agrees with the flag main would have parsed anyway.
   unmapped, it falls through to their generic error.
 - `benchmarks/failure_check.py` covers a corrupt DOCX and a not-a-deck PPTX.
 
+### Browser demo runs on AILANG v0.43.1 (WASM pin v0.34.0 → v0.43.1)
+
+- `docs/wasm/.ailang-version` and the vendored `ailang.wasm` move to v0.43.1
+  (44 MB → 24 MB download). Vendored parser modules were already current.
+- Checked locally with the CI Playwright suite: `wasm-smoke` (homepage parses
+  sample.docx, footer shows the pin) and `module-budget` pass; the slowest
+  module type-check is docx_parser at 2.4 s against the 8 s embedder budget.
+
 ---
 
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
