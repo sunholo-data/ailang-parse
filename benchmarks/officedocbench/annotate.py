@@ -346,6 +346,9 @@ def _extract_sheet_names(blocks: list[dict]) -> list[str]:
             kind = block.get("kind", "")
             if kind.startswith("sheet:"):
                 names.append(kind.removeprefix("sheet:").strip())
+            elif kind == "sheet" and block.get("name"):
+                # Current parser output: bare kind, name in its own field.
+                names.append(str(block["name"]).strip())
             # Recurse into nested sections
             names.extend(_extract_sheet_names(block.get("blocks", [])))
     return names

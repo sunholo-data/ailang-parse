@@ -78,6 +78,16 @@ env now simply agrees with the flag main would have parsed anyway.
   nested list items, and an indented line inside an open paragraph, list item
   or blockquote is still a lazy continuation.
 
+### OfficeDocBench sheet detection reads the current section shape
+
+- **Sheets feature detection is back to 5/5 (was 0/5).** The parser stopped
+  packing the sheet name into the section kind (`"sheet:Q1"` → kind `"sheet"`
+  plus a `name` field), but the OfficeDocBench docparse adapter and
+  `annotate.py` still matched only the packed form, so every XLSX/ODS file
+  reported no sheet names. Both now read `name` from a bare `"sheet"`
+  section and still accept the old packed form. Parser output is unchanged;
+  this is a benchmark-harness fix only.
+
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
 
 ### Scanned PDFs escalate to local docling by default; AI is never automatic
