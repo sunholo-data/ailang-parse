@@ -9,11 +9,14 @@ to shatter into three lines of broken pipe syntax while the suite read 100%.
 This checks the one property the writer and reader owe each other: what
 markdown can represent must survive the trip.
 
-  tables    same count, same dimensions, same cell text
-  headings  same (level, text) sequence
+  tables       same count, same dimensions, same cell text
+  headings     same (level, text) sequence
+  annotations  same comments (author, date, text, anchor) and track changes
+               (type, author, date, text), in order — the writer renders both
+               as blockquotes and the reader reads that syntax back
 
-Blocks markdown cannot represent (images, comments, track changes, section
-containers) are out of scope by construction and are not asserted on.
+Blocks markdown cannot represent (images, section containers, comment
+threading) are out of scope by construction and are not asserted on.
 
 Usage:
   uv run benchmarks/roundtrip_check.py            # all office test files
@@ -130,6 +133,26 @@ def headings(blocks: list[dict]) -> list[tuple]:
             for b in walk(blocks) if b.get("type") == "heading"]
 
 
+def ws(s) -> str:
+    return " ".join((s or "").split())
+
+
+def annotations(blocks: list[dict]) -> list[tuple]:
+    # Whitespace is collapsed: a multi-paragraph comment or anchor is carried
+    # as wrapped blockquote lines and comes back joined by single spaces.
+    out = []
+    for b in walk(blocks):
+        t = b.get("type")
+        if t == "comment":
+            out.append(("comment", b.get("author"), b.get("date"), ws(b.get("text")),
+                        ws(b.get("anchorText")) if b.get("anchored") else "",
+                        bool(b.get("anchored"))))
+        elif t == "change":
+            out.append(("change", b.get("changeType"), b.get("author"),
+                        b.get("date"), ws(b.get("text"))))
+    return out
+
+
 def load(path: Path) -> list[dict]:
     with open(path) as fh:
         return json.load(fh)["document"]["blocks"]
@@ -226,6 +249,12 @@ def main() -> int:
         if missing is not None:
             failures.append((src.name, f"heading lost or altered: {missing!r}"))
 
+        aa, ab = annotations(a), annotations(b)
+        if aa != ab:
+            failures.append((src.name,
+                             f"comments/track changes {len(aa)} -> {len(ab)}, "
+                             f"first difference: {first_delta(aa, ab)}"))
+
     print(f"checked:  {checked}")
     print(f"failures: {len(failures)}\n")
     if failures:
@@ -235,7 +264,7 @@ def main() -> int:
         if len(failures) > len(shown):
             print(f"  ... and {len(failures) - len(shown)} more (--verbose)")
         return 1
-    print("All round-trips preserve tables and headings.")
+    print("All round-trips preserve tables, headings, comments and track changes.")
     return 0
 
 

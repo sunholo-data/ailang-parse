@@ -399,26 +399,22 @@ pure func mdChangeHead(line: string) -> Option[MdChangeHead] {
   }
 }
 
--- The writer only emits real revision types (insert / delete / move-to /
--- move-from), and requiring a single lowercase hyphenated word keeps an
--- ordinary quoted "[Chapter 1 by Smith]" from being read as a track change.
+-- The writer only emits the four revision types docx_parser produces
+-- (insert / delete / move-to / move-from). Matching exactly that set keeps an
+-- ordinary quote such as "> [note by Smith on Monday] ..." from being read as
+-- a track change.
 pure func mdIsChangeType(s: string) -> bool
   tests [
     ("insert", true),
+    ("delete", true),
+    ("move-to", true),
     ("move-from", true),
+    ("note", false),
     ("Chapter 1", false),
     ("Insert", false),
     ("", false)
   ]
-{ length(s) > 0 && mdIsChangeTypeFrom(s, 0) }
-
-pure func mdIsChangeTypeFrom(s: string, i: int) -> bool =
-  if i >= length(s) then true
-  else {
-    let c = charAt(s, i);
-    let n = charCode(c);
-    (c == "-" || (n >= 97 && n <= 122)) && mdIsChangeTypeFrom(s, i + 1)
-  }
+{ s == "insert" || s == "delete" || s == "move-to" || s == "move-from" }
 
 -- Build the ChangeBlock. The struck flag says the writer wrapped the body in
 -- ~~ markers so it reads as struck-through; the ChangeBlock carries plain

@@ -9,6 +9,29 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### docx → md → docx keeps comments and track changes
+
+- **Fixed:** converting a reviewed `.docx` to Markdown and back silently
+  turned every comment and track change into plain quoted text — no warning,
+  exit 0. The Markdown writer renders them as blockquotes
+  (`> **Comment (Author, date):** text`, `> [insert by Author on date] text`)
+  but the Markdown parser had no rule to read that syntax back. It now
+  restores the `CommentBlock` (author, date, text, anchor) and `ChangeBlock`
+  (insert / delete / move-to / move-from, author, date, text). Other
+  blockquotes are unchanged.
+- **Fixed:** a comment anchor, comment or change text spanning several lines
+  broke out of its blockquote in Markdown output (continuation lines lost
+  their `> `), which misrendered and left the comment unanchored on the way
+  back. Every continuation line now keeps its quote marker.
+- Not representable in Markdown, so still lost on that route: comment
+  threading (reply-to) and comment ids.
+- `benchmarks/roundtrip_check.py` now asserts comments and track changes
+  survive the Markdown round trip (11 test files failed it before this fix).
+
+---
+
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
 
 ### Scanned PDFs escalate to local docling by default; AI is never automatic
