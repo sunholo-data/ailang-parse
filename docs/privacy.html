@@ -59,13 +59,36 @@
 
     <main class="dp-docs-content legal-content">
 
-      <p class="legal-updated">Last updated: 1 April 2026</p>
+      <p class="legal-updated">Last updated: 25 September 2026</p>
 
       <h2 id="who-we-are">1. Who We Are</h2>
       <p>AILANG Parse is operated by <strong>Holosun ApS</strong>, a company registered in Denmark. We provide a document parsing service that extracts structured content from Office documents, PDFs, images, and other file formats.</p>
       <p>Privacy contact: <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a></p>
 
       <h2 id="data-we-collect">2. Data We Collect</h2>
+
+      <p>What happens to your documents depends on how you run AILANG Parse:</p>
+      <table class="dp-config-table" id="three-modes">
+        <thead>
+          <tr><th>How you parse</th><th>What we keep</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>In your browser</strong> (WebAssembly)</td>
+            <td><strong>Nothing.</strong> The document never leaves your device.</td>
+          </tr>
+          <tr>
+            <td><strong>Local CLI or self-hosted</strong></td>
+            <td><strong>Nothing is sent to Holosun.</strong> The code runs on your machine or servers.</td>
+          </tr>
+          <tr>
+            <td><strong>Hosted API</strong> (europe-west1)</td>
+            <td>Uploaded files are not stored. Each request keeps a <strong>request record</strong>: its metadata and, unless you turn request history off, up to 10&nbsp;KB of the parsed output for replay. <strong>Request records are deleted after 12 months.</strong> Google Gemini (only when you choose AI parsing) may process in the US, and Firebase sign-in runs in the US; see <a href="#transfers" style="color:var(--dp-blue)">International Transfers</a>.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>In detail:</p>
 
       <table class="dp-config-table">
         <thead>
@@ -103,8 +126,13 @@
             <td>Until key revocation or account deletion</td>
           </tr>
           <tr>
+            <td><strong>Request records</strong></td>
+            <td>Per API request: request ID, account and API key ID, endpoint, file name or source reference, input and output format, whether AI was used, file size, outcome and error code, timestamp. <strong>Request history</strong>: up to 10&nbsp;KB of the parsed output, kept so you can replay the request. It&rsquo;s on by default; turn it off in your <a href="dashboard.html" style="color:var(--dp-blue)">dashboard</a> or with <code>POST /api/v1/account/history</code> and new requests keep metadata only. The file name is stored as you send it; if it identifies a person, rename the file before upload.</td>
+            <td>Automatically deleted 12 months after the request. Your history shows the last 30, 180 or 365 days depending on plan.</td>
+          </tr>
+          <tr>
             <td><strong>Usage metrics</strong></td>
-            <td>Request counts, file types, response times. <strong>No document content.</strong></td>
+            <td>Request counts per API key and month. <strong>No document content.</strong></td>
             <td>12 months</td>
           </tr>
           <tr>
@@ -165,8 +193,8 @@
         </thead>
         <tbody>
           <tr>
-            <td><strong>Google Cloud Platform</strong><br><span style="font-size:12px;color:var(--text-muted)">Cloud Run, Cloud Storage</span></td>
-            <td>API hosting, ephemeral compute, temporary file storage</td>
+            <td><strong>Google Cloud Platform</strong><br><span style="font-size:12px;color:var(--text-muted)">Cloud Run, Cloud Storage, Firestore</span></td>
+            <td>API hosting, ephemeral compute, temporary file storage; API keys (hashed), usage counts and request records</td>
             <td>EU (europe-west1)</td>
           </tr>
           <tr>
@@ -216,7 +244,7 @@
         <li>API key authentication for all API requests</li>
         <li>No human review of uploaded document content</li>
         <li>Access controls limited to authorised Holosun ApS personnel</li>
-        <li>Document content is never logged</li>
+        <li>Uploaded files are not stored; parsed output is kept only as request history (up to 10&nbsp;KB per request, on by default, can be turned off), deleted after 12 months</li>
       </ul>
 
       <h2 id="cookies">10. Cookies</h2>
