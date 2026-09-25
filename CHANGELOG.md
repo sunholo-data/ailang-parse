@@ -68,6 +68,16 @@ env now simply agrees with the flag main would have parsed anyway.
 
 ---
 
+### Markdown indented code blocks keep their lines
+
+- **A 4-space (or tab) indented code block is now a code block**, the same
+  `TextBlock` style `code` a fenced block produces, so Markdown → DOCX (and
+  every other generator) keeps its line breaks and column spacing instead of
+  collapsing it into one run-on paragraph. Interior blank lines stay inside
+  the block; trailing ones are dropped. Indented `-`/`*`/`1.` lines are still
+  nested list items, and an indented line inside an open paragraph, list item
+  or blockquote is still a lazy continuation.
+
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
 
 ### Scanned PDFs escalate to local docling by default; AI is never automatic
