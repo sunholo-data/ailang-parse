@@ -220,7 +220,7 @@
 
         <div class="dpa-clause">
           <h3>Clause 9 &mdash; Erasure and return of data</h3>
-          <p>On termination, the processor shall delete all personal data and certify deletion. For AILANG Parse, this is substantially satisfied by the architecture: documents are processed ephemerally or temporarily stored with automatic deletion within 1 day.</p>
+          <p>On termination, the processor shall delete all personal data and certify deletion. For AILANG Parse, this is substantially satisfied by the architecture: documents are processed ephemerally or temporarily stored with automatic deletion within 1 day. The only persistent record is the request record (Appendix C.2): request metadata plus, unless the controller has turned request history off, up to 10 KB of the parsed output. It is deleted automatically 12 months after each request, or on termination at the controller&rsquo;s request.</p>
         </div>
 
         <div class="dpa-clause">
@@ -242,7 +242,7 @@
               <tr><td><strong>Nature</strong></td><td>Automated processing. Office formats: deterministic structural parsing, no AI. PDFs/images: AI-assisted extraction via user-selected provider.</td></tr>
               <tr><td><strong>Personal data types</strong></td><td>Any personal data in uploaded documents, determined by the controller. May include names, contact details, financial data, employment records, health data, or any other category.</td></tr>
               <tr><td><strong>Data subjects</strong></td><td>Determined by the controller. May include employees, customers, partners, or any individuals whose data appears in uploaded documents.</td></tr>
-              <tr><td><strong>Duration</strong></td><td>For the term of the service. Individual processing is ephemeral (seconds to minutes). Large files may be temporarily stored up to 1 day.</td></tr>
+              <tr><td><strong>Duration</strong></td><td>For the term of the service. Individual processing is ephemeral (seconds to minutes). Large files may be temporarily stored up to 1 day. Request records (metadata, plus up to 10 KB of parsed output unless request history is turned off) are kept for up to 12 months.</td></tr>
             </tbody>
           </table>
         </div>
@@ -258,6 +258,11 @@
               <tr>
                 <td><strong>Google Cloud Platform</strong><br><span style="font-size:11px;color:var(--text-muted)">Cloud Run, Cloud Storage</span></td>
                 <td>API hosting, ephemeral compute, temporary encrypted file storage</td>
+                <td>EU (europe-west1)</td>
+              </tr>
+              <tr>
+                <td><strong>Google Cloud Firestore</strong><br><span style="font-size:11px;color:var(--text-muted)">Google Ireland Limited</span></td>
+                <td>API keys (hashed), usage counts and request records (metadata, plus up to 10 KB of parsed output unless request history is off). Deleted after 12 months.</td>
                 <td>EU (europe-west1)</td>
               </tr>
               <tr>
@@ -292,12 +297,12 @@
               <tr><td><strong>Access control</strong></td><td>Infrastructure access limited to authorised Holosun ApS personnel</td></tr>
               <tr><td><strong>No human review</strong></td><td>Document content is never viewed by staff in normal operations</td></tr>
               <tr><td><strong>AI controls</strong></td><td>Vertex AI enterprise API: no model training on customer data</td></tr>
-              <tr><td><strong>Logging</strong></td><td>Request metadata only (timestamp, file type, response time). Document content is NOT logged.</td></tr>
+              <tr><td><strong>Logging</strong></td><td>Request metadata per request: request ID, account and API key ID, endpoint, file name or source reference, input and output format, whether AI was used, file size, outcome and error code, timestamp. Request history: unless the controller turns it off (dashboard, or <code>POST /api/v1/account/history</code>), the first 10 KB of the parsed output is stored with the request record for replay. Uploaded files are not stored. Request records are deleted automatically 12 months after the request.</td></tr>
             </tbody>
           </table>
 
           <h4 style="margin-top:20px">C.3 Erasure</h4>
-          <p>Small documents: erased from memory after API response. Large files: deleted from GCS within 1 day. On termination: API access revoked, any stored files deleted within 1 day. Certification of erasure available on request.</p>
+          <p>Small documents: erased from memory after API response. Large files: deleted from GCS within 1 day. Request records: deleted automatically 12 months after each request. On termination: API access revoked, any stored files deleted within 1 day, request records deleted on request. Certification of erasure available on request.</p>
 
           <h4 style="margin-top:20px">C.4 Processing location</h4>
           <p>Primary: europe-west1 (Belgium). Firebase Auth: US (DPF + SCCs). Vertex AI: EU preferred, US fallback (DPF + SCCs). Alternative regions available on request.</p>
