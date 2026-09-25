@@ -38,6 +38,10 @@ Behaviour through the shim now:
   `parseFiles` continues with the remaining files and `main` still exits 1,
   with a `Batch complete: N/M parsed` summary line (multi-file runs only —
   single-file output is unchanged).
+- `--convert` with more than one input is refused (exit 2) instead of every
+  file overwriting the same target, matching `bin/docparse`.
+- Both `[bin]` shims get this: `docparse` and `docparse-pdf` run the same
+  module.
 
 The full `bin/docparse` wrapper is unaffected: it still fans out with
 `ailang run --batch` for compile-once throughput, and its `DOCPARSE_OUTPUT_DIR`

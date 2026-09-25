@@ -112,6 +112,12 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
   let useAI = hasFlag(args, "describe");
   let doSummarize = hasFlag(args, "summarize");
   let convertTarget = getConvertTarget(args);
+  -- One output path cannot receive N inputs: every file would overwrite the
+  -- same target and only the last would survive (bin/docparse refuses this too).
+  if length(convertTarget) > 0 && listLength(files) > 1 then {
+    println("Error: --convert takes a single input file (got ${show(listLength(files))}). Convert one at a time, or use --output-dir for batch parsing.");
+    exit(2)
+  } else ();
   let generateTarget = getGenerateTarget(args);
   let promptText = getPromptText(args);
   let referenceDoc = getReferenceDoc(args);
