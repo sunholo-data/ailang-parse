@@ -25,6 +25,15 @@ separately — see `sdks/` for per-SDK changelogs.
   backend suggests `--pdf-backend docling` (with `--install-backends` if it is
   missing) before `--pdf-backend ai`, labelled external and paid. The adapter's
   own stderr no longer tells users to use the AI backend.
+- **docling now returns the OCR text of scanned pages.** docling lays a
+  scanned page out as a single picture and files its OCR text as that
+  picture's children, which the default Markdown export skips, so the page
+  came out as `<!-- image -->` and the escalation failed with "0 blocks". When
+  the default export has no substance, the adapter exports again with
+  `traverse_pictures=True`. Text-layer PDFs are unchanged.
+- Verified 25 Sept on an image-only PDF (no fonts), installed layout, no
+  backend set: "PDF backend 'pdftotext' found no text; recovered via docling
+  (29 blocks)", exit 0, no AI.
 - The hosted API is unaffected: it always passes an explicit backend.
 
 ---
