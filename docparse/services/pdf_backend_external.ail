@@ -10,12 +10,33 @@ module docparse/services/pdf_backend_external
 --
 -- Architecture: pure core (decode logic + contracts) + thin effectful outer
 -- (`parsePdfViaBackend`) that only owns exec and error reporting.
+--
+-- WHERE THE ADAPTER IS FOUND (three layouts, in priority order):
+--
+--   1. DOCPARSE_PROJECT_ROOT set (bin/docparse clone / installed-prefix flow):
+--      <projectRoot>/docparse/services/pdf_backends/adapter.py — unchanged.
+--   2. `ailang install` shim flow (no project root): the adapter and the
+--      backend uv project ship in the package under assets/pdf_backends/, and
+--      std/package.assetPath resolves them to their absolute installed
+--      location — independent of the caller's working directory, which the
+--      shim deliberately leaves untouched (v0.42.0: output lands where you
+--      are). Until this existed the shim could not run ANY external backend:
+--      the relative paths resolved against the user's cwd, where neither the
+--      adapter nor a uv project exists.
+--   3. Everything else (a clone run without DOCPARSE_PROJECT_ROOT): the
+--      historical cwd-relative paths, unchanged.
+--
+-- The FS effect on the exported functions exists only for that resolution
+-- (assetPath + a fileExists sanity check); every caller — the orchestrator's
+-- full ladder — already declared {FS, Process}.
 
 import std/json (getArray, getString, getInt, getNumber, asString, asArray, getOr)
 import std/option (Some, None, getOrElse)
-import std/list (map, length as listLength)
+import std/list (map, length as listLength, take)
 import std/result (Result, Ok, Err)
-import std/string (length as strLength)
+import std/string (length as strLength, split, join)
+import std/fs (fileExists)
+import std/package (assetPath)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
 import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, simpleCell)
 import docparse/services/pdf_annotations (PdfWord)
@@ -41,11 +62,69 @@ pure func adapterPath(projectRoot: string) -> string
 -- The uv project directory to resolve the backend env from. Empty projectRoot
 -- means "invoked from the repo root", so cwd (".") is the project. This keeps
 -- backend deps (docling, liteparse) resolving through uv's managed env rather
--- than whatever happens to be on the system python3 — see backendArgv.
+-- than whatever happens to be on the system python3 — see backendLayout.
 pure func backendProject(projectRoot: string) -> string
   ensures { strLength(result) > 0 }
 =
   if strLength(projectRoot) == 0 then "." else projectRoot
+
+-- The module path of this bridge, used as the asset resolver's package key:
+-- std/package.assetPath resolves a file shipped inside the INSTALLED package
+-- that owns the named module.
+pure func bridgeModule() -> string = "docparse/services/pdf_backend_external"
+
+-- Asset names for the adapter, in both shapes the resolver may expect
+-- (assets-dir-relative, then package-root-relative).
+pure func adapterAssets() -> [string] =
+  ["pdf_backends/adapter.py", "assets/pdf_backends/adapter.py"]
+
+-- Same for the backend uv project (pyproject.toml lives next to the adapter
+-- in assets/pdf_backends/ so both ship and resolve together).
+pure func backendPyprojectAssets() -> [string] =
+  ["pdf_backends/pyproject.toml", "assets/pdf_backends/pyproject.toml"]
+
+-- First asset that both resolves through std/package and exists on disk.
+-- An Ok from assetPath is not trusted blindly: a resolved-but-absent path
+-- would send uv after a file that is not there, which reads as a corrupt PDF
+-- rather than as the packaging gap it is.
+func firstAsset(mod: string, names: [string]) -> Option[string] ! {FS} =
+  match names {
+    [] => None,
+    a :: rest => match assetPath(mod, a) {
+      Err(_) => firstAsset(mod, rest),
+      Ok(p) => if fileExists(p) then Some(p) else firstAsset(mod, rest)
+    }
+  }
+
+-- Directory part of a path; "." when there is no separator.
+pure func dirOfPath(p: string) -> string = {
+  let parts = split(p, "/");
+  if listLength(parts) <= 1 then "." else join("/", take(listLength(parts) - 1, parts))
+}
+
+-- Runtime layout for the adapter: where the adapter is and which directory
+-- uv should resolve the backend environment from.
+--
+-- Priority order at the top of this file. In particular: an explicit
+-- DOCPARSE_PROJECT_ROOT (the bin/docparse wrapper sets it) always wins, so
+-- clone and installed-prefix behaviour is identical to before this existed;
+-- the asset resolution only kicks in for the ailang-install shim, which has
+-- no wrapper to set one.
+func backendLayout(projectRoot: string) -> {adapter: string, project: string} ! {FS} =
+  if strLength(projectRoot) > 0
+    then {adapter: adapterPath(projectRoot), project: backendProject(projectRoot)}
+    else match firstAsset(bridgeModule(), adapterAssets()) {
+      Some(adapter) => {
+        let projDir = match firstAsset(bridgeModule(), backendPyprojectAssets()) {
+          Some(pp) => dirOfPath(pp),
+          None => dirOfPath(adapter)
+        };
+        {adapter: adapter, project: if strLength(projDir) == 0 then "." else projDir}
+      },
+      -- No installed-package layout (a clone run without DOCPARSE_PROJECT_ROOT):
+      -- keep the historical cwd-relative behaviour unchanged.
+      None => {adapter: adapterPath(""), project: backendProject("")}
+    }
 
 -- Decode a single JSON block. Unknown "kind" values fall back to TextBlock.
 pure func decodeBlock(j: Json) -> Block = {
@@ -129,7 +208,7 @@ export type PdfParseOutcome = {
 -- from font sizes in the existing text layer and fails on scans exactly as
 -- pdftotext does.)
 export func parsePdfWithFallback(backend: string, filepath: string, projectRoot: string)
-    -> Result[PdfParseOutcome, string] ! {Process} =
+    -> Result[PdfParseOutcome, string] ! {FS, Process} =
   match parsePdfViaBackend(backend, filepath, projectRoot) {
     Ok(res) => Ok({doc: res, backendUsed: backend}),
     Err(firstErr) =>
@@ -152,11 +231,13 @@ export func parsePdfWithFallback(backend: string, filepath: string, projectRoot:
 -- annotations, never block the parse: the comment text itself is still worth
 -- returning, and an annotation that says "page 3" is honest where a guessed
 -- span would not be.
-export func fetchPdfWords(filepath: string, projectRoot: string) -> [PdfWord] ! {Process} =
-  match runJson("uv", ["run", "--project", backendProject(projectRoot), "python", adapterPath(projectRoot), "words", filepath]) {
+export func fetchPdfWords(filepath: string, projectRoot: string) -> [PdfWord] ! {FS, Process} = {
+  let layout = backendLayout(projectRoot);
+  match runJson("uv", ["run", "--project", layout.project, "python", layout.adapter, "words", filepath]) {
     Err(_) => [],
     Ok(doc) => decodeWords(getOrElse(getArray(doc, "words"), []))
   }
+}
 
 pure func decodeWords(items: [Json]) -> [PdfWord] =
   map(decodeWord, items)
@@ -177,12 +258,17 @@ pure func decodeWord(j: Json) -> PdfWord = {
 -- zero blocks is a hard failure the caller must surface (no silent 1-byte
 -- "successes"). Scanned/image-only PDFs land here too — the message points the
 -- user at --pdf-backend ai.
-export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {Process} =
+export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {FS, Process} = {
+  -- Resolve the adapter and the uv project WITHOUT depending on the caller's
+  -- working directory (see backendLayout): the installed shim deliberately
+  -- leaves you in your own cwd, where neither the historical relative adapter
+  -- path nor "." as the uv project resolves to anything useful.
+  let layout = backendLayout(projectRoot);
   -- Run the adapter through `uv run` so backend deps (docling, liteparse)
   -- resolve from the project's managed env, not an arbitrary system python3.
   -- uv emits sync/resolution logs to stderr only, so adapter stdout stays the
   -- pure JSON the bridge parses.
-  match runJson("uv", ["run", "--project", backendProject(projectRoot), "python", adapterPath(projectRoot), backend, filepath]) {
+  match runJson("uv", ["run", "--project", layout.project, "python", layout.adapter, backend, filepath]) {
     Err(e) => Err(formatError(e)),
     Ok(doc) => {
       let res = decodeAdapterDoc(doc);
@@ -191,3 +277,4 @@ export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: s
         else Ok(res)
     }
   }
+}

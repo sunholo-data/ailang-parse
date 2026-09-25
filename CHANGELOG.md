@@ -9,6 +9,49 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### PDF backends work straight from `ailang install`
+
+The installed `docparse` shim (v0.42.0) could not run a single PDF backend, for
+two independent reasons, and both are fixed:
+
+- **No Process capability.** The shim ran with `--caps IO,FS,Env`, so
+  `DOCPARSE_PDF_BACKEND=pdftotext docparse any.pdf` failed immediately with
+  `effect 'Process' requires capability, but none provided` — the backend
+  bridge runs the Python adapter through `uv run`, which needs Process. The
+  everyday `docparse` shim keeps its minimal capability set; a new **`docparse-pdf`**
+  shim (same module) adds `Process` — with `--process-timeout 20m`, without
+  which the docling tier dies at the 30s default on any real contract. It is a
+  separate command because AILANG cannot narrow a capability to a command:
+  `Process[cmd=uv]` is rejected at type-check (`EFF_PARAMS_NOT_SUPPORTED` — only
+  Rand and AI take effect parameters in v1.0.0), so the narrowness lives in
+  which command carries Process, not in the capability itself.
+- **The adapter was unreachable from an install.** The bridge resolved the
+  adapter and the uv project relative to the *caller's working directory*
+  (`adapterPath("")` → `docparse/services/pdf_backends/adapter.py`,
+  `backendProject("")` → `.`), which the shim deliberately leaves untouched.
+  `pdf_backend_external` now resolves a three-layout ladder: explicit
+  `DOCPARSE_PROJECT_ROOT` first (clone / install.sh prefix — unchanged), then
+  `std/package.assetPath` against the installed package (the shim flow), then
+  the historical cwd-relative fallback. The exported functions gain `FS` for
+  that resolution; every caller (the orchestrator's full ladder) already
+  declared `{FS, Process}`.
+- **The backend environment ships in the package.** `assets/pdf_backends/`
+  now carries `pyproject.toml` next to `adapter.py`, with docling and
+  liteparse as default dependencies (the shim has no wrapper to run
+  `uv sync --extra backends`, so a plain `uv run` must be able to materialise
+  the environment). No `uv.lock` ships — generating one needs a network
+  resolution at packaging time; `uv run --project` writes the lock on first use
+  and pins it thereafter. The `assets/backends-pyproject.toml` extras flow used
+  by `--install-backends` and `scripts/install.sh` is unchanged.
+
+`DOCPARSE_PDF_BACKEND=liteparse docparse-pdf file.pdf --convert out.md` now
+works from a clean `ailang install` (poppler and uv permitting, as reported by
+the installer preflight).
+
+---
+
 ## [v0.43.1](https://github.com/sunholo-data/ailang-parse/compare/v0.42.0...v0.43.1) — 2026-09-23
 
 v0.43.0 was tagged but never published: the registry now refuses a version

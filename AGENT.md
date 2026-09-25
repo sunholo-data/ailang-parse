@@ -32,6 +32,28 @@ ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
   docparse/main.ail --generate report.docx --prompt "Q1 sales report with tables"
 ```
 
+## Installed shims: `docparse` and `docparse-pdf`
+
+`ailang install sunholo/ailang_parse` gives you two commands, no clone needed.
+`docparse` handles every deterministic format (DOCX, PPTX, XLSX, ODT, ODP, ODS,
+HTML, MD, CSV, EML, EPUB, RTF, …) with `IO,FS,Env` — no subprocess rights.
+`docparse-pdf` is the same parser with `Process` added, for the local PDF
+backends, which run the bundled Python adapter (`assets/pdf_backends/`) through
+`uv run`:
+
+```bash
+DOCPARSE_PDF_BACKEND=liteparse docparse-pdf scan.pdf --convert out.md
+```
+
+- `pdftotext` (default tier) needs poppler on PATH.
+- `docling` / `liteparse` resolve through `uv run` from the bundled
+  `assets/pdf_backends/pyproject.toml`; first use needs network once to
+  materialise the uv environment, then it is pinned.
+- AI parsing (`--pdf-backend ai`, `describe`, `summarize`) stays a deliberate
+  opt-in through the full `bin/docparse` wrapper with `--ai` — neither shim
+  carries the AI capability, so a local-policy "never send the PDF to Gemini"
+  rule is enforced by the shim's own capability set.
+
 ## SDKs
 
 ```bash

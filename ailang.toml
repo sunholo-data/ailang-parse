@@ -93,7 +93,25 @@ level = "experimental"
 # and convert one file, output beside you. AI is left out of caps on purpose:
 # `--caps AI` without `--ai <model>` warns on stderr on every run, and the
 # `describe`/`summarize` flows need a model and a key, which the full
-# bin/docparse wrapper handles. Batch, --output-dir, PDF backends and
-# --install-backends also stay with the wrapper.
+# bin/docparse wrapper handles. Batch, --output-dir and --install-backends
+# also stay with the wrapper.
+#
+# docparse-pdf is the SAME module with one added capability: Process, for the
+# local PDF backends (pdftotext / docling / liteparse), which run the Python
+# adapter through `uv run`. It is a separate command because AILANG caps cannot
+# be narrowed to a command: effect parameters are limited to Rand and AI
+# (AILANG v1.0.0 rejects `Process[cmd=uv]` with EFF_PARAMS_NOT_SUPPORTED), so
+# the narrowing lives in WHICH command carries Process — the everyday
+# `docparse` shim still runs with IO,FS,Env only, and docparse-pdf grants
+# exec rights to a bridge whose code execs exactly one binary, `uv` (hardcoded
+# in pdf_backend_external; only the backend name and paths vary, and the
+# backend name is validated by adapter.py's BACKENDS table). Mark/Daneel's
+# policy — PDFs through a local, non-AI backend, never the Gemini upload path —
+# routes PDFs here:
+#   DOCPARSE_PDF_BACKEND=liteparse docparse-pdf scan.pdf --convert out.md
+# --process-timeout 20m is what makes the docling tier finish (it needs ~185s
+# on a 9-page contract; the 30s default killed every escalation — v0.39.3).
+# AI stays out of both caps on purpose.
 [bin]
 docparse = { module = "docparse/main", caps = "IO,FS,Env", run_flags = ["--max-recursion-depth", "50000"] }
+docparse-pdf = { module = "docparse/main", caps = "IO,FS,Env,Process", run_flags = ["--max-recursion-depth", "50000", "--process-timeout", "20m"] }
