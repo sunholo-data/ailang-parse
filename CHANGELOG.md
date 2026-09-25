@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased]
+## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
 
 ### Scanned PDFs escalate to local docling by default; AI is never automatic
 
