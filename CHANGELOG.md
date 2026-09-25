@@ -9,6 +9,26 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### Scanned PDFs escalate to local docling by default; AI is never automatic
+
+- **The default PDF path is now pdftotext → docling, never AI.** An empty
+  `pdfBackend` means "the default ladder"; any explicit value, including
+  `pdftotext`, is honoured exactly. `bin/docparse` used to export
+  `DOCPARSE_PDF_BACKEND=pdftotext` unconditionally, which made every run look
+  explicit and disabled the docling escalation the README promised. It now
+  forwards the variable only when you set it. The old default-path fallback
+  to AI (`parsePdfResult`) is gone: AI costs money and sends the document
+  off-machine, so it is opt-in only (`--pdf-backend ai`).
+- **Error advice puts the free local option first.** A failed explicit
+  backend suggests `--pdf-backend docling` (with `--install-backends` if it is
+  missing) before `--pdf-backend ai`, labelled external and paid. The adapter's
+  own stderr no longer tells users to use the AI backend.
+- The hosted API is unaffected: it always passes an explicit backend.
+
+---
+
 ## [v0.44.0](https://github.com/sunholo-data/ailang-parse/compare/v0.43.1...v0.44.0) — 2026-09-25
 
 ### PDF backends work straight from `ailang install`

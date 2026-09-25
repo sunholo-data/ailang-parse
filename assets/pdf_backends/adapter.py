@@ -373,8 +373,7 @@ def main() -> int:
     if backend not in NON_BLOCK_BACKENDS and not _has_substance(doc.get("blocks") or []):
         print(
             f"ERR: backend '{backend}' extracted no content (0 blocks) from "
-            f"{pdf.name}. For scanned/image-only PDFs with no text layer, "
-            f"use --pdf-backend ai.",
+            f"{pdf.name} (no text layer?).",
             file=sys.stderr,
         )
         return 1
