@@ -585,7 +585,14 @@ func orchResolveTexSource(filepath: string)
 -- meant a reviewer's comments vanished silently on the default backend.
 func orchPdf(filepath: string, opts: ParseOptions)
   -> Result[ParseOutcome, AIError] ! {IO, FS, AI, Env, Net, Process, Clock} = {
-  let backend = if length(opts.pdfBackend) > 0 then opts.pdfBackend else "pdftotext";
+  -- An EMPTY pdfBackend means "the default ladder". Anything else — including
+  -- "pdftotext" itself — is an explicit choice the caller made. This
+  -- distinction is what the docling escalation hangs on: bin/docparse used to
+  -- export DOCPARSE_PDF_BACKEND=pdftotext unconditionally, which made every
+  -- default run look explicit here, disabled the escalation, and told users
+  -- with a scanned PDF to retry with the paid AI backend.
+  let explicit = length(opts.pdfBackend) > 0;
+  let backend = if explicit then opts.pdfBackend else "pdftotext";
   if backend == "ai" then match parsePdfResult(filepath) {
     Err(e) => Err(e),
     Ok(blocks) => {
@@ -596,16 +603,10 @@ func orchPdf(filepath: string, opts: ParseOptions)
         ann.warnings, 1))
     }
   }
-  else match parsePdfViaBackend(backend, filepath, opts.projectRoot) {
-    Ok(ext) => {
-      let ann = orchPdfAnnotations(filepath, opts.projectRoot);
-      Ok(mkOutcome("pdf", filepath, ext.metadata,
-        concat(ext.blocks, ann.blocks),
-        concat(["Parsed PDF (${backend}): ${show(countBlocks(ext.blocks))} blocks"], ann.notes),
-        ann.warnings, 0))
-    },
-    -- An explicit backend choice is respected: no silent AI fallback, because
-    -- AI costs money and the caller asked for something free.
+  else
+    -- An explicit non-AI backend choice is respected: no silent escalation,
+    -- because the caller asked for exactly this engine (and AI costs money, so
+    -- it is never automatic).
     --
     -- The failure is returned as Err, NOT as an Ok document whose only block is
     -- the error text. That laundering is what pdf_backend_external warns against
@@ -613,21 +614,35 @@ func orchPdf(filepath: string, opts: ParseOptions)
     -- "PDF extraction failed: …" and counted the file as parsed, so a batch of
     -- nine reported 9/9 while one document was gone. An Err exits 1, writes no
     -- output file, and is counted as a failure by `ailang run --batch`.
-    Err(msg) =>
-      if length(opts.pdfBackend) > 0
-        then Err(orchParseError("pdf_backend_failed",
-          "PDF backend '${backend}' failed on ${filepath}: ${msg}. If this is a scanned PDF, retry with --pdf-backend ai."))
-        else match parsePdfResult(filepath) {
-          Err(e) => Err(e),
-          Ok(blocks) => {
-            let ann = orchPdfAnnotations(filepath, opts.projectRoot);
-            Ok(mkOutcome("pdf", filepath, parsePdfMetadata(filepath),
-              concat(blocks, ann.blocks),
-              concat(["PDF backend '${backend}' found no text; fell back to AI"], ann.notes),
-              ann.warnings, 1))
-          }
-        }
-  }
+    if explicit then match parsePdfViaBackend(backend, filepath, opts.projectRoot) {
+      Ok(ext) => {
+        let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+        Ok(mkOutcome("pdf", filepath, ext.metadata,
+          concat(ext.blocks, ann.blocks),
+          concat(["Parsed PDF (${backend}): ${show(countBlocks(ext.blocks))} blocks"], ann.notes),
+          ann.warnings, 0))
+      },
+      Err(msg) => Err(orchParseError("pdf_backend_failed",
+        "PDF backend '${backend}' failed on ${filepath}: ${msg}. For scanned/image-only PDFs with no text layer, retry with --pdf-backend docling (local, free; if it is not installed, run: docparse --install-backends), or --pdf-backend ai (external, paid) as a last resort."))
+    }
+    -- The DEFAULT: the free ladder pdftotext -> docling, never AI. docling is
+    -- local and free, so escalating to it needs no permission (parsePdfWithFallback
+    -- owns the ladder and names --install-backends when docling is missing);
+    -- ai costs money and must be asked for explicitly.
+    else match parsePdfWithFallback("pdftotext", filepath, opts.projectRoot) {
+      Ok(fb) => {
+        let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+        Ok(mkOutcome("pdf", filepath, fb.doc.metadata,
+          concat(fb.doc.blocks, ann.blocks),
+          concat([if fb.backendUsed == "pdftotext"
+            then "Parsed PDF (pdftotext): ${show(countBlocks(fb.doc.blocks))} blocks"
+            else "PDF backend 'pdftotext' found no text; recovered via ${fb.backendUsed} (${show(countBlocks(fb.doc.blocks))} blocks)"], ann.notes),
+          ann.warnings, 0))
+      },
+      Err(fbErr) =>
+        Err(orchParseError("pdf_backend_failed",
+          "PDF extraction failed on ${filepath}: ${fbErr} You can also retry with --pdf-backend ai (external, paid) as a last resort."))
+    }
 }
 
 -- Annotation blocks plus the notes/warnings describing what was found.

@@ -126,6 +126,8 @@ Examples:
   docparse slides.pptx --describe       With AI image descriptions
   docparse report.docx --summarize      With AI summary
   docparse contract.pdf                 PDF (deterministic pdftotext, no AI)
+  docparse scan.pdf                     Scanned PDF (pdftotext finds no text
+                                        layer, escalates to docling automatically)
   docparse scan.pdf --pdf-backend ai    Scanned PDF (needs multimodal AI)
   docparse photo.png                    Image (auto-enables AI)
 
@@ -176,9 +178,12 @@ Options:
                     PPTX output only.
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
-  --pdf-backend B   PDF backend: pdftotext (default, deterministic plain text),
-                    docling (local ML layout), liteparse (font-size headings),
-                    ai (multimodal AI — required for scanned/image-only PDFs)
+  --pdf-backend B   PDF backend: pdftotext (default for text-layer PDFs),
+                    docling (local ML layout/OCR), liteparse (font-size
+                    headings), ai (multimodal AI — external, paid).
+                    Default: pdftotext, escalating automatically to docling
+                    when the PDF has no text layer (scanned/image-only PDFs).
+                    AI is never chosen automatically.
   --ai MODEL        AI model (default: gemini-2.5-flash; gemini-3-flash-preview
                     is supported but ~5x slower for PDF parsing due to thinking
                     tokens — pass it explicitly only when reasoning helps)
@@ -409,7 +414,14 @@ AI_MODEL="$DEFAULT_AI_MODEL"
 VERIFY=false
 BUDGET=false
 OUTPUT_DIR=""
-PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-pdftotext}"
+# Empty means "the default PDF ladder" (see orchestrator.orchPdf): pdftotext,
+# escalating automatically to docling when the PDF has no text layer, never AI.
+# Only an explicit --pdf-backend flag (or a DOCPARSE_PDF_BACKEND already in the
+# environment) produces a non-empty value, which the orchestrator then honours
+# as a decision. Exporting "pdftotext" unconditionally made every default run
+# look explicit, which disabled the docling escalation on scanned PDFs and
+# pointed users at the paid AI backend.
+PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-}"
 EXTRA_FLAGS=()
 DEEP_REQUESTED=false
 THREADED_REQUESTED=false
@@ -862,7 +874,13 @@ ENV_PREFIX+=(DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR")
 if $USE_AI; then
   ENV_PREFIX+=(GOOGLE_API_KEY="")
 fi
-ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
+# Only forward an EXPLICIT backend choice: with the variable unset the
+# orchestrator runs its default ladder (pdftotext, escalating to docling for
+# no-text-layer PDFs). Forwarding "pdftotext" unconditionally disabled that
+# escalation — see the PDF_BACKEND comment above.
+if [ -n "$PDF_BACKEND" ]; then
+  ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
+fi
 if [ "$PDF_BACKEND" != "ai" ]; then
   ENV_PREFIX+=(DOCPARSE_PROJECT_ROOT="$PROJECT_DIR")
 fi
