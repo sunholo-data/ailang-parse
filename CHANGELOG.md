@@ -88,6 +88,27 @@ env now simply agrees with the flag main would have parsed anyway.
   section and still accept the old packed form. Parser output is unchanged;
   this is a benchmark-harness fix only.
 
+### A corrupt Office or ODF file is a failed parse, not a document
+
+- **Fixed:** a corrupt `.docx` (e.g. `printf 'not a zip file' > corrupt.docx`)
+  exited 0 and wrote an output file whose only content was
+  `XML parse error: XML parse error: empty document`, and folder/batch mode
+  counted it as succeeded (a 19-file batch reported 19/19). DOCX, PPTX, XLSX,
+  ODT, ODP and ODS now fail with `Error [parse_failed]` on stderr, exit 1,
+  write no output file, and batch mode counts them as failed — the same
+  contract failed PDF parses got in 0.42.
+- Caught: a file that is not a ZIP archive or is an empty one; a DOCX whose
+  `word/document.xml` is missing or unparseable; an ODF file whose
+  `content.xml` is missing or unparseable; a PPTX with no slides; an XLSX with
+  no worksheets.
+- New orchestrator error code `parse_failed` (the file is broken) alongside
+  `parse_refused` (the format is unsupported). The stdio MCP server reports it
+  as `PARSE_FAILED`. API servers that map orchestrator codes should add it;
+  unmapped, it falls through to their generic error.
+- `benchmarks/failure_check.py` covers a corrupt DOCX and a not-a-deck PPTX.
+
+---
+
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
 
 ### Scanned PDFs escalate to local docling by default; AI is never automatic

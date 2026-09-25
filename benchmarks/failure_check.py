@@ -38,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -159,6 +160,15 @@ def main() -> int:
         unsupported = tmp / "thing.wombat"
         unsupported.write_text("not a format docparse knows")
 
+        # Not a ZIP at all — the exact file from the Office-format report.
+        corrupt_docx = tmp / "corrupt.docx"
+        corrupt_docx.write_bytes(b"not a zip file")
+
+        # A valid ZIP that is not a deck: no slide entries.
+        not_a_deck = tmp / "not_a_deck.pptx"
+        with zipfile.ZipFile(not_a_deck, "w") as zf:
+            zf.writestr("a.txt", "hello")
+
         print("=== Failure check ===\n")
         print("failures must exit non-zero and write nothing:")
 
@@ -176,6 +186,20 @@ def main() -> int:
             "unsupported_format",
             [str(unsupported)],
             tmp, "parse_refused", args.verbose,
+        )
+
+        # Office formats laundered failures the same way: a corrupt .docx
+        # exited 0 with "XML parse error: …" as its only content, and a
+        # 19-file batch reported 19/19 succeeded.
+        problems += check_failure(
+            "corrupt_docx",
+            [str(corrupt_docx)],
+            tmp, "parse_failed", args.verbose,
+        )
+        problems += check_failure(
+            "not_a_deck_pptx",
+            [str(not_a_deck)],
+            tmp, "parse_failed", args.verbose,
         )
 
         print("\nsuccesses must still exit 0 and write a real document:")
