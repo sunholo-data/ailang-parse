@@ -70,9 +70,10 @@
       <p>AILANG Parse exposes a drop-in compatible endpoint at <code>POST /general/v0/general</code> that accepts the same multipart file upload format as the Unstructured API. Existing Unstructured clients can point at AILANG Parse with just a URL change.</p>
 
       <h3>curl</h3>
-      <pre><code class="language-bash"># Same request format as Unstructured API
+      <pre><code class="language-bash"># Same request format as Unstructured API (add your API key)
 curl -X POST https://docparse.ailang.sunholo.com/general/v0/general \
   -F "files=@report.docx" \
+  -F "apiKey=dp_YOUR_KEY" \
   -H "Accept: application/json"</code></pre>
 
       <h3>Python &mdash; before and after</h3>
@@ -84,7 +85,8 @@ elements = partition(filename="report.docx")
 import requests
 resp = requests.post(
     "https://docparse.ailang.sunholo.com/general/v0/general",
-    files={"files": open("report.docx", "rb")}
+    files={"files": open("report.docx", "rb")},
+    data={"apiKey": "dp_YOUR_KEY"},
 )
 elements = resp.json()</code></pre>
 
@@ -112,9 +114,11 @@ def parse_document(filepath: str) -> dict:
 
     if ext in OFFICE_EXTS:
         # AILANG Parse: deterministic, no per-page billing, full structural fidelity
+        # Upload field must be "filepath"; authenticate with your API key
         resp = requests.post(
             f"{AILANG_PARSE_URL}/api/v1/parse",
-            files={"file": open(filepath, "rb")}
+            files={"filepath": open(filepath, "rb")},
+            data={"apiKey": "dp_YOUR_KEY"},
         )
         return resp.json()
 
@@ -152,9 +156,11 @@ def parse_document(filepath: str) -> dict:
 
     if ext in OFFICE_EXTS:
         # AILANG Parse: free, local, deterministic
+        # Upload field must be "filepath"; authenticate with your API key
         resp = requests.post(
             f"{AILANG_PARSE_URL}/api/v1/parse",
-            files={"file": open(filepath, "rb")}
+            files={"filepath": open(filepath, "rb")},
+            data={"apiKey": "dp_YOUR_KEY"},
         )
         return resp.json()
 
@@ -207,9 +213,10 @@ curl https://docparse.ailang.sunholo.com/api/v1/health
 # List supported formats
 curl https://docparse.ailang.sunholo.com/api/v1/formats
 
-# Parse a document
+# Parse a document (upload field is "filepath", API key required)
 curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
-  -F "file=@report.docx"
+  -F "filepath=@report.docx" \
+  -F "apiKey=dp_YOUR_KEY"
 
 # Capability manifest (agent discovery)
 curl https://docparse.ailang.sunholo.com/api/v1/capabilities</code></pre>
