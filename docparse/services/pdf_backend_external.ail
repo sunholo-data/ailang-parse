@@ -228,8 +228,10 @@ pure func decodeWord(j: Json) -> PdfWord = {
 -- BACKENDS). Failures are propagated as Err, never swallowed into an empty
 -- result: a backend that errors, exits non-zero, emits non-JSON, or extracts
 -- zero blocks is a hard failure the caller must surface (no silent 1-byte
--- "successes"). Scanned/image-only PDFs land here too — the message points the
--- user at --pdf-backend ai.
+-- "successes"). Scanned/image-only PDFs land here too — the advice the user
+-- sees is composed by the caller (orchestrator.orchPdf): docling (local,
+-- free; --install-backends if missing) first, --pdf-backend ai (external,
+-- paid) only as an explicit last resort.
 export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {FS, Process} = {
   -- Resolve the adapter and the uv project WITHOUT depending on the caller's
   -- working directory (see backendLayout): the installed shim deliberately

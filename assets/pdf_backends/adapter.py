@@ -165,6 +165,17 @@ def run_docling(pdf: Path) -> dict:
     result = DocumentConverter().convert(str(pdf))
     md = result.document.export_to_markdown()
     blocks = _blocks_from_markdown(md)
+    # A scanned page is laid out as ONE picture, and docling files its OCR text
+    # as that picture's children, which the default export skips: the whole
+    # page comes out as "<!-- image -->". Only when that leaves nothing
+    # substantive, export again descending into pictures, so text-layer PDFs
+    # with figures are unchanged.
+    if not _has_substance(blocks):
+        try:
+            md = result.document.export_to_markdown(traverse_pictures=True)
+            blocks = _blocks_from_markdown(md)
+        except TypeError:
+            pass  # older docling without traverse_pictures
 
     meta = _empty_meta()
     try:
@@ -373,8 +384,7 @@ def main() -> int:
     if backend not in NON_BLOCK_BACKENDS and not _has_substance(doc.get("blocks") or []):
         print(
             f"ERR: backend '{backend}' extracted no content (0 blocks) from "
-            f"{pdf.name}. For scanned/image-only PDFs with no text layer, "
-            f"use --pdf-backend ai.",
+            f"{pdf.name} (no text layer?).",
             file=sys.stderr,
         )
         return 1
