@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased]
+## [v0.46.0](https://github.com/sunholo-data/ailang-parse/compare/v0.45.0...v0.46.0) — 2026-09-25
 
 ### docx → md → docx keeps comments and track changes
 
