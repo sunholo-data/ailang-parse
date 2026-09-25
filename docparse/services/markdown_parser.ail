@@ -231,10 +231,14 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- precedence for indented headings/tables/thematic breaks is likewise left
   -- to the existing branches; the indented-code branch claims only what
   -- everything above lets fall through, and only with no paragraph or list
-  -- open (an indented line inside either is a lazy continuation).
+  -- open (an indented line inside either is a lazy continuation). An open
+  -- blockquote is treated the same way; an open table is flushed first so the
+  -- table block is emitted BEFORE the code block, not after it.
   else if mdIsEmptyList(state.listItems) && mdIsEmptyList(state.textLines) &&
+          mdIsEmptyList(state.quoteLines) &&
           mdCodeIndentCount(line, 0, 0) >= 4 then
-    { state | indentCode: mdStripCodeIndent(line) :: state.indentCode }
+    let s = flushTable(state) in
+    { s | indentCode: mdStripCodeIndent(line) :: s.indentCode }
 
   -- Regular text line: a wrapped continuation of the open list item's
   -- paragraph (CommonMark lazy continuation) joins onto that item, so a
