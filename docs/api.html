@@ -944,6 +944,20 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   <section class="dp-api-section reveal">
     <h2 id="data-handling">Data Handling</h2>
     <p>Your documents stay yours. Here's exactly what happens when you use the API:</p>
+
+    <div style="margin:0 0 16px;padding:12px 16px;background:rgba(37,99,235,0.04);border:1px solid rgba(37,99,235,0.12);border-radius:var(--radius);font-size:13px;line-height:1.6">
+      <strong>Three ways to run AILANG Parse</strong>
+      <table class="dp-table" style="font-size:12px;margin-top:8px">
+        <thead><tr><th>Mode</th><th>Where the document goes</th><th>What's kept</th></tr></thead>
+        <tbody>
+          <tr><td><strong>In-browser (WebAssembly try-it)</strong></td><td>Nowhere &mdash; parsed on your machine</td><td>Nothing</td></tr>
+          <tr><td><strong>Local CLI / self-hosted API</strong></td><td>Nowhere we can see</td><td>Nothing sent to Holosun</td></tr>
+          <tr><td><strong>Hosted API (this section)</strong></td><td>Our API in <code>europe-west1</code></td><td>Metadata for usage/billing; parsed content only if you opt in to <a href="#data-handling" style="color:var(--dp-blue)">history/replay</a></td></tr>
+        </tbody>
+      </table>
+      See the <a href="privacy.html" style="color:var(--dp-blue)">privacy policy</a> for the full breakdown.
+    </div>
+
     <table class="dp-table" style="font-size:13px">
       <thead>
         <tr><th style="width:30%">Data type</th><th>What happens</th><th style="width:22%">Retention</th></tr>
@@ -961,12 +975,12 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         </tr>
         <tr>
           <td><strong>Parsed output</strong></td>
-          <td>Returned to you in the API response. Not stored server-side.</td>
-          <td>None</td>
+          <td>Returned to you in the API response. Stored server-side <strong>only if you opt in</strong> to request history/replay &mdash; kept for your tier&rsquo;s retention period and deletable at any time from your dashboard or on request.</td>
+          <td>None unless you opt in to history/replay</td>
         </tr>
         <tr>
           <td><strong>Request metadata</strong><br><span style="color:var(--text-muted);font-size:11px">timestamp, format, size, block count</span></td>
-          <td>Logged for billing and your request history dashboard. No document content is stored.</td>
+          <td>Logged for billing and your request history dashboard. Document content is never logged.</td>
           <td>30 days (planned TTL)</td>
         </tr>
         <tr>
@@ -977,7 +991,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
       </tbody>
     </table>
     <div style="margin-top:12px;padding:12px 16px;background:rgba(37,99,235,0.04);border:1px solid rgba(37,99,235,0.12);border-radius:var(--radius);font-size:12px;line-height:1.6">
-      <strong>Infrastructure</strong>: All processing runs in <code>europe-west1</code> (Belgium). Temporary file storage uses a co-located regional bucket with 24-hour lifecycle deletion. No document content is used for AI model training or analytics.
+      <strong>Infrastructure</strong>: All processing runs in <code>europe-west1</code> (Belgium). Temporary file storage uses a co-located regional bucket with 24-hour lifecycle deletion. No document content is used for AI model training or analytics. AI parsing is routed to Gemini with an EU region preferred; a US endpoint may be used as fallback (covered by the EU-US Data Privacy Framework and SCCs). Sign-in runs on Firebase Authentication in the US. See the <a href="privacy.html#transfers" style="color:var(--dp-blue)">privacy policy</a> for transfer details.
     </div>
   </section>
 
