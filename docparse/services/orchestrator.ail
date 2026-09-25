@@ -45,7 +45,7 @@
 
 module docparse/services/orchestrator
 
-import std/string (length, toLower, startsWith, endsWith)
+import std/string (length, toLower, startsWith, endsWith, substring)
 import std/list (concat, map, filter, length as listLength)
 import std/fs (readFile, readFileBytes, fileExists, writeFileBytes, removeFile)
 import std/bytes (fromBase64)
@@ -68,7 +68,8 @@ import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeaders
 import docparse/services/odp_parser (parseOdp, parseOdpMetadata)
 import docparse/services/ods_parser (parseOds, parseOdsMetadata)
 import docparse/services/epub_parser (parseEpub, parseEpubMetadata)
-import docparse/services/zip_extract (resolveBlockImages)
+import docparse/services/zip_extract (resolveBlockImages, findSlideEntries, findSheetEntries)
+import std/zip (listEntries)
 import docparse/services/html_parser (parseHtmlDoc)
 import docparse/services/markdown_parser (parseMarkdown, parseMarkdownMeta)
 import docparse/services/csv_parser (parseCsv)
@@ -176,7 +177,7 @@ export func parseDocumentPure(filepath: string, opts: ParseOptions)
   let ext = orchDispatchExt(filepath);
   let format = detectFormat(ext);
   if format == "zip-office" then orchOffice(filepath, ext, opts)
-  else if format == "zip-odf" then Ok(orchOdf(filepath, ext))
+  else if format == "zip-odf" then orchOdf(filepath, ext)
   else if format == "epub" then Ok(orchEpub(filepath))
   else if format == "html" then Ok(orchHtml(filepath))
   else if format == "markdown" then Ok(orchMarkdown(filepath))
@@ -217,6 +218,111 @@ pure func orchPureRefusal(format: string) -> string =
   else
     "unsupported format '${format}'"
 
+-- =====================================================================
+-- Office/ODF container + parse failure detection
+-- =====================================================================
+
+-- A corrupt Office file used to come back as Ok: the parsers report an
+-- unreadable container or part as empty blocks (or, for DOCX, as a single
+-- error-styled paragraph), so the CLI exited 0, wrote an output file whose
+-- content was the error text, and `ailang run --batch` scored the file as
+-- parsed — a batch of 19 reported "19/19 succeeded" with one document
+-- replaced by "XML parse error: …". The checks in this section make a corrupt
+-- Office/ODF file a typed Err instead: exit 1, no output file, batch failure —
+-- the same contract the PDF ladder already has.
+
+pure func orchOfficeLabel(kind: string) -> string =
+  if kind == "word" then "DOCX"
+  else if kind == "powerpoint" then "PPTX"
+  else if kind == "excel" then "XLSX"
+  else "Office"
+
+pure func orchOdfLabel(ext: string) -> string =
+  if ext == "odt" then "ODT"
+  else if ext == "odp" then "ODP"
+  else "ODS"
+
+-- An Office/ODF file is a ZIP archive before it is anything else. A file that
+-- is not a readable archive (or is an empty one — no DOCX/PPTX/XLSX/ODF has
+-- zero entries) cannot parse, and every parser downstream would turn that into
+-- an empty document. Check the container first. None = the container is good;
+-- Some(msg) = the typed failure to return.
+func orchZipCheck(filepath: string, label: string) -> Option[string] ! {FS} =
+  match listEntries(filepath) {
+    Err(msg) => Some("${label} parse failed: not a readable ZIP archive: ${msg}"),
+    Ok(entries) =>
+      if listLength(entries) == 0
+      then Some("${label} parse failed: ZIP archive has no entries — not an Office document")
+      else None
+  }
+
+-- The DOCX and ODF parsers return [Block] and cannot fail in their exported
+-- type, so a document whose main part (word/document.xml, content.xml) is
+-- missing or cannot be parsed comes back as a single error-styled text block.
+-- Recognise exactly that shape and fail the parse instead. "" = no failure.
+-- Only a lone block counts: a real document is never just that one block.
+pure func orchFatalParseError(blocks: [Block]) -> string
+  tests [
+    ([], ""),
+    ([mkText("Hello", "normal", 0)], ""),
+    ([mkText("XML parse error: empty document", "error", 0)], "empty document"),
+    ([mkText("XML parse error: XML parse error: empty document", "error", 0)],
+     "XML parse error: empty document"),
+    ([mkText("ODT error: could not read content.xml", "error", 0)], "could not read content.xml"),
+    ([mkText("ODS XML parse error: unexpected EOF", "error", 0)], "unexpected EOF"),
+    ([mkText("XML parse error: x", "normal", 0)], ""),
+    ([mkText("[unreadable PDF attachment: x]", "error", 0)], "")
+  ]
+{
+  match blocks {
+    TextBlock(t) :: [] =>
+      if t.style == "error" then orchParserFailureMsg(t.text) else "",
+    _ => ""
+  }
+}
+
+-- The message inside a parser's failure block, "" when the text is not one.
+-- One leading "XML parse error: " prefix is stripped because parseLenient
+-- already wraps its own errors in the same words — a corrupt DOCX printed as
+-- "XML parse error: XML parse error: empty document", and the Err should not
+-- carry the doubling forward.
+pure func orchParserFailureMsg(text: string) -> string =
+  if startsWith(text, "XML parse error: ") then substring(text, 17, length(text))
+  else if startsWith(text, "ODT XML parse error: ") || startsWith(text, "ODP XML parse error: ")
+       || startsWith(text, "ODS XML parse error: ")
+    then substring(text, 21, length(text))
+  else if text == "ODT error: could not read content.xml" || text == "ODP error: could not read content.xml"
+       || text == "ODS error: could not read content.xml"
+    then "could not read content.xml"
+  else ""
+
+-- Which formats can reach the deterministic Err path with a real parse
+-- FAILURE rather than a refusal. Everything listed is a format
+-- parseDocumentPure recognises, so an Err from it means a known format whose
+-- parse failed (corrupt file); anything else reaching Err was refused up
+-- front (or is genuinely unsupported). The distinction becomes the error
+-- code: "parse_failed" (your file is broken) vs "parse_refused" (this format
+-- needs more capability).
+pure func orchDeterministicFormat(format: string) -> bool
+  tests [
+    ("zip-office", true),
+    ("zip-odf", true),
+    ("epub", true),
+    ("html", true),
+    ("markdown", true),
+    ("csv", true),
+    ("email", true),
+    ("rtf", true),
+    ("text", true),
+    ("pdf", false),
+    ("unknown", false)
+  ]
+{
+  format == "zip-office" || format == "zip-odf" || format == "epub"
+  || format == "html" || format == "markdown" || format == "csv"
+  || format == "email" || format == "rtf" || format == "text"
+}
+
 -- --- DOCX / PPTX / XLSX ---
 --
 -- Block order is the standard for all three surfaces:
@@ -226,36 +332,63 @@ pure func orchPureRefusal(format: string) -> string =
 func orchOffice(filepath: string, ext: string, opts: ParseOptions)
   -> Result[ParseOutcome, string] ! {FS} = {
   let kind = officeType(ext);
-  if kind == "word" then {
-    let body = parseDocxWithComments(filepath);
-    let images = if opts.extractImages then parseDocxImages(filepath) else [];
-    let blocks = concat(parseDocxHeaders(filepath),
-      concat(body,
-        concat(parseDocxFooters(filepath),
-          concat(parseDocxFootnotes(filepath),
-            concat(parseDocxEndnotes(filepath), images)))));
-    Ok(mkOutcome("docx", filepath, parseDocxMetadata(filepath), blocks,
-      ["Parsed DOCX: ${show(countBlocks(blocks))} blocks"], [], 0))
+  let label = orchOfficeLabel(kind);
+  -- Container check first: a corrupt file must be an Err, never an Ok
+  -- document whose only block carries the error text (orchZipCheck).
+  match orchZipCheck(filepath, label) {
+    Some(msg) => Err(msg),
+    None =>
+      if kind == "word" then {
+        let body = parseDocxWithComments(filepath);
+        -- An unreadable word/document.xml comes back as one error-styled
+        -- text block; publishing that as the document is exactly the
+        -- laundering this check exists to prevent.
+        let fatal = orchFatalParseError(body);
+        if length(fatal) > 0 then Err("${label} parse failed: ${fatal}")
+        else {
+          let images = if opts.extractImages then parseDocxImages(filepath) else [];
+          let blocks = concat(parseDocxHeaders(filepath),
+            concat(body,
+              concat(parseDocxFooters(filepath),
+                concat(parseDocxFootnotes(filepath),
+                  concat(parseDocxEndnotes(filepath), images)))));
+          Ok(mkOutcome("docx", filepath, parseDocxMetadata(filepath), blocks,
+            ["Parsed DOCX: ${show(countBlocks(blocks))} blocks"], [], 0))
+        }
+      }
+      else if kind == "powerpoint" then {
+        -- A deck always has at least one slide, so an archive with no slide
+        -- entries is not a PPTX; without this check it parsed to an empty
+        -- document and was counted as a success.
+        if listLength(findSlideEntries(filepath)) == 0
+        then Err("${label} parse failed: the archive contains no slides — not a PowerPoint presentation")
+        else {
+          let body = parsePptx(filepath);
+          -- PPTX image extraction has always been opt-in behind useAI, unlike DOCX
+          -- where it is unconditional. Preserved deliberately: switching PPTX to
+          -- extractImages would change output for every existing caller. The
+          -- inconsistency is worth resolving, but not silently inside a refactor.
+          let images = if opts.useAI then parsePptxImages(filepath) else [];
+          let blocks = concat(body, images);
+          Ok(mkOutcome("pptx", filepath, parsePptxMetadata(filepath), blocks,
+            ["Parsed PPTX: ${show(countBlocks(blocks))} blocks"], [], 0))
+        }
+      }
+      else if kind == "excel" then {
+        -- A workbook always has at least one worksheet; an archive without any
+        -- is not an XLSX and previously parsed to an empty document.
+        if listLength(findSheetEntries(filepath)) == 0
+        then Err("${label} parse failed: the archive contains no worksheets — not an Excel workbook")
+        else {
+          -- Warnings name colour the workbook carries that the blocks do not
+          -- (conditional formatting, gradient/pattern fills, unresolvable theme).
+          let parsed = parseXlsxWithWarnings(filepath);
+          Ok(mkOutcome("xlsx", filepath, parseXlsxMetadata(filepath), parsed.blocks,
+            ["Parsed XLSX: ${show(countBlocks(parsed.blocks))} blocks"], parsed.warnings, 0))
+        }
+      }
+      else Err("unknown Office type for extension '${ext}'")
   }
-  else if kind == "powerpoint" then {
-    let body = parsePptx(filepath);
-    -- PPTX image extraction has always been opt-in behind useAI, unlike DOCX
-    -- where it is unconditional. Preserved deliberately: switching PPTX to
-    -- extractImages would change output for every existing caller. The
-    -- inconsistency is worth resolving, but not silently inside a refactor.
-    let images = if opts.useAI then parsePptxImages(filepath) else [];
-    let blocks = concat(body, images);
-    Ok(mkOutcome("pptx", filepath, parsePptxMetadata(filepath), blocks,
-      ["Parsed PPTX: ${show(countBlocks(blocks))} blocks"], [], 0))
-  }
-  else if kind == "excel" then {
-    -- Warnings name colour the workbook carries that the blocks do not
-    -- (conditional formatting, gradient/pattern fills, unresolvable theme).
-    let parsed = parseXlsxWithWarnings(filepath);
-    Ok(mkOutcome("xlsx", filepath, parseXlsxMetadata(filepath), parsed.blocks,
-      ["Parsed XLSX: ${show(countBlocks(parsed.blocks))} blocks"], parsed.warnings, 0))
-  }
-  else Err("unknown Office type for extension '${ext}'")
 }
 
 -- --- ODT / ODP / ODS ---
@@ -266,22 +399,49 @@ func orchOffice(filepath: string, ext: string, opts: ParseOptions)
 -- must be resolved against the archive exactly as EPUB's are. Without this the
 -- ImageBlock's `data` keeps the href string and `dataLength` reports the length
 -- of the path rather than of the image.
-func orchOdf(filepath: string, ext: string) -> ParseOutcome ! {FS} = {
+--
+-- A corrupt container is an Err (orchZipCheck) rather than an Ok document
+-- whose blocks are empty — the same contract the Office formats get.
+func orchOdf(filepath: string, ext: string) -> Result[ParseOutcome, string] ! {FS} =
+  match orchZipCheck(filepath, orchOdfLabel(ext)) {
+    Some(msg) => Err(msg),
+    None => orchOdfParsed(filepath, ext)
+  }
+
+-- A readable archive whose content.xml is missing or unparseable comes back
+-- from the ODF parsers as one error block (orchFatalParseError): an Err too.
+func orchOdfParsed(filepath: string, ext: string) -> Result[ParseOutcome, string] ! {FS} = {
+  let label = orchOdfLabel(ext);
   if ext == "odt" then {
-    let parsed = concat(parseOdt(filepath), parseOdtHeadersFooters(filepath));
-    let blocks = resolveBlockImages(filepath, parsed);
-    mkOutcome("odt", filepath, parseOdtMetadata(filepath), blocks,
-      ["Parsed ODT: ${show(countBlocks(blocks))} blocks"], [], 0)
+    let body = parseOdt(filepath);
+    let fatal = orchFatalParseError(body);
+    if length(fatal) > 0 then Err("${label} parse failed: ${fatal}")
+    else {
+      let parsed = concat(body, parseOdtHeadersFooters(filepath));
+      let blocks = resolveBlockImages(filepath, parsed);
+      Ok(mkOutcome("odt", filepath, parseOdtMetadata(filepath), blocks,
+        ["Parsed ODT: ${show(countBlocks(blocks))} blocks"], [], 0))
+    }
   }
   else if ext == "odp" then {
-    let blocks = resolveBlockImages(filepath, parseOdp(filepath));
-    mkOutcome("odp", filepath, parseOdpMetadata(filepath), blocks,
-      ["Parsed ODP: ${show(countBlocks(blocks))} blocks"], [], 0)
+    let body = parseOdp(filepath);
+    let fatal = orchFatalParseError(body);
+    if length(fatal) > 0 then Err("${label} parse failed: ${fatal}")
+    else {
+      let blocks = resolveBlockImages(filepath, body);
+      Ok(mkOutcome("odp", filepath, parseOdpMetadata(filepath), blocks,
+        ["Parsed ODP: ${show(countBlocks(blocks))} blocks"], [], 0))
+    }
   }
   else {
-    let blocks = resolveBlockImages(filepath, parseOds(filepath));
-    mkOutcome("ods", filepath, parseOdsMetadata(filepath), blocks,
-      ["Parsed ODS: ${show(countBlocks(blocks))} blocks"], [], 0)
+    let body = parseOds(filepath);
+    let fatal = orchFatalParseError(body);
+    if length(fatal) > 0 then Err("${label} parse failed: ${fatal}")
+    else {
+      let blocks = resolveBlockImages(filepath, body);
+      Ok(mkOutcome("ods", filepath, parseOdsMetadata(filepath), blocks,
+        ["Parsed ODS: ${show(countBlocks(blocks))} blocks"], [], 0))
+    }
   }
 }
 
@@ -448,10 +608,14 @@ export func parseDocument(filepath: string, opts: ParseOptions)
       if format == "email" && opts.deep
         then Ok(orchEnrich(filepath, orchEmailDeep(outcome, opts), opts))
         else Ok(orchEnrich(filepath, outcome, opts)),
-    -- Deterministic path refused — every format it can do has been routed
-    -- above, so what reaches here is genuinely unsupported. Surface it as a
-    -- failure, not as a document whose content is the refusal (orchParseError).
-    Err(msg) => Err(orchParseError("parse_refused", "${filepath}: ${msg}"))
+    -- Two Err shapes reach here from the deterministic path: a known format
+    -- whose PARSE failed (corrupt Office/ODF file — see orchZipCheck), and a
+    -- refusal of a format it cannot do. They get different codes so a caller
+    -- can tell "your file is broken" from "this format needs more caps".
+    Err(msg) =>
+      if orchDeterministicFormat(format)
+        then Err(orchParseError("parse_failed", "${filepath}: ${msg}"))
+        else Err(orchParseError("parse_refused", "${filepath}: ${msg}"))
   }
 }
 
@@ -847,6 +1011,9 @@ export func parseDocumentAI(filepath: string, opts: ParseOptions)
   else if format == "video" then Ok(orchMedia(filepath, "video", parseVideo(filepath, orchVideoMime(ext))))
   else match parseDocumentPure(filepath, opts) {
     Ok(outcome) => Ok(orchEnrich(filepath, outcome, opts)),
-    Err(msg) => Err(orchParseError("parse_refused", "${filepath}: ${msg}"))
+    Err(msg) =>
+      if orchDeterministicFormat(format)
+        then Err(orchParseError("parse_failed", "${filepath}: ${msg}"))
+        else Err(orchParseError("parse_refused", "${filepath}: ${msg}"))
   }
 }

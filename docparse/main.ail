@@ -94,13 +94,30 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
 
   -- Get filepath and flags from CLI args
   let args = getArgs();
-  let filepath = match args {
-    [] => "docparse/data/sample.docx",
-    f :: _ => f
+  -- Positional inputs. The [bin] shim passes every argument straight through,
+  -- so the batch contract eparse relies on — `docparse f1 f2 ... fN
+  -- --output-dir DIR` (one batch per raw leaf directory) — arrives here as N
+  -- paths plus flags. The bash wrapper (bin/docparse) used to split these
+  -- itself and translate --output-dir into DOCPARSE_OUTPUT_DIR; main now owns
+  -- both halves so the [bin] entry is honest on its own.
+  let files = match inputFiles(args) {
+    [] => ["docparse/data/sample.docx"],
+    fs => fs
   };
+  let outDirFlag = getOutputDir(args);
+  if hasFlag(args, "--output-dir") && length(outDirFlag) == 0 then {
+    println("Error: --output-dir requires a directory path (e.g. --output-dir parsed/)");
+    exit(1)
+  } else ();
   let useAI = hasFlag(args, "describe");
   let doSummarize = hasFlag(args, "summarize");
   let convertTarget = getConvertTarget(args);
+  -- One output path cannot receive N inputs: every file would overwrite the
+  -- same target and only the last would survive (bin/docparse refuses this too).
+  if length(convertTarget) > 0 && listLength(files) > 1 then {
+    println("Error: --convert takes a single input file (got ${show(listLength(files))}). Convert one at a time, or use --output-dir for batch parsing.");
+    exit(2)
+  } else ();
   let generateTarget = getGenerateTarget(args);
   let promptText = getPromptText(args);
   let referenceDoc = getReferenceDoc(args);
@@ -143,35 +160,16 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
     println("Usage: ./bin/docparse --generate report.docx --prompt \"Q1 sales report with tables\"");
     println("       ./bin/docparse --generate slides.pptx --prompt \"5-slide pitch deck\"")
   }
-  -- Check file exists (normal parse mode)
-  else if not fileExists(filepath) then {
-    println("Error: File not found: ${filepath}");
-    println("");
-    println("Usage: ailang run --entry main --caps IO,FS,Env docparse/main.ail <file>");
-    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail <file> describe");
-    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail <file> summarize");
-    println("       ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail --generate output.docx --prompt \"...\"")
-  }
   else {
-    -- Step 1: Detect format
-    -- Special case: archive extensions (.tar.gz, .tgz, .tex.gz) route to
-    -- the LaTeX pipeline — arXiv source bundles. getExtension only returns
-    -- the last dotted suffix (".gz"), so we check the full filename first.
-    let rawExt = getExtension(filepath);
-    let ext = if isTarGz(filepath) then "tar.gz" else rawExt;
-    let format = if isTarGz(filepath) then "latex" else detectFormat(rawExt);
-    let strategy = strategyDescription(format);
-    println("File:     ${filepath}");
-    println("Format:   ${format} (${ext})");
-    println("Strategy: ${strategy}");
-    let aiRequired = needsAI(format);
-    if aiRequired then println("AI:       required (format needs AI extraction)")
-    else if doSummarize then println("AI:       enabled (summarize)")
-    else if useAI then println("AI:       enabled (image descriptions)")
-    else println("AI:       disabled (pass 'describe' or 'summarize' arg to enable)");
-    println("");
+    if listLength(files) > 1 then {
+      println("Batch mode: parsing ${show(listLength(files))} files (each file's outputs written as soon as it finishes)");
+      println("")
+    } else ();
+    -- --output-dir flag wins over the env var the bash wrapper sets; env wins
+    -- over the default of "." (the caller's cwd).
+    let outDir = if length(outDirFlag) > 0 then outDirFlag else getEnvOr("DOCPARSE_OUTPUT_DIR", ".");
 
-    -- Step 2: Parse. Every format recipe lives in the orchestrator, shared
+    -- Parse. Every format recipe lives in the orchestrator, shared
     -- with the MCP server and the hosted API — see docparse/services/orchestrator.
     --
     -- --deep and --threaded also read from env because AILANG batch mode treats
@@ -187,7 +185,65 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
       projectRoot: getEnvOr("DOCPARSE_PROJECT_ROOT", ""),
       noAttachmentData: hasFlag(args, "--no-attachment-data") || getEnvOr("DOCPARSE_NO_ATTACHMENT_DATA", "") == "1"
     };
-    runParse(filepath, opts, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize)
+    let failed = parseFiles(files, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+    if failed > 0 then exit(1) else ()
+  }
+}
+
+-- Parse every input file in turn, writing each file's outputs as soon as it
+-- finishes — the batch contract the bash wrapper used to provide and eparse's
+-- batch mode depends on. Returns the count of failed files so main can exit
+-- non-zero WITHOUT aborting the remaining files: exit() inside the loop would
+-- drop every file after the first failure (the same ailang#607 shape the
+-- empty-extraction note in runParse documents).
+func parseFiles(files: [string], opts: ParseOptions, outDir: string, doSummarize: bool,
+                convertTarget: string, referenceDoc: string, referenceSection: int,
+                tableStyle: string, slideSize: string) -> int ! {IO, FS, AI, Env, Net, Process, Clock} {
+  let failures = parseLoop(files, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+  if listLength(files) > 1 then {
+    println("");
+    println("Batch complete: ${show(listLength(files) - failures)}/${show(listLength(files))} parsed${if failures > 0 then ", ${show(failures)} failed" else ""}.")
+  } else ();
+  failures
+}
+
+func parseLoop(files: [string], opts: ParseOptions, outDir: string, doSummarize: bool,
+               convertTarget: string, referenceDoc: string, referenceSection: int,
+               tableStyle: string, slideSize: string) -> int ! {IO, FS, AI, Env, Net, Process, Clock} {
+  match files {
+    [] => 0,
+    f :: rest => {
+      let ok = parseOne(f, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+      parseLoop(rest, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize) + (if ok then 0 else 1)
+    }
+  }
+}
+
+-- Parse one input file: the per-file banner plus the orchestrator call.
+-- Returns false on hard failure (missing file, parse error) so the batch can
+-- continue with the remaining files and main can still exit non-zero.
+func parseOne(filepath: string, opts: ParseOptions, outDir: string, doSummarize: bool,
+              convertTarget: string, referenceDoc: string, referenceSection: int,
+              tableStyle: string, slideSize: string) -> bool ! {IO, FS, AI, Env, Net, Process, Clock} {
+  if not fileExists(filepath) then {
+    println("Error: File not found: ${filepath}");
+    false
+  }
+  else {
+    let rawExt = getExtension(filepath);
+    let ext = if isTarGz(filepath) then "tar.gz" else rawExt;
+    let format = if isTarGz(filepath) then "latex" else detectFormat(rawExt);
+    let strategy = strategyDescription(format);
+    println("File:     ${filepath}");
+    println("Format:   ${format} (${ext})");
+    println("Strategy: ${strategy}");
+    let aiRequired = needsAI(format);
+    if aiRequired then println("AI:       required (format needs AI extraction)")
+    else if doSummarize then println("AI:       enabled (summarize)")
+    else if opts.useAI then println("AI:       enabled (image descriptions)")
+    else println("AI:       disabled (pass 'describe' or 'summarize' arg to enable)");
+    println("");
+    runParse(filepath, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize)
   }
 }
 
@@ -223,19 +279,23 @@ func printNotes(notes: [string]) -> () ! {IO} =
 -- Replaces ~14 parse*Document functions that each re-derived their own dispatch
 -- and merge order — the divergence that let the hosted API drop PDF annotations
 -- and silently truncate multi-file LaTeX.
-func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTarget: string,
+--
+-- Returns false on hard failure instead of exit()ing: in batch mode an exit()
+-- here would kill every remaining file, so parseFiles collects the count and
+-- main exits non-zero once the whole batch has had its turn.
+func runParse(filepath: string, opts: ParseOptions, outDir: string, doSummarize: bool, convertTarget: string,
               referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string)
-  -> () ! {IO, FS, AI, Env, Net, Process, Clock} {
+  -> bool ! {IO, FS, AI, Env, Net, Process, Clock} {
   match parseDocument(filepath, opts) {
-    -- Hard failure: print, write NOTHING, exit non-zero. The error text must
-    -- never become the document — a caller that gets a file back cannot tell a
-    -- parse from a failure, and `ailang run --batch` scores it as a success.
-    -- The code says which kind of failure it was; "AI provider failure" was
-    -- hardcoded here and mislabelled every backend and routing error as one.
+    -- Hard failure: print, write NOTHING. The error text must never become the
+    -- document — a caller that gets a file back cannot tell a parse from a
+    -- failure, and `ailang run --batch` scores it as a success. The code says
+    -- which kind of failure it was; "AI provider failure" was hardcoded here
+    -- and mislabelled every backend and routing error as one.
     Err(e) => {
       println("");
       println("Error [${e.code}]: ${e.message}");
-      exit(1)
+      false
     },
     Ok(outcome) => {
       printNotes(outcome.notes);
@@ -260,10 +320,48 @@ func runParse(filepath: string, opts: ParseOptions, doSummarize: bool, convertTa
       if countBlocks(doc.blocks) == 0
         then println("⚠ Warning: extraction produced no content blocks.")
         else ();
-      writeOutputs(doc, result, doSummarize, filepath, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize)
+      writeOutputs(doc, result, outDir, doSummarize, filepath, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+      true
     }
   }
 }
+
+-- Extract --output-dir DIR: where parsed outputs (.json/.md) are written.
+-- eparse's batch mode calls `docparse f1 ... fN --output-dir DIR` through the
+-- [bin] shim, which reaches main with the raw arguments — the flag has to be
+-- parsed here, not only in the bash wrapper.
+pure func getOutputDir(args: [string]) -> string =
+  match args {
+    [] => "",
+    "--output-dir" :: rest => match rest {
+      [] => "",
+      dir :: _ => dir
+    },
+    _ :: rest => getOutputDir(rest)
+  }
+
+-- Flags whose NEXT argument is the flag's value, not an input path.
+pure func isValueFlag(flag: string) -> bool =
+  any(\f. f == flag, ["--output-dir", "--convert", "--generate", "--prompt",
+                      "--reference-doc", "--reference-section", "--slide-size",
+                      "--table-style", "--pdf-backend", "--ai"])
+
+-- Positional inputs: everything that is neither a flag nor a flag's value.
+-- "describe"/"summarize" are bare-word flags that predate --flags, and the
+-- boolean module flags travel inline in batch invocations — none of them are
+-- input documents.
+pure func inputFiles(args: [string]) -> [string] =
+  match args {
+    [] => [],
+    a :: rest =>
+      if length(a) > 0 && startsWith(a, "-") then {
+        if isValueFlag(a)
+          then match rest { [] => [], _ :: r => inputFiles(r) }
+          else inputFiles(rest)
+      }
+      else if a == "describe" || a == "summarize" then inputFiles(rest)
+      else a :: inputFiles(rest)
+  }
 
 -- Extract --convert target path from args: ["file.docx", "--convert", "out.html"] -> "out.html"
 pure func getConvertTarget(args: [string]) -> string =
@@ -459,14 +557,14 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
 
 -- Write all output files: JSON, markdown, optional conversion, and optional AI summary
 -- Output filenames are derived from input: sample.docx -> sample.docx.json, sample.docx.md
--- Output dir: DOCPARSE_OUTPUT_DIR env var (default: ".", the caller's cwd).
+-- Output dir: outDir, resolved by main from --output-dir (flag), then
+-- DOCPARSE_OUTPUT_DIR (what the bash wrapper and eparse set), then "." (cwd).
 -- The default used to be docparse/data, which only made sense when the only
 -- way to run this was from a checkout; an installed `docparse` (the [bin]
 -- shim, or bin/docparse from PATH) should leave its output where the user is.
 -- convertTarget: if non-empty, generate output in target format (e.g., "out.html", "out.docx")
-func writeOutputs(doc: ParsedDocument, result: ExtractionResult, doSummarize: bool, filepath: string,
+func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string, doSummarize: bool, filepath: string,
                   convertTarget: string, referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string) -> () ! {IO, FS, AI, Env} {
-  let outDir = getEnvOr("DOCPARSE_OUTPUT_DIR", ".");
   let basename = mainBasename(filepath);
 
   -- Ensure the output directory exists (defensive — bin/docparse already

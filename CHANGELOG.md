@@ -9,6 +9,114 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### docx → md → docx keeps comments and track changes
+
+- **Fixed:** converting a reviewed `.docx` to Markdown and back silently
+  turned every comment and track change into plain quoted text — no warning,
+  exit 0. The Markdown writer renders them as blockquotes
+  (`> **Comment (Author, date):** text`, `> [insert by Author on date] text`)
+  but the Markdown parser had no rule to read that syntax back. It now
+  restores the `CommentBlock` (author, date, text, anchor) and `ChangeBlock`
+  (insert / delete / move-to / move-from, author, date, text). Other
+  blockquotes are unchanged.
+- **Fixed:** a comment anchor, comment or change text spanning several lines
+  broke out of its blockquote in Markdown output (continuation lines lost
+  their `> `), which misrendered and left the comment unanchored on the way
+  back. Every continuation line now keeps its quote marker.
+- Not representable in Markdown, so still lost on that route: comment
+  threading (reply-to) and comment ids.
+- `benchmarks/roundtrip_check.py` now asserts comments and track changes
+  survive the Markdown round trip (11 test files failed it before this fix).
+
+### The `[bin]` shim honours the eparse batch contract: N files + `--output-dir`
+
+`docparse/main` now parses `--output-dir DIR` and accepts N positional input
+files itself. Previously the batch contract — `docparse f1 f2 ... fN
+--output-dir DIR`, which `eparse` calls once per raw leaf directory — lived
+only in the bash wrapper (`bin/docparse`), which translated `--output-dir`
+into `DOCPARSE_OUTPUT_DIR` and fanned the file list out through
+`ailang run --batch`. The `[bin]` shim installed by `ailang install` reaches
+`docparse/main` directly with the raw arguments, so through the shim the
+second and later files were silently ignored, `--output-dir` was treated as
+an input path (or, when it appeared first, as *the* input path), and outputs
+landed in the caller's cwd — eparse batches then reported every post-cutover
+message as unparsed while exiting 0.
+
+Behaviour through the shim now:
+
+- `docparse a.eml b.eml --output-dir /tmp/parsed/` parses both files and
+  writes each file's `.json`/`.md` into `/tmp/parsed/` as soon as that file
+  finishes (precedence unchanged: `--output-dir` flag, then
+  `DOCPARSE_OUTPUT_DIR`, then cwd).
+- Flags (`describe`, `summarize`, `--deep`, `--threaded`,
+  `--no-attachment-data`, `--convert`, `--reference-doc`, ...) are separated
+  from input paths, so none of them leak into the file list.
+- A file that fails to parse or is missing no longer aborts the batch:
+  `parseFiles` continues with the remaining files and `main` still exits 1,
+  with a `Batch complete: N/M parsed` summary line (multi-file runs only —
+  single-file output is unchanged).
+- `--convert` with more than one input is refused (exit 2) instead of every
+  file overwriting the same target, matching `bin/docparse`.
+- Both `[bin]` shims get this: `docparse` and `docparse-pdf` run the same
+  module.
+
+The full `bin/docparse` wrapper is unaffected: it still fans out with
+`ailang run --batch` for compile-once throughput, and its `DOCPARSE_OUTPUT_DIR`
+env now simply agrees with the flag main would have parsed anyway.
+
+---
+
+### Markdown indented code blocks keep their lines
+
+- **A 4-space (or tab) indented code block is now a code block**, the same
+  `TextBlock` style `code` a fenced block produces, so Markdown → DOCX (and
+  every other generator) keeps its line breaks and column spacing instead of
+  collapsing it into one run-on paragraph. Interior blank lines stay inside
+  the block; trailing ones are dropped. Indented `-`/`*`/`1.` lines are still
+  nested list items, and an indented line inside an open paragraph, list item
+  or blockquote is still a lazy continuation.
+
+### OfficeDocBench sheet detection reads the current section shape
+
+- **Sheets feature detection is back to 5/5 (was 0/5).** The parser stopped
+  packing the sheet name into the section kind (`"sheet:Q1"` → kind `"sheet"`
+  plus a `name` field), but the OfficeDocBench docparse adapter and
+  `annotate.py` still matched only the packed form, so every XLSX/ODS file
+  reported no sheet names. Both now read `name` from a bare `"sheet"`
+  section and still accept the old packed form. Parser output is unchanged;
+  this is a benchmark-harness fix only.
+
+### A corrupt Office or ODF file is a failed parse, not a document
+
+- **Fixed:** a corrupt `.docx` (e.g. `printf 'not a zip file' > corrupt.docx`)
+  exited 0 and wrote an output file whose only content was
+  `XML parse error: XML parse error: empty document`, and folder/batch mode
+  counted it as succeeded (a 19-file batch reported 19/19). DOCX, PPTX, XLSX,
+  ODT, ODP and ODS now fail with `Error [parse_failed]` on stderr, exit 1,
+  write no output file, and batch mode counts them as failed — the same
+  contract failed PDF parses got in 0.42.
+- Caught: a file that is not a ZIP archive or is an empty one; a DOCX whose
+  `word/document.xml` is missing or unparseable; an ODF file whose
+  `content.xml` is missing or unparseable; a PPTX with no slides; an XLSX with
+  no worksheets.
+- New orchestrator error code `parse_failed` (the file is broken) alongside
+  `parse_refused` (the format is unsupported). The stdio MCP server reports it
+  as `PARSE_FAILED`. API servers that map orchestrator codes should add it;
+  unmapped, it falls through to their generic error.
+- `benchmarks/failure_check.py` covers a corrupt DOCX and a not-a-deck PPTX.
+
+### Browser demo runs on AILANG v0.43.1 (WASM pin v0.34.0 → v0.43.1)
+
+- `docs/wasm/.ailang-version` and the vendored `ailang.wasm` move to v0.43.1
+  (44 MB → 24 MB download). Vendored parser modules were already current.
+- Checked locally with the CI Playwright suite: `wasm-smoke` (homepage parses
+  sample.docx, footer shows the pin) and `module-budget` pass; the slowest
+  module type-check is docx_parser at 2.4 s against the 8 s embedder budget.
+
+---
+
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
 
 ### Scanned PDFs escalate to local docling by default; AI is never automatic
