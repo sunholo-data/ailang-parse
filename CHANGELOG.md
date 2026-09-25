@@ -30,6 +30,42 @@ separately — see `sdks/` for per-SDK changelogs.
 - `benchmarks/roundtrip_check.py` now asserts comments and track changes
   survive the Markdown round trip (11 test files failed it before this fix).
 
+### The `[bin]` shim honours the eparse batch contract: N files + `--output-dir`
+
+`docparse/main` now parses `--output-dir DIR` and accepts N positional input
+files itself. Previously the batch contract — `docparse f1 f2 ... fN
+--output-dir DIR`, which `eparse` calls once per raw leaf directory — lived
+only in the bash wrapper (`bin/docparse`), which translated `--output-dir`
+into `DOCPARSE_OUTPUT_DIR` and fanned the file list out through
+`ailang run --batch`. The `[bin]` shim installed by `ailang install` reaches
+`docparse/main` directly with the raw arguments, so through the shim the
+second and later files were silently ignored, `--output-dir` was treated as
+an input path (or, when it appeared first, as *the* input path), and outputs
+landed in the caller's cwd — eparse batches then reported every post-cutover
+message as unparsed while exiting 0.
+
+Behaviour through the shim now:
+
+- `docparse a.eml b.eml --output-dir /tmp/parsed/` parses both files and
+  writes each file's `.json`/`.md` into `/tmp/parsed/` as soon as that file
+  finishes (precedence unchanged: `--output-dir` flag, then
+  `DOCPARSE_OUTPUT_DIR`, then cwd).
+- Flags (`describe`, `summarize`, `--deep`, `--threaded`,
+  `--no-attachment-data`, `--convert`, `--reference-doc`, ...) are separated
+  from input paths, so none of them leak into the file list.
+- A file that fails to parse or is missing no longer aborts the batch:
+  `parseFiles` continues with the remaining files and `main` still exits 1,
+  with a `Batch complete: N/M parsed` summary line (multi-file runs only —
+  single-file output is unchanged).
+- `--convert` with more than one input is refused (exit 2) instead of every
+  file overwriting the same target, matching `bin/docparse`.
+- Both `[bin]` shims get this: `docparse` and `docparse-pdf` run the same
+  module.
+
+The full `bin/docparse` wrapper is unaffected: it still fans out with
+`ailang run --batch` for compile-once throughput, and its `DOCPARSE_OUTPUT_DIR`
+env now simply agrees with the flag main would have parsed anyway.
+
 ---
 
 ## [v0.45.0](https://github.com/sunholo-data/ailang-parse/compare/v0.44.0...v0.45.0) — 2026-09-25
