@@ -9,6 +9,57 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### PDF backends work straight from `ailang install`
+
+The installed `docparse` shim (v0.42.0) could not run a single PDF backend, for
+two independent reasons, and both are fixed:
+
+- **No Process capability.** The shim ran with `--caps IO,FS,Env`, so
+  `DOCPARSE_PDF_BACKEND=pdftotext docparse any.pdf` failed immediately with
+  `effect 'Process' requires capability, but none provided` — the backend
+  bridge runs the Python adapter through `uv run`, which needs Process. The
+  everyday `docparse` shim keeps its minimal capability set; a new **`docparse-pdf`**
+  shim (same module) adds `Process` — with `--process-timeout 20m`, without
+  which the docling tier dies at the 30s default on any real contract. It is a
+  separate command because AILANG cannot narrow a capability to a command:
+  `Process[cmd=uv]` is rejected at type-check (`EFF_PARAMS_NOT_SUPPORTED` — only
+  Rand and AI take effect parameters in v1.0.0), so the narrowness lives in
+  which command carries Process, not in the capability itself.
+- **The adapter was unreachable from an install.** The bridge resolved the
+  adapter and the uv project relative to the *caller's working directory*
+  (`adapterPath("")` → `docparse/services/pdf_backends/adapter.py`,
+  `backendProject("")` → `.`), which the shim deliberately leaves untouched.
+  The adapter has shipped at `assets/pdf_backends/adapter.py` since v0.41.x;
+  nothing looked there. `pdf_backend_external` now resolves, in order: explicit
+  `DOCPARSE_PROJECT_ROOT` (clone / install.sh prefix — unchanged), the
+  cwd-relative adapter when it exists (a clone run without the wrapper —
+  unchanged), then `std/package.assetPath("sunholo/ailang_parse", ...)` for the
+  installed shim. The exported functions gain `FS` for that resolution; every
+  caller (the orchestrator's full ladder) already declared `{FS, Process}`.
+- **Installed runs use an ephemeral uv environment.** From the package the
+  adapter runs as `uv run --no-project [--with docling|--with liteparse]
+  python <adapter>`. `--no-project` ignores any pyproject in the caller's cwd
+  and writes nothing into the registry cache; `--with` pulls only the chosen
+  backend, so a liteparse or pdftotext run never downloads docling (pdftotext
+  and `words` need only the stdlib and poppler). uv caches the environment
+  after the first run.
+- **liteparse backend fixed.** `LiteParse().parse(path, ocr_enabled=False)`
+  raised `TypeError: parse() got an unexpected keyword argument 'ocr_enabled'`
+  on liteparse 2.14.3 and 2.14.7 alike: `ocr_enabled` is a constructor option.
+  The adapter now calls `LiteParse(ocr_enabled=False).parse(path)`.
+
+Verified 25 Sept outside any clone, with no `DOCPARSE_PROJECT_ROOT`:
+pdftotext and liteparse both convert `table_report.pdf` end to end through
+the installed-layout path. docling was not exercised (it pulls torch).
+
+`DOCPARSE_PDF_BACKEND=liteparse docparse-pdf file.pdf --convert out.md` now
+works from a clean `ailang install` (poppler and uv permitting, as reported by
+the installer preflight).
+
+---
+
 ## [v0.43.1](https://github.com/sunholo-data/ailang-parse/compare/v0.42.0...v0.43.1) — 2026-09-23
 
 v0.43.0 was tagged but never published: the registry now refuses a version

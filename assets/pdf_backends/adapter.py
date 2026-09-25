@@ -204,7 +204,9 @@ def _liteparse_headings_from_textitems(textitems: list) -> set[str]:
 def run_liteparse(pdf: Path) -> dict:
     from liteparse import LiteParse
 
-    result = LiteParse().parse(str(pdf), ocr_enabled=False)
+    # ocr_enabled is a constructor option (liteparse 2.14.x); parse() takes only
+    # the file and raises TypeError on the old keyword.
+    result = LiteParse(ocr_enabled=False).parse(str(pdf))
     all_textitems = []
     for page in result.pages:
         all_textitems.extend(getattr(page, "textItems", []) or [])
