@@ -191,10 +191,10 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "The CLI offers four backends via --pdf-backend: pdftotext (poppler, deterministic plain text — the default), docling (IBM Docling, local ML layout, ~5× faster than AI), liteparse (run-llama LiteParse, font-size heading inference), or ai (Gemini, Claude, OpenAI, or Ollama — required for scanned PDFs). All produce the same structured JSON Block ADT."}},
-    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Local deterministic backends: pdftotext (default, poppler plain-text, highest character recall), Docling (structural ML extraction), LiteParse (text + font-size headings). AI backends for scanned/multimodal PDFs: Gemini, Claude, OpenAI, Ollama. Switch with --pdf-backend pdftotext|docling|liteparse|ai — no code changes."}},
-    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — that is now the default. --pdf-backend pdftotext (poppler) needs no API key and runs offline, as do docling and liteparse. For scanned PDFs you can still stay local with --ai ollama/llama3.2-vision."}},
-    {"@type": "Question", "name": "Do all PDFs require AI?", "acceptedAnswer": {"@type": "Answer", "text": "No — PDFs default to the deterministic pdftotext backend, no AI. Born-digital PDFs (papers, reports, invoices, contracts) parse cleanly with pdftotext, docling, or liteparse. AI is required only for scanned PDFs, handwriting, and complex multimodal layouts that have no text layer."}},
+    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "The CLI offers four backends via --pdf-backend: pdftotext (poppler, deterministic plain text — the default), docling (IBM Docling, local ML layout — also the automatic fallback for scanned pages, ~5× faster than AI), liteparse (run-llama LiteParse, font-size heading inference), or ai (Gemini, Claude, OpenAI, or Ollama — opt-in only, never automatic). All produce the same structured JSON Block ADT."}},
+    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Local deterministic backends: pdftotext (default, poppler plain-text, highest character recall), Docling (structural ML extraction — the automatic local fallback when pdftotext finds no text layer, e.g. a scan), LiteParse (text + font-size headings). AI backends, opt-in only via --pdf-backend ai: Gemini, Claude, OpenAI, Ollama. Switch with --pdf-backend pdftotext|docling|liteparse|ai — no code changes."}},
+    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — that is the default, including for scanned PDFs. --pdf-backend pdftotext (poppler) needs no API key and runs offline; when it finds no text layer it escalates automatically to the local docling backend, as does liteparse if you choose it. AI is opt-in only (--pdf-backend ai) and, if you still want to stay fully local, --ai ollama/llama3.2-vision works offline too."}},
+    {"@type": "Question", "name": "Do all PDFs require AI?", "acceptedAnswer": {"@type": "Answer", "text": "No — PDFs default to the pdftotext → docling ladder, never AI. Born-digital PDFs (papers, reports, invoices, contracts) parse cleanly with pdftotext; scanned or image-only PDFs escalate automatically to the local docling backend. AI (--pdf-backend ai) is opt-in only, for cases where you want cloud-model quality on handwriting or complex multimodal layouts."}},
     {"@type": "Question", "name": "Is the output format the same as Office parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. PDF parsing produces the same Block ADT (headings, text, tables, images) as DOCX, XLSX, and PPTX parsing. Your downstream code handles all formats identically."}},
     {"@type": "Question", "name": "How much does PDF parsing cost?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse charges per API request. The AI provider costs are separate — you use your own API key. Gemini Flash is the most cost-effective option for high-volume PDF processing."}}
   ]
@@ -318,7 +318,7 @@ uv pip install docling liteparse</code></pre>
 <pre><code class="language-bash"># pdftotext — default, deterministic, no API key, most complete text
 ./bin/docparse paper.pdf
 
-# AI — required for scanned / image-only PDFs
+# AI — opt-in only; scanned/image-only PDFs escalate to local docling by default
 ./bin/docparse scan.pdf --pdf-backend ai --ai gemini-2.5-flash
 
 # Docling — local, structural, ~5× faster than Gemini
@@ -486,11 +486,11 @@ for block in result.blocks:
         </details>
         <details>
           <summary>Can I parse PDFs locally without sending data to the cloud?</summary>
-          <div class="dp-faq-answer"><p>Yes. Use Ollama as the AI backend. Set <code>--ai ollama/llama3.2-vision</code> or any vision-capable model. No data leaves your machine.</p></div>
+          <div class="dp-faq-answer"><p>Yes, for every PDF — that's the default. pdftotext handles born-digital PDFs; docling handles scanned/image-only ones automatically, no flag needed. If you choose the AI backend anyway, Ollama keeps it local too: set <code>--ai ollama/llama3.2-vision</code> or any vision-capable model. No data leaves your machine either way.</p></div>
         </details>
         <details>
-          <summary>Why does PDF parsing require AI?</summary>
-          <div class="dp-faq-answer"><p>PDFs encode glyph positions, not document structure. Extracting headings, tables, and reading order requires visual understanding. For structured source files, <a href="docx-parsing.html">parse the DOCX directly</a>.</p></div>
+          <summary>Why would PDF parsing ever use AI?</summary>
+          <div class="dp-faq-answer"><p>PDFs encode glyph positions, not document structure, so extracting headings, tables, and reading order needs either a layout model (docling, the local default for scans) or, for handwriting and complex multimodal layouts, visual understanding from a cloud AI model — opt-in via <code>--pdf-backend ai</code>, never automatic. For structured source files, <a href="docx-parsing.html">parse the DOCX directly</a>.</p></div>
         </details>
         <details>
           <summary>Is the output format the same as Office parsing?</summary>

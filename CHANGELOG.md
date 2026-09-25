@@ -9,6 +9,33 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### Docs: correct API examples, pricing figures, and stale AI-required claims
+
+- **curl/Python examples** in `integrations.html`, `docs/lab/samples/guide.html`,
+  `superdoc.html`, and `workbench.html` used the wrong upload field and no API
+  key. `/api/v1/parse` takes the file as `filepath` (not `file`) and the key as
+  the `apiKey` form field (not an `Authorization: Bearer` or `X-API-Key`
+  header, which that endpoint doesn't read) — verified against
+  `parseFileSecure` in `sunholo-data/docparse`'s `api_server.ail`.
+- **Free tier daily rate limit**: the JSON-LD on `index.html` and
+  `pricing.html` said 500; the live value (`pricing.ail`'s
+  `daily_rate_limit`) is 50, matching the page's own visible copy.
+- **Output format counts**: "9 output formats" conflated the 4 parse output
+  formats (structured JSON blocks, Markdown, HTML, A2UI) with the 9 document
+  conversion targets (HTML, Markdown, Quarto, DOCX, PPTX, XLSX, ODT, ODP,
+  ODS). Fixed on `index.html` and `terms.html`.
+- **CVR number**: added `44324687` (Holosun ApS) to `privacy.html` and
+  `terms.html`, matching `docs/templates/proposal.md`.
+- **Scanned PDFs no longer require AI as of v0.45.0** (the default path
+  escalates `pdftotext` → local `docling`, and AI is opt-in only via
+  `--pdf-backend ai`, never automatic). Updated the pages that still said
+  scanned PDFs "need AI" or "require the AI backend": `selfhost.html`,
+  `pdf-parsing.html`, and `index.html`.
+
+---
+
 ## [v0.46.0](https://github.com/sunholo-data/ailang-parse/compare/v0.45.0...v0.46.0) — 2026-09-25
 
 ### docx → md → docx keeps comments and track changes

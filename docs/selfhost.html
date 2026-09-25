@@ -112,9 +112,9 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "How do I install AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Run curl -fsSL https://ailang.sunholo.com/install.sh | bash to install AILANG, then ailang install sunholo/ailang_parse to install the parsing package and put the docparse command on your PATH. Office parsing has zero external dependencies."}},
-    {"@type": "Question", "name": "What are the system requirements?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini or Claude, or a local Ollama model."}},
+    {"@type": "Question", "name": "What are the system requirements?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it runs comfortably on a laptop with no GPU. Born-digital PDFs parse locally via the default pdftotext backend; scanned PDFs escalate automatically to the local docling backend, with AI as an opt-in fallback."}},
     {"@type": "Question", "name": "What is the difference between the API and running locally?", "acceptedAnswer": {"@type": "Answer", "text": "The hosted API gives you zero-maintenance scaling with Python, JS, and Go SDKs — 1,000 free requests per month included. Running locally gives you unlimited free parsing with full privacy, but requires installing AILANG on your machine."}},
-    {"@type": "Question", "name": "Does local parsing require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline — no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline."}},
+    {"@type": "Question", "name": "Does local parsing require an internet connection?", "acceptedAnswer": {"@type": "Answer", "text": "For Office formats (DOCX, PPTX, XLSX, ODF) and PDFs (including scanned ones, via the local docling backend), parsing is fully offline — no internet needed. AI is opt-in only (--pdf-backend ai) and requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline."}},
     {"@type": "Question", "name": "Can I use AILANG for other projects?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG is a general-purpose programming language for AI-powered applications. Once installed, you can build your own apps with capability budgets, formal contracts, and pluggable AI models. AILANG Parse is just one application built on AILANG."}}
   ]
 }
@@ -189,7 +189,7 @@
             <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           </div>
           <div class="dp-way-name">Run Locally</div>
-          <div class="dp-way-desc">Install the AILANG CLI and parse everything locally. All <span data-dp="formats.input_count">16</span> formats, AI-powered PDF parsing, unlimited and free. Full control.</div>
+          <div class="dp-way-desc">Install the AILANG CLI and parse everything locally. All <span data-dp="formats.input_count">16</span> formats, deterministic PDF parsing via local backends (optional AI for scans), unlimited and free. Full control.</div>
           <div class="dp-way-tags">
             <span class="dp-way-tag dp-way-tag--green">Free</span>
             <span class="dp-way-tag dp-way-tag--green">Private</span>
@@ -207,8 +207,8 @@
         <tbody>
           <tr><td>Install required</td><td>None</td><td>SDK only</td><td>AILANG CLI</td></tr>
           <tr><td>Office parsing</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-          <tr><td>AI / PDF parsing</td><td>With API key</td><td>Yes</td><td>Yes</td></tr>
-          <tr><td>Offline capable</td><td>Yes (Office)</td><td>No</td><td>Yes (Office)</td></tr>
+          <tr><td>AI / PDF parsing</td><td>With API key</td><td>Yes</td><td>Local backends by default; AI opt-in for scans</td></tr>
+          <tr><td>Offline capable</td><td>Yes (Office)</td><td>No</td><td>Yes (Office + PDFs, including scans via docling)</td></tr>
           <tr><td>Throughput</td><td>Browser-limited</td><td>Unlimited (paid)</td><td>Unlimited</td></tr>
           <tr><td>Cost</td><td>Free</td><td>Free tier, then paid</td><td>Free (bring your own AI keys)</td></tr>
           <tr><td>Data privacy</td><td>Stays in browser</td><td>Regional servers (EU). <a href="api.html#data-handling" style="color:var(--dp-blue)">Data handling&nbsp;&rarr;</a></td><td>Stays on your machine</td></tr>
@@ -314,7 +314,7 @@ docparse *.eml</code></pre>
       </div>
 
       <h2 id="ai-models">AI Models <span style="font-size:13px;font-weight:400;color:var(--text-secondary)">(and local PDF backends)</span></h2>
-      <p>Office formats (DOCX, PPTX, XLSX, etc.) are parsed deterministically with zero AI calls. PDFs, images, audio, and video go through an AI provider — or, for PDFs, one of the local deterministic backends shipped in <strong>v0.19.0</strong>.</p>
+      <p>Office formats (DOCX, PPTX, XLSX, etc.) are parsed deterministically with zero AI calls. PDFs default to the local deterministic <code>pdftotext</code> backend (no API key, no network call), escalating automatically to the local <code>docling</code> backend for scanned or image-only pages; <code>liteparse</code> is a local alternative too. Images, audio, and video go through an AI provider — AI is opt-in only for PDFs (<code>--pdf-backend ai</code>), never automatic.</p>
 
       <div class="dp-callout" style="margin-bottom:16px">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -445,7 +445,7 @@ print(result.markdown)</code></pre>
           <tr><td>Markdown</td><td>Deterministic</td><td>Headings, lists, tables, code blocks, links</td></tr>
           <tr><td>CSV / TSV</td><td>Deterministic</td><td>Delimiter detection, quoted fields</td></tr>
           <tr><td>EPUB</td><td>Deterministic</td><td>ZIP + XHTML chapters, images, metadata</td></tr>
-          <tr><td>PDF</td><td>AI Required</td><td>Page-by-page extraction via pluggable AI model</td></tr>
+          <tr><td>PDF</td><td>Local backend default</td><td>Born-digital and scanned PDFs via pdftotext / docling / liteparse; AI opt-in fallback</td></tr>
           <tr><td>PNG / JPG</td><td>AI Required</td><td>Document image extraction or description</td></tr>
           <tr><td>Audio<br><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">.wav .mp3 .aiff .aac .ogg .flac</span></td><td>AI Required</td><td>Full transcription, speaker detection, language identification, content summary</td></tr>
           <tr><td>Video<br><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">.mp4 .mov .avi .webm .wmv .mpeg .mpg .flv .3gpp</span></td><td>AI Required</td><td>Visual content extraction (headings, tables, text, images), spoken-word transcription</td></tr>
@@ -487,7 +487,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
         </details>
         <details>
           <summary>What are the system requirements?</summary>
-          <div class="dp-faq-answer"><p>AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it needs approximately 50MB RAM and no GPU. AI-powered PDF parsing needs connectivity to Gemini/Claude, or a local Ollama model.</p></div>
+          <div class="dp-faq-answer"><p>AILANG is a single Go binary. It runs on macOS, Linux (amd64/arm64), and Windows. For Office-only parsing, it runs comfortably on a laptop with no GPU. Born-digital PDFs parse locally via the default pdftotext backend; scanned PDFs escalate automatically to the local docling backend. AI is opt-in only, via Gemini/Claude or a local Ollama model.</p></div>
         </details>
         <details>
           <summary>What's the difference between the API and running locally?</summary>
@@ -495,7 +495,7 @@ docker run -e GOOGLE_API_KEY="your-key" \
         </details>
         <details>
           <summary>Does local parsing require an internet connection?</summary>
-          <div class="dp-faq-answer"><p>For Office formats (DOCX, PPTX, XLSX, ODF), parsing is fully offline &mdash; no internet needed. AI-powered PDF parsing requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline.</p></div>
+          <div class="dp-faq-answer"><p>For Office formats (DOCX, PPTX, XLSX, ODF) and PDFs (including scanned ones, via the local docling backend), parsing is fully offline &mdash; the default backends need no API key and no network. AI is opt-in only (<code>--pdf-backend ai</code>) and requires connectivity to Gemini or Claude, unless you use a local Ollama model which also runs offline.</p></div>
         </details>
         <details>
           <summary>Can I use AILANG for other projects?</summary>
