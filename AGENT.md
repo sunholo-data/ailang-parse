@@ -46,9 +46,9 @@ DOCPARSE_PDF_BACKEND=liteparse docparse-pdf scan.pdf --convert out.md
 ```
 
 - `pdftotext` (default tier) needs poppler on PATH.
-- `docling` / `liteparse` resolve through `uv run` from the bundled
-  `assets/pdf_backends/pyproject.toml`; first use needs network once to
-  materialise the uv environment, then it is pinned.
+- `docling` / `liteparse` run through `uv run --no-project --with <backend>`,
+  an ephemeral environment in uv's cache holding only that backend; first use
+  needs network once, later runs reuse the cache.
 - AI parsing (`--pdf-backend ai`, `describe`, `summarize`) stays a deliberate
   opt-in through the full `bin/docparse` wrapper with `--ai` — neither shim
   carries the AI capability, so a local-policy "never send the PDF to Gemini"

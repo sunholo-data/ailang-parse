@@ -31,20 +31,28 @@ two independent reasons, and both are fixed:
   adapter and the uv project relative to the *caller's working directory*
   (`adapterPath("")` → `docparse/services/pdf_backends/adapter.py`,
   `backendProject("")` → `.`), which the shim deliberately leaves untouched.
-  `pdf_backend_external` now resolves a three-layout ladder: explicit
-  `DOCPARSE_PROJECT_ROOT` first (clone / install.sh prefix — unchanged), then
-  `std/package.assetPath` against the installed package (the shim flow), then
-  the historical cwd-relative fallback. The exported functions gain `FS` for
-  that resolution; every caller (the orchestrator's full ladder) already
-  declared `{FS, Process}`.
-- **The backend environment ships in the package.** `assets/pdf_backends/`
-  now carries `pyproject.toml` next to `adapter.py`, with docling and
-  liteparse as default dependencies (the shim has no wrapper to run
-  `uv sync --extra backends`, so a plain `uv run` must be able to materialise
-  the environment). No `uv.lock` ships — generating one needs a network
-  resolution at packaging time; `uv run --project` writes the lock on first use
-  and pins it thereafter. The `assets/backends-pyproject.toml` extras flow used
-  by `--install-backends` and `scripts/install.sh` is unchanged.
+  The adapter has shipped at `assets/pdf_backends/adapter.py` since v0.41.x;
+  nothing looked there. `pdf_backend_external` now resolves, in order: explicit
+  `DOCPARSE_PROJECT_ROOT` (clone / install.sh prefix — unchanged), the
+  cwd-relative adapter when it exists (a clone run without the wrapper —
+  unchanged), then `std/package.assetPath("sunholo/ailang_parse", ...)` for the
+  installed shim. The exported functions gain `FS` for that resolution; every
+  caller (the orchestrator's full ladder) already declared `{FS, Process}`.
+- **Installed runs use an ephemeral uv environment.** From the package the
+  adapter runs as `uv run --no-project [--with docling|--with liteparse]
+  python <adapter>`. `--no-project` ignores any pyproject in the caller's cwd
+  and writes nothing into the registry cache; `--with` pulls only the chosen
+  backend, so a liteparse or pdftotext run never downloads docling (pdftotext
+  and `words` need only the stdlib and poppler). uv caches the environment
+  after the first run.
+- **liteparse backend fixed.** `LiteParse().parse(path, ocr_enabled=False)`
+  raised `TypeError: parse() got an unexpected keyword argument 'ocr_enabled'`
+  on liteparse 2.14.3 and 2.14.7 alike: `ocr_enabled` is a constructor option.
+  The adapter now calls `LiteParse(ocr_enabled=False).parse(path)`.
+
+Verified 25 Sept outside any clone, with no `DOCPARSE_PROJECT_ROOT`:
+pdftotext and liteparse both convert `table_report.pdf` end to end through
+the installed-layout path. docling was not exercised (it pulls torch).
 
 `DOCPARSE_PDF_BACKEND=liteparse docparse-pdf file.pdf --convert out.md` now
 works from a clean `ailang install` (poppler and uv permitting, as reported by
