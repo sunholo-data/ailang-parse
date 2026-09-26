@@ -558,13 +558,14 @@ pure func orchIsAttachmentDataBlock(block: Block) -> bool =
 
 -- parseDocumentPure cannot resolve attachments (that needs Process for the PDF
 -- ladder), so say so rather than quietly returning a shallow parse when the
--- caller explicitly asked for --deep. parseDocument does the real work.
+-- caller explicitly asked for --deep. parseDocument does the real work and
+-- drops this warning via orchEmailDeep -> orchDropDeepSkippedWarning; direct
+-- parseDocumentPure callers keep it.
 pure func orchNoteDeepUnavailable(outcome: ParseOutcome, opts: ParseOptions) -> ParseOutcome =
   if opts.deep == false then outcome
   else {
     document: outcome.document,
-    warnings: concat(outcome.warnings,
-      ["deep attachment resolution skipped: parseDocumentPure cannot shell out; use parseDocument"]),
+    warnings: concat(outcome.warnings, [orchDeepSkippedWarningMsg()]),
     notes: outcome.notes,
     aiCallsUsed: outcome.aiCallsUsed
   }
@@ -606,6 +607,13 @@ export func parseDocument(filepath: string, opts: ParseOptions)
     -- enrich as normal.
     Ok(outcome) =>
       if format == "email" && opts.deep
+        -- The shallow outcome carries the parseDocumentPure "cannot shell
+        -- out" warning, which is TRUE for parseDocumentPure's own callers but
+        -- a lie here: parseDocument is about to do the deep work. Feed the
+        -- shallow parse to orchEmailDeep and let IT be the sole source of
+        -- blocks and warnings, so the stale warning cannot survive (GitHub
+        -- issue in sunholo-data/ailang#679: users read the warning as "no
+        -- text extracted" and filed a regression that did not exist).
         then Ok(orchEnrich(filepath, orchEmailDeep(outcome, opts), opts))
         else Ok(orchEnrich(filepath, outcome, opts)),
     -- Two Err shapes reach here from the deterministic path: a known format
@@ -949,6 +957,17 @@ pure func orchEmlGetMeta(blocks: [Block]) -> string =
   }
 
 -- Apply deep resolution to an already-parsed email outcome.
+--
+-- `outcome` is the SHALLOW parse (parseDocumentPure's email recipe): this
+-- function owns the deep blocks and the warnings. The shallow path appends
+-- "deep attachment resolution skipped: parseDocumentPure cannot shell out;
+-- use parseDocument" when opts.deep is set — correct for parseDocumentPure's
+-- own callers, but FALSE by the time this runs, because parseDocument is
+-- doing the deep work right here. Drop that specific warning rather than
+-- forwarding it: printing it from the CLI (docparse/main prints every
+-- warning) made users read "no text extracted" out of a parse that had in
+-- fact resolved every attachment. Direct parseDocumentPure callers keep the
+-- warning; only the path that actually resolves attachments loses it.
 func orchEmailDeep(outcome: ParseOutcome, opts: ParseOptions)
   -> ParseOutcome ! {IO, FS, Process} = {
   println("Resolving attachments...");
@@ -957,10 +976,67 @@ func orchEmailDeep(outcome: ParseOutcome, opts: ParseOptions)
   {
     document: {format: outcome.document.format, filename: outcome.document.filename,
                metadata: outcome.document.metadata, blocks: resolved.blocks},
-    warnings: outcome.warnings,
+    warnings: orchDropDeepSkippedWarning(outcome.warnings),
     notes: concat(outcome.notes, ["Resolved ${show(resolved.count)} attachment(s)"]),
     aiCallsUsed: outcome.aiCallsUsed
   }
+}
+
+-- The exact sentence, quoted once so the append (shallow path) and the
+-- retract (deep path) can never drift apart.
+pure func orchDeepSkippedWarningMsg() -> string =
+  "deep attachment resolution skipped: parseDocumentPure cannot shell out; use parseDocument"
+
+pure func orchHasDeepSkippedWarning(warnings: [string]) -> bool =
+  match warnings {
+    [] => false,
+    w :: rest => w == orchDeepSkippedWarningMsg() || orchHasDeepSkippedWarning(rest)
+  }
+
+-- warnings for a deterministic-path parse: the not-done warning is appended
+-- when (and only when) the caller asked for --deep.
+pure func orchAppendDeepSkippedWarning(existing: [string], deep: bool) -> [string] =
+  if deep then concat(existing, [orchDeepSkippedWarningMsg()]) else existing
+
+-- Remove exactly the "deep attachment resolution skipped" warning, keeping
+-- everything else (unreadable-attachment warnings etc. must survive). Match
+-- on the exact sentence orchNoteDeepUnavailable appends, not a substring, so
+-- a user warning that merely mentions it is never dropped.
+pure func orchDropDeepSkippedWarning(warnings: [string]) -> [string] {
+  filter(\w. w != orchDeepSkippedWarningMsg(), warnings)
+}
+
+-- Pins both arms of sunholo-data/ailang#679 (the stale "cannot shell out"
+-- warning printed by `docparse --deep` even though the deep work ran).
+--
+-- orchEmailDeep itself needs Process and `ailang test` evaluates pure tests
+-- only, so the pin exercises the pure warnings logic the two arms share:
+-- the append is what parseDocumentPure's shallow path attaches (direct
+-- callers keep it — there the warning is TRUE), and the drop is what
+-- orchEmailDeep applies once it has done the deep work. Reverting the
+-- orchEmailDeep fix to forwarding outcome.warnings verbatim is exactly the
+-- identity the drop pin refutes; removing the append breaks the other.
+
+-- Arm 1: after the deep work, the warning is gone and the real warnings stay.
+pure func orchDeepSkippedWarningDropped() -> bool
+  tests [((), true)]
+{
+  let deepWarnings = orchDropDeepSkippedWarning(
+    ["Attachment 1 unreadable", orchDeepSkippedWarningMsg()]);
+  not orchHasDeepSkippedWarning(deepWarnings) &&
+    deepWarnings == ["Attachment 1 unreadable"]
+}
+
+-- Arm 2: the shallow path with --deep still attaches it (direct
+-- parseDocumentPure callers keep being told the truth); without --deep,
+-- nothing is added.
+pure func orchDeepSkippedWarningKeptByPurePath() -> bool
+  tests [((), true)]
+{
+  orchAppendDeepSkippedWarning([], true) == [orchDeepSkippedWarningMsg()] &&
+  orchAppendDeepSkippedWarning(["kept"], true) ==
+    ["kept", orchDeepSkippedWarningMsg()] &&
+  orchAppendDeepSkippedWarning(["kept"], false) == ["kept"]
 }
 
 -- =====================================================================
