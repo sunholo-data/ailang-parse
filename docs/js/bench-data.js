@@ -32,7 +32,7 @@
     if (typeof value === 'number') {
       // Coverage / score / composite — anything ratio-shaped → percentage
       if (value >= 0 && value <= 1 && /composite|coverage|adjusted|score|recall|quality|fidelity|jaccard|count|metadata|detection|fields|fmt/i.test(key)) {
-        return (value * 100).toFixed(1) + '%';
+        return (value * 100).toFixed(0) + '%';
       }
       return String(value);
     }
@@ -92,7 +92,7 @@
       var attrTarget = el.getAttribute('data-bench-attr');
       var styleTarget = el.getAttribute('data-bench-style');
       var pct = (typeof value === 'number' && value >= 0 && value <= 1)
-        ? (value * 100).toFixed(1)
+        ? (value * 100).toFixed(0)
         : null;
 
       if (attrTarget) {
