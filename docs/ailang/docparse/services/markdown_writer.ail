@@ -1,6 +1,6 @@
 module docparse/services/markdown_writer
 
-import std/string (length, replaceMany, startsWith, substring, repeat, join)
+import std/string (length, replaceMany, startsWith, substring, repeat, join, split)
 import std/list (map, length as listLength)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText)
 
@@ -88,10 +88,23 @@ export pure func renderBlockMd(block: Block) -> string =
 pure func renderCommentMd(author: string, date: string, text: string,
                           anchorText: string, anchored: bool) -> string {
   let byline = if length(date) > 0 then "${author}, ${date}" else author;
+  let body = mdQuoteCont(text);
   if anchored && length(anchorText) > 0
-  then "> ${anchorText}\n>\n> **Comment (${byline}):** ${text}\n\n"
-  else "> **Comment (${byline}, unanchored):** ${text}\n\n"
+  then "> ${mdQuoteCont(anchorText)}\n>\n> **Comment (${byline}):** ${body}\n\n"
+  else "> **Comment (${byline}, unanchored):** ${body}\n\n"
 }
+
+-- Keep a multi-line value inside its blockquote: every continuation line gets
+-- its own "> " marker. An anchor spanning paragraphs ("a new paragraph.\nAnd
+-- so") used to break out of the quote mid-anchor, which both misrendered and
+-- stopped markdown_parser reading the comment back as anchored.
+pure func mdQuoteCont(s: string) -> string
+  tests [
+    ("one line", "one line"),
+    ("a\nb", "a\n> b"),
+    ("", "")
+  ]
+{ join("\n> ", split(s, "\n")) }
 
 -- A fenced code block is carried as a TextBlock whose style is "code" or
 -- "code:<lang>". Keeping the fence as a style rather than as literal backticks
@@ -158,8 +171,8 @@ pure func renderChangeMd(changeType: string, author: string, date: string, text:
   let when = if length(date) > 0 then " on ${date}" else "";
   let prefix = "> [${changeType} by ${who}${when}] ";
   let body = if changeType == "delete" || changeType == "move-from"
-    then "~~${text}~~"
-    else text;
+    then "~~${mdQuoteCont(text)}~~"
+    else mdQuoteCont(text);
   "${prefix}${body}\n\n"
 }
 

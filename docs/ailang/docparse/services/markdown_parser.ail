@@ -3,7 +3,7 @@ module docparse/services/markdown_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, contains, charAt, charCode, foldChars, join, replace, replaceMany, stringToInt)
 import std/list (map, filter, foldl, concat, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, TableCell, simpleCell, mergedCell, spanCell, simpleCellRuns, spanCellRuns, mkTable)
+import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block, HeadingBlock, TextBlock, ListBlock, TableBlock, ImageBlock, ChangeBlock, mkAnchoredComment, mkUnanchoredComment, TableCell, simpleCell, mergedCell, spanCell, simpleCellRuns, spanCellRuns, mkTable)
 
 -- Markdown Parser — converts Markdown text to Block ADT.
 -- Pure AILANG implementation, no external dependencies.
@@ -14,11 +14,15 @@ import docparse/types/document (DocMetadata, emptyMetadata, mkHeading, mkHeading
 --   - Unordered lists (- or * prefix)
 --   - Ordered lists (1. 2. etc prefix)
 --   - Simple tables (| col | col | format)
+--   - Blockquotes (>)
+--   - Code blocks (``` fenced, and 4-space / tab indented)
+--   - Comments and track changes, in the exact blockquote syntax
+--     markdown_writer.renderCommentMd / renderChangeMd emit, so the
+--     docx -> md -> docx waypoint is lossless instead of silently demoting
+--     both to inert quote text.
 --
 -- Does NOT handle (yet):
---   - Code blocks (``` fenced)
 --   - Inline formatting (bold, italic, links)
---   - Blockquotes (>)
 --   - Images (![alt](url))
 --
 -- Usage:
@@ -100,6 +104,7 @@ type MdParseState = {
   tableRows: [[string]], -- accumulated table rows (reversed)
   textLines: [string],   -- accumulated paragraph lines (reversed)
   codeLines: [string],   -- accumulated fenced-code lines (reversed)
+  indentCode: [string],  -- accumulated indented-code-block lines (reversed)
   quoteLines: [string],  -- accumulated blockquote lines (reversed)
   tableAligns: [string], -- per-column alignment from the separator row
   itemLevels: [int],     -- nesting depth per list item (reversed)
@@ -122,6 +127,7 @@ pure func emptyParseState() -> MdParseState
   tableRows: [],
   textLines: [],
   codeLines: [],
+  indentCode: [],
   quoteLines: [],
   tableAligns: [],
   itemLevels: [],
@@ -145,8 +151,13 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     let s = flushToState(state) in
     { s | inCode: true, codeLang: trim(substring(trimmedLine, 3, length(trimmedLine))), codeLines: [] }
 
-  -- Blank line: flush current paragraph/list
-  else if length(trimmedLine) == 0 then flushToState(state)
+  -- Blank line: flush current paragraph/list. Inside an indented code block a
+  -- blank line is content (CommonMark keeps interior blanks), not a terminator
+  -- — the block ends only on a dedented non-blank line.
+  else if length(trimmedLine) == 0 then
+    if not mdIsEmptyList(state.indentCode)
+    then { state | indentCode: "" :: state.indentCode }
+    else flushToState(state)
 
   -- Heading: # through ######
   else if startsWith(trimmedLine, "######") then mdHeadingState(state, trimmedLine, 6)
@@ -166,7 +177,7 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- Unordered list item: - or *. Depth comes from the RAW line's indentation,
   -- which is why it is measured before trimming.
   else if startsWith(trimmedLine, "- ") || startsWith(trimmedLine, "* ") then
-    let s = flushText(flushTable(state)) in
+    let s = flushText(flushTable(flushIndentCode(state))) in
     let item = trim(substring(trimmedLine, 2, length(trimmedLine))) in
     { s | listItems: item :: s.listItems, listOrdered: false,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
@@ -182,14 +193,14 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- are live punctuation in prose (ranges, ellipses) and would false-fire.
 
   else if mdIsUnicodeBullet(trimmedLine) then
-    let s = flushText(flushTable(state)) in
+    let s = flushText(flushTable(flushIndentCode(state))) in
     let item = trim(substring(trimmedLine, 1, length(trimmedLine))) in
     { s | listItems: item :: s.listItems, listOrdered: false,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
 
   -- Ordered list item: starts with digit followed by ". "
   else if mdIsOrderedListItem(trimmedLine) then
-    let s = flushText(flushTable(state)) in
+    let s = flushText(flushTable(flushIndentCode(state))) in
     let item = mdExtractOrderedItem(trimmedLine) in
     { s | listItems: item :: s.listItems, listOrdered: true,
           itemLevels: mdIndentLevel(line) :: s.itemLevels }
@@ -202,7 +213,7 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
     if mdIsTableSeparator(trimmedLine)
     then { state | tableAligns: map(mdCellAlign, mdSplitCells(trimmedLine)) }
     else
-      let s = flushText(flushList(state)) in
+      let s = flushText(flushList(flushIndentCode(state))) in
       let cells = mdParseTableRow(trimmedLine) in
       { s | tableRows: cells :: s.tableRows }
 
@@ -210,10 +221,30 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
   -- paragraph. Without this the ">" survived as a literal character in the
   -- text and every generator rendered it as punctuation.
   else if startsWith(trimmedLine, ">") then {
-    let s = flushList(flushTable(flushText(state)));
+    let s = flushList(flushTable(flushText(flushIndentCode(state))));
     let body = trim(substring(trimmedLine, 1, length(trimmedLine)));
     { s | quoteLines: body :: s.quoteLines }
   }
+
+  -- Indented code block: four or more columns of indentation with nothing
+  -- else open. CommonMark treats it exactly like a fenced block, and every
+  -- consumer of this parser does too (an aligned ASCII address table must
+  -- keep its column spacing, not collapse into one run-on paragraph).
+  -- The check sits here, AFTER the marker branches, deliberately: indented
+  -- "- item" / "* item" / "1. item" lines are nested list items (the list
+  -- branches read nesting depth off the raw line), and demoting them to code
+  -- would destroy every nested list this parser accepts. Strict CommonMark
+  -- precedence for indented headings/tables/thematic breaks is likewise left
+  -- to the existing branches; the indented-code branch claims only what
+  -- everything above lets fall through, and only with no paragraph or list
+  -- open (an indented line inside either is a lazy continuation). An open
+  -- blockquote is treated the same way; an open table is flushed first so the
+  -- table block is emitted BEFORE the code block, not after it.
+  else if mdIsEmptyList(state.listItems) && mdIsEmptyList(state.textLines) &&
+          mdIsEmptyList(state.quoteLines) &&
+          mdCodeIndentCount(line, 0, 0) >= 4 then
+    let s = flushTable(state) in
+    { s | indentCode: mdStripCodeIndent(line) :: s.indentCode }
 
   -- Regular text line: a wrapped continuation of the open list item's
   -- paragraph (CommonMark lazy continuation) joins onto that item, so a
@@ -225,17 +256,209 @@ pure func mdProcessLine(state: MdParseState, line: string) -> MdParseState {
       [] => state
     }
   else
-    let s = flushList(flushTable(flushQuote(state))) in
+    let s = flushList(flushTable(flushQuote(flushIndentCode(state)))) in
     { s | textLines: trimmedLine :: s.textLines }
 }
 
--- Flush accumulated blockquote lines into a TextBlock with style "quote"
+-- Flush accumulated blockquote lines into blocks.
+--
+-- A blockquote that came from markdown_writer (renderCommentMd /
+-- renderChangeMd) is read back into the CommentBlock / ChangeBlock it came
+-- from, so the markdown waypoint is lossless instead of silently demoting
+-- comments and track changes to inert quote text. Anything else keeps the
+-- plain quoted-paragraph reading.
 pure func flushQuote(state: MdParseState) -> MdParseState =
   if mdIsEmptyList(state.quoteLines) then state
-  else {
-    let text = mdJoinLines(reverse(state.quoteLines));
-    { state | blocks: mdTextBlock(text, "quote", 0) :: state.blocks, quoteLines: [] }
+  else match mdQuoteBlocks(reverse(state.quoteLines)) {
+    Some(bs) => { state | blocks: mdPrependBlocks(bs, state.blocks), quoteLines: [] },
+    None => {
+      let text = mdJoinLines(reverse(state.quoteLines));
+      { state | blocks: mdTextBlock(text, "quote", 0) :: state.blocks, quoteLines: [] }
+    }
   }
+
+-- Prepend blocks (in document order) onto the reversed accumulated list.
+pure func mdPrependBlocks(bs: [Block], acc: [Block]) -> [Block] =
+  match bs {
+    [] => acc,
+    b :: rest => b :: mdPrependBlocks(rest, acc)
+  }
+
+-- Read a writer-rendered blockquote (lines in document order) into the blocks
+-- it encodes, or None when it is an ordinary quote.
+pure func mdQuoteBlocks(ls: [string]) -> Option[[Block]] {
+  match mdQuoteCommentAt(ls, 0) {
+    Some(hit) =>
+      match hit {
+        (i, h) => Some(mdCommentBlocks(ls, i, h))
+      },
+    None =>
+      match ls {
+        first :: rest =>
+          match mdChangeHead(first) {
+            Some(ch) => Some([mdChangeBlock(ch, rest)]),
+            None => None
+          },
+        [] => None
+      }
+  }
+}
+
+-- First comment-header line in the quote, with its index.
+pure func mdQuoteCommentAt(ls: [string], i: int) -> Option[(int, MdCommentHead)] =
+  match ls {
+    [] => None,
+    l :: rest =>
+      match mdCommentHead(l) {
+        Some(h) => Some((i, h)),
+        None => mdQuoteCommentAt(rest, i + 1)
+      }
+  }
+
+-- The writer's anchored form is "> anchor\n>\n> **Comment (…):** text": the
+-- anchor is every line before the blank separator. Without the separator — or
+-- when the byline itself said "unanchored" — the comment stands alone.
+pure func mdCommentBlocks(ls: [string], i: int, h: MdCommentHead) -> [Block] {
+  let text = mdCommentText(h.text, join(" ", mdAfter(ls, i + 1)));
+  let anchored = not h.declaredUnanchored && i >= 2 && mdLineAt(ls, i - 1) == "";
+  if anchored
+  then let anchor = join(" ", mdFirstN(i - 1, ls)) in
+    [mkAnchoredComment("", h.author, h.date, text, anchor, "range", 0 - 1, "", false)]
+  else [mkUnanchoredComment("", h.author, h.date, text, "", false)]
+}
+
+-- Comment text: the header line's remainder plus any wrapped continuation
+-- lines (the writer does not flatten newlines out of comment text).
+pure func mdCommentText(first: string, more: string) -> string =
+  if length(more) > 0 && length(first) > 0 then "${first} ${more}"
+  else if length(more) > 0 then more
+  else first
+
+-- Lines strictly after index i.
+pure func mdAfter(ls: [string], i: int) -> [string] =
+  if i <= 0 then ls
+  else match ls { [] => [], _ :: rest => mdAfter(rest, i - 1) }
+
+-- The first n lines.
+pure func mdFirstN(n: int, ls: [string]) -> [string] =
+  if n <= 0 then []
+  else match ls { [] => [], x :: rest => x :: mdFirstN(n - 1, rest) }
+
+-- The line at index i, "" when out of range.
+pure func mdLineAt(ls: [string], i: int) -> string =
+  match ls { [] => "", x :: rest => if i <= 0 then x else mdLineAt(rest, i - 1) }
+
+-- === Writer round-trip: comments ========================================
+--
+-- markdown_writer.renderCommentMd emits:
+--   **Comment (Author, 2026-05-09T16:13:00Z):** text
+--   **Comment (Author, unanchored):** text
+
+-- The "**Comment (…):**" byline.
+type MdCommentHead = { author: string, date: string, text: string, declaredUnanchored: bool }
+
+pure func mdCommentHead(line: string) -> Option[MdCommentHead] {
+  let t = trim(line);
+  if not startsWith(t, "**Comment (") then None
+  else {
+    let close = find(t, "):**");
+    if close < 0 then None
+    else {
+      let inner = substring(t, 11, close);
+      let body = trim(substring(t, close + 4, length(t)));
+      if endsWith(inner, ", unanchored")
+      then Some(mdByline(substring(inner, 0, length(inner) - 12), body, true))
+      else Some(mdByline(inner, body, false))
+    }
+  }
+}
+
+-- "Author" | "Author, date" — split on the LAST ", ", so the date takes the
+-- tail and an author whose name itself carries a comma keeps most of it.
+pure func mdByline(s: string, text: string, unanchored: bool) -> MdCommentHead {
+  let idx = mdLastCommaIdx(s, 0, 0 - 1);
+  if idx < 0
+  then { author: s, date: "", text: text, declaredUnanchored: unanchored }
+  else { author: substring(s, 0, idx),
+         date: trim(substring(s, idx + 2, length(s))),
+         text: text, declaredUnanchored: unanchored }
+}
+
+-- Index of the last ", " in s, -1 when absent.
+pure func mdLastCommaIdx(s: string, i: int, best: int) -> int =
+{
+  if i + 1 >= length(s) then best
+  else if charAt(s, i) == "," && charAt(s, i + 1) == " "
+  then mdLastCommaIdx(s, i + 1, i)
+  else mdLastCommaIdx(s, i + 1, best)
+}
+
+-- === Writer round-trip: track changes ===================================
+--
+-- markdown_writer.renderChangeMd emits:
+--   > [insert by Alice on 2026-03-29] text
+--   > [delete by Bob on 2026-03-29] ~~text~~
+
+-- The "[<type> by <author> on <date>]" attribution prefix.
+type MdChangeHead = { changeType: string, author: string, date: string,
+                      text: string, struck: bool }
+
+pure func mdChangeHead(line: string) -> Option[MdChangeHead] {
+  let t = trim(line);
+  if not startsWith(t, "[") then None
+  else {
+    let close = find(t, "] ");
+    if close < 1 then None
+    else {
+      let header = substring(t, 1, close);
+      let body = trim(substring(t, close + 2, length(t)));
+      let byIdx = find(header, " by ");
+      if byIdx <= 0 then None
+      else {
+        let ct = trim(substring(header, 0, byIdx));
+        if not mdIsChangeType(ct) then None
+        else {
+          let who = trim(substring(header, byIdx + 4, length(header)));
+          let onIdx = find(who, " on ");
+          let author = if onIdx >= 0 then trim(substring(who, 0, onIdx)) else who;
+          let date = if onIdx >= 0 then trim(substring(who, onIdx + 4, length(who))) else "";
+          Some({ changeType: ct, author: author, date: date, text: body,
+                 struck: ct == "delete" || ct == "move-from" })
+        }
+      }
+    }
+  }
+}
+
+-- The writer only emits the four revision types docx_parser produces
+-- (insert / delete / move-to / move-from). Matching exactly that set keeps an
+-- ordinary quote such as "> [note by Smith on Monday] ..." from being read as
+-- a track change.
+pure func mdIsChangeType(s: string) -> bool
+  tests [
+    ("insert", true),
+    ("delete", true),
+    ("move-to", true),
+    ("move-from", true),
+    ("note", false),
+    ("Chapter 1", false),
+    ("Insert", false),
+    ("", false)
+  ]
+{ s == "insert" || s == "delete" || s == "move-to" || s == "move-from" }
+
+-- Build the ChangeBlock. The struck flag says the writer wrapped the body in
+-- ~~ markers so it reads as struck-through; the ChangeBlock carries plain
+-- text like every other parser's, so unwrap — including the case where the
+-- wrapping pair got split across wrapped quote lines.
+pure func mdChangeBlock(ch: MdChangeHead, more: [string]) -> Block {
+  let raw = mdCommentText(ch.text, join(" ", more));
+  let opened = if ch.struck && startsWith(raw, "~~") && length(raw) >= 2
+    then substring(raw, 2, length(raw)) else raw;
+  let closed = if ch.struck && endsWith(opened, "~~") && length(opened) >= 2
+    then substring(opened, 0, length(opened) - 2) else opened;
+  ChangeBlock({ changeType: ch.changeType, author: ch.author, date: ch.date, text: closed })
+}
 
 pure func mdHeadingState(state: MdParseState, trimmedLine: string, level: int) -> MdParseState {
   let s = flushToState(state);
@@ -253,6 +476,62 @@ pure func mdFlushCode(state: MdParseState) -> MdParseState {
             codeLines: [], inCode: false, codeLang: "" }
 }
 
+-- Flush accumulated indented-code lines into a TextBlock with style "code",
+-- exactly the shape mdFlushCode emits for a fence, so every generator renders
+-- both forms identically. Lines are verbatim (no inline scan, no trimming);
+-- trailing blank lines are dropped, interior ones kept.
+pure func flushIndentCode(state: MdParseState) -> MdParseState =
+  if mdIsEmptyList(state.indentCode) then state
+  else {
+    let lines = mdDropTrailingBlanks(reverse(state.indentCode));
+    let body = join("\n", lines);
+    { state | blocks: mkText(body, "code", 0) :: state.blocks, indentCode: [] }
+}
+
+pure func mdDropTrailingBlanks(xs: [string]) -> [string] =
+  reverse(mdDropLeadingBlanks(reverse(xs)))
+
+pure func mdDropLeadingBlanks(xs: [string]) -> [string] =
+  match xs {
+    [] => [],
+    x :: rest => if length(x) == 0 then mdDropLeadingBlanks(rest) else xs
+  }
+
+-- Columns of indentation: a space is 1, a tab is 4 (CommonMark's tab stop for
+-- the code-block indent). Distinct from mdCountIndent, whose tab=2 is the
+-- LIST nesting rule — one tab must still qualify as an indented code line.
+pure func mdCodeIndentCount(line: string, i: int, acc: int) -> int =
+  if i >= length(line) then acc
+  else {
+    let c = charAt(line, i);
+    if c == " " then mdCodeIndentCount(line, i + 1, acc + 1)
+    else if c == "\t" then mdCodeIndentCount(line, i + 1, acc + 4)
+    else acc
+  }
+
+-- The line minus up to 4 columns of leading indent (tab = 4 columns),
+-- CommonMark's "strip one indent unit". Whatever is left is the code line.
+pure func mdStripCodeIndent(line: string) -> string
+  tests [
+    ("    a    b", "a    b"),
+    ("      deeper", "  deeper"),
+    ("\tcode line", "code line"),
+    ("  \tcode line", "code line"),
+    ("  only two", "  only two"),
+    ("", "")
+  ]
+{ mdStripIndent(line, 0, 0) }
+
+pure func mdStripIndent(line: string, i: int, acc: int) -> string =
+  if i >= length(line) then ""
+  else if acc >= 4 then substring(line, i, length(line))
+  else {
+    let c = charAt(line, i);
+    if c == " " then mdStripIndent(line, i + 1, acc + 1)
+    else if c == "\t" then mdStripIndent(line, i + 1, acc + 4)
+    else line   -- under 4 columns before content: not an indented line, keep it
+  }
+
 -- Flush all accumulated state into blocks
 pure func flushState(state: MdParseState) -> [Block] {
   let s = flushToState(state);
@@ -264,7 +543,7 @@ pure func flushToState(state: MdParseState) -> MdParseState {
   let s = if state.inCode && not mdIsEmptyList(state.codeLines)
     then mdFlushCode(state)   -- unterminated fence: keep the code, don't drop it
     else state;
-  flushQuote(flushText(flushList(flushTable(s))))
+  flushQuote(flushText(flushList(flushTable(flushIndentCode(s)))))
 }
 
 -- Flush accumulated text lines into a TextBlock
