@@ -408,6 +408,11 @@ def create_challenge_sparse_rows_xlsx():
     and whose tab order does not follow the part numbers, so sheet order and
     names must come from workbook.xml + its rels, not the zip listing.
 
+    The "Gaps" sheet (third tab) has <row> elements only for rows 1, 2, 5, 6
+    and 400, as Excel writes a sheet with empty rows. Rows 3-4 must come back
+    as two blank rows, and the 393-row gap before row 400 as one blank
+    separator row plus a warning.
+
     Written as raw XML so the omitted cells and zip order are exact; openpyxl
     would normalise both.
     """
@@ -455,7 +460,9 @@ def create_challenge_sparse_rows_xlsx():
     for n in range(2, 12):
         if n not in parts:
             parts[n] = (f"Tab {n:02d}", [(1, {0: "Sheet part", 1: n})])
-    tab_order = [3, 1] + [n for n in range(2, 12) if n not in (1, 3)]
+    parts[12] = ("Gaps", [(1, {0: "Row", 1: "Value"}), (2, {0: "r2", 1: 2}), (5, {0: "r5", 1: 5}),
+                          (6, {0: "r6", 1: 6}), (400, {0: "r400", 1: 400})])
+    tab_order = [3, 1, 12] + [n for n in range(2, 12) if n not in (1, 3)]
 
     ct = "".join(f'<Override PartName="/xl/worksheets/sheet{n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
                  for n in parts)
@@ -487,6 +494,104 @@ def create_challenge_sparse_rows_xlsx():
         files[f"xl/worksheets/sheet{n}.xml"] = sheet_xml(parts[n][1])
 
     path = OUTPUT_DIR / "challenge_sparse_rows.xlsx"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 9, 29, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, data)
+    print(f"  Created {path}")
+
+
+def create_challenge_comments_multisheet_xlsx():
+    """XLSX whose comment parts are numbered in the opposite order to its sheets.
+
+    Tests: comment parts resolved through each sheet's rels (§18.7,
+    xl/worksheets/_rels/sheetN.xml.rels), not by position.
+    Excel numbers comment parts by creation order and only for sheets that
+    have comments. Here sheet 1 ("Plain") has none, sheet 2 ("Reviewed") has a
+    legacy note on B1 in xl/comments2.xml, and sheet 3 ("Threads") has a
+    threaded comment on C4 in threadedComment1.xml plus its legacy
+    compatibility shim in xl/comments1.xml. Pairing the Nth part with the Nth
+    sheet put sheet 3's comment on sheet 1. Persons are linked from
+    workbook.xml.rels, as Excel writes them.
+
+    Written as raw XML so the part numbering and rels targets are exact.
+    """
+    import zipfile
+
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    tc_ns = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"
+    decl = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+
+    def cell(ref, v):
+        if isinstance(v, str):
+            return f'<c r="{ref}" t="inlineStr"><is><t>{v}</t></is></c>'
+        return f'<c r="{ref}"><v>{v}</v></c>'
+
+    def sheet(rows):
+        body = "".join(f'<row r="{r}">' + "".join(cell(ref, v) for ref, v in cs) + "</row>"
+                       for r, cs in rows)
+        return f'{decl}<worksheet xmlns="{main_ns}"><sheetData>{body}</sheetData></worksheet>'
+
+    def rels(items):
+        return (f'{decl}<Relationships xmlns="{rel_ns}">'
+                + "".join(f'<Relationship Id="{i}" Type="{t}" Target="{tg}"/>' for i, t, tg in items)
+                + "</Relationships>")
+
+    person = "{33333333-3333-3333-3333-333333333333}"
+    thread_id = "{BBBBBBBB-0000-0000-0000-000000000001}"
+    ct_ws = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+    ct_cm = "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"
+    files = {
+        "[Content_Types].xml": f'{decl}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            + "".join(f'<Override PartName="/xl/worksheets/sheet{n}.xml" ContentType="{ct_ws}"/>' for n in (1, 2, 3))
+            + f'<Override PartName="/xl/comments1.xml" ContentType="{ct_cm}"/>'
+            f'<Override PartName="/xl/comments2.xml" ContentType="{ct_cm}"/>'
+            '<Override PartName="/xl/threadedComments/threadedComment1.xml" ContentType="application/vnd.ms-excel.threadedcomments+xml"/>'
+            '<Override PartName="/xl/persons/person.xml" ContentType="application/vnd.ms-excel.person+xml"/>'
+            '</Types>',
+        "_rels/.rels": rels([("rId1", f"{r_ns}/officeDocument", "xl/workbook.xml")]),
+        "xl/workbook.xml": f'{decl}<workbook xmlns="{main_ns}" xmlns:r="{r_ns}"><sheets>'
+            '<sheet name="Plain" sheetId="1" r:id="rId1"/>'
+            '<sheet name="Reviewed" sheetId="2" r:id="rId2"/>'
+            '<sheet name="Threads" sheetId="3" r:id="rId3"/>'
+            '</sheets></workbook>',
+        "xl/_rels/workbook.xml.rels": rels(
+            [(f"rId{n}", f"{r_ns}/worksheet", f"worksheets/sheet{n}.xml") for n in (1, 2, 3)]
+            + [("rId9", "http://schemas.microsoft.com/office/2017/10/relationships/person", "persons/person.xml")]),
+        "xl/worksheets/sheet1.xml": sheet([(1, [("A1", "Item"), ("B1", "Owner")]),
+                                           (2, [("A2", "Kickoff"), ("B2", "Ann")])]),
+        "xl/worksheets/sheet2.xml": sheet([(1, [("A1", "Budget"), ("B1", 1200)]),
+                                           (2, [("A2", "Spent"), ("B2", 800)])]),
+        "xl/worksheets/sheet3.xml": sheet([(1, [("A1", "Quarter"), ("B1", "Region"), ("C1", "Forecast")])]
+                                          + [(r, [("A%d" % r, "Q%d" % (r - 1)), ("B%d" % r, "EMEA"),
+                                                  ("C%d" % r, "Q%d forecast" % (r - 1))]) for r in (2, 3, 4)]),
+        "xl/worksheets/_rels/sheet2.xml.rels": rels([("rId1", f"{r_ns}/comments", "../comments2.xml")]),
+        "xl/worksheets/_rels/sheet3.xml.rels": rels([
+            ("rId1", f"{r_ns}/comments", "../comments1.xml"),
+            ("rId2", "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment",
+             "../threadedComments/threadedComment1.xml")]),
+        # Legacy compatibility shim for the threaded comment on Threads!C4
+        "xl/comments1.xml": f'{decl}<comments xmlns="{main_ns}"><authors><author>tc={thread_id}</author></authors>'
+            '<commentList><comment ref="C4" authorId="0"><text><t>[Threaded comment] Is this final?</t></text>'
+            '</comment></commentList></comments>',
+        # The legacy note on Reviewed!B1
+        "xl/comments2.xml": f'{decl}<comments xmlns="{main_ns}"><authors><author>Ann</author></authors>'
+            '<commentList><comment ref="B1" authorId="0"><text><t>Check this figure</t></text>'
+            '</comment></commentList></comments>',
+        "xl/threadedComments/threadedComment1.xml": f'{decl}<ThreadedComments xmlns="{tc_ns}">'
+            f'<threadedComment ref="C4" dT="2026-09-29T10:00:00Z" personId="{person}" id="{thread_id}">'
+            '<text>Is this final?</text></threadedComment></ThreadedComments>',
+        "xl/persons/person.xml": f'{decl}<personList xmlns="{tc_ns}">'
+            f'<person displayName="Priya" id="{person}" userId="priya@example.com" providerId="AD"/>'
+            '</personList>',
+    }
+    path = OUTPUT_DIR / "challenge_comments_multisheet.xlsx"
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in files.items():
             info = zipfile.ZipInfo(name, date_time=(2026, 9, 29, 0, 0, 0))
@@ -752,6 +857,7 @@ def main():
         ("Hyperlinks with URLs", create_challenge_hyperlinks),
         ("XLSX merged cells", create_challenge_merged_cells_xlsx),
         ("XLSX sparse rows + sheet order", create_challenge_sparse_rows_xlsx),
+        ("XLSX comments on a multi-sheet workbook", create_challenge_comments_multisheet_xlsx),
         ("Equations (OMML)", create_challenge_equations),
         ("Real-world mixed document", create_challenge_real_world),
     ]
