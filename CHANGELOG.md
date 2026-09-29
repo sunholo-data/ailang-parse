@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.47.0](https://github.com/sunholo-data/ailang-parse/compare/v0.46.0...v0.47.0) — 2026-09-29
+
 ### Workbench DOCX parsing works again, and RTF works on the workbench at all
 
 A partner dropped `comments.docx` and `track_changes_move.docx` on the public
