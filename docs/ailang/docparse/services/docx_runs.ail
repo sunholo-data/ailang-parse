@@ -1,0 +1,186 @@
+module docparse/services/docx_runs
+
+import std/string (length, intToStr, split, startsWith, contains)
+import std/list (foldl, length as listLength)
+import docparse/types/document (InlineRun)
+import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, docxRun, docxParagraph)
+
+-- DOCX run and paragraph XML: character formatting, inline links, code
+-- blocks, rules, inline images, revision marks and comment anchors, plus the
+-- relationship-id conventions those paragraphs refer to. Split out of
+-- docx_generator (see its header) to keep each module inside the browser
+-- type-checker's step ceiling. Pure string building; no package state.
+
+-- === Character formatting (P2 phase 4) ===================================
+
+-- A header cell centres by default, but a column that DECLARES an alignment
+-- should honour it in the header too, not just the body.
+export pure func docxHeaderAlignPr(align: string) -> string =
+  if length(align) > 0 then docxAlignPr(align)
+  else "<w:pPr><w:jc w:val=\"center\"/></w:pPr>"
+
+-- Declared column alignment. Word takes it as paragraph justification inside
+-- the cell; "left" is Word's default and needs no element.
+export pure func docxAlignPr(align: string) -> string =
+  if align == "left" then "<w:pPr><w:jc w:val=\"left\"/></w:pPr>"
+  else if align == "center" then "<w:pPr><w:jc w:val=\"center\"/></w:pPr>"
+  else if align == "right" then "<w:pPr><w:jc w:val=\"right\"/></w:pPr>"
+  else ""
+
+-- A blockquote: indented, as Word's own Quote style renders it.
+export pure func docxBlockquote(runs: [InlineRun], text: string) -> string {
+  let body = if listLength(runs) > 0 then docxRunsToXml(runs) else docxRun(text);
+  docxParagraph("<w:pPr><w:ind w:left=\"720\"/></w:pPr>${body}")
+}
+
+-- A fenced code block. Word has no code block, so the whole fence becomes ONE
+-- monospaced paragraph with soft line breaks (w:br) between source lines,
+-- rather than one paragraph per line: a paragraph-per-line let a page break
+-- fall mid-fence, and rendering at full body size wrapped anything wider than
+-- the text column (an ASCII diagram, say) at the margin, destroying its
+-- alignment. Dropping to 8.5pt against a ~10.5pt body keeps typical 72-80
+-- column content inside the page width.
+export pure func docxIsCodeStyle(style: string) -> bool =
+  style == "code" || startsWith(style, "code:")
+
+export pure func docxCodeBlock(text: string) -> string =
+  docxParagraph(docxMonoLines(split(text, "\n")))
+
+pure func docxMonoLines(lines: [string]) -> string =
+  match lines {
+    [] => "",
+    line :: [] => docxMonoRun(line),
+    line :: rest => "${docxMonoRun(line)}<w:r><w:br/></w:r>${docxMonoLines(rest)}"
+  }
+
+pure func docxMonoRun(text: string) -> string =
+  "<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/><w:sz w:val=\"17\"/><w:szCs w:val=\"17\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
+
+-- A thematic break. Word has no <hr> element — the idiom is an empty paragraph
+-- carrying a bottom border, which is what Word itself writes for one.
+export pure func docxHorizontalRule() -> string =
+  docxParagraph("<w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr>")
+
+export pure func docxRunsToXml(runs: [InlineRun]) -> string =
+  foldl(\acc r. "${acc}${docxRunMaybeLinked(r)}", "", runs)
+
+-- A run carrying an href becomes a real clickable link.
+--
+-- Uses w:fldSimple with a HYPERLINK instruction rather than w:hyperlink + r:id:
+-- the field form embeds the target inline, so it needs no relationship entry
+-- and no id bookkeeping threaded through the block walk. Word, LibreOffice and
+-- Pages all render it, and docx_parser reads w:fldSimple back, so it
+-- round-trips.
+--
+-- Without this, HTML→DOCX put the literal Markdown "[text](url)" into Word:
+-- the URL only ever lived in the marker text, and runs had nowhere to keep it.
+pure func docxRunMaybeLinked(r: InlineRun) -> string =
+  if length(r.href) > 0
+  then "<w:fldSimple w:instr=\" HYPERLINK &quot;${xmlAttrEscape(r.href)}&quot; \">${docxLinkedRun(r)}</w:fldSimple>"
+  else docxFormattedRun(r)
+
+-- Same run, plus the Hyperlink character style so it looks like a link.
+pure func docxLinkedRun(r: InlineRun) -> string =
+  "<w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/>${docxRunPropsInner(r)}</w:rPr><w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
+
+pure func docxFormattedRun(r: InlineRun) -> string =
+  "<w:r>${docxRunProps(r)}<w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
+
+-- Child order matters: CT_RPr is a sequence in the schema, not a choice, and
+-- rFonts/b/i/strike/u/vertAlign must appear in that order. Emitting w:u before
+-- w:strike produces a document Word may reject or silently repair.
+pure func docxRunProps(r: InlineRun) -> string {
+  -- DOCX has no "code" run property; a monospace font is its honest equivalent.
+  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
+  let bold = if r.bold then "<w:b/>" else "";
+  let italic = if r.italic then "<w:i/>" else "";
+  let strike = if r.strike then "<w:strike/>" else "";
+  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
+  let vert = if length(r.vertAlign) > 0
+    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
+    else "";
+  let inner = docxRunPropsInner(r);
+  if length(inner) > 0 then "<w:rPr>${inner}</w:rPr>" else ""
+}
+
+-- The rPr children alone, so a linked run can prepend w:rStyle to them.
+pure func docxRunPropsInner(r: InlineRun) -> string {
+  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
+  let bold = if r.bold then "<w:b/>" else "";
+  let italic = if r.italic then "<w:i/>" else "";
+  let strike = if r.strike then "<w:strike/>" else "";
+  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
+  let vert = if length(r.vertAlign) > 0
+    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
+    else "";
+  "${fonts}${bold}${italic}${strike}${under}${vert}"
+}
+
+-- Build OOXML <w:drawing> for an inline image
+-- rId references word/_rels/document.xml.rels entry
+export pure func docxInlineImage(imgIdx: int, description: string) -> string {
+  let rId = docxImageRelId(imgIdx);
+  let idStr = intToStr(imgIdx);
+  let desc = xmlEscape(description);
+  -- Default size: 6 inches wide × 4 inches tall (in EMUs: 1 inch = 914400 EMU)
+  let cx = "5486400";
+  let cy = "3657600";
+  docxParagraph(
+    "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${cx}\" cy=\"${cy}\"/><wp:docPr id=\"${idStr}\" name=\"Image ${idStr}\" descr=\"${desc}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"${idStr}\" name=\"Image ${idStr}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"${rId}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${cx}\" cy=\"${cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
+  )
+}
+
+-- Track changes as styled paragraphs
+-- Full revision markup (<w:ins>/<w:del>) would need revision IDs (deferred).
+-- For now, render as styled text with attribution.
+export pure func docxChangeToXml(changeType: string, author: string, date: string, text: string) -> string {
+  let attribution = " (${changeType} by ${author}, ${date})";
+  if changeType == "delete" || changeType == "move-from"
+  then docxParagraph(
+    "<w:r><w:rPr><w:strike/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>${docxRun(attribution)}"
+  )
+  else docxParagraph(
+    "<w:r><w:rPr><w:b/><w:u w:val=\"single\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>${docxRun(attribution)}"
+  )
+}
+
+export pure func docxLinkRelId(idx: int) -> string = "rIdLink${intToStr(idx)}"
+
+-- Image relationship id. Non-numeric like every other id this generator emits,
+-- which is what lets a reference doc's own rId1..rIdN be carried through
+-- untouched: none of ours can land on one of theirs.
+export pure func docxImageRelId(idx: int) -> string = "rIdImage${intToStr(idx)}"
+
+export pure func docxIsW3CDTF(value: string) -> bool =
+  length(value) >= 19 && contains(value, "-") && contains(value, "T") && contains(value, ":")
+
+export pure func docxHyperlinkPara(idx: int, text: string, title: string) -> string {
+  let tooltip = if length(title) > 0 then " w:tooltip=\"${xmlAttrEscape(title)}\"" else "";
+  let run = "<w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>";
+  docxParagraph("<w:hyperlink r:id=\"${docxLinkRelId(idx)}\"${tooltip}>${run}</w:hyperlink>")
+}
+
+-- w:date must be W3CDTF when present, and it is optional in the schema — so an
+-- unparseable date is dropped rather than written and risking the file.
+export pure func docxDateAttr(date: string) -> string =
+  if docxIsW3CDTF(date) then " w:date=\"${xmlAttrEscape(date)}\"" else ""
+
+-- CommentBlock is a standalone block carrying the text it annotates, so the
+-- anchor paragraph is that text wrapped in the comment range. Unanchored
+-- comments still get a reference so the comment is reachable in Word's pane.
+export pure func docxCommentAnchorPara(id: int, anchorText: string, anchored: bool) -> string {
+  let idStr = intToStr(id);
+  let ref = "<w:r><w:commentReference w:id=\"${idStr}\"/></w:r>";
+  if anchored && length(anchorText) > 0
+  then docxParagraph("<w:commentRangeStart w:id=\"${idStr}\"/>${docxRun(anchorText)}<w:commentRangeEnd w:id=\"${idStr}\"/>${ref}")
+  else docxParagraph(ref)
+}
+
+-- Real revision marks. Deleted text uses <w:delText>, not <w:t> — Word ignores
+-- a <w:t> inside <w:del>, which silently loses the deleted content.
+export pure func docxRevisionPara(id: int, changeType: string, author: string, date: string, text: string) -> string {
+  let attrs = "w:id=\"${intToStr(id)}\" w:author=\"${xmlAttrEscape(author)}\"${docxDateAttr(date)}";
+  if changeType == "delete" || changeType == "move-from"
+  then docxParagraph("<w:del ${attrs}><w:r><w:delText xml:space=\"preserve\">${xmlEscape(text)}</w:delText></w:r></w:del>")
+  else docxParagraph("<w:ins ${attrs}>${docxRun(text)}</w:ins>")
+}

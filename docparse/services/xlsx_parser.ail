@@ -551,7 +551,9 @@ func xlsxWorkbookSheets(filepath: string, parts: [string]) -> [(string, string)]
   }
 }
 
-pure func xlsxResolveWorkbookSheets(workbookXml: string, relsXml: string, parts: [string]) -> [(string, string)] =
+-- Exported (pure) so the browser workbench orders and names sheets with this
+-- same code: docparse_browser.orderXlsxSheets.
+export pure func xlsxResolveWorkbookSheets(workbookXml: string, relsXml: string, parts: [string]) -> [(string, string)] =
   match (parseLenient(workbookXml), parseLenient(relsXml)) {
     (Ok(wb), Ok(rels)) => {
       let targets = map(\r. (getOrElse(getAttr(r, "Id"), ""),

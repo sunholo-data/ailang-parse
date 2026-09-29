@@ -1,14 +1,17 @@
 module docparse/services/docx_generator
 
-import std/string (length, intToStr, split, contains, startsWith)
-import std/list (map, foldl, length as listLength)
-import docparse/services/docx_layout (docxUsableWidth, docxColumnWidths, docxSpanWidth)
+import std/string (length, intToStr, contains)
+import std/list (foldl, length as listLength)
+import docparse/services/docx_layout (docxUsableWidth)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
-import docparse/types/document (mkList, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, countBlocks)
-import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl, docxNs, docxRun, docxParagraph, docxStyledParagraph)
-import docparse/services/docx_template (DocxRefDoc, docxTplNone, docxTplLoad, docxTplInsertBefore, docxTplInsertBeforeFirst, docxTplDropElems, docxTplDroppedParts)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, ParsedDocument)
+import docparse/services/xml_helpers (xmlDecl, docxRun, docxParagraph, docxStyledParagraph)
+import docparse/services/docx_template (DocxRefDoc, docxTplNone, docxTplLoad)
+import docparse/services/docx_runs (docxBlockquote, docxIsCodeStyle, docxCodeBlock, docxHorizontalRule, docxRunsToXml, docxInlineImage, docxChangeToXml, docxHyperlinkPara, docxCommentAnchorPara, docxRevisionPara)
+import docparse/services/docx_table (docxTableToXml, docxListToXml)
+import docparse/services/docx_package (DocxOptParts, DocxImage, DocxLink, DocxComment, DocxHdrFtr, docxMediaPrefix, docxNeedsNumbering, docxContentTypesPart, docxStylesPart, docxDocumentRelsPart, docxImageEntries, docxAppendByteEntries, docxRootRelsPart, docxCoreProps, docxNumberingPart, docxCommentsPart, docxHdrFtrPartName, docxHdrFtrRelId)
 
 -- DOCX Generator — converts Block ADT to a valid .docx file.
 --
@@ -28,20 +31,16 @@ import docparse/services/docx_template (DocxRefDoc, docxTplNone, docxTplLoad, do
 --   - Minimal styling (structural, not pixel-perfect)
 --   - Image sizing is fixed (no aspect ratio detection from binary data)
 --
+--
+-- Split by concern so no module is over the browser type-checker's 100k-step
+-- ceiling (tests/browser/module-budget.spec.ts); this one was 151k:
+--   docx_runs     run and paragraph XML (formatting, links, revisions, images)
+--   docx_table    tables and list paragraphs
+--   docx_package  every OPC part but document.xml: content types, rels,
+--                 styles, core props, numbering, comments; and the part types
+-- This module keeps the plan, the indexed block walk and the archive.
+--
 -- Contract: non-empty blocks produce a valid DOCX
-
--- Which optional parts a given document needs. Threaded through the
--- [Content_Types].xml and document.xml.rels builders so every part that gets
--- written also gets declared and related — the P0 bug was styles.xml being
--- written and declared but never related, which makes it invisible to Word.
-type DocxOptParts = {
-  images: [DocxImage],
-  links: [DocxLink],
-  comments: [DocxComment],
-  headers: [DocxHdrFtr],
-  footers: [DocxHdrFtr],
-  hasNumbering: bool
-}
 
 -- Generate a DOCX file from a ParsedDocument, writing to outputPath
 -- Every OPC part of the document, as strings — the whole of DOCX generation
@@ -158,19 +157,6 @@ func docxWriteArchive(doc: ParsedDocument, outputPath: string, ref: DocxRefDoc) 
     }
   }
 }
-
--- Our media parts get a distinct basename under a reference doc: the template
--- brings its own word/media/image1.png — a letterhead logo, usually — and
--- writing ours to the same path would either clobber it or put two entries of
--- the same name in the ZIP.
-pure func docxMediaPrefix(ref: DocxRefDoc) -> string =
-  if ref.active then "dpimage" else "image"
-
--- numbering.xml is written whenever the content needs it OR the template
--- already had one: dropping the template's numbering would strip the list
--- formatting the reference doc exists to supply.
-pure func docxNeedsNumbering(parts: DocxOptParts, ref: DocxRefDoc) -> bool =
-  parts.hasNumbering || length(ref.numberingXml) > 0
 
 -- The full text-part list for a document. Single source of truth: both the
 -- image and no-image archive paths derive their entries from this, so a part
@@ -304,111 +290,6 @@ pure func docxBlockToXml(block: Block) -> string =
       docxParagraph(docxRun(commentText(c.author, c.text, c.anchorText, c.anchored)))
   }
 
--- === Character formatting (P2 phase 4) ===================================
-
--- A header cell centres by default, but a column that DECLARES an alignment
--- should honour it in the header too, not just the body.
-pure func docxHeaderAlignPr(align: string) -> string =
-  if length(align) > 0 then docxAlignPr(align)
-  else "<w:pPr><w:jc w:val=\"center\"/></w:pPr>"
-
--- Declared column alignment. Word takes it as paragraph justification inside
--- the cell; "left" is Word's default and needs no element.
-pure func docxAlignPr(align: string) -> string =
-  if align == "left" then "<w:pPr><w:jc w:val=\"left\"/></w:pPr>"
-  else if align == "center" then "<w:pPr><w:jc w:val=\"center\"/></w:pPr>"
-  else if align == "right" then "<w:pPr><w:jc w:val=\"right\"/></w:pPr>"
-  else ""
-
--- A blockquote: indented, as Word's own Quote style renders it.
-pure func docxBlockquote(runs: [InlineRun], text: string) -> string {
-  let body = if listLength(runs) > 0 then docxRunsToXml(runs) else docxRun(text);
-  docxParagraph("<w:pPr><w:ind w:left=\"720\"/></w:pPr>${body}")
-}
-
--- A fenced code block. Word has no code block, so the whole fence becomes ONE
--- monospaced paragraph with soft line breaks (w:br) between source lines,
--- rather than one paragraph per line: a paragraph-per-line let a page break
--- fall mid-fence, and rendering at full body size wrapped anything wider than
--- the text column (an ASCII diagram, say) at the margin, destroying its
--- alignment. Dropping to 8.5pt against a ~10.5pt body keeps typical 72-80
--- column content inside the page width.
-pure func docxIsCodeStyle(style: string) -> bool =
-  style == "code" || startsWith(style, "code:")
-
-pure func docxCodeBlock(text: string) -> string =
-  docxParagraph(docxMonoLines(split(text, "\n")))
-
-pure func docxMonoLines(lines: [string]) -> string =
-  match lines {
-    [] => "",
-    line :: [] => docxMonoRun(line),
-    line :: rest => "${docxMonoRun(line)}<w:r><w:br/></w:r>${docxMonoLines(rest)}"
-  }
-
-pure func docxMonoRun(text: string) -> string =
-  "<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/><w:sz w:val=\"17\"/><w:szCs w:val=\"17\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>"
-
--- A thematic break. Word has no <hr> element — the idiom is an empty paragraph
--- carrying a bottom border, which is what Word itself writes for one.
-pure func docxHorizontalRule() -> string =
-  docxParagraph("<w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr>")
-
-pure func docxRunsToXml(runs: [InlineRun]) -> string =
-  foldl(\acc r. "${acc}${docxRunMaybeLinked(r)}", "", runs)
-
--- A run carrying an href becomes a real clickable link.
---
--- Uses w:fldSimple with a HYPERLINK instruction rather than w:hyperlink + r:id:
--- the field form embeds the target inline, so it needs no relationship entry
--- and no id bookkeeping threaded through the block walk. Word, LibreOffice and
--- Pages all render it, and docx_parser reads w:fldSimple back, so it
--- round-trips.
---
--- Without this, HTML→DOCX put the literal Markdown "[text](url)" into Word:
--- the URL only ever lived in the marker text, and runs had nowhere to keep it.
-pure func docxRunMaybeLinked(r: InlineRun) -> string =
-  if length(r.href) > 0
-  then "<w:fldSimple w:instr=\" HYPERLINK &quot;${xmlAttrEscape(r.href)}&quot; \">${docxLinkedRun(r)}</w:fldSimple>"
-  else docxFormattedRun(r)
-
--- Same run, plus the Hyperlink character style so it looks like a link.
-pure func docxLinkedRun(r: InlineRun) -> string =
-  "<w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/>${docxRunPropsInner(r)}</w:rPr><w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
-
-pure func docxFormattedRun(r: InlineRun) -> string =
-  "<w:r>${docxRunProps(r)}<w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
-
--- Child order matters: CT_RPr is a sequence in the schema, not a choice, and
--- rFonts/b/i/strike/u/vertAlign must appear in that order. Emitting w:u before
--- w:strike produces a document Word may reject or silently repair.
-pure func docxRunProps(r: InlineRun) -> string {
-  -- DOCX has no "code" run property; a monospace font is its honest equivalent.
-  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
-  let bold = if r.bold then "<w:b/>" else "";
-  let italic = if r.italic then "<w:i/>" else "";
-  let strike = if r.strike then "<w:strike/>" else "";
-  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
-  let vert = if length(r.vertAlign) > 0
-    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
-    else "";
-  let inner = docxRunPropsInner(r);
-  if length(inner) > 0 then "<w:rPr>${inner}</w:rPr>" else ""
-}
-
--- The rPr children alone, so a linked run can prepend w:rStyle to them.
-pure func docxRunPropsInner(r: InlineRun) -> string {
-  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
-  let bold = if r.bold then "<w:b/>" else "";
-  let italic = if r.italic then "<w:i/>" else "";
-  let strike = if r.strike then "<w:strike/>" else "";
-  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
-  let vert = if length(r.vertAlign) > 0
-    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
-    else "";
-  "${fonts}${bold}${italic}${strike}${under}${vert}"
-}
-
 -- Counters threaded through the body walk. Images and links each need a
 -- relationship id, comments need an id shared with word/comments.xml, and
 -- revisions need a document-unique w:id. Collect* functions below walk the same
@@ -498,178 +379,6 @@ pure func docxSectionLabel(kind: string) -> string =
   else if kind == "textbox" then "Text Box:"
   else ""
 
--- Build OOXML <w:drawing> for an inline image
--- rId references word/_rels/document.xml.rels entry
-pure func docxInlineImage(imgIdx: int, description: string) -> string {
-  let rId = docxImageRelId(imgIdx);
-  let idStr = intToStr(imgIdx);
-  let desc = xmlEscape(description);
-  -- Default size: 6 inches wide × 4 inches tall (in EMUs: 1 inch = 914400 EMU)
-  let cx = "5486400";
-  let cy = "3657600";
-  docxParagraph(
-    "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${cx}\" cy=\"${cy}\"/><wp:docPr id=\"${idStr}\" name=\"Image ${idStr}\" descr=\"${desc}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"${idStr}\" name=\"Image ${idStr}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"${rId}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${cx}\" cy=\"${cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
-  )
-}
-
--- Build a DOCX table: <w:tbl> with <w:tr>/<w:tc>
--- Use the selected section width in twips. Word auto-fits a
--- table with no explicit widths, but that is Word being forgiving: ECMA-376
--- §17.4.49 makes w:tblGrid part of the table's definition, and a reader that
--- follows the spec (Pages, for one) collapses every column to its minimum —
--- one character per line.
-pure func docxTableToXml(headers: [TableCell], rows: [[TableCell]], tblStyle: string, totalWidth: int) -> string {
-  let cols = docxTableColCount(headers, rows);
-  let widths = docxColumnWidths(headers, rows, cols, totalWidth);
-  let tableWidth = foldl(\acc w. acc + w, 0, widths);
-  -- Under a template table style the style carries the borders — hardcoded
-  -- direct formatting would override it and defeat the binding — so only the
-  -- styleless path emits them. Geometry follows the selected page/column
-  -- width, with bounded content weights rather than a fixed Letter grid.
-  let tblPr = if length(tblStyle) > 0
-    then "<w:tblPr><w:tblStyle w:val=\"${tblStyle}\"/><w:tblW w:w=\"${intToStr(tableWidth)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>"
-    else "<w:tblPr><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders><w:tblW w:w=\"${intToStr(tableWidth)}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/></w:tblPr>";
-  let grid = "<w:tblGrid>${docxGridCols(widths)}</w:tblGrid>";
-  let headerRow = if listLength(headers) > 0
-    then "<w:tr><w:trPr><w:tblHeader/></w:trPr>${docxHeaderCellsToXml(headers, widths)}</w:tr>"
-    else "";
-  let dataRows = foldl(\acc row. "${acc}<w:tr>${docxDataCellsToXml(row, widths)}</w:tr>", "", rows);
-  "<w:tbl>${tblPr}${grid}${headerRow}${dataRows}</w:tbl>"
-}
-
--- Widest row wins, counting a spanned cell as the columns it covers.
-pure func docxTableColCount(headers: [TableCell], rows: [[TableCell]]) -> int =
-  foldl(\acc row. { let n = docxRowSpanWidth(row) in if n > acc then n else acc },
-        docxRowSpanWidth(headers), rows)
-
--- A row's true grid width. Cells that a preceding gridSpan already covers
--- occupy no grid position of their own — counting them made a 4-column table
--- declare a 7-column grid, because "Total {colspan=4}" plus its three merged
--- continuations was summed as 4+1+1+1.
-pure func docxRowSpanWidth(cells: [TableCell]) -> int =
-  docxRowWidthWalk(cells, 0, 0)
-
-pure func docxRowWidthWalk(cells: [TableCell], cover: int, acc: int) -> int =
-  match cells {
-    [] => acc,
-    c :: rest =>
-      if c.merged && cover > 0
-      then docxRowWidthWalk(rest, cover - 1, acc)
-      else docxRowWidthWalk(rest, docxCoverAfter(c), acc + docxCellSpan(c))
-  }
-
-pure func docxCellSpan(c: TableCell) -> int = if c.colSpan > 1 then c.colSpan else 1
-
--- Grid positions a cell claims beyond the one it sits in.
-pure func docxCoverAfter(c: TableCell) -> int = docxCellSpan(c) - 1
-
-pure func docxGridCols(widths: [int]) -> string =
-  foldl(\acc w. "${acc}<w:gridCol w:w=\"${intToStr(w)}\"/>", "", widths)
-
--- Header cells as bold <w:tc>
--- Emit cells left to right, skipping any merged cell that a preceding
--- gridSpan already covers.
---
--- `merged` means "this position is a continuation", and until now every one of
--- them became a <w:vMerge> tc — a VERTICAL merge. For the horizontal case that
--- is doubly wrong: the position is already occupied by the span, so the extra
--- tc pushes the row past the declared grid, and it claims continuation from a
--- row above that has no cell at that offset. python-docx refuses to read such
--- a row; Word offers to repair the file. vMerge is correct only when nothing
--- in this row covers the position.
-pure func docxHeaderCellsToXml(cells: [TableCell], widths: [int]) -> string =
-  docxHeaderCellsWalk(cells, widths, 0, 0, "")
-
-pure func docxHeaderCellsWalk(cells: [TableCell], widths: [int], pos: int, cover: int, acc: string) -> string =
-  match cells {
-    [] => acc,
-    c :: rest =>
-      if c.merged && cover > 0
-      then docxHeaderCellsWalk(rest, widths, pos, cover - 1, acc)
-      else docxHeaderCellsWalk(rest, widths, pos + docxCellSpan(c), docxCoverAfter(c),
-                               "${acc}${docxHeaderCellToXml(c, docxSpanWidth(widths, pos, docxCellSpan(c)))}")
-  }
-
-pure func docxHeaderCellToXml(cell: TableCell, colW: int) -> string {
-  if cell.merged then "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/><w:vMerge/></w:tcPr><w:p/></w:tc>"
-  else {
-    let spanPr = if cell.colSpan > 1
-      then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
-      else "";
-    -- Runs carry their own formatting (e.g. code:true from a `backtick` span);
-    -- bold is forced on top of that rather than replacing it, so a header cell
-    -- stays bold the way a plain-text header cell always has.
-    let body = if listLength(cell.runs) > 0
-      then docxRunsToXml(map(\r. {r | bold: true}, cell.runs))
-      else "<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(cell.text)}</w:t></w:r>";
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/>${spanPr}</w:tcPr><w:p>${docxHeaderAlignPr(cell.align)}${body}</w:p></w:tc>"
-  }
-}
-
--- Data cells as normal <w:tc>, with the same horizontal-continuation skip.
-pure func docxDataCellsToXml(cells: [TableCell], widths: [int]) -> string =
-  docxDataCellsWalk(cells, widths, 0, 0, "")
-
-pure func docxDataCellsWalk(cells: [TableCell], widths: [int], pos: int, cover: int, acc: string) -> string =
-  match cells {
-    [] => acc,
-    c :: rest =>
-      if c.merged && cover > 0
-      then docxDataCellsWalk(rest, widths, pos, cover - 1, acc)
-      else docxDataCellsWalk(rest, widths, pos + docxCellSpan(c), docxCoverAfter(c),
-                             "${acc}${docxDataCellToXml(c, docxSpanWidth(widths, pos, docxCellSpan(c)))}")
-  }
-
-pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
-  if cell.merged then "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/><w:vMerge/></w:tcPr><w:p/></w:tc>"
-  else {
-    let spanPr = if cell.colSpan > 1
-      then "<w:gridSpan w:val=\"${intToStr(cell.colSpan)}\"/>"
-      else "";
-    -- cell.runs is the tokenized decomposition of cell.text (markdown_parser
-    -- populates it; every other parser leaves it empty), so a `code` span or
-    -- **bold** term inside a cell renders as a real Word run instead of
-    -- reaching the page as literal backtick/asterisk characters.
-    let body = if listLength(cell.runs) > 0 then docxRunsToXml(cell.runs) else docxRun(cell.text);
-    "<w:tc><w:tcPr><w:tcW w:w=\"${intToStr(colW)}\" w:type=\"dxa\"/>${spanPr}</w:tcPr>${docxParagraph("${docxAlignPr(cell.align)}${body}")}</w:tc>"
-  }
-}
-
--- Lists as real Word list paragraphs referencing word/numbering.xml
--- (numBase = bullet, numBase + 1 = decimal, matching docxNumberingDefs).
-pure func docxListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]],
-                        itemLevels: [int], numBase: int) -> string =
-  docxListItemsToXml(items, itemRuns, itemLevels, if ordered then numBase + 1 else numBase)
-
--- itemRuns is parallel to items but may be empty entirely (nothing formatted).
--- Both lists are walked together so a short or absent itemRuns simply falls
--- back to plain text per item rather than mis-pairing formatting with the
--- wrong item.
-pure func docxListItemsToXml(items: [string], itemRuns: [[InlineRun]], itemLevels: [int], numId: int) -> string =
-  match items {
-    [] => "",
-    item :: rest =>
-      -- w:ilvl is the nesting depth Word indents by; it was hardcoded to 0, so
-      -- every sub-item rendered flush with its parent.
-      let lvl = docxHeadLevel(itemLevels) in
-      let pPr = "<w:pPr><w:pStyle w:val=\"ListParagraph\"/><w:numPr><w:ilvl w:val=\"${intToStr(lvl)}\"/><w:numId w:val=\"${intToStr(numId)}\"/></w:numPr></w:pPr>" in
-      match itemRuns {
-        [] =>
-          "${docxParagraph("${pPr}${docxRun(item)}")}${docxListItemsToXml(rest, [], docxTailLevels(itemLevels), numId)}",
-        r :: rrest =>
-          let body = if listLength(r) > 0 then docxRunsToXml(r) else docxRun(item) in
-          "${docxParagraph("${pPr}${body}")}${docxListItemsToXml(rest, rrest, docxTailLevels(itemLevels), numId)}"
-      }
-  }
-
--- itemLevels is parallel to items but may be absent entirely (a flat list), so
--- both are walked together and a missing level simply means top level.
-pure func docxHeadLevel(levels: [int]) -> int =
-  match levels { [] => 0, n :: _ => n }
-
-pure func docxTailLevels(levels: [int]) -> [int] =
-  match levels { [] => [], _ :: t => t }
-
 -- Section blocks: render child blocks with a section label
 pure func docxSectionToXml(kind: string, blocks: [Block]) -> string {
   let label = if kind == "slide" then "--- Slide ---"
@@ -685,180 +394,6 @@ pure func docxSectionToXml(kind: string, blocks: [Block]) -> string {
     else "";
   "${labelXml}${foldl(\acc b. "${acc}${docxBlockToXml(b)}", "", blocks)}"
 }
-
--- Track changes as styled paragraphs
--- Full revision markup (<w:ins>/<w:del>) would need revision IDs (deferred).
--- For now, render as styled text with attribution.
-pure func docxChangeToXml(changeType: string, author: string, date: string, text: string) -> string {
-  let attribution = " (${changeType} by ${author}, ${date})";
-  if changeType == "delete" || changeType == "move-from"
-  then docxParagraph(
-    "<w:r><w:rPr><w:strike/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>${docxRun(attribution)}"
-  )
-  else docxParagraph(
-    "<w:r><w:rPr><w:b/><w:u w:val=\"single\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>${docxRun(attribution)}"
-  )
-}
-
--- [Content_Types].xml. Every part written by docxTextParts must have an Override
--- here (or a Default for its extension) or Word rejects the package — and so
--- must NOT have one for a part the package does not contain.
---
--- Under a reference doc the template's registry is kept and only extended: it
--- already declares its theme, settings, fontTable, headers and footers, and
--- re-deriving that list from parts we never look at is not possible.
-pure func docxContentTypesPart(parts: DocxOptParts, ref: DocxRefDoc, needNum: bool) -> string =
-  if docxCanMerge(ref.contentTypesXml, "</Types>")
-  then docxCtMerge(docxDropOverridesFor(ref.contentTypesXml, docxTplDroppedParts()), parts, ref, needNum)
-  else "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>${docxCtImageDefaults(parts.images, "", "")}${docxCtOverrides(parts, ref, needNum)}</Types>"
-
-pure func docxCtMerge(ct: string, parts: DocxOptParts, ref: DocxRefDoc, needNum: bool) -> string {
-  let defaults = docxCtImageDefaults(parts.images, ct, "");
-  -- OPC lists every <Default> ahead of the <Override> entries; appending new
-  -- image defaults at the end would interleave them.
-  let withDefaults = if length(defaults) == 0 then ct
-    else if contains(ct, "<Override")
-    then docxTplInsertBeforeFirst(ct, "<Override", defaults)
-    else docxTplInsertBefore(ct, "</Types>", defaults);
-  docxTplInsertBefore(withDefaults, "</Types>", docxCtOverrides(parts, ref, needNum))
-}
-
--- One body-builder for both paths. With no reference doc every "does the
--- template already declare this" test is false, so the output is the same set
--- of overrides this generator has always written.
-pure func docxCtOverrides(parts: DocxOptParts, ref: DocxRefDoc, needNum: bool) -> string {
-  let wordNs = "application/vnd.openxmlformats-officedocument.wordprocessingml";
-  let tpl = ref.contentTypesXml;
-  let docOv = docxCtOverrideIfMissing(tpl, "/word/document.xml", "${wordNs}.document.main+xml");
-  let stylesOv = docxCtOverrideIfMissing(tpl, "/word/styles.xml", "${wordNs}.styles+xml");
-  let coreOv = docxCtOverrideIfMissing(tpl, "/docProps/core.xml", "application/vnd.openxmlformats-package.core-properties+xml");
-  let numOv = if needNum
-    then docxCtOverrideIfMissing(tpl, "/word/numbering.xml", "${wordNs}.numbering+xml")
-    else "";
-  -- Not guarded on the template: the override for its comments part was just
-  -- stripped, because the template's comments went with its body.
-  let cmtOv = if listLength(parts.comments) > 0
-    then docxOverride("/word/comments.xml", "${wordNs}.comments+xml")
-    else "";
-  let hdrOv = docxHdrFtrOverrides(parts.headers, "${wordNs}.header+xml");
-  let ftrOv = docxHdrFtrOverrides(parts.footers, "${wordNs}.footer+xml");
-  "${docOv}${stylesOv}${coreOv}${numOv}${cmtOv}${hdrOv}${ftrOv}"
-}
-
-pure func docxCtOverrideIfMissing(tpl: string, partName: string, contentType: string) -> string =
-  if contains(tpl, "PartName=\"${partName}\"") then "" else docxOverride(partName, contentType)
-
-pure func docxDropOverridesFor(ct: string, dropped: [{name: string, part: string, target: string}]) -> string =
-  match dropped {
-    [] => ct,
-    d :: rest => docxDropOverridesFor(docxTplDropElems(ct, "<Override ", "PartName=\"${d.part}\""), rest)
-  }
-
-pure func docxOverride(partName: string, contentType: string) -> string =
-  "<Override PartName=\"${partName}\" ContentType=\"${contentType}\"/>"
-
-pure func docxHdrFtrOverrides(parts: [DocxHdrFtr], contentType: string) -> string =
-  match parts {
-    [] => "",
-    p :: rest =>
-      "${docxOverride("/word/${docxHdrFtrPartName(p)}", contentType)}${docxHdrFtrOverrides(rest, contentType)}"
-  }
-
--- <Default> entries for the image MIME types in this document, skipping both
--- extensions already emitted and extensions the template already declares.
-pure func docxCtImageDefaults(images: [DocxImage], tpl: string, seen: string) -> string =
-  match images {
-    [] => "",
-    img :: rest =>
-      if docxContainsExt(seen, img.ext) || contains(tpl, "Extension=\"${img.ext}\"")
-      then docxCtImageDefaults(rest, tpl, seen)
-      else "<Default Extension=\"${img.ext}\" ContentType=\"${img.mime}\"/>${docxCtImageDefaults(rest, tpl, "${seen},${img.ext}")}"
-  }
-
--- A template part is mergeable only if we actually have it and it closes the
--- way we expect. Anything else falls through to generating the part outright,
--- which is wrong-looking but valid — as against inserting into a string that
--- does not have the shape assumed, which is invalid XML.
-pure func docxCanMerge(xml: string, closeTag: string) -> bool =
-  length(xml) > 0 && contains(xml, closeTag)
-
-pure func docxContainsExt(seen: string, ext: string) -> bool {
-  let parts = split(seen, ",");
-  docxExtInList(parts, ext)
-}
-
-pure func docxExtInList(parts: [string], ext: string) -> bool =
-  match parts {
-    [] => false,
-    p :: rest => if p == ext then true else docxExtInList(rest, ext)
-  }
-
--- Every style this generator's body XML can reference, as (id, xml) pairs
--- rather than one blob. Reference-doc mode injects only the ids a template does
--- not already define, so the template's Heading1 wins and a missing
--- ListParagraph still gets filled in — and the two paths cannot disagree about
--- what the set of styles is.
---
--- Normal carries w:default="1": without it the part has no default paragraph
--- style, and consumers report no style at all for unstyled paragraphs
--- (python-docx returns None for paragraph.style).
---
--- ListParagraph is referenced by every w:numPr paragraph, Hyperlink by every
--- w:hyperlink run. A missing style definition here is the same class of bug as
--- the orphaned styles.xml: the reference resolves to nothing.
-pure func docxStyleDefs() -> [{id: string, xml: string}] = [
-  {id: "Normal", xml: "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>"},
-  {id: "ListParagraph", xml: "<w:style w:type=\"paragraph\" w:styleId=\"ListParagraph\"><w:name w:val=\"List Paragraph\"/><w:pPr><w:ind w:left=\"720\"/><w:contextualSpacing/></w:pPr></w:style>"},
-  {id: "Hyperlink", xml: "<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr></w:style>"},
-  {id: "Heading1", xml: docxHeadingStyle(1, "28")},
-  {id: "Heading2", xml: docxHeadingStyle(2, "24")},
-  {id: "Heading3", xml: docxHeadingStyle(3, "20")},
-  {id: "Heading4", xml: docxHeadingStyle(4, "18")},
-  {id: "Heading5", xml: docxHeadingStyle(5, "16")},
-  {id: "Heading6", xml: docxHeadingStyle(6, "14")}
-]
-
-pure func docxMinimalStyles() -> string =
-  "${xmlDecl()}<w:styles xmlns:w=\"${docxNs()}\">${docxJoinStyleXml(docxStyleDefs())}</w:styles>"
-
-pure func docxJoinStyleXml(defs: [{id: string, xml: string}]) -> string =
-  match defs {
-    [] => "",
-    d :: rest => "${d.xml}${docxJoinStyleXml(rest)}"
-  }
-
--- word/styles.xml under a reference doc: the template's part with our
--- definitions added only for styleIds it lacks.
---
--- This is the whole point of the feature and both easy mistakes are silent.
--- Replacing the part throws away the fonts, colours and spacing the reference
--- doc was supplied for; appending ours unconditionally shadows its heading
--- styles with our 14pt bold. Either way the file opens and looks wrong.
-pure func docxStylesPart(ref: DocxRefDoc) -> string =
-  if not docxCanMerge(ref.stylesXml, "</w:styles>")
-  then docxMinimalStyles()
-  else docxTplInsertBefore(ref.stylesXml, "</w:styles>",
-                           docxMissingStyleXml(docxStyleDefs(), ref.stylesXml))
-
-pure func docxMissingStyleXml(defs: [{id: string, xml: string}], tpl: string) -> string =
-  match defs {
-    [] => "",
-    d :: rest =>
-      if contains(tpl, "w:styleId=\"${d.id}\"")
-      then docxMissingStyleXml(rest, tpl)
-      else "${d.xml}${docxMissingStyleXml(rest, tpl)}"
-  }
-
--- Build a heading style definition
-pure func docxHeadingStyle(level: int, fontSize: string) -> string =
-  "<w:style w:type=\"paragraph\" w:styleId=\"Heading${intToStr(level)}\"><w:name w:val=\"heading ${intToStr(level)}\"/><w:pPr><w:spacing w:before=\"240\" w:after=\"120\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"${fontSize}\"/></w:rPr></w:style>"
-
--- ============================================================
--- Image embedding support (M3: createArchiveWithBytes)
--- ============================================================
-
--- Collected image info
-type DocxImage = { idx: int, data: string, mime: string, ext: string }
 
 -- Collect all ImageBlocks with binary data from blocks
 pure func docxCollectImages(blocks: [Block], startIdx: int) -> [DocxImage] =
@@ -924,213 +459,11 @@ pure func docxMimeToExt(mime: string) -> string =
   else if mime == "image/svg+xml" then "svg"
   else "png"
 
--- Build word/_rels/document.xml.rels: the styles relationship, plus one per image.
---
--- The styles relationship is NOT optional and must be present even when the
--- document has no images. OPC resolves parts through the relationship graph, so
--- declaring word/styles.xml in [Content_Types].xml is not enough — without a
--- relationship pointing at it the part is unreachable, every
--- <w:pStyle w:val="HeadingN"/> resolves to nothing, and all headings silently
--- render as body text. LibreOffice and python-docx both drop them; pandoc only
--- appeared to work because it pattern-matches the styleId heuristically instead
--- of resolving the part, which is why this went unnoticed.
---
--- Under a reference doc the template's relationship graph is carried WHOLE:
--- the lifted <w:sectPr> resolves its header and footer ids through it, so
--- rebuilding it would break the letterhead the reference doc exists to supply.
--- Ours are appended, and every id this generator emits is non-numeric, so no
--- appended id can land on one of the template's rId1..rIdN.
-pure func docxDocumentRelsPart(parts: DocxOptParts, ref: DocxRefDoc, needNum: bool) -> string =
-  if docxCanMerge(ref.documentRelsXml, "</Relationships>")
-  then docxTplInsertBefore(docxDropRelsFor(ref.documentRelsXml, docxTplDroppedParts()),
-                           "</Relationships>", docxRelsBody(parts, ref, needNum))
-  else "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${docxRelsBody(parts, ref, needNum)}</Relationships>"
-
--- One body-builder for both paths. With no reference doc every "does the
--- template already have this" test is false and parts.headers/footers are
--- populated, so the output is the relationship set this generator has always
--- written; under one, the headers are empty and the guards suppress duplicates.
-pure func docxRelsBody(parts: DocxOptParts, ref: DocxRefDoc, needNum: bool) -> string {
-  let ofcNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-  let tpl = ref.documentRelsXml;
-  let stylesRel = if contains(tpl, "Target=\"styles.xml\"") then ""
-    else docxRel(docxStylesRelId(), "${ofcNs}/styles", "styles.xml");
-  let numRel = if needNum && not contains(tpl, "Target=\"numbering.xml\"")
-    then docxRel("rIdNumbering", "${ofcNs}/numbering", "numbering.xml")
-    else "";
-  let cmtRel = if listLength(parts.comments) > 0
-    then docxRel("rIdComments", "${ofcNs}/comments", "comments.xml")
-    else "";
-  let hdrRels = docxHdrFtrRels(parts.headers, "${ofcNs}/header");
-  let ftrRels = docxHdrFtrRels(parts.footers, "${ofcNs}/footer");
-  let linkRels = docxLinkRels(parts.links, "${ofcNs}/hyperlink");
-  "${stylesRel}${numRel}${cmtRel}${hdrRels}${ftrRels}${linkRels}${docxImageRelsEntries(parts.images, docxMediaPrefix(ref))}"
-}
-
-pure func docxDropRelsFor(rels: string, dropped: [{name: string, part: string, target: string}]) -> string =
-  match dropped {
-    [] => rels,
-    d :: rest => docxDropRelsFor(docxTplDropElems(rels, "<Relationship ", "Target=\"${d.target}\""), rest)
-  }
-
-pure func docxRel(id: string, relType: string, target: string) -> string =
-  "<Relationship Id=\"${id}\" Type=\"${relType}\" Target=\"${target}\"/>"
-
-pure func docxHdrFtrRels(parts: [DocxHdrFtr], relType: string) -> string =
-  match parts {
-    [] => "",
-    p :: rest =>
-      "${docxRel(docxHdrFtrRelId(p), relType, docxHdrFtrPartName(p))}${docxHdrFtrRels(rest, relType)}"
-  }
-
--- Hyperlink targets are external URLs, so they need TargetMode="External".
--- Without it Word treats the href as a package-relative part path and the link
--- silently does nothing.
-pure func docxLinkRels(links: [DocxLink], relType: string) -> string =
-  match links {
-    [] => "",
-    l :: rest =>
-      "<Relationship Id=\"${docxLinkRelId(l.idx)}\" Type=\"${relType}\" Target=\"${xmlAttrEscape(l.href)}\" TargetMode=\"External\"/>${docxLinkRels(rest, relType)}"
-  }
-
-pure func docxLinkRelId(idx: int) -> string = "rIdLink${intToStr(idx)}"
-
--- Relationship id for word/styles.xml.
-pure func docxStylesRelId() -> string = "rIdStyles"
-
--- Image relationship id. Non-numeric like every other id this generator emits,
--- which is what lets a reference doc's own rId1..rIdN be carried through
--- untouched: none of ours can land on one of theirs.
-pure func docxImageRelId(idx: int) -> string = "rIdImage${intToStr(idx)}"
-
--- The media path is built here and in docxImageEntries, and nowhere else, so
--- the prefix that keeps our media clear of a template's has exactly two places
--- to be applied.
-pure func docxImageRelsEntries(images: [DocxImage], prefix: string) -> string =
-  match images {
-    [] => "",
-    img :: rest =>
-      "<Relationship Id=\"${docxImageRelId(img.idx)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/${prefix}${intToStr(img.idx)}.${img.ext}\"/>${docxImageRelsEntries(rest, prefix)}"
-  }
-
--- Build binary archive entries for images
-pure func docxImageEntries(images: [DocxImage], prefix: string) -> [{name: string, data: string}] =
-  match images {
-    [] => [],
-    img :: rest =>
-      let entry = {name: "word/media/${prefix}${intToStr(img.idx)}.${img.ext}", data: img.data} in
-      entry :: docxImageEntries(rest, prefix)
-  }
-
--- List append helpers
-pure func docxAppendByteEntries(a: [{name: string, data: string}], b: [{name: string, data: string}]) -> [{name: string, data: string}] =
-  match a {
-    [] => b,
-    x :: rest => x :: docxAppendByteEntries(rest, b)
-  }
-
 pure func docxAppendImageList(a: [DocxImage], b: [DocxImage]) -> [DocxImage] =
   match a {
     [] => b,
     x :: rest => x :: docxAppendImageList(rest, b)
   }
-
--- ============================================================
--- docProps/core.xml — document metadata (P1 item 5)
--- ============================================================
-
--- The package-level rels must point at docProps/core.xml, otherwise the part is
--- orphaned exactly the way styles.xml was. Local to this module rather than a
--- change to xml_helpers.docxRootRels, which pptx/xlsx also use.
-pure func docxRootRelsWithCore() -> string {
-  let docRel = docxRel("rId1", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument", "word/document.xml");
-  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${docRel}${docxCoreRel()}</Relationships>"
-}
-
-pure func docxCoreRel() -> string =
-  docxRel("rIdCore", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", "docProps/core.xml")
-
--- _rels/.rels under a reference doc. The template's package relationships point
--- at its theme, settings, app and custom properties, so they are carried; only
--- the core-properties relationship is added, and only when the template has
--- none. A template that has one already points at the same path we write.
-pure func docxRootRelsPart(ref: DocxRefDoc) -> string =
-  if not docxCanMerge(ref.rootRelsXml, "</Relationships>")
-  then docxRootRelsWithCore()
-  else if contains(ref.rootRelsXml, "docProps/core.xml")
-  then ref.rootRelsXml
-  else docxTplInsertBefore(ref.rootRelsXml, "</Relationships>", docxCoreRel())
-
-pure func docxCoreProps(meta: DocMetadata) -> string {
-  let title = if length(meta.title) > 0 then "<dc:title>${xmlEscape(meta.title)}</dc:title>" else "";
-  let creator = if length(meta.author) > 0 then "<dc:creator>${xmlEscape(meta.author)}</dc:creator>" else "";
-  let modBy = if length(meta.author) > 0 then "<cp:lastModifiedBy>${xmlEscape(meta.author)}</cp:lastModifiedBy>" else "";
-  let created = docxDctermsDate("created", meta.created);
-  let modified = docxDctermsDate("modified", meta.modified);
-  "${xmlDecl()}<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">${title}${creator}${modBy}${created}${modified}</cp:coreProperties>"
-}
-
--- dcterms dates are xsi:type="dcterms:W3CDTF" and Word refuses to open a package
--- whose dates don't parse. Metadata reaching us from non-Office sources is
--- free-form, so emit the element only when the value already looks like W3CDTF
--- rather than risking an unopenable file for the sake of a date.
-pure func docxDctermsDate(field: string, value: string) -> string =
-  if docxIsW3CDTF(value)
-  then "<dcterms:${field} xsi:type=\"dcterms:W3CDTF\">${xmlEscape(value)}</dcterms:${field}>"
-  else ""
-
-pure func docxIsW3CDTF(value: string) -> bool =
-  length(value) >= 19 && contains(value, "-") && contains(value, "T") && contains(value, ":")
-
--- ============================================================
--- word/numbering.xml — real Word lists (P1 item 4)
--- ============================================================
-
--- Two abstract definitions, one instance each: numBase bullets, numBase + 1
--- decimal. Single level only — mkList([string], bool) is flat, so
--- there is no nesting to represent. Nested lists need an ADT change.
---
--- The ids are parameters because a reference doc's numbering.xml already
--- defines its own. Writing our numId 1 into a template that defines numId 1 as
--- a legal-style multilevel list does not fail — it renders every bullet as that
--- list, which is the kind of wrong that survives a green suite.
-pure func docxNumberingDefs(numBase: int, absBase: int) -> {abstracts: string, nums: string} {
-  let bulletLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"•\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr></w:lvl>";
-  let decimalLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>";
-  {
-    abstracts: "<w:abstractNum w:abstractNumId=\"${intToStr(absBase)}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${bulletLvl}</w:abstractNum><w:abstractNum w:abstractNumId=\"${intToStr(absBase + 1)}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${decimalLvl}</w:abstractNum>",
-    nums: "<w:num w:numId=\"${intToStr(numBase)}\"><w:abstractNumId w:val=\"${intToStr(absBase)}\"/></w:num><w:num w:numId=\"${intToStr(numBase + 1)}\"><w:abstractNumId w:val=\"${intToStr(absBase + 1)}\"/></w:num>"
-  }
-}
-
-pure func docxNumbering(numBase: int, absBase: int) -> string {
-  let defs = docxNumberingDefs(numBase, absBase);
-  "${xmlDecl()}<w:numbering xmlns:w=\"${docxNs()}\">${defs.abstracts}${defs.nums}</w:numbering>"
-}
-
--- word/numbering.xml. A template's part is kept and extended only when this
--- document actually has a list; otherwise it is passed through untouched rather
--- than gaining two definitions nothing references.
-pure func docxNumberingPart(parts: DocxOptParts, ref: DocxRefDoc) -> string =
-  if not docxCanMerge(ref.numberingXml, "</w:numbering>")
-  then docxNumbering(ref.numIdBase, ref.absNumIdBase)
-  else if parts.hasNumbering
-  then docxNumberingMerge(ref.numberingXml, docxNumberingDefs(ref.numIdBase, ref.absNumIdBase))
-  else ref.numberingXml
-
--- CT_Numbering is an ordered sequence: every <w:abstractNum> precedes every
--- <w:num>, and <w:numIdMacAtCleanup> follows them both. Appending the two
--- blocks at the end would put our abstract definitions after the template's
--- <w:num> entries, which Word rejects outright.
-pure func docxNumberingMerge(tpl: string, defs: {abstracts: string, nums: string}) -> string {
-  let withAbs = if contains(tpl, "<w:num ")
-    then docxTplInsertBeforeFirst(tpl, "<w:num ", defs.abstracts)
-    else docxTplInsertBefore(tpl, "</w:numbering>", defs.abstracts);
-  let numMarker = if contains(withAbs, "<w:numIdMacAtCleanup")
-    then "<w:numIdMacAtCleanup"
-    else "</w:numbering>";
-  docxTplInsertBefore(withAbs, numMarker, defs.nums)
-}
 
 pure func docxHasList(blocks: [Block]) -> bool =
   match blocks {
@@ -1139,12 +472,6 @@ pure func docxHasList(blocks: [Block]) -> bool =
     SectionBlock(s) :: rest => docxHasList(s.blocks) || docxHasList(rest),
     _ :: rest => docxHasList(rest)
   }
-
--- ============================================================
--- Hyperlinks (P1 item 6)
--- ============================================================
-
-type DocxLink = { idx: int, href: string }
 
 pure func docxCollectLinks(blocks: [Block], startIdx: int) -> [DocxLink] =
   match blocks {
@@ -1167,18 +494,6 @@ pure func docxAppendLinkList(a: [DocxLink], b: [DocxLink]) -> [DocxLink] =
     x :: rest => x :: docxAppendLinkList(rest, b)
   }
 
-pure func docxHyperlinkPara(idx: int, text: string, title: string) -> string {
-  let tooltip = if length(title) > 0 then " w:tooltip=\"${xmlAttrEscape(title)}\"" else "";
-  let run = "<w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr><w:t xml:space=\"preserve\">${xmlEscape(text)}</w:t></w:r>";
-  docxParagraph("<w:hyperlink r:id=\"${docxLinkRelId(idx)}\"${tooltip}>${run}</w:hyperlink>")
-}
-
--- ============================================================
--- Track changes and comments (P1 item 7)
--- ============================================================
-
-type DocxComment = { id: int, author: string, date: string, text: string }
-
 pure func docxCollectComments(blocks: [Block], startId: int) -> [DocxComment] =
   match blocks {
     [] => [],
@@ -1196,47 +511,6 @@ pure func docxAppendCommentList(a: [DocxComment], b: [DocxComment]) -> [DocxComm
     [] => b,
     x :: rest => x :: docxAppendCommentList(rest, b)
   }
-
-pure func docxCommentsPart(comments: [DocxComment]) -> string =
-  "${xmlDecl()}<w:comments xmlns:w=\"${docxNs()}\">${docxCommentEntries(comments)}</w:comments>"
-
-pure func docxCommentEntries(comments: [DocxComment]) -> string =
-  match comments {
-    [] => "",
-    c :: rest =>
-      "<w:comment w:id=\"${intToStr(c.id)}\" w:author=\"${xmlAttrEscape(c.author)}\"${docxDateAttr(c.date)}>${docxParagraph(docxRun(c.text))}</w:comment>${docxCommentEntries(rest)}"
-  }
-
--- w:date must be W3CDTF when present, and it is optional in the schema — so an
--- unparseable date is dropped rather than written and risking the file.
-pure func docxDateAttr(date: string) -> string =
-  if docxIsW3CDTF(date) then " w:date=\"${xmlAttrEscape(date)}\"" else ""
-
--- CommentBlock is a standalone block carrying the text it annotates, so the
--- anchor paragraph is that text wrapped in the comment range. Unanchored
--- comments still get a reference so the comment is reachable in Word's pane.
-pure func docxCommentAnchorPara(id: int, anchorText: string, anchored: bool) -> string {
-  let idStr = intToStr(id);
-  let ref = "<w:r><w:commentReference w:id=\"${idStr}\"/></w:r>";
-  if anchored && length(anchorText) > 0
-  then docxParagraph("<w:commentRangeStart w:id=\"${idStr}\"/>${docxRun(anchorText)}<w:commentRangeEnd w:id=\"${idStr}\"/>${ref}")
-  else docxParagraph(ref)
-}
-
--- Real revision marks. Deleted text uses <w:delText>, not <w:t> — Word ignores
--- a <w:t> inside <w:del>, which silently loses the deleted content.
-pure func docxRevisionPara(id: int, changeType: string, author: string, date: string, text: string) -> string {
-  let attrs = "w:id=\"${intToStr(id)}\" w:author=\"${xmlAttrEscape(author)}\"${docxDateAttr(date)}";
-  if changeType == "delete" || changeType == "move-from"
-  then docxParagraph("<w:del ${attrs}><w:r><w:delText xml:space=\"preserve\">${xmlEscape(text)}</w:delText></w:r></w:del>")
-  else docxParagraph("<w:ins ${attrs}>${docxRun(text)}</w:ins>")
-}
-
--- ============================================================
--- Headers and footers as real parts (P1 item 8)
--- ============================================================
-
-type DocxHdrFtr = { idx: int, kind: string, xml: string }
 type DocxSections = { body: [Block], headers: [Block], footers: [Block] }
 
 -- Split top-level header/footer SectionBlocks out of the body. Only top-level:
@@ -1270,15 +544,6 @@ pure func docxHdrFtrParts(blocks: [Block], kind: string, startIdx: int) -> [Docx
 
 pure func docxBlocksSimple(blocks: [Block]) -> string =
   foldl(\acc b. "${acc}${docxBlockToXml(b)}", "", blocks)
-
-pure func docxHdrFtrPartName(p: DocxHdrFtr) -> string =
-  "${p.kind}${intToStr(p.idx)}.xml"
-
-pure func docxHdrFtrRelId(p: DocxHdrFtr) -> string =
-  "rId${docxCapKind(p.kind)}${intToStr(p.idx)}"
-
-pure func docxCapKind(kind: string) -> string =
-  if kind == "header" then "Header" else "Footer"
 
 pure func docxHdrFtrTextParts(parts: [DocxHdrFtr]) -> [{name: string, content: string}] =
   match parts {

@@ -5,6 +5,9 @@ in the wrong column, or a sheet whose name is paired with another sheet's
 data, still scores 100%. That is how both bugs this guards against shipped.
 
 Usage: python3 benchmarks/check_xlsx_positions.py   (from the repo root)
+       python3 benchmarks/check_xlsx_positions.py --expect-json
+           print the expectations only; tests/browser/wasm-smoke.spec.ts holds
+           the browser workbench to this same list.
 """
 
 import json
@@ -24,12 +27,19 @@ EXPECTED_LEADS = [
      "Referral", "Won", "Mark", "signed"],
 ]
 
+# Header of the first column of these sheets: pairs each name with its part.
+EXPECTED_FIRST_HEADER = {"Summary": "Metric", "Tab 02": "Sheet part"}
+
 
 def text(cell):
     return cell if isinstance(cell, str) else cell.get("text", "")
 
 
 def main():
+    if "--expect-json" in sys.argv:
+        print(json.dumps({"sheets": EXPECTED_SHEETS, "leads": EXPECTED_LEADS,
+                          "firstHeader": EXPECTED_FIRST_HEADER}))
+        return
     with tempfile.TemporaryDirectory() as out:
         subprocess.run(["./bin/docparse", str(FIXTURE), "--output-dir", out],
                        check=True, capture_output=True)
@@ -42,7 +52,7 @@ def main():
         errors.append(f"sheet order/names: got {names}")
 
     by_name = {s["name"]: s for s in sheets}
-    for name, first in (("Summary", "Metric"), ("Tab 02", "Sheet part")):
+    for name, first in EXPECTED_FIRST_HEADER.items():
         table = next((b for b in by_name.get(name, {}).get("blocks", []) if b["type"] == "table"), None)
         if not table or text(table["headers"][0]) != first:
             errors.append(f"sheet {name!r} is paired with the wrong part's data")

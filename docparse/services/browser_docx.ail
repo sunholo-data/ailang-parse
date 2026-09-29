@@ -1,0 +1,67 @@
+module docparse/services/browser_docx
+
+import std/xml (parseLenient)
+import std/json (encode, ja, jo, kv, js)
+import std/string (length)
+import std/result (Ok, Err)
+import docparse/types/document (mkSection, emptyMetadata)
+import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml, hasContent, extractMetadata, parseDocxWithCommentsXml, docxCommentsOnlyXml)
+import docparse/services/output_formatter (blocksToJson, metadataToJson)
+
+-- Browser (WASM) bindings for DOCX.
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Parse DOCX body XML (word/document.xml) -> JSON array of blocks
+export pure func parseDocxBody(xml: string) -> string {
+  match parseLenient(xml) {
+    Ok(root) => encode(ja(blocksToJson(extractBodyBlocks(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("XML parse error: ${e}"))])]))
+  }
+}
+
+-- Parse DOCX section XML (header/footer/footnote/endnote) -> JSON array of blocks
+export pure func parseDocxSection(xml: string, kind: string) -> string {
+  let blocks = parseSectionXml(xml);
+  if hasContent(blocks)
+  then encode(ja(blocksToJson([mkSection(kind, blocks)])))
+  else encode(ja([]))
+}
+
+-- Parse metadata from core.xml -> JSON metadata object
+export pure func parseMetadataXml(coreXml: string) -> string {
+  match parseLenient(coreXml) {
+    Ok(root) => encode(metadataToJson(extractMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}
+
+-- Parse DOCX body XML together with its comments -> JSON array of blocks.
+--
+-- Comments are anchored to the span of body text they annotate and spliced in
+-- at that point, exactly as the CLI does — this calls the same pure core, so
+-- the browser cannot drift into the unanchored behaviour the CLI has left
+-- behind. JavaScript passes word/document.xml, word/comments.xml and
+-- word/commentsExtended.xml; the latter two may be empty strings.
+export pure func parseDocxBodyWithComments(documentXml: string, commentsXml: string,
+                                            extXml: string) -> string =
+  encode(ja(blocksToJson(parseDocxWithCommentsXml(documentXml, commentsXml, extXml))))
+
+-- Parse DOCX comments alone (word/comments.xml + word/document.xml for the
+-- anchors) -> JSON array of blocks. Prefer parseDocxBodyWithComments, which
+-- places each comment beside the text it annotates.
+export pure func parseDocxComments(commentsXml: string, documentXml: string,
+                                    extXml: string) -> string {
+  if length(commentsXml) == 0 then encode(ja([]))
+  else {
+    encode(ja(blocksToJson(docxCommentsOnlyXml(commentsXml, documentXml, extXml))))
+  }
+}
+
+-- (The browser's own unanchored comment reader has been removed; comment
+-- parsing now goes through docx_parser's anchored core so there is exactly one
+-- implementation.)

@@ -1,0 +1,34 @@
+module docparse/services/browser_epub
+
+import std/json (encode, ja, js)
+import std/string (length)
+import std/list (map)
+import docparse/types/document (emptyMetadata)
+import docparse/services/epub_parser (epubFindOpfPath, epubExtractSpine, epubParseOpfMetadata)
+import docparse/services/output_formatter (metadataToJson)
+
+-- Browser (WASM) bindings for EPUB (chapters go through browser_html).
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Parse EPUB META-INF/container.xml -> OPF rootfile path
+export pure func parseEpubContainer(xml: string) -> string {
+  epubFindOpfPath(xml)
+}
+
+-- Parse EPUB OPF spine -> JSON array of content file paths (in reading order).
+-- opfDir is the directory portion of the OPF path (e.g., "OEBPS/").
+export pure func parseEpubSpine(opfXml: string, opfDir: string) -> string {
+  let hrefs = epubExtractSpine(opfXml, opfDir);
+  encode(ja(map(\h. js(h), hrefs)))
+}
+
+-- Parse EPUB OPF metadata -> JSON metadata object
+export pure func parseEpubMetadataXml(opfXml: string) -> string {
+  if length(opfXml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else encode(metadataToJson(epubParseOpfMetadata(opfXml)))
+}

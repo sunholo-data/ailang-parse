@@ -193,26 +193,22 @@
     var base = window.docparseWasm.assetBase();
     $('m-bundle-note').textContent = mods.length + ' modules';
     log('engine ready, ' + mods.length + ' modules loaded', 'ok');
-    // The generator is not in the default set — it is the most expensive
-    // module to type-check (~150k steps), so only this page pays for it.
-    log('loading docx_generator…');
-    log('loading docx_template…');
-    // Order matters: load the template and layout helpers before the
-    // generator; docparse_generate then imports docx_generator.
-    window.docparseWasm.loadExtraModule('docparse/services/docx_template',
-                                        'docparse/services/docx_template.ail')
-      .then(function () {
-        return window.docparseWasm.loadExtraModule('docparse/services/docx_layout',
-                                                   'docparse/services/docx_layout.ail');
-      })
-      .then(function () {
-        return window.docparseWasm.loadExtraModule('docparse/services/docx_generator',
-                                                   'docparse/services/docx_generator.ail');
-      })
-      .then(function () {
-        return window.docparseWasm.loadExtraModule('docparse/services/docparse_generate',
-                                                   'docparse/services/docparse_generate.ail');
-      })
+    // The generator is not in the default set, so only this page pays to
+    // type-check it. Order matters: each module after its imports —
+    // docx_table imports docx_runs, docx_package imports docx_runs and
+    // docx_template, docx_generator imports all of them, and
+    // docparse_generate imports docx_generator.
+    // Spelled out, not generated: check-wasm-bindings.py reads these calls to
+    // know which vendored modules this page loads.
+    log('loading ' + 'docx_template, docx_layout, docx_runs, docx_table, docx_package, docx_generator, docparse_generate' + '\u2026');
+    Promise.resolve()
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docx_template', 'docparse/services/docx_template.ail'); })
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docx_layout', 'docparse/services/docx_layout.ail'); })
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docx_runs', 'docparse/services/docx_runs.ail'); })
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docx_table', 'docparse/services/docx_table.ail'); })
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docx_package', 'docparse/services/docx_package.ail'); })
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docx_generator', 'docparse/services/docx_generator.ail'); })
+      .then(function () { return window.docparseWasm.loadExtraModule('docparse/services/docparse_generate', 'docparse/services/docparse_generate.ail'); })
       .then(function () { log('generator ready', 'ok'); $('run').disabled = false; })
       .catch(function (e) {
         log('generator failed to load: ' + e.message, 'warn');
