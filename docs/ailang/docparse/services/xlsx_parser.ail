@@ -774,9 +774,14 @@ pure func xlsxSheetBlocks(parsedRows: [[TableCell]], sheetName: string) -> [Bloc
       -- Rows end at their last non-blank cell; square them up so a row with
       -- trailing blanks still has a cell in every column.
       let width = foldl(\w r. if listLength(r) > w then listLength(r) else w, 0, parsedRows);
-      let tableBlock = mkTable(map(\r. xlsxPadRow(r, width), dataRows), xlsxPadRow(firstRow, width));
-      let section = mkNamedSection("sheet", cleanName, [heading, tableBlock]);
-      [section]
+      -- Every row trimmed to nothing (a sheet of formatted but empty cells):
+      -- there is no column to show, so it reads as an empty sheet rather
+      -- than a zero-column table, which no output format can represent.
+      if width == 0 then [heading]
+      else {
+        let tableBlock = mkTable(map(\r. xlsxPadRow(r, width), dataRows), xlsxPadRow(firstRow, width));
+        [mkNamedSection("sheet", cleanName, [heading, tableBlock])]
+      }
     }
   }
 }
