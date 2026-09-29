@@ -1,8 +1,10 @@
 module docparse/services/zip_extract
 
 import std/zip (listEntries, readEntry, readEntryBytes)
-import std/string (contains, length, endsWith, startsWith, split, substring)
-import std/list (last as listLast, reverse, length as listLength)
+import std/string (contains, length, endsWith, startsWith, split, substring, stringToInt, join)
+import std/list (last as listLast, reverse, length as listLength, sortBy, filter, map, any, concat)
+import std/option (getOrElse)
+import std/xml (parseLenient, findAll, getAttr)
 import std/result (Ok, Err)
 import std/bytes (fromBase64)
 import std/fs (mkdirAllResult, writeFileBytes, readFileBytes)
@@ -169,10 +171,14 @@ pure func filterByPrefix(entries: [string], prefix: string) -> [string] =
       else filterByPrefix(rest, prefix)
   }
 
--- Find all slide entries in a PPTX ZIP (ppt/slides/slide*.xml)
+-- Find all slide entries in a PPTX ZIP (ppt/slides/slide*.xml).
+-- Returned in ascending slide-number order: ZIP directory order is not
+-- required to match presentation order, and a lexicographic sort would put
+-- slide10 between slide1 and slide2, so the sort is numeric (see
+-- pptxSlideOrder for the sldIdLst-derived authoritative order).
 export func findSlideEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
-    Ok(entries) => filterSlides(entries),
+    Ok(entries) => pptxNumericSort(filterSlides(entries)),
     Err(_) => []
   }
 }
@@ -193,10 +199,11 @@ pure func isSlideEntry(entry: string) -> bool {
   endsWith(entry, ".xml")
 }
 
--- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml)
+-- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml),
+-- sorted numerically like the slides (see findSlideEntries).
 export func findNotesSlideEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
-    Ok(entries) => filterNotesSlides(entries),
+    Ok(entries) => pptxNumericSort(filterNotesSlides(entries)),
     Err(_) => []
   }
 }
@@ -215,6 +222,124 @@ pure func filterNotesSlides(entries: [string]) -> [string] =
 pure func isNotesSlideEntry(entry: string) -> bool {
   startsWith(entry, "ppt/notesSlides/notesSlide") &&
   endsWith(entry, ".xml")
+}
+
+-- === Slide order (ECMA-376 §19.2.1.6 sldIdLst) =============================
+--
+-- ppt/presentation.xml is the deck's authoritative slide order: its <p:sldIdLst>
+-- lists the slides by relationship id, and ppt/_rels/presentation.xml.rels maps
+-- each id to a slide part. ZIP directory order is not required to match
+-- presentation order and commonly doesn't, so the raw listing — or even a
+-- filename sort — is only ever a fallback.
+
+-- Resolve a presentation-level relationship target relative to ppt/.
+pure func pptxPresRelTarget(target: string) -> string =
+  if startsWith(target, "/") then substring(target, 1, length(target))
+  else "ppt/${target}"
+
+-- (rId, resolved target) pairs from ppt/_rels/presentation.xml.rels
+pure func pptxPresRelMap(relsXml: string) -> [(string, string)] =
+  if length(relsXml) == 0 then []
+  else match parseLenient(relsXml) {
+    Ok(root) => map(\r. (getOrElse(getAttr(r, "Id"), ""),
+                         pptxPresRelTarget(getOrElse(getAttr(r, "Target"), ""))),
+                    findAll(root, "Relationship")),
+    Err(_) => []
+  }
+
+pure func pptxPairKey(p: (string, string)) -> string = match p { (k, _) => k }
+pure func pptxPairVal(p: (string, string)) -> string = match p { (_, v) => v }
+
+pure func pptxRelLookup(rels: [(string, string)], id: string) -> string =
+  match rels {
+    [] => "",
+    p :: rest => if pptxPairKey(p) == id then pptxPairVal(p) else pptxRelLookup(rest, id)
+  }
+
+-- Slide parts named by sldIdLst, in presentation order. Ids with no rels
+-- entry (or an unreadable part) drop out of the result.
+pure func pptxOrderFromSldIdLst(presXml: string, rels: [(string, string)]) -> [string] =
+  if length(presXml) == 0 then []
+  else match parseLenient(presXml) {
+    Ok(root) =>
+      filter(\e. length(e) > 0,
+             map(\sid. pptxRelLookup(rels, getOrElse(getAttr(sid, "r:id"), "")),
+                 findAll(root, "p:sldId"))),
+    Err(_) => []
+  }
+
+-- The harness (string in, string out) exists so the sldIdLst reading is an
+-- (input, expected) test case — the tests form cannot express a list of
+-- tuples, and the r:id attribute lookup through the real XML parser is the
+-- part worth pinning: it names a namespaced attribute and would silently
+-- yield "" (and then a filename-sort fallback) if it ever stopped matching.
+pure func pptxOrderHarness(presXml: string) -> string
+  tests [
+    ("<p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><p:sldIdLst><p:sldId id=\"256\" r:id=\"rId2\"/><p:sldId id=\"257\" r:id=\"rId1\"/></p:sldIdLst></p:presentation>",
+     "ppt/slides/slide2.xml|ppt/slides/slide1.xml"),
+    ("", ""),
+    ("<p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><p:sldIdLst><p:sldId id=\"256\" r:id=\"rId9\"/></p:sldIdLst></p:presentation>", "")
+  ]
+{
+  join("|", pptxOrderFromSldIdLst(presXml, [("rId1", "ppt/slides/slide1.xml"),
+                                            ("rId2", "ppt/slides/slide2.xml")]))
+}
+
+-- Slide entries in presentation order. Falls back to a numeric filename sort
+-- when presentation.xml or its rels cannot be read; any slide part the
+-- sldIdLst did not mention (a hand-built archive, a stale rel) is appended so
+-- no slide content is lost either way.
+export func pptxSlideOrder(path: string) -> [string] ! {FS} {
+  let known = findSlideEntries(path);
+  let ordered = pptxOrderFromSldIdLst(readZipEntry(path, "ppt/presentation.xml"),
+                                      pptxPresRelMap(readZipEntry(path, "ppt/_rels/presentation.xml.rels")));
+  if listLength(ordered) == 0
+  then known
+  else {
+    let kept = filter(\e. any(\k. k == e, known), ordered);
+    let extras = filter(\e. not any(\k. k == e, kept), known);
+    concat(kept, extras)
+  }
+}
+
+-- Numeric index of a slide/notes-slide entry name: "ppt/slides/slide12.xml"
+-- -> 12, "ppt/notesSlides/notesSlide3.xml" -> 3. 0 when no numeric suffix.
+export pure func pptxEntryIndex(entry: string)
+  tests [
+    ("ppt/slides/slide1.xml", 1),
+    ("ppt/slides/slide10.xml", 10),
+    ("ppt/slides/slide21.xml", 21),
+    ("ppt/notesSlides/notesSlide3.xml", 3),
+    ("ppt/notesSlides/notesSlide12.xml", 12),
+    ("ppt/media/image1.png", 0)
+  ]
+{
+  let stem = zipStem(pptxBaseName(entry));
+  if startsWith(stem, "notesSlide") then pptxOptInt(substring(stem, 10, length(stem)))
+  else if startsWith(stem, "slide") then pptxOptInt(substring(stem, 5, length(stem)))
+  else 0
+}
+
+pure func zipStem(name: string) -> string =
+  if endsWith(name, ".xml") then substring(name, 0, length(name) - 4) else name
+
+pure func pptxOptInt(s: string) -> int = getOrElse(stringToInt(s), 0)
+
+-- Comparator for a numeric slide/notes-slide sort, so slide10 never lands
+-- between slide1 and slide2 the way a lexicographic sort puts it.
+export pure func pptxEntryNumCmp(a: string, b: string) -> int =
+  pptxEntryIndex(a) - pptxEntryIndex(b)
+
+export pure func pptxNumericSort(entries: [string]) -> [string] =
+  sortBy(pptxEntryNumCmp, entries)
+
+-- "ppt/notesSlides/notesSlide2.xml" -> "ppt/notesSlides/_rels/notesSlide2.xml.rels"
+-- Which slide a notesSlide annotates is declared by these relationships, not
+-- by the file numbering — same rule as the slide rels above.
+export pure func notesSlideRelsPathFor(entry: string) -> string {
+  let base = pptxBaseName(entry);
+  if length(base) == 0 then ""
+  else "ppt/notesSlides/_rels/${base}.rels"
 }
 
 -- Find all worksheet entries in an XLSX ZIP (xl/worksheets/sheet*.xml)

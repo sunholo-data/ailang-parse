@@ -5,8 +5,12 @@ import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
-import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection)
-import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget, extractMediaToFiles, imageTempDir, imageExtractErrorText)
+import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection, mkNamedSection)
+import docparse/services/zip_extract (readCoreProperties, pptxSlideOrder, findNotesSlideEntries,
+                                       pptxEntryIndex, notesSlideRelsPathFor, readZipEntry,
+                                       findMediaEntries, readImageEntry, mediaMimeType,
+                                       readPptxSlideRels, pptxResolveTarget, extractMediaToFiles,
+                                       imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
 
 -- PPTX Parser
@@ -48,7 +52,9 @@ import docparse/services/omml (renderOmml)
 
 -- Parse all slides from a PPTX file
 export func parsePptx(filepath: string) -> [Block] ! {FS} {
-  let slideEntries = findSlideEntries(filepath);
+  -- Slides in the presentation's own order (sldIdLst, with a numeric filename
+  -- sort as fallback) — ZIP entry order scrambles every deck past 9 slides.
+  let slideEntries = pptxSlideOrder(filepath);
   let totalSlides = listLength(slideEntries);
   let cappedEntries = take(500, slideEntries);
   -- Speaker notes follow the slides, as they did before e9de665 deleted them.
@@ -553,20 +559,60 @@ pure func pptxParseIntOrDefault(s: string, default: int) -> int =
 -- versions") overwrote this module with a reduced browser variant and deleted
 -- the whole section. The only test covering it was a golden no suite read.
 
--- Parse all notes slide entries
+-- Parse all notes slide entries into sections named for the slide each
+-- belongs to. Which slide a notesSlide annotates is declared by the
+-- notesSlide's own relationships (Target ../slides/slideN.xml — see
+-- pptxNotesSlideNo); the filename suffix is only the fallback. The section
+-- name is what carries the association through to the JSON output: a notes
+-- section named "Slide 12" pairs with the slide section for slide 12, which
+-- is the link extraction used to drop entirely.
 func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
   match entries {
     [] => [],
     entry :: rest => {
       let xml = readZipEntry(filepath, entry);
       let noteText = pptxExtractNoteText(xml);
+      let slideNo = pptxNotesSlideNo(filepath, entry);
       let moreBlocks = pptxParseNotesSlides(filepath, rest);
       if length(trim(noteText)) > 0
       then {
-        let noteBlock = mkSection("notes", [mkText(noteText, "speaker-notes", 0)]);
+        let noteBlock = mkNamedSection("notes", "Slide ${intToStr(slideNo)}",
+                                       [mkText(noteText, "speaker-notes", 0)]);
         noteBlock :: moreBlocks
       }
       else moreBlocks
+    }
+  }
+
+-- Which slide a notesSlide annotates: the rels are authoritative, the
+-- filename suffix the fallback (a deck may omit the rels entry).
+func pptxNotesSlideNo(filepath: string, entry: string) -> int ! {FS} {
+  let relsXml = readZipEntry(filepath, notesSlideRelsPathFor(entry));
+  let fromRels = pptxSlideNoFromRels(relsXml);
+  if fromRels > 0 then fromRels else pptxEntryIndex(entry)
+}
+
+-- Slide number targeted by a notesSlide's relationships: the Relationship
+-- whose target lands in ppt/slides/slideN.xml (type ".../relationships/slide";
+-- a notesSlide rel's type and target both name notesSlide, so the guard keeps
+-- this from matching the notesSlide's own part).
+pure func pptxSlideNoFromRels(relsXml: string) -> int =
+  if length(relsXml) == 0 then 0
+  else match parseLenient(relsXml) {
+    Ok(root) => pptxSlideRelNo(findAll(root, "Relationship")),
+    Err(_) => 0
+  }
+
+pure func pptxSlideRelNo(rels: [XmlNode]) -> int =
+  match rels {
+    [] => 0,
+    r :: rest => {
+      let tgt = getOrElse(getAttr(r, "Target"), "");
+      let typ = getOrElse(getAttr(r, "Type"), "");
+      if contains(typ, "/slide") && not contains(typ, "notesSlide") &&
+         contains(tgt, "slides/slide") && not contains(tgt, "notesSlide")
+      then pptxEntryIndex(tgt)
+      else pptxSlideRelNo(rest)
     }
   }
 

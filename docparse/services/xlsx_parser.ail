@@ -263,11 +263,18 @@ pure func xlsxFoldSi(acc: { pairs: [(int, string)], idx: int }, si: XmlNode) -> 
 pure func xlsxFoldRow(acc: { rows: [[TableCell]], count: int, ss: Map[int, string], merges: [XlsxMerge] }, rowNode: XmlNode) -> { rows: [[TableCell]], count: int, ss: Map[int, string], merges: [XlsxMerge] } {
   if acc.count >= 5000 then acc
   else {
-    -- The merge-aware walk also fills the cells Excel omits, so it is only
-    -- worth its cost when the sheet actually declares merge regions.
+    let cellNodes = findAll(rowNode, "c");
+    -- The ref-based walk fills the cells Excel omits for being blank — which
+    -- OOXML does with or without merges — so it runs whenever the sheet
+    -- declares a merge OR the row's cell refs skip a column. A row with no
+    -- cell elements keeps the positional path (which yields nothing and skips
+    -- the row), and cells without r= refs cannot be placed by ref, so they
+    -- keep it too (see xlsxRowHasGaps).
     let cells = if listLength(acc.merges) > 0
-      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, emptyMap(), acc.merges,
+      then xlsxBuildRowWithMerges(cellNodes, acc.ss, emptyMap(), acc.merges,
                                   xlsxRowNumber(rowNode), 0)
+      else if xlsxRowHasGaps(cellNodes)
+      then xlsxBuildRowWithMerges(cellNodes, acc.ss, emptyMap(), [], xlsxRowNumber(rowNode), 0)
       else parseXlsxRow(rowNode, acc.ss, emptyMap());
     if listLength(cells) > 0
     then { rows: cells :: acc.rows, count: acc.count + 1, ss: acc.ss, merges: acc.merges }
@@ -340,6 +347,54 @@ pure func xlsxCellRefRow(ref: string) -> int
 {
   let colStr = xlsxCellRefColStr(ref);
   getOrElse(stringToInt(substring(ref, length(colStr), length(ref))), 0)
+}
+
+-- === Gap detection (blank cells without merges) ============================
+--
+-- OOXML omits the <c> element for every genuinely blank cell, whether or not
+-- the sheet declares any merge region. A merge-free sheet therefore still
+-- needs the ref-based gap-filling walk: without it, a row's values after the
+-- first blank cell all shift left into the wrong columns. The gate is per-row
+-- and per-ref: run the walk when any cell's r= ref is not the dense successor
+-- of the previous cell's. A cell without an r= attribute cannot be placed by
+-- ref at all, so such a row stays on the positional path (which is the only
+-- reading of it).
+
+-- Do this row's refs skip a column? Cells with no r= attribute force the
+-- positional path, so the answer is false whenever one is present.
+pure func xlsxRowHasGaps(cells: [XmlNode]) -> bool =
+  if xlsxRowAnyNoRef(cells) then false
+  else xlsxColListHasGaps(xlsxRowCols(cells), 0)
+
+pure func xlsxRowAnyNoRef(cells: [XmlNode]) -> bool =
+  match cells {
+    [] => false,
+    c :: rest =>
+      if length(getOrElse(getAttr(c, "r"), "")) == 0 then true
+      else xlsxRowAnyNoRef(rest)
+  }
+
+pure func xlsxRowCols(cells: [XmlNode]) -> [int] =
+  map(\c. xlsxCellRefCol(getOrElse(getAttr(c, "r"), "A1")), cells)
+
+pure func xlsxColListHasGaps(cols: [int], expected: int) -> bool =
+  match cols {
+    [] => false,
+    c :: rest => if c != expected then true else xlsxColListHasGaps(rest, expected + 1)
+  }
+
+-- Single-arg wrapper so the cases above stay expressible as (input, expected)
+-- test pairs (the tests form takes two elements per case).
+pure func xlsxColsHaveGaps(cols: [int]) -> bool
+  tests [
+    ([0, 1, 2], false),
+    ([0, 2], true),
+    ([1, 2], true),
+    ([0, 1, 3, 4], true),
+    ([], false)
+  ]
+{
+  xlsxColListHasGaps(cols, 0)
 }
 
 -- "A1:D1" -> region. A bare "A9" is a 1x1 region.
@@ -568,9 +623,15 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
   if acc.count >= 5000 then
     (if xlsxRefsAllFound(acc.refs, acc.texts) then Stop(acc) else Continue(acc))
   else {
+    let cellNodes = findAll(rowNode, "c");
+    -- Same gate as xlsxFoldRow: ref-based gap-filling for merges OR for rows
+    -- whose refs skip a column (OOXML omits blank cells with or without
+    -- merges); positional parse for rows without refs or with none present.
     let cells = if listLength(acc.merges) > 0
-      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.styles, acc.merges,
+      then xlsxBuildRowWithMerges(cellNodes, acc.ss, acc.styles, acc.merges,
                                   xlsxRowNumber(rowNode), 0)
+      else if xlsxRowHasGaps(cellNodes)
+      then xlsxBuildRowWithMerges(cellNodes, acc.ss, acc.styles, [], xlsxRowNumber(rowNode), 0)
       else parseXlsxRow(rowNode, acc.ss, acc.styles);
     let texts = if listLength(acc.refs) > 0
       then xlsxCollectRefTexts(findAll(rowNode, "c"), acc.ss, acc.refs, acc.texts)
