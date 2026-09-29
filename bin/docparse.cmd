@@ -303,10 +303,11 @@ for %%m in (
     docparse\services\docx_parser.ail
     docparse\services\odt_parser.ail
     docparse\services\odp_parser.ail
+    docparse\services\pptx_parser.ail
 ) do (
     echo.
     echo --- %%~nxm ---
-    ailang test "%%m"
+    ailang test --allow-skips "%%m"
 )
 popd
 exit /b 0

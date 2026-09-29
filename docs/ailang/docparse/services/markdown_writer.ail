@@ -149,6 +149,10 @@ pure func renderSectionMd(kind: string, name: string, blocks: [Block]) -> string
     else if kind == "footnote" then "*Footnote:*\n"
     else if kind == "endnote" then "*Endnote:*\n"
     else if kind == "textbox" then "> "
+    -- PPTX speaker notes sit right after their slide; without a label they
+    -- read as more slide text. name is "Slide N" from pptx_parser.
+    else if kind == "notes" then
+      (if length(name) > 0 then "*Speaker notes (${name}):*\n" else "*Speaker notes:*\n")
     else "";
   "${rule}${label}${renderBlocksMd(blocks)}"
 }
