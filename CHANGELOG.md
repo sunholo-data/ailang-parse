@@ -125,6 +125,51 @@ silently ran the suite against it.
   `--allow-skips`, because a property derived from an `ensures` over an
   `XmlNode` has no generator and is reported as skipped rather than failed.
 
+### XLSX: blank cells no longer shift values into the wrong column; sheets keep their names and order
+
+Reported by a partner testing a real two-sheet workbook: on one sheet, 28 of
+115 rows came back with values moved left. His example row,
+
+```
+Jordan | · | ExampleCo | example-co.example | Sam Placeholder | CEO | · | Intro call, 3 July 2026 | · | · | ·
+```
+
+parsed as six values in the first six columns.
+
+- **Column positions.** Excel writes no `<c>` element for a blank cell. The
+  row walk that reads each cell's `r="B3"` ref and fills the gaps only ran
+  when the sheet declared a merge region; every other sheet (most of them)
+  was read positionally, so every value after a blank moved left. Rows are
+  now always placed by ref, and rows ending in blanks are padded to the
+  sheet's width so every row has a cell in every column. Columns past `ZZ`
+  are read correctly now; they previously all collapsed to column A.
+- **Sheet names and order.** Sheet parts were taken in zip-listing order and
+  paired with `workbook.xml`'s names by position. The two orders are
+  unrelated: a zip listed alphabetically puts `sheet10` before `sheet2`, and
+  part numbers stop following the tabs once a sheet has been moved or
+  deleted. The result was a sheet's name attached to another sheet's data.
+  The `poi_two_sheets.xlsx` golden had that baked in ("Sheet1" holding
+  `Sheet2A1`); it has been corrected. Sheets are now resolved as the format
+  defines them, through `<sheet r:id>` and `xl/_rels/workbook.xml.rels`, in
+  tab order.
+- **Why the suite passed.** The office benchmark scores tables by
+  bag-of-words Jaccard, which cannot see either bug. The new
+  `benchmarks/check_xlsx_positions.py` asserts exact cell positions and sheet
+  order on `challenge_sparse_rows.xlsx` (11 sheets, lexicographic zip order,
+  tab order unlike the part numbers, the reported row shape), and runs in CI.
+- **Performance.** The merge-aware walk used to scan every merge region for
+  every cell. It now narrows to the regions touching the row first:
+  `stress/poi_many_merges.xlsx` went from 25s to 5.5s. Reading refs on every
+  sheet costs a dense merge-free 5k-row sheet about 3.6s → 6s, kept down by
+  a constant-time column read for one- and two-letter columns.
+
+Goldens changed: `challenge_formula_cached`, `challenge_merged_cells`,
+`pandoc_basic` and `unstructured_test` (rows padded to sheet width) and
+`poi_two_sheets` (sheet/data pairing corrected).
+
+Known, not fixed here: legacy and threaded comment parts are still matched to
+sheets by position rather than through each sheet's rels.
+
 ### Docs: correct API examples, pricing figures, and stale AI-required claims
 
 - **curl/Python examples** in `integrations.html`, `docs/lab/samples/guide.html`,
