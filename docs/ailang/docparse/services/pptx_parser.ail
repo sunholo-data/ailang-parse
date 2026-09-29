@@ -553,17 +553,31 @@ pure func pptxParseIntOrDefault(s: string, default: int) -> int =
 -- listing ppt/notesSlides/ and appended after ALL the slides with no link back,
 -- so a reader could not tell which slide a note was for — and on a long deck
 -- they sat past the end of everything a reader or a size-capped consumer saw.
-func pptxSlideNotes(filepath: string, relsXml: string, slideNo: int) -> [Block] ! {FS} =
+func pptxSlideNotes(filepath: string, relsXml: string, slideNo: int) -> [Block] ! {FS} {
+  let target = pptxNotesPart(relsXml);
+  if length(target) == 0 then []
+  else pptxNotesSection(readZipEntry(filepath, target), slideNo)
+}
+
+-- The ZIP path of a slide's notes part, from the slide's rels XML; "" if none.
+-- Pure halves of pptxSlideNotes, exported so the browser workbench (which
+-- reads the ZIP in JavaScript) resolves and renders notes with this same code:
+-- docparse_browser.pptxNotesPartFor / parsePptxNotes.
+export pure func pptxNotesPart(relsXml: string) -> string =
   match pptxSlideRelTargets(relsXml, pptxIsNotesRel) {
-    [] => [],
-    target :: _ => {
-      let noteText = pptxExtractNoteText(readZipEntry(filepath, target));
-      if length(trim(noteText)) > 0
-      then [mkNamedSection("notes", "Slide ${intToStr(slideNo)}",
-                           [mkText(noteText, "speaker-notes", 0)])]
-      else []
-    }
+    [] => "",
+    target :: _ => target
   }
+
+-- A notes part's XML -> [SectionBlock{kind:"notes", name:"Slide N"}], or []
+-- when the page carries no notes text.
+export pure func pptxNotesSection(notesXml: string, slideNo: int) -> [Block] {
+  let noteText = pptxExtractNoteText(notesXml);
+  if length(trim(noteText)) > 0
+  then [mkNamedSection("notes", "Slide ${intToStr(slideNo)}",
+                       [mkText(noteText, "speaker-notes", 0)])]
+  else []
+}
 
 pure func pptxIsNotesRel(r: XmlNode) -> bool =
   endsWith(getOrElse(getAttr(r, "Type"), ""), "/notesSlide")

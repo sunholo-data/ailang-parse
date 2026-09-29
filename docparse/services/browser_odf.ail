@@ -1,0 +1,82 @@
+module docparse/services/browser_odf
+
+import std/xml (parseLenient)
+import std/json (encode, ja, jo, kv, js)
+import std/string (length)
+import std/result (Ok, Err)
+import docparse/types/document (emptyMetadata)
+import docparse/services/odt_parser (odtExtractBody, odtParseMetadata, odtExtractHeadersFooters)
+import docparse/services/odp_parser (odpExtractSlides, odpParseMetadata)
+import docparse/services/ods_parser (odsExtractSheets, odsParseMetadata)
+import docparse/services/output_formatter (blocksToJson, metadataToJson)
+
+-- Browser (WASM) bindings for ODF (ODT / ODP / ODS).
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Parse ODT content.xml -> JSON array of blocks
+export pure func parseOdtContent(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parseLenient(xml) {
+    Ok(root) => encode(ja(blocksToJson(odtExtractBody(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODT XML parse error: ${e}"))])]))
+  }
+}
+
+-- Parse ODT meta.xml -> JSON metadata object
+export pure func parseOdtMetadataXml(xml: string) -> string {
+  if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else match parseLenient(xml) {
+    Ok(root) => encode(metadataToJson(odtParseMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}
+
+-- Parse ODT styles.xml -> JSON array of header/footer SectionBlocks
+export pure func parseOdtStylesXml(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parseLenient(xml) {
+    Ok(root) => encode(ja(blocksToJson(odtExtractHeadersFooters(root)))),
+    Err(_) => encode(ja([]))
+  }
+}
+
+-- Parse ODP content.xml -> JSON array of slide SectionBlocks
+export pure func parseOdpContent(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parseLenient(xml) {
+    Ok(root) => encode(ja(blocksToJson(odpExtractSlides(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODP XML parse error: ${e}"))])]))
+  }
+}
+
+-- Parse ODP meta.xml -> JSON metadata object
+export pure func parseOdpMetadataXml(xml: string) -> string {
+  if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else match parseLenient(xml) {
+    Ok(root) => encode(metadataToJson(odpParseMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}
+
+-- Parse ODS content.xml -> JSON array of sheet SectionBlocks
+export pure func parseOdsContent(xml: string) -> string {
+  if length(xml) == 0 then encode(ja([]))
+  else match parseLenient(xml) {
+    Ok(root) => encode(ja(blocksToJson(odsExtractSheets(root)))),
+    Err(e) => encode(ja([jo([kv("type", js("error")), kv("text", js("ODS XML parse error: ${e}"))])]))
+  }
+}
+
+-- Parse ODS meta.xml -> JSON metadata object
+export pure func parseOdsMetadataXml(xml: string) -> string {
+  if length(xml) == 0 then encode(metadataToJson(emptyMetadata()))
+  else match parseLenient(xml) {
+    Ok(root) => encode(metadataToJson(odsParseMetadata(root))),
+    Err(_) => encode(metadataToJson(emptyMetadata()))
+  }
+}

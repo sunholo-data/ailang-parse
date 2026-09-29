@@ -1,0 +1,51 @@
+module docparse/services/browser_pptx
+
+import std/xml (parseLenient)
+import std/json (encode, ja)
+import std/string (length, join, split)
+import std/list (filter)
+import std/result (Ok, Err)
+import docparse/types/document (mkSection)
+import docparse/services/pptx_parser (extractSlideBlocks, pptxNotesPart, pptxNotesSection)
+import docparse/services/zip_extract (pptxOrderSlideEntries)
+import docparse/services/output_formatter (blocksToJson)
+
+-- Browser (WASM) bindings for PPTX.
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Parse a single PPTX slide XML -> JSON array of blocks
+export pure func parsePptxSlide(slideXml: string) -> string {
+  if length(slideXml) == 0 then encode(ja([]))
+  else match parseLenient(slideXml) {
+    -- An empty slide still gets its section, as in pptx_parser: dropping it
+    -- shifted every later slide down one position.
+    Ok(root) => encode(ja(blocksToJson([mkSection("slide", extractSlideBlocks(root))]))),
+    Err(_) => encode(ja([]))
+  }
+}
+
+-- Order PPTX slide part names the way the deck orders them: ppt/presentation.xml's
+-- sldIdLst resolved through ppt/_rels/presentation.xml.rels, with a NUMERIC
+-- file-name fallback when either part is missing. JS used to .sort() the names,
+-- which puts slide10.xml before slide2.xml. `entries` and the result are
+-- newline-joined part names ("ppt/slides/slide1.xml\nppt/slides/slide2.xml").
+export pure func orderPptxSlides(presXml: string, relsXml: string, entries: string) -> string =
+  join("\n", pptxOrderSlideEntries(presXml, relsXml,
+                                   filter(\e. length(e) > 0, split(entries, "\n"))))
+
+-- The ZIP path of a slide's speaker-notes part, resolved through the slide's
+-- own rels (ppt/slides/_rels/slideN.xml.rels, Type ".../notesSlide"); "" when
+-- the slide has none. notesSlideN is NOT slideN's notes in general, so JS must
+-- never guess the part from the slide number.
+export pure func pptxNotesPartFor(slideRelsXml: string) -> string =
+  pptxNotesPart(slideRelsXml)
+
+-- Parse a notes part -> JSON array: [] or one {kind:"notes", name:"Slide N"}
+-- section. slideNo is the slide's DECK position (1-based), as on the server.
+export pure func parsePptxNotes(notesXml: string, slideNo: int) -> string =
+  encode(ja(blocksToJson(pptxNotesSection(notesXml, slideNo))))

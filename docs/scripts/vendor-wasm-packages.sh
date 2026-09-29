@@ -92,7 +92,8 @@ if [ "$SKIP_WASM" -eq 0 ]; then
 fi
 
 # ── 2. Copy latest parser modules from source ────────────────────────────
-# This must mirror MODULES_TO_LOAD in docs/js/wasm-demo.js exactly. Every
+# This must mirror MODULES_TO_LOAD + LAZY_MODULES in docs/js/wasm-demo.js (plus
+# the modules docs/lab pages load with loadExtraModule) exactly. Every
 # module loaded into the browser AILANG REPL must be vendored by name —
 # the WASM bundle has no package resolution.
 mkdir -p "$MODULES_DIR/types" "$MODULES_DIR/services"
@@ -124,10 +125,24 @@ MODULES=(
   "services/output_formatter.ail"
   "services/a2ui_formatter.ail"
   "services/docx_layout.ail"
+  "services/docx_runs.ail"
+  "services/docx_table.ail"
+  "services/docx_package.ail"
   "services/docx_generator.ail"
   "services/docx_template.ail"
   "services/docparse_generate.ail"
   "services/docparse_browser.ail"
+  "services/browser_docx.ail"
+  "services/browser_pptx.ail"
+  "services/browser_xlsx.ail"
+  "services/browser_html.ail"
+  "services/browser_csv.ail"
+  "services/browser_markdown.ail"
+  "services/browser_rtf.ail"
+  "services/browser_tex.ail"
+  "services/browser_eml.ail"
+  "services/browser_odf.ail"
+  "services/browser_epub.ail"
 )
 for m in "${MODULES[@]}"; do
   cp "$ROOT/docparse/$m" "$MODULES_DIR/$m"

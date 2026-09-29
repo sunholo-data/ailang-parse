@@ -1,0 +1,85 @@
+module docparse/services/browser_xlsx
+
+import std/xml (parseLenient, findAll, getAttr)
+import std/json (encode, ja, jo, kv, js)
+import std/string (length, split)
+import std/list (map, filter)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import std/map (empty as emptyMap, insert as mapInsert)
+import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml, xlsxResolveWorkbookSheets)
+import docparse/services/output_formatter (blocksToJson)
+
+-- Browser (WASM) bindings for XLSX.
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Order and name XLSX worksheets the way the server does: xl/workbook.xml's
+-- <sheet> list (tab order, real names) resolved through
+-- xl/_rels/workbook.xml.rels to part names. JS used to .sort() the part names
+-- (sheet10 before sheet2) and call them Sheet1..N. `entries` is the
+-- newline-joined worksheet part names, numerically sorted; the result is a
+-- JSON array of {name, part}. If workbook.xml or its rels cannot be resolved,
+-- falls back like the server: parts in the given order, named by workbook
+-- position, else by part ("xl/worksheets/sheet3.xml" -> "Sheet 3").
+export pure func orderXlsxSheets(workbookXml: string, relsXml: string, entries: string) -> string {
+  let parts = filter(\e. length(e) > 0, split(entries, "\n"));
+  let resolved = xlsxResolveWorkbookSheets(workbookXml, relsXml, parts);
+  let pairs = match resolved {
+    [] => xlsxBrowserPairByPosition(xlsxBrowserSheetNames(workbookXml), parts),
+    _ => resolved
+  };
+  encode(ja(map(\p. match p { (n, part) => jo([kv("name", js(n)), kv("part", js(part))]) }, pairs)))
+}
+
+pure func xlsxBrowserSheetNames(workbookXml: string) -> [string] =
+  match parseLenient(workbookXml) {
+    Ok(root) => map(\n. getOrElse(getAttr(n, "name"), ""), findAll(root, "sheet")),
+    Err(_) => []
+  }
+
+pure func xlsxBrowserPairByPosition(names: [string], parts: [string]) -> [(string, string)] =
+  match parts {
+    [] => [],
+    p :: rest => {
+      let name = match names {
+        n :: _ => if length(n) > 0 then n else p,
+        [] => p
+      };
+      (name, p) :: xlsxBrowserPairByPosition(xlsxBrowserTail(names), rest)
+    }
+  }
+
+pure func xlsxBrowserTail(xs: [string]) -> [string] = match xs { [] => [], _ :: t => t }
+
+-- Parse XLSX shared strings XML into Map, then parse sheet XML
+export pure func parseXlsxSheet(sheetXml: string, sharedStringsXml: string, sheetName: string) -> string {
+  let sharedStrings = parseSharedStringsToMap(sharedStringsXml);
+  let blocks = parseSheetXml(sheetXml, sharedStrings, sheetName);
+  encode(ja(blocksToJson(blocks)))
+}
+
+-- Helper: parse shared strings XML into a Map[int, string]
+-- Pure version for browser (no FS). Builds indexed map for O(1) cell resolution.
+pure func parseSharedStringsToMap(xml: string) -> Map[int, string] {
+  if length(xml) == 0 then emptyMap()
+  else match parseLenient(xml) {
+    Ok(root) => {
+      let items = findAll(root, "si");
+      let strings = extractSharedStrings(items);
+      xlsxBrowserBuildMap(strings, 0)
+    },
+    Err(_) => emptyMap()
+  }
+}
+
+-- Build Map[int, string] from a list of strings with indices
+pure func xlsxBrowserBuildMap(strings: [string], idx: int) -> Map[int, string] =
+  match strings {
+    [] => emptyMap(),
+    s :: rest => mapInsert(xlsxBrowserBuildMap(rest, idx + 1), idx, s)
+  }

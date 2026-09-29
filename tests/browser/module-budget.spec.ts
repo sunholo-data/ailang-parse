@@ -19,17 +19,25 @@ import { test, expect } from "@playwright/test";
 // works again") — do not raise the number.
 const STEP_CEILING = 100_000;
 
-// Known debt, capped at today's cost so it can shrink but not grow.
-// docx_generator is only loaded by docs/lab/docx-generation.html.
-const OVER_CEILING_CAPS: Record<string, number> = {
-  "docparse/services/docx_generator": 155_000,
-};
+// Early warning, not a gate: a module past this is one feature away from the
+// ceiling. It is printed as a WARNING line (and a GitHub annotation in CI) so
+// the next module to need a split is visible before it fails. wasm-demo.js
+// warns in the browser console at the same number.
+const STEP_WARNING = 85_000;
+
+// Known debt, capped at today's cost so it can shrink but not grow. Empty
+// since v0.47.x split docx_generator (151k) into docx_runs, docx_table,
+// docx_package and docx_generator. Do not add entries to make a module pass.
+const OVER_CEILING_CAPS: Record<string, number> = {};
 
 // Modules outside the default boot set that pages load on demand
 // (docs/lab/docx-generation.html), in dependency order.
 const EXTRA_MODULES = [
   "docparse/services/docx_template",
   "docparse/services/docx_layout",
+  "docparse/services/docx_runs",
+  "docparse/services/docx_table",
+  "docparse/services/docx_package",
   "docparse/services/docx_generator",
   "docparse/services/docparse_generate",
 ];
@@ -45,18 +53,24 @@ test("per-module type-check cost stays under the step ceiling", async ({ page })
     { timeout: 120_000 },
   );
 
-  // loadStats() is what the page itself recorded while booting — the real
-  // loads, in the real order — plus the extras loaded here.
-  const stats: Stat[] = await page.evaluate(async (extras) => {
+  // loadStats() is what the page itself recorded — the real loads, in the
+  // real order: the boot set, then every format's lazily loaded parsers
+  // (loaded here the way a first drop of that format loads them), then the
+  // generator extras.
+  const { stats, bootMs, bootSet, lazySet } = await page.evaluate(async (extras) => {
     const w = window as any;
+    const t0 = performance.now();
     await w.docparseWasm.ready();
+    const bootMs = Math.round(performance.now() - t0);
+    for (const key of w.docparseWasm.formats()) await w.docparseWasm.loadFormat(key);
     for (const name of extras) await w.docparseWasm.loadExtraModule(name, name + ".ail");
-    return w.docparseWasm.loadStats();
+    return {
+      stats: w.docparseWasm.loadStats() as Stat[],
+      bootMs,
+      bootSet: w.docparseWasm.modules().map((m: { name: string }) => m.name) as string[],
+      lazySet: w.docparseWasm.lazyModules().map((m: { name: string }) => m.name) as string[],
+    };
   }, EXTRA_MODULES);
-
-  const bootSet: string[] = await page.evaluate(() =>
-    (window as any).docparseWasm.modules().map((m: { name: string }) => m.name),
-  );
 
   const capFor = (name: string) => OVER_CEILING_CAPS[name] ?? STEP_CEILING;
   const budget = stats.find((s) => s.budgetMs)?.budgetMs ?? 0;
@@ -68,11 +82,25 @@ test("per-module type-check cost stays under the step ceiling", async ({ page })
       `  ${String(t.steps ?? "?").padStart(7)} steps  ${pct}% of cap  ${String(t.ms ?? "?").padStart(5)}ms  ${t.ok ? "ok " : "ERR"}  ${t.name}`,
     );
   }
+  const sumMs = (names: string[]) => stats.filter((t) => names.includes(t.name)).reduce((a, t) => a + (t.ms ?? 0), 0);
+  const sumSteps = (names: string[]) => stats.filter((t) => names.includes(t.name)).reduce((a, t) => a + (t.steps ?? 0), 0);
+  console.log(`BOOT SET: ${bootSet.length} modules, ${sumSteps(bootSet)} steps, ${sumMs(bootSet)}ms type-check ` +
+    `(ready() awaited ${bootMs}ms); LAZY: ${lazySet.length} modules, ${sumSteps(lazySet)} steps, ` +
+    `${sumMs(lazySet)}ms, loaded per format on first use`);
+
+  const near = sorted.filter((t) => (t.steps ?? 0) > STEP_WARNING && (t.steps ?? 0) <= capFor(t.name));
+  for (const t of near) {
+    const msg = `${t.name}: ${t.steps} type-check steps, past the ${STEP_WARNING} warning line ` +
+      `(ceiling ${capFor(t.name)}) — split it before the next feature lands`;
+    console.log(`WARNING ${msg}`);
+    if (process.env.GITHUB_ACTIONS) console.log(`::warning title=WASM type-check budget::${msg}`);
+    test.info().annotations.push({ type: "warning", description: msg });
+  }
 
   // Every module in the bundle must have been measured — one missing from the
   // stats is one this gate has silently stopped covering.
   const measured = stats.map((s) => s.name);
-  for (const name of [...bootSet, ...EXTRA_MODULES]) {
+  for (const name of [...bootSet, ...lazySet, ...EXTRA_MODULES]) {
     expect(measured, `no load stats for ${name}`).toContain(name);
   }
   for (const t of stats) {

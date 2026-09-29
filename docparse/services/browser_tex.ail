@@ -1,0 +1,19 @@
+module docparse/services/browser_tex
+
+import std/json (encode, ja)
+import docparse/services/tex_parser (parseLatex)
+import docparse/services/output_formatter (blocksToJson)
+
+-- Browser (WASM) bindings for LaTeX.
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Parse LaTeX content -> JSON array of blocks
+-- Single-file only — \input/\include resolution requires FS and runs server-side.
+export pure func parseTexContent(content: string) -> string {
+  encode(ja(blocksToJson(parseLatex(content))))
+}
