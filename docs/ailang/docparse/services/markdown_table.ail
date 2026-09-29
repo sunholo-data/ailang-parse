@@ -1,0 +1,201 @@
+module docparse/services/markdown_table
+
+import std/string (trim, length, startsWith, endsWith, substring, find, charAt, foldChars, join, replace, stringToInt)
+import std/list (map, concat, reverse, length as listLength)
+import std/option (Some, None)
+import docparse/types/document (Block, TableCell, simpleCell, mergedCell, simpleCellRuns, spanCellRuns, mkTable)
+import docparse/services/markdown_inline (mdInlineRuns)
+
+-- GFM table rows -> TableBlock: cell splitting (escaped pipes), separator and
+-- alignment rows, colspan/merged markers from markdown_writer, and fitting
+-- rows to the header width.
+--
+-- Split out of markdown_parser, with markdown_inline and markdown_quote, to
+-- keep each module well inside the in-browser WASM type-check budget, which
+-- is per module and wall-clock (see CHANGELOG, "Workbench DOCX parsing works
+-- again"). Pure string -> cells; shares no state with the line parser.
+
+-- Build the TableBlock from raw cell strings (header row first) and the
+-- per-column alignments read off the separator row.
+export pure func mdTableBlock(headerCells: [string], dataRows: [[string]], aligns: [string]) -> Block {
+  let headerRow = mdApplyAligns(map(mdCellFromText, headerCells), aligns);
+  -- Rows are fitted to the header width (GFM): short rows gain empty
+  -- cells, long rows lose the excess. A ragged table is not renderable
+  -- and every consumer downstream assumes rectangularity.
+  --
+  -- Width is the sum of the colSpans, not the number of cells: in a table
+  -- with merged cells a row of 2 cells can be exactly as wide as a header
+  -- of 3, and padding it to 3 would invent a column.
+  let width = mdCellsWidth(headerRow);
+  let bodyRows = map(\row. mdApplyAligns(mdFitCells(map(mdCellFromText, row), width), aligns), dataRows);
+  mkTable(bodyRows, headerRow)
+}
+
+-- Recover table topology from the attribute suffixes the markdown writer emits
+-- (output_formatter.cellTextMd). Without this the markers survived as literal
+-- text — a cell reading "Total {colspan=2}" — in every consumer downstream.
+-- Cell text is tokenized the same way a paragraph is (mdInlineRuns), so a
+-- `` `code` `` span or **bold** term inside a cell carries into `runs`
+-- instead of reaching every generator as literal markup characters. `text`
+-- keeps the raw markdown (see TableCell's doc comment) — only `runs` decodes it.
+pure func mdCellFromText(s: string) -> TableCell {
+  let t = trim(s);
+  if endsWith(t, "{merged}") then mergedCell()
+  else {
+    let idx = find(t, "{colspan=");
+    if idx < 0 || not endsWith(t, "}") then simpleCellRuns(t, mdInlineRuns(t))
+    else {
+      let text = trim(substring(t, 0, idx));
+      let digits = substring(t, idx + 9, length(t) - 1);
+      match stringToInt(digits) {
+        -- Clamped: the span sets the table's width, so an absurd or hostile
+        -- value ({colspan=99}) padded every data row out to match it. No real
+        -- table has more columns than this.
+        Some(n) => if n > 1 && n <= 64 then spanCellRuns(text, n, mdInlineRuns(text)) else simpleCellRuns(text, mdInlineRuns(text)),
+        None => simpleCellRuns(t, mdInlineRuns(t))
+      }
+    }
+  }
+}
+
+-- A row's width is the columns it covers, which is the sum of its colSpans.
+-- A row's width is the grid columns it covers. A merged cell sitting inside a
+-- preceding cell's span occupies no column of its own — summing every colSpan
+-- made "Total {colspan=4}" plus its three continuations read as 7 columns, so
+-- every 4-cell data row was then padded out to 7.
+pure func mdCellsWidth(cells: [TableCell]) -> int =
+  mdWidthWalk(cells, 0, 0)
+
+pure func mdWidthWalk(cells: [TableCell], cover: int, acc: int) -> int =
+  match cells {
+    [] => acc,
+    c :: rest =>
+      if c.merged && cover > 0
+      then mdWidthWalk(rest, cover - 1, acc)
+      else mdWidthWalk(rest, mdSpanOf(c) - 1, acc + mdSpanOf(c))
+  }
+
+pure func mdSpanOf(c: TableCell) -> int = if c.colSpan > 1 then c.colSpan else 1
+
+-- Pad a short row out to the header width so the table is rectangular.
+--
+-- A row WIDER than its header is left alone. GFM says to drop the excess, but
+-- dropping it deletes content the document actually contains — one fixture
+-- here has a 1-column header over 2-column rows, and truncating lost a cell
+-- on every row. A ragged-wide row is still all of the data.
+pure func mdFitCells(cells: [TableCell], width: int) -> [TableCell] {
+  let have = mdCellsWidth(cells);
+  if have >= width then cells else mdPadCells(cells, width - have)
+}
+
+pure func mdPadCells(cells: [TableCell], shortfall: int) -> [TableCell] =
+  if shortfall <= 0 then cells
+  else mdPadCells(concat(cells, [simpleCell("")]), shortfall - 1)
+
+-- Check if a table row is a separator (e.g., | --- | --- | or |:---|---:|).
+--
+-- This is decided structurally — every cell must be a run of dashes with
+-- optional alignment colons — not by looking for "---" anywhere in the line.
+-- The substring test used to delete real data rows: "| 2024---2025 | fiscal |"
+-- is content, and was silently dropped from the table.
+export pure func mdIsTableSeparator(line: string) -> bool {
+  let cells = mdSplitCells(line);
+  if listLength(cells) == 0 then false
+  else mdAllSepCells(cells)
+}
+
+pure func mdAllSepCells(cells: [string]) -> bool =
+  match cells {
+    [] => true,
+    c :: rest => mdIsSepCell(c) && mdAllSepCells(rest)
+  }
+
+-- ":---" left, "---:" right, ":---:" centre, "---" unspecified.
+export pure func mdCellAlign(cell: string) -> string {
+  let t = trim(cell);
+  let n = length(t);
+  if n == 0 then ""
+  else {
+    let l = charAt(t, 0) == ":";
+    let r = charAt(t, n - 1) == ":" && n > 1;
+    if l && r then "center" else if r then "right" else if l then "left" else ""
+  }
+}
+
+pure func mdApplyAligns(cells: [TableCell], aligns: [string]) -> [TableCell] =
+  match cells {
+    [] => [],
+    c :: rest => {
+      let a = match aligns { [] => "", x :: _ => x };
+      let restA = match aligns { [] => [], _ :: t => t };
+      (if length(a) > 0 then { c | align: a } else c) :: mdApplyAligns(rest, restA)
+    }
+  }
+
+-- One separator cell: optional ':', one or more '-', optional ':'
+pure func mdIsSepCell(s: string) -> bool {
+  let t = trim(s);
+  let n = length(t);
+  if n == 0 then false
+  else {
+    let start = if charAt(t, 0) == ":" then 1 else 0;
+    let end = if charAt(t, n - 1) == ":" && n - 1 > start then n - 1 else n;
+    if end <= start then false
+    else mdAllDashes(t, start, end)
+  }
+}
+
+pure func mdAllDashes(s: string, i: int, end: int) -> bool =
+  if i >= end then true
+  else charAt(s, i) == "-" && mdAllDashes(s, i + 1, end)
+
+-- Parse a table row "| cell | cell | cell |" into a list of cell strings.
+--
+-- Empty cells are preserved: dropping them shifted every later cell one column
+-- to the left, so "| 1 |  | 3 |" silently filed the 3 under the second header.
+-- Contract: a table row always produces at least one cell
+export pure func mdParseTableRow(line: string) -> [string]
+  ensures { listLength(result) >= 1 }
+{
+  map(mdUnescapeCell, mdSplitCells(line))
+}
+
+-- Undo the escaping applied by the markdown writer (output_formatter.cellTextMd):
+-- <br> is how a cell newline survives a line-oriented grammar.
+pure func mdUnescapeCell(cell: string) -> string =
+  replace(cell, "<br>", "\n")
+
+-- Split a table row on unescaped pipes, dropping the fence pipes at each end.
+-- "\|" is a literal pipe inside a cell and must not split it.
+export pure func mdSplitCells(line: string) -> [string] {
+  let t = trim(line);
+  let noLead = if startsWith(t, "|") then substring(t, 1, length(t)) else t;
+  let noTrail = if endsWith(noLead, "|") && not endsWith(noLead, "\\|")
+    then substring(noLead, 0, length(noLead) - 1)
+    else noLead;
+  let st = foldChars(mdCellStep, { cells: [], buf: [], esc: false }, noTrail);
+  map(trim, reverse(mdCellFlush(st).cells))
+}
+
+type MdCellState = {
+  cells: [string],   -- completed cells, reversed
+  buf: [string],     -- characters of the current cell, reversed
+  esc: bool          -- last character was a backslash
+}
+
+-- A backslash escapes a pipe or another backslash — the two characters
+-- mdEscapeCell emits. Anything else keeps both characters, so a Windows path
+-- or a LaTeX fragment in a cell survives unchanged.
+pure func mdCellStep(st: MdCellState, c: string) -> MdCellState =
+  if st.esc then
+    if c == "|" then { st | buf: "|" :: st.buf, esc: false }
+    else if c == "\\" then { st | buf: "\\" :: st.buf, esc: false }
+    else { st | buf: c :: "\\" :: st.buf, esc: false }
+  else if c == "\\" then { st | esc: true }
+  else if c == "|" then { cells: join("", reverse(st.buf)) :: st.cells, buf: [], esc: false }
+  else { st | buf: c :: st.buf }
+
+pure func mdCellFlush(st: MdCellState) -> MdCellState {
+  let trailing = if st.esc then "\\" :: st.buf else st.buf;
+  { st | cells: join("", reverse(trailing)) :: st.cells, buf: [], esc: false }
+}

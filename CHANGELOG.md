@@ -11,6 +11,72 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Workbench DOCX parsing works again, and RTF works on the workbench at all
+
+A partner dropped `comments.docx` and `track_changes_move.docx` on the public
+workbench and both failed:
+
+```
+Module docparse/services/markdown_parser failed: type error in mdProcessLine:
+WASM type-checker budget exceeded (8s, 68608 type-checker steps)
+```
+
+It was not a DOCX bug. The browser engine type-checks every module in the
+bundle at boot, and **the limit is wall-clock, per module**. The markdown
+round trip for comments and track changes (4656c78) had grown `markdown_parser`
+from 79k to 105k type-checker steps, which is 2.6s on an M4 Max. The partner's
+machine was roughly 4x slower, the 8s ran out 68,608 steps in, and the engine
+never finished booting. Every parse attempt failed, whatever the format. The
+error names the module that was loading when the clock ran out, not the file
+that was dropped. Formats that "worked" were parsed after a retry happened to
+boot in time.
+
+The hotspot was `mdProcessLine` itself: 46k of the module's 56k steps (after the
+split below). Every branch of its 20-way if/else chain did
+`let s = flush…(state) in { s | … }` inline, and the checker re-solved the
+12-field state record in each one. Moving each branch into a typed helper
+(`mdListItemState`, `mdTableLine`, `mdQuoteLine`, …) cut it to 21k. Separately,
+three disjoint concerns moved into their own modules, all loaded before
+`markdown_parser`:
+
+- `markdown_inline`: inline runs and the block constructors
+- `markdown_table`: GFM rows, alignment, and colspan/merged markers
+- `markdown_quote`: comment and track-change blockquote readback
+
+Measured on the pinned v0.43.1 runtime (steps are identical on every machine):
+
+- `markdown_parser` 105,374 steps / 2592ms → 21,185 / ~900ms
+- largest markdown module is now `markdown_inline` at 31,483 steps
+- output is unchanged: office suite 100% across 109 files, round trip 0
+  failures across 106
+
+**RTF.** On the workbench, `sample_rtf.rtf` failed on every machine with
+`Parse failed: no result from engine.call`. `DocParseEngine.parseFile` listed
+`.rtf` as a text format but had no dispatch branch for it, so `r` stayed
+undefined. The homepage demo had its own path and always worked. The branch is
+now there.
+
+**Budget.** `wasm-demo.js` raises the per-module limit from 8s to 30s. Even
+after this fix, `docx_parser`, `xlsx_parser` and `tex_parser` take ~2s each on
+an M4 Max. Most of that is not type-checker steps, so splitting cannot remove
+it. On the partner's machine they sit at roughly 8s, so an 8s limit left no
+margin for them either. The limit stays in place as a guard against a module
+that hangs the checker. Any module slower than 8s now logs a console warning
+with its step count.
+
+**The gate.** `tests/browser/module-budget.spec.ts` used to print timings and
+assert nothing. It now fails when any module in the bundle exceeds **100,000
+type-checker steps**; `markdown_parser` at 105k would have been caught. The gate
+reads the counts the page records during its real boot
+(`docparseWasm.loadStats()`), covers the on-demand generator modules too, and
+checks that every module was measured. `docx_generator` (151k, lab page only)
+is capped at its current cost. A new smoke test drives the workbench's own
+`DocParseEngine.parseFile` with the three partner files and a markdown document
+that uses all four markdown modules. Without the RTF branch it fails with the
+partner's exact message. `BROWSER_TEST_PORT` overrides the test server port:
+8765 is also the local `ailang coordinator` port, and `reuseExistingServer`
+silently ran the suite against it.
+
 ### Docs: correct API examples, pricing figures, and stale AI-required claims
 
 - **curl/Python examples** in `integrations.html`, `docs/lab/samples/guide.html`,
