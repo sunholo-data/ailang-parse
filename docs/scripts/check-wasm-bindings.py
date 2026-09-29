@@ -6,13 +6,14 @@ The homepage demo and workbench rely on a small set of invariants that have
 broken silently in the past:
 
   1. Every symbol called from JS via `engine.call('NAME', ...)` must be
-     exported as `export ... func NAME` from the canonical source
-     `docparse/services/docparse_browser.ail`. We learned this the hard way
+     exported as `export ... func NAME` from the module engine.call routes it
+     to: the browser_<format> bridge whose LAZY_MODULES entry `binds` it, else
+     the canonical source `docparse/services/docparse_browser.ail`. We learned this the hard way
      when commit 6cd2d48 sync'd source → vendored and silently dropped
      `parseCsvContent` / `parseMarkdownContent` etc., breaking text-format
      parsing on the deployed homepage for several days.
 
-  2. Every module path in `MODULES_TO_LOAD` (docs/js/wasm-demo.js) must
+  2. Every module path in `MODULES_TO_LOAD` and `LAZY_MODULES` (docs/js/wasm-demo.js) must
      resolve to a real file under `docparse/` so the vendor script and the
      CI workflow can copy it.
 
@@ -110,6 +111,25 @@ def extract_modules_to_load(js_source: str) -> list[tuple[str, str]]:
     return entry_pattern.findall(block)
 
 
+def extract_lazy_modules(js_source: str) -> list[tuple[str, str, list[str], list[str]]]:
+    """Pull (name, path, formats, binds) out of the LAZY_MODULES literal.
+
+    LAZY_MODULES are loaded on first use of a format (ensureFormat), in list
+    order, so each entry's imports must already be loaded for every format
+    that loads it.
+    """
+    block_match = re.search(r"LAZY_MODULES\s*=\s*\[(.*?)\n\s*\];", js_source, re.DOTALL)
+    if not block_match:
+        return []
+    entry_pattern = re.compile(
+        r"\{\s*name:\s*['\"]([^'\"]+)['\"]\s*,\s*path:\s*['\"]([^'\"]+)['\"]\s*,"
+        r"\s*formats:\s*\[([^\]]*)\](?:\s*,\s*binds:\s*\[([^\]]*)\])?\s*\}"
+    )
+    quoted = re.compile(r"['\"]([^'\"]+)['\"]")
+    return [(n, p, quoted.findall(f), quoted.findall(b or ""))
+            for n, p, f, b in entry_pattern.findall(block_match.group(1))]
+
+
 def extract_pkg_imports(ail_source: str) -> list[tuple[str, list[str]]]:
     """Pull (pkg_path, [imported_names]) tuples from `import pkg/...` lines.
 
@@ -177,22 +197,38 @@ def main() -> int:
     vendor = VENDOR_SCRIPT.read_text()
 
     # ── Invariant 1: every engine.call('NAME', ...) is exported ──────────
-    # `engine` wraps DOCPARSE_MODULE = 'docparse/services/docparse_browser',
-    # so every engine.call symbol must be exported from that module.
+    # `engine.call` routes NAME to the LAZY_MODULES bridge that binds it, or
+    # else to DOCPARSE_MODULE = 'docparse/services/docparse_browser', so NAME
+    # must be exported from that module.
     engine_calls = extract_engine_calls(js)
     exports = extract_ailang_exports(ail)
-    print(f"  Found {len(engine_calls)} engine.call() symbols, {len(exports)} exports in docparse_browser.ail")
+    lazy_modules = extract_lazy_modules(js)
+    bound_to: dict[str, str] = {}
+    for name, path, _formats, binds in lazy_modules:
+        for fn in binds:
+            if fn in bound_to:
+                fail(f"LAZY_MODULES binds {fn} twice ({bound_to[fn]} and {name})")
+                failures += 1
+            bound_to[fn] = path
+    print(f"  Found {len(engine_calls)} engine.call() symbols, {len(exports)} exports in docparse_browser.ail, "
+          f"{len(bound_to)} bound to {len({p for p in bound_to.values()})} format bridge(s)")
 
-    missing = (engine_calls - JS_ONLY_SYMBOLS) - exports
+    missing: list[tuple[str, str]] = []
+    for fn in sorted(set(bound_to) | (engine_calls - JS_ONLY_SYMBOLS)):
+        path = bound_to.get(fn)
+        if path is None:
+            if fn not in exports:
+                missing.append((fn, "docparse/services/docparse_browser.ail"))
+            continue
+        src = SOURCE_DOCPARSE / path[len("docparse/"):]
+        if not src.exists() or fn not in extract_ailang_exports(src.read_text()):
+            missing.append((fn, f"docparse/{path[len('docparse/'):]}"))
     if missing:
-        for name in sorted(missing):
-            fail(
-                f"engine.call('{name}', ...) in wasm-demo.js — but no `export func {name}` "
-                f"in docparse/services/docparse_browser.ail"
-            )
+        for fn, where in missing:
+            fail(f"engine.call('{fn}', ...) routes to {where}, which has no `export func {fn}`")
         failures += len(missing)
     else:
-        ok("All engine.call() symbols are exported by source docparse_browser.ail")
+        ok("All engine.call() symbols are exported by the module engine.call routes them to")
 
     # ── Invariant 1b: every repl.call(MODULE, 'NAME', ...) is also exported ──
     # These bypass the engine wrapper and call DOCPARSE_MODULE directly.
@@ -210,12 +246,13 @@ def main() -> int:
             ok(f"All {len(repl_calls)} repl.call() symbols are exported")
 
     # ── Invariant 2: every MODULES_TO_LOAD path resolves to a source file ──
-    modules = extract_modules_to_load(js)
-    if not modules:
-        fail("Could not parse MODULES_TO_LOAD from wasm-demo.js — regex needs updating")
+    core_modules = extract_modules_to_load(js)
+    modules = core_modules + [(n, p) for n, p, _f, _b in lazy_modules]
+    if not core_modules or not lazy_modules:
+        fail("Could not parse MODULES_TO_LOAD / LAZY_MODULES from wasm-demo.js — regex needs updating")
         failures += 1
     else:
-        print(f"  Found {len(modules)} entries in MODULES_TO_LOAD")
+        print(f"  Found {len(core_modules)} entries in MODULES_TO_LOAD, {len(lazy_modules)} in LAZY_MODULES")
         unresolved: list[tuple[str, str]] = []
         for name, path in modules:
             # MODULES_TO_LOAD paths are relative to docs/ailang/. Skip vendored
@@ -281,27 +318,46 @@ def main() -> int:
     # resolved, vendor and loader agreed), yet the browser died at init with
     # "undefined global variable: renderOmml from docparse/services/omml" — the
     # WASM smoke test then failed as a bare 60s timeout with no visible cause.
+    #
+    # A LAZY_MODULES entry is loaded, in list order, for each format it names,
+    # so each of its imports must be core or an EARLIER lazy entry that names
+    # every one of those formats — otherwise dropping a file of that format
+    # dies with the same error, only later.
     if modules:
-        loaded_names = {name for name, _ in modules}
-        missing_deps: list[tuple[str, str]] = []
-        for name, path in modules:
+        core_names = {name for name, _ in core_modules}
+        missing_deps: list[tuple[str, str, str]] = []
+
+        def imports_of(path: str) -> list[str]:
             if path.startswith("pkg/"):
-                continue
+                return []
             source_file = SOURCE_DOCPARSE / path[len("docparse/"):]
-            if not source_file.exists():
-                continue
-            for dep in extract_docparse_imports(source_file.read_text()):
-                if dep not in loaded_names:
-                    missing_deps.append((name, dep))
+            return extract_docparse_imports(source_file.read_text()) if source_file.exists() else []
+
+        for name, path in core_modules:
+            for dep in imports_of(path):
+                if dep not in core_names:
+                    missing_deps.append((name, dep, "is not in MODULES_TO_LOAD"))
+        earlier: dict[str, set[str]] = {}
+        for name, path, formats, _binds in lazy_modules:
+            for dep in imports_of(path):
+                if dep in core_names:
+                    continue
+                if dep not in earlier:
+                    missing_deps.append((name, dep, "is neither core nor an earlier LAZY_MODULES entry"))
+                elif not set(formats) <= earlier[dep]:
+                    missing_deps.append((name, dep, f"is not loaded for format(s) "
+                                         f"{sorted(set(formats) - earlier[dep])}"))
+            earlier[name] = set(formats)
         if missing_deps:
-            for mod, dep in sorted(set(missing_deps)):
+            for mod, dep, why in sorted(set(missing_deps)):
                 fail(
-                    f"{mod} imports {dep}, which is not in MODULES_TO_LOAD — "
-                    "the browser will fail at init with 'undefined global variable'"
+                    f"{mod} imports {dep}, which {why} — "
+                    "the browser will fail with 'undefined global variable'"
                 )
             failures += len(set(missing_deps))
         else:
-            ok(f"All docparse imports across {len(loaded_names)} loaded module(s) are themselves loaded")
+            ok(f"All docparse imports across {len(modules)} loaded module(s) "
+               f"({len(core_modules)} core, {len(lazy_modules)} lazy) are loaded before them")
 
     # ── Invariant 3b: vendored pkg/... packages export every imported symbol ──
     # The browser bundle has no package resolution — it loads exactly the

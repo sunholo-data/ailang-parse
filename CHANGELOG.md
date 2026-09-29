@@ -101,6 +101,54 @@ each `src` file's sha256 is one of that document's own media entries, that
 different images never share a path, and that a re-parse gives the same
 `src`. It fails on v0.47.0.
 
+### Workbench matches the server on XLSX sheets and PPTX speaker notes; boots in a fifth of the type-checking
+
+v0.47.0 fixed XLSX sheet order and names, and PPTX speaker notes, on the
+server. The browser workbench reads the ZIP in JavaScript and never ran that
+code (design doc v0.47.0, G2b and G2):
+
+- **XLSX sheets** were sorted as strings (`sheet10` before `sheet2`) and named
+  `Sheet1..N`. They now come from `xl/workbook.xml` through its rels in tab
+  order, with their real names, via the server's own
+  `xlsxResolveWorkbookSheets` (now exported) behind a new `orderXlsxSheets`
+  binding. The spreadsheet preview's tabs use the same order and names. The
+  v0.47.0 blank-cell column fix already reached the browser, because
+  `parseSheetXml` shares the row fold. The new test now asserts it.
+- **PPTX speaker notes** were never read. Each slide's notes now follow it as
+  `{kind:"notes", name:"Slide N"}`, exactly as on the server. The notes part is
+  resolved through the slide's own rels, never from its number. The pure halves
+  of `pptxSlideNotes` are now exported (`pptxNotesPart`, `pptxNotesSection`)
+  and are shared by the server and the new `pptxNotesPartFor` and
+  `parsePptxNotes` bindings.
+
+`wasm-smoke.spec.ts` checks both against the expectations the server checks
+use. `check_xlsx_positions.py` and `create_pptx_order_fixture.py` gained an
+`--expect-json` flag for this. The new tests fail on v0.47.0 with
+`Sheet1, Sheet2, …` and with no `notes` sections.
+
+WASM type-check headroom (design doc G6, repo side):
+
+- **`docx_generator` is split** into `docx_runs` (run and paragraph XML),
+  `docx_table` (tables and lists), `docx_package` (every OPC part except
+  document.xml) and `docx_generator` (plan, indexed walk, archive). The
+  module went from 151,174 type-checker steps to 77,504, and no piece is over
+  the 100k ceiling, so its 155k exemption is gone from `module-budget.spec.ts`.
+  Generated DOCX is byte-identical on the ten files compared.
+- **Early warning at 85k steps.** `module-budget.spec.ts` prints a `WARNING`
+  line, and a GitHub annotation in CI, for any module past 85k. `wasm-demo.js`
+  logs a console warning at the same point. `html_parser` (91k) and
+  `eml_parser` (87k) are past it today.
+- **Per-format lazy loading.** The browser used to type-check all 28 parser
+  modules at boot: 752k steps, about 20s on an M-series laptop. It now boots
+  9 modules (213k steps, about 4.4s). Each format's parsers load the first time
+  a file of that format is parsed. The bindings moved out of
+  `docparse_browser` into one `browser_<format>` bridge per format.
+  `LAZY_MODULES` in `wasm-demo.js` lists them in dependency order, and
+  `engine.call` routes each binding to its bridge. `check-wasm-bindings.py`
+  now checks that every lazy module's imports are loaded before it, for every
+  format that loads it. The first DOCX, for example, waits about 3s for its
+  parsers.
+
 ## [v0.47.0](https://github.com/sunholo-data/ailang-parse/compare/v0.46.0...v0.47.0) — 2026-09-29
 
 ### Workbench DOCX parsing works again, and RTF works on the workbench at all

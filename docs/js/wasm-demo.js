@@ -50,46 +50,98 @@
 
   var DOCPARSE_MODULE = 'docparse/services/docparse_browser';
 
+  // Loaded at boot: what every page needs whatever the format. Dependencies
+  // before dependents.
   var MODULES_TO_LOAD = [
-    { name: 'docparse/types/document',           path: 'docparse/types/document.ail' },
-    // colour before xlsx_parser and a2ui_formatter — both import normaliseHex
-    { name: 'docparse/services/colour',           path: 'docparse/services/colour.ail' },
-    { name: 'docparse/services/format_router',    path: 'docparse/services/format_router.ail' },
-    { name: 'docparse/services/zip_extract',      path: 'docparse/services/zip_extract.ail' },
-    // omml before docx_parser/pptx_parser — both import renderOmml from it
-    { name: 'docparse/services/omml',             path: 'docparse/services/omml.ail' },
-    { name: 'docparse/services/docx_parser',      path: 'docparse/services/docx_parser.ail' },
-    { name: 'docparse/services/pptx_parser',      path: 'docparse/services/pptx_parser.ail' },
-    { name: 'docparse/services/xlsx_parser',      path: 'docparse/services/xlsx_parser.ail' },
-    // Text format parsers (html_parser before eml_parser — dependency)
-    { name: 'docparse/services/html_parser',      path: 'docparse/services/html_parser.ail' },
-    { name: 'docparse/services/csv_parser',       path: 'docparse/services/csv_parser.ail' },
-    // markdown_inline/_quote/_table before markdown_parser — split out of it to
-    // keep it inside the per-module type-check budget; it imports all three
-    // (and markdown_table imports markdown_inline).
-    { name: 'docparse/services/markdown_inline',  path: 'docparse/services/markdown_inline.ail' },
-    { name: 'docparse/services/markdown_quote',   path: 'docparse/services/markdown_quote.ail' },
-    { name: 'docparse/services/markdown_table',   path: 'docparse/services/markdown_table.ail' },
-    { name: 'docparse/services/markdown_parser',  path: 'docparse/services/markdown_parser.ail' },
-    { name: 'docparse/services/rtf_parser',       path: 'docparse/services/rtf_parser.ail' },
-    { name: 'docparse/services/eml_parser',       path: 'docparse/services/eml_parser.ail' },
-    { name: 'docparse/services/tex_parser',       path: 'docparse/services/tex_parser.ail' },
-    // ODF + EPUB structural parsers (run pure XML→Blocks via AILANG WASM;
-    // JS only does ZIP extraction with JSZip).
-    { name: 'docparse/services/xml_helpers',      path: 'docparse/services/xml_helpers.ail' },
-    { name: 'docparse/services/odf_text',         path: 'docparse/services/odf_text.ail' },
-    { name: 'docparse/services/odt_parser',       path: 'docparse/services/odt_parser.ail' },
-    { name: 'docparse/services/odp_parser',       path: 'docparse/services/odp_parser.ail' },
-    { name: 'docparse/services/ods_parser',       path: 'docparse/services/ods_parser.ail' },
-    { name: 'docparse/services/epub_parser',      path: 'docparse/services/epub_parser.ail' },
+    { name: 'docparse/types/document', path: 'docparse/types/document.ail' },
+    // colour before a2ui_formatter, which imports normaliseHex (xlsx_parser too)
+    { name: 'docparse/services/colour', path: 'docparse/services/colour.ail' },
+    { name: 'docparse/services/format_router', path: 'docparse/services/format_router.ail' },
+    // xml_helpers: small, and imported by both the ODF parsers and the DOCX
+    // generator modules docs/lab pages load, so it is core rather than lazy.
+    { name: 'docparse/services/xml_helpers', path: 'docparse/services/xml_helpers.ail' },
     // markdown_writer before output_formatter — the latter imports it.
-    { name: 'docparse/services/markdown_writer',  path: 'docparse/services/markdown_writer.ail' },
+    { name: 'docparse/services/markdown_writer', path: 'docparse/services/markdown_writer.ail' },
     { name: 'docparse/services/output_formatter', path: 'docparse/services/output_formatter.ail' },
     // A2UI: vendored package + formatter (dependencies before dependents)
-    { name: 'pkg/sunholo/a2ui/components',        path: 'pkg/sunholo/a2ui/components.ail' },
-    { name: 'docparse/services/a2ui_formatter',   path: 'docparse/services/a2ui_formatter.ail' },
+    { name: 'pkg/sunholo/a2ui/components', path: 'pkg/sunholo/a2ui/components.ail' },
+    { name: 'docparse/services/a2ui_formatter', path: 'docparse/services/a2ui_formatter.ail' },
     { name: 'docparse/services/docparse_browser', path: 'docparse/services/docparse_browser.ail' },
   ];
+
+  // Loaded on demand, the first time a file of one of `formats` is parsed
+  // (ensureFormat). Type-checking every parser at boot was 752k type-checker
+  // steps across 28 modules, ~20s on a fast laptop and ~40s on a CI runner
+  // (design doc v0.47.0 G6); the boot set is now ~213k steps across 9, and a
+  // visitor usually drops one format. The list is in dependency order across ALL formats: loading a
+  // format loads, in list order, every entry that names it, so an entry's
+  // imports must be core or an earlier entry covering all of its formats
+  // (check-wasm-bindings.py enforces this). `binds` names the engine.call
+  // functions a browser_<format> bridge exports; engine.call routes them there.
+  var LAZY_MODULES = [
+    { name: 'docparse/services/zip_extract', path: 'docparse/services/zip_extract.ail', formats: ['docx', 'pptx', 'xlsx'] },
+    // omml before docx_parser/pptx_parser — both import renderOmml from it
+    { name: 'docparse/services/omml', path: 'docparse/services/omml.ail', formats: ['docx', 'pptx'] },
+    { name: 'docparse/services/docx_parser', path: 'docparse/services/docx_parser.ail', formats: ['docx'] },
+    { name: 'docparse/services/browser_docx', path: 'docparse/services/browser_docx.ail', formats: ['docx'],
+      binds: ['parseDocxBody', 'parseDocxSection', 'parseMetadataXml', 'parseDocxBodyWithComments', 'parseDocxComments'] },
+    { name: 'docparse/services/pptx_parser', path: 'docparse/services/pptx_parser.ail', formats: ['pptx'] },
+    { name: 'docparse/services/browser_pptx', path: 'docparse/services/browser_pptx.ail', formats: ['pptx'],
+      binds: ['parsePptxSlide', 'orderPptxSlides', 'pptxNotesPartFor', 'parsePptxNotes'] },
+    { name: 'docparse/services/xlsx_parser', path: 'docparse/services/xlsx_parser.ail', formats: ['xlsx'] },
+    { name: 'docparse/services/browser_xlsx', path: 'docparse/services/browser_xlsx.ail', formats: ['xlsx'],
+      binds: ['parseXlsxSheet', 'orderXlsxSheets'] },
+    // html_parser before eml_parser and epub_parser — both import it
+    { name: 'docparse/services/html_parser', path: 'docparse/services/html_parser.ail', formats: ['html', 'eml', 'epub'] },
+    // EPUB chapters are XHTML and go through parseHtmlContent
+    { name: 'docparse/services/browser_html', path: 'docparse/services/browser_html.ail', formats: ['html', 'epub'],
+      binds: ['parseHtmlContent'] },
+    { name: 'docparse/services/csv_parser', path: 'docparse/services/csv_parser.ail', formats: ['csv', 'eml'] },
+    { name: 'docparse/services/browser_csv', path: 'docparse/services/browser_csv.ail', formats: ['csv'],
+      binds: ['parseCsvContent'] },
+    // markdown_inline/_quote/_table before markdown_parser — split out of it to
+    // keep it inside the per-module type-check budget; it imports all three
+    // (and markdown_table imports markdown_inline). eml_parser imports markdown_parser.
+    { name: 'docparse/services/markdown_inline', path: 'docparse/services/markdown_inline.ail', formats: ['md', 'eml'] },
+    { name: 'docparse/services/markdown_quote', path: 'docparse/services/markdown_quote.ail', formats: ['md', 'eml'] },
+    { name: 'docparse/services/markdown_table', path: 'docparse/services/markdown_table.ail', formats: ['md', 'eml'] },
+    { name: 'docparse/services/markdown_parser', path: 'docparse/services/markdown_parser.ail', formats: ['md', 'eml'] },
+    { name: 'docparse/services/browser_markdown', path: 'docparse/services/browser_markdown.ail', formats: ['md'],
+      binds: ['parseMarkdownContent'] },
+    { name: 'docparse/services/rtf_parser', path: 'docparse/services/rtf_parser.ail', formats: ['rtf'] },
+    { name: 'docparse/services/browser_rtf', path: 'docparse/services/browser_rtf.ail', formats: ['rtf'],
+      binds: ['parseRtfContent'] },
+    { name: 'docparse/services/eml_parser', path: 'docparse/services/eml_parser.ail', formats: ['eml'] },
+    { name: 'docparse/services/browser_eml', path: 'docparse/services/browser_eml.ail', formats: ['eml'],
+      binds: ['parseEmlContent', 'parseEmlMeta', 'parseMboxContent', 'parseMboxMeta', 'parseMboxThreadedContent'] },
+    { name: 'docparse/services/tex_parser', path: 'docparse/services/tex_parser.ail', formats: ['tex'] },
+    { name: 'docparse/services/browser_tex', path: 'docparse/services/browser_tex.ail', formats: ['tex'],
+      binds: ['parseTexContent'] },
+    // ODF structural parsers
+    { name: 'docparse/services/odf_text', path: 'docparse/services/odf_text.ail', formats: ['odf'] },
+    { name: 'docparse/services/odt_parser', path: 'docparse/services/odt_parser.ail', formats: ['odf'] },
+    { name: 'docparse/services/odp_parser', path: 'docparse/services/odp_parser.ail', formats: ['odf'] },
+    { name: 'docparse/services/ods_parser', path: 'docparse/services/ods_parser.ail', formats: ['odf'] },
+    { name: 'docparse/services/browser_odf', path: 'docparse/services/browser_odf.ail', formats: ['odf'],
+      binds: ['parseOdtContent', 'parseOdtMetadataXml', 'parseOdtStylesXml', 'parseOdpContent', 'parseOdpMetadataXml', 'parseOdsContent', 'parseOdsMetadataXml'] },
+    { name: 'docparse/services/epub_parser', path: 'docparse/services/epub_parser.ail', formats: ['epub'] },
+    { name: 'docparse/services/browser_epub', path: 'docparse/services/browser_epub.ail', formats: ['epub'],
+      binds: ['parseEpubContainer', 'parseEpubSpine', 'parseEpubMetadataXml'] },
+  ];
+
+  // File extension -> LAZY_MODULES format key.
+  var FORMAT_OF_EXT = {
+    docx: 'docx', pptx: 'pptx', xlsx: 'xlsx', odt: 'odf', odp: 'odf', ods: 'odf', epub: 'epub',
+    html: 'html', htm: 'html', csv: 'csv', tsv: 'csv', md: 'md', txt: 'md', rtf: 'rtf',
+    eml: 'eml', mbox: 'eml', tex: 'tex', latex: 'tex', ltx: 'tex'
+  };
+
+  // engine.call function -> the bridge module that exports it (default:
+  // docparse_browser).
+  var BIND_MODULE = {};
+  LAZY_MODULES.forEach(function (m) {
+    (m.binds || []).forEach(function (fn) { BIND_MODULE[fn] = m.name; });
+  });
 
   var EXTRA_STDLIBS = ['std/xml', 'std/list', 'std/io', 'std/bytes'];
 
@@ -103,10 +155,18 @@
   // enough that the old 8s limit would have refused them — say so in the
   // console, with the deterministic step count worth quoting in a report.
   var SLOW_MODULE_MS = 8000;
+  // Deterministic early warning: CI fails a module over 100k type-checker
+  // steps (tests/browser/module-budget.spec.ts); past this it is one feature
+  // away from that, whatever the machine.
+  var STEP_WARNING = 85000;
   function warnIfSlow(name, r) {
     if (r && r.success && typeof r.typeCheckMs === 'number' && r.typeCheckMs > SLOW_MODULE_MS) {
       console.warn('[DocParse] ' + name + ' took ' + Math.round(r.typeCheckMs) + 'ms to type-check (' +
         r.typeCheckSteps + ' steps) — slow machine or a module that has grown; limit is ' + TYPECHECK_BUDGET_MS + 'ms');
+    }
+    if (r && r.success && typeof r.typeCheckSteps === 'number' && r.typeCheckSteps > STEP_WARNING) {
+      console.warn('[DocParse] ' + name + ' needed ' + r.typeCheckSteps + ' type-checker steps, past the ' +
+        STEP_WARNING + ' warning line (CI ceiling 100000) — split it before it grows further');
     }
   }
   function recordLoadStats(name, r) {
@@ -246,6 +306,43 @@
   // Idempotent + concurrent-safe: every caller awaits the same `initPromise`
   // so a file dropped on the workbench before WASM is ready will queue
   // cleanly behind the boot sequence instead of throwing.
+  // Fetch and type-check one module into the REPL. Shared by the boot loop,
+  // ensureFormat and loadExtraModule, so every load is recorded in loadStats.
+  var loadedModules = {};
+  async function loadModuleInto(repl, mod) {
+    if (loadedModules[mod.name]) return;
+    var resp = await fetch(MODULE_BASE + mod.path + '?v=' + Date.now());
+    if (!resp.ok) throw new Error('Failed to fetch ' + mod.path);
+    var result = repl.loadModule(mod.name, await resp.text());
+    recordLoadStats(mod.name, result);
+    warnIfSlow(mod.name, result);
+    if (!result.success) throw new Error('Module ' + mod.name + ' failed: ' + result.error);
+    loadedModules[mod.name] = true;
+  }
+
+  // Load a format's parsers and bridge on first use. Loads are chained, so
+  // two files dropped together never load the same module twice or out of
+  // order; a failed load leaves its module unmarked, and a later call retries.
+  var lazyChain = Promise.resolve();
+  function ensureFormat(key) {
+    var run = lazyChain.then(async function () {
+      if (!engine) await initWasm();
+      var todo = LAZY_MODULES.filter(function (m) {
+        return m.formats.indexOf(key) !== -1 && !loadedModules[m.name];
+      });
+      for (var i = 0; i < todo.length; i++) {
+        setStatus('Loading ' + todo[i].name.split('/').pop() + ' (' + (i + 1) + '/' + todo.length + ')...', false, true);
+        await loadModuleInto(engine.repl, todo[i]);
+      }
+    });
+    lazyChain = run.catch(function () {});
+    return run;
+  }
+  function ensureFormatForExt(ext) {
+    var key = FORMAT_OF_EXT[ext];
+    return key ? ensureFormat(key) : Promise.resolve();
+  }
+
   function initWasm() {
     if (wasmReady) return Promise.resolve();
     if (initPromise) return initPromise;
@@ -314,14 +411,7 @@
           setStatus(label);
           emitProgress('modules', label, 70 + Math.round(((k + 1) / MODULES_TO_LOAD.length) * 28));
 
-          var resp = await fetch(MODULE_BASE + mod.path + '?v=' + Date.now());
-          if (!resp.ok) throw new Error('Failed to fetch ' + mod.path);
-          var code = await resp.text();
-
-          var result = repl.loadModule(mod.name, code);
-          recordLoadStats(mod.name, result);
-          warnIfSlow(mod.name, result);
-          if (!result.success) throw new Error('Module ' + mod.name + ' failed: ' + result.error);
+          await loadModuleInto(repl, mod);
         }
 
         // Set up AI handler if user has API key
@@ -333,9 +423,15 @@
 
         engine = {
           repl: repl,
+          // Format bindings live in their browser_<format> bridge (BIND_MODULE),
+          // loaded by ensureFormat before any parse of that format.
           call: function (func) {
             var args = Array.prototype.slice.call(arguments, 1);
-            var r = repl.call(DOCPARSE_MODULE, func, ...args);
+            var mod = BIND_MODULE[func] || DOCPARSE_MODULE;
+            if (!loadedModules[mod]) {
+              return { success: false, error: func + ': ' + mod + ' is not loaded (ensureFormat was not awaited)' };
+            }
+            var r = repl.call(mod, func, ...args);
             if (!r.success) return { success: false, error: r.error };
             return { success: true, result: parseWasmResult(r.result) };
           },
@@ -467,15 +563,25 @@
   window.docparseWasm = {
     ready: function () { return initWasm().then(function () { return engine; }); },
     modules: function () { return MODULES_TO_LOAD.slice(); },
+    // Per-format modules loaded on first use, and a way to load them now.
+    lazyModules: function () { return LAZY_MODULES.slice(); },
+    formats: function () {
+      var keys = [];
+      LAZY_MODULES.forEach(function (m) {
+        m.formats.forEach(function (f) { if (keys.indexOf(f) === -1) keys.push(f); });
+      });
+      return keys;
+    },
+    loadFormat: function (key) { return ensureFormat(key); },
     loadStats: function () { return moduleLoadStats.slice(); },
     assetBase: function () { return ASSET_BASE; },
     // The blocks from the most recent parse, or null if nothing parsed yet.
     lastBlocks: function () { return (lastOutput && lastOutput.blocks) || null; },
     parseFile: function (file) { return window.handleDocParseFile(file); },
-    // Load an extra module on demand. docx_generator is the single most
-    // expensive module to type-check (~150k steps), so it is not in the default
-    // set — only pages that generate documents pay for it.
+    // Load an extra module on demand: the DOCX generator modules are not in
+    // any default set — only pages that generate documents pay for them.
     loadExtraModule: async function (name, path) {
+      if (loadedModules[name]) return true;
       var resp = await fetch(MODULE_BASE + path + '?v=' + Date.now());
       if (!resp.ok) throw new Error('failed to fetch ' + path);
       if (!engine || !engine.repl) throw new Error('engine not ready');
@@ -483,6 +589,7 @@
       recordLoadStats(name, r);
       warnIfSlow(name, r);
       if (!r.success) throw new Error('module ' + name + ' failed: ' + r.error);
+      loadedModules[name] = true;
       return true;
     }
   };
@@ -550,6 +657,7 @@
         showError('WASM not loaded. ' + (wasmError || 'Try refreshing.'));
         return;
       }
+      if (!(await loadFormatOrShowError(ext))) return;
       await parseTextFile(file, ext);
     } else if (zipFormats.indexOf(ext) !== -1) {
       pipelineLog('route', 'ZIP-based Office format \u2014 WASM parsing');
@@ -557,6 +665,7 @@
         showError('WASM not loaded. ' + (wasmError || 'Try refreshing.'));
         return;
       }
+      if (!(await loadFormatOrShowError(ext))) return;
       await parseZipFile(file, ext);
     } else if (aiFormats.indexOf(ext) !== -1) {
       pipelineLog('route', 'Binary format \u2014 AI extraction');
@@ -565,6 +674,19 @@
       showError('Unsupported format: .' + ext);
     }
   };
+
+  // The first file of a format waits for that format's modules.
+  async function loadFormatOrShowError(ext) {
+    try {
+      pipelineLog('load', 'Loading the ' + ext.toUpperCase() + ' parser (first use)');
+      await ensureFormatForExt(ext);
+      return true;
+    } catch (err) {
+      pipelineLog('error', err.message, 'error');
+      showError('Could not load the ' + ext.toUpperCase() + ' parser: ' + err.message);
+      return false;
+    }
+  }
 
   // ── Parse text-based formats via AILANG WASM ──
   async function parseTextFile(file, ext) {
@@ -844,8 +966,27 @@
         var r = engine.call('parsePptxSlide', xml);
         if (r.success) allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
       }
+      // Speaker notes follow their slide, as on the server.
+      allBlocks = allBlocks.concat(await parsePptxSlideNotes(zip, slideEntries[i], i + 1));
     }
     return allBlocks;
+  }
+
+  // The notes part belongs to a slide through the slide's OWN rels — notesSlideN
+  // is not slideN's notes once a deck has been reordered or a slide has none —
+  // so the part is resolved in AILANG (pptxNotesPartFor), never from the number.
+  // slideNo is the deck position, which is what "Slide N" names on the server.
+  async function parsePptxSlideNotes(zip, slideEntry, slideNo) {
+    var relsEntry = zip.file(slideEntry.replace(/^ppt\/slides\//, 'ppt/slides/_rels/') + '.rels');
+    if (!relsEntry) return [];
+    var part = engine.call('pptxNotesPartFor', await relsEntry.async('string'));
+    if (!part.success || !part.result) return [];
+    var notesEntry = zip.file(String(part.result));
+    if (!notesEntry) return [];
+    var notesXml = await notesEntry.async('string');
+    if (notesXml.length > MAX_XML_SIZE) return [];
+    var r = engine.call('parsePptxNotes', notesXml, slideNo);
+    return r.success ? safeJsonParse(r.result, []) : [];
   }
 
   // ── XLSX parsing ──
@@ -857,24 +998,44 @@
     var ssXml = ssEntry ? await ssEntry.async('string') : '';
     if (ssEntry) pipelineLog('xml', 'Loaded shared strings');
 
-    // Find sheets
-    var sheetEntries = Object.keys(zip.files)
-      .filter(function (n) { return n.match(/^xl\/worksheets\/sheet\d+\.xml$/); })
-      .sort();
+    // Find sheets, in tab order with their real names
+    var sheets = await orderXlsxSheetEntries(zip);
 
-    pipelineLog('xml', 'Found ' + sheetEntries.length + ' sheet(s)');
+    pipelineLog('xml', 'Found ' + sheets.length + ' sheet(s)');
 
-    for (var i = 0; i < Math.min(sheetEntries.length, MAX_SHEETS); i++) {
-      pipelineLog('sheet', 'Parsing sheet ' + (i + 1) + '/' + sheetEntries.length);
-      setStatus('Parsing sheet ' + (i + 1) + '/' + sheetEntries.length + '...');
-      var xml = await zip.file(sheetEntries[i]).async('string');
-      var sheetName = 'Sheet' + (i + 1);
+    for (var i = 0; i < Math.min(sheets.length, MAX_SHEETS); i++) {
+      pipelineLog('sheet', 'Parsing sheet ' + (i + 1) + '/' + sheets.length);
+      setStatus('Parsing sheet ' + (i + 1) + '/' + sheets.length + '...');
+      var xml = await zip.file(sheets[i].part).async('string');
       if (xml.length <= MAX_XML_SIZE) {
-        var r = engine.call('parseXlsxSheet', xml, ssXml, sheetName);
+        var r = engine.call('parseXlsxSheet', xml, ssXml, sheets[i].name);
         if (r.success) allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
       }
     }
     return allBlocks;
+  }
+
+  // Worksheets as [{name, part}] in the workbook's TAB order with their real
+  // names, resolved by AILANG's orderXlsxSheets through xl/workbook.xml and its
+  // rels, exactly as the server does. Part names are neither the order (a moved
+  // tab keeps its sheetN.xml) nor the name, and a plain .sort() is
+  // lexicographic (sheet10 before sheet2). If the engine call fails: numeric
+  // part order, named by part, never a string sort.
+  async function orderXlsxSheetEntries(zip) {
+    var numeric = Object.keys(zip.files)
+      .filter(function (n) { return n.match(/^xl\/worksheets\/sheet\d+\.xml$/); })
+      .sort(function (a, b) {
+        return parseInt(a.match(/(\d+)\.xml$/)[1], 10) - parseInt(b.match(/(\d+)\.xml$/)[1], 10);
+      });
+    var fallback = numeric.map(function (p) { return { name: p, part: p }; });
+    if (!engine) return fallback;
+    var wbEntry = zip.file('xl/workbook.xml');
+    var relsEntry = zip.file('xl/_rels/workbook.xml.rels');
+    var wbXml = wbEntry ? await wbEntry.async('string') : '';
+    var relsXml = relsEntry ? await relsEntry.async('string') : '';
+    var r = engine.call('orderXlsxSheets', wbXml, relsXml, numeric.join('\n'));
+    var ordered = r.success ? safeJsonParse(r.result, null) : null;
+    return Array.isArray(ordered) ? ordered : fallback;
   }
 
   // ── ODF parsing (ODT / ODP / ODS) ──
@@ -1309,12 +1470,11 @@
       return;
     }
     try {
+      await ensureFormat('xlsx');
       var zip = await JSZip.loadAsync(buffer);
       var ssEntry = zip.file('xl/sharedStrings.xml');
       var ssXml = ssEntry ? await ssEntry.async('string') : '';
-      var sheetEntries = Object.keys(zip.files)
-        .filter(function (e) { return e.match(/^xl\/worksheets\/sheet\d+\.xml$/); })
-        .sort();
+      var sheetEntries = await orderXlsxSheetEntries(zip);
 
       if (sheetEntries.length === 0) {
         container.innerHTML = '<div class="office-preview-fallback">No sheets found</div>';
@@ -1323,12 +1483,16 @@
 
       var sheets = [];
       for (var i = 0; i < Math.min(sheetEntries.length, MAX_SHEETS); i++) {
-        var xml = await zip.file(sheetEntries[i]).async('string');
+        var xml = await zip.file(sheetEntries[i].part).async('string');
         if (xml && engine) {
-          var sheetName = 'Sheet' + (i + 1);
-          var r = engine.call('parseXlsxSheet', xml, ssXml, sheetName);
+          var r = engine.call('parseXlsxSheet', xml, ssXml, sheetEntries[i].name);
           if (r.success) {
-            sheets.push({ name: sheetName, blocks: safeJsonParse(r.result, []) });
+            var sheetBlocks = safeJsonParse(r.result, []);
+            // The tab label is the name the parser settled on (a part-name
+            // fallback reads "Sheet 3", not "xl/worksheets/sheet3.xml").
+            var named = sheetBlocks.filter(function (b) { return b.type === 'section' && b.name; })[0];
+            var heading = sheetBlocks.filter(function (b) { return b.type === 'heading'; })[0];
+            sheets.push({ name: named ? named.name : (heading ? heading.text : sheetEntries[i].name), blocks: sheetBlocks });
           }
         }
       }
@@ -1388,6 +1552,7 @@
       return;
     }
     try {
+      await ensureFormat('pptx');
       var zip = await JSZip.loadAsync(buffer);
       var slideEntries = await orderPptxSlideEntries(zip, Object.keys(zip.files)
         .filter(function (e) { return e.match(/^ppt\/slides\/slide\d+\.xml$/) && e.indexOf('_rels') === -1; }));
@@ -2381,6 +2546,8 @@
 
       if (!wasmReady) await initWasm();
       if (!wasmReady) throw new Error(wasmError || 'WASM failed to initialize');
+      // First file of this format: load its parsers (not counted in ms).
+      await ensureFormatForExt(ext);
 
       var t0 = performance.now();
       var blocks = [];

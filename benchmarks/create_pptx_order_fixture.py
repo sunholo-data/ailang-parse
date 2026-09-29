@@ -31,6 +31,9 @@ parser agrees with itself.
 Usage:
     uv run benchmarks/create_pptx_order_fixture.py            # (re)build fixture
     uv run benchmarks/create_pptx_order_fixture.py --verify   # parse + compare
+    python3 benchmarks/create_pptx_order_fixture.py --expect-json
+        # print expected_sections() as JSON; tests/browser/wasm-smoke.spec.ts
+        # holds the browser workbench to it (needs no python-pptx)
 """
 
 from __future__ import annotations
@@ -44,8 +47,6 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-
-from pptx import Presentation
 
 REPO = Path(__file__).resolve().parent.parent
 FIXTURE = REPO / "data" / "test_files" / "pptx_slide_order_notes.pptx"
@@ -82,6 +83,8 @@ assert sorted(NOTES_ORDER) == [p for p, d in enumerate(DECK, 1) if d[2] is not N
 
 
 def build(path: Path) -> None:
+    from pptx import Presentation  # only building needs python-pptx
+
     prs = Presentation()
     prs.slides  # python-pptx renames slide parts on first access; do it while empty
     title_body = prs.slide_layouts[1]
@@ -237,6 +240,9 @@ def verify() -> int:
 
 
 def main() -> int:
+    if "--expect-json" in sys.argv:
+        print(json.dumps(expected_sections()))
+        return 0
     if "--verify" in sys.argv:
         return verify()
     build(FIXTURE)

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { basename, resolve } from "node:path";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 // Smoke test for the homepage AILANG WASM demo.
 //
@@ -194,4 +195,79 @@ test("browser parses PPTX slides in presentation order", async ({ page }) => {
   expect(positions.every((p) => p >= 0)).toBe(true);
   expect(positions).toEqual([...positions].sort((a, b) => a - b));
   expect(consoleErrors).toEqual([]);
+});
+
+// ── Workbench parity with the server on the v0.47.0 fixtures ────────────────
+//
+// The workbench reads the ZIP in JavaScript and hands parts to AILANG, so
+// anything the server resolves through a part's relationships has to be
+// resolved again on this path. Expectations come from the same Python scripts
+// that check the server (--expect-json), so the two cannot drift apart.
+
+const REPO_ROOT = resolve(__dirname, "../..");
+function expectationsFrom(script: string): any {
+  return JSON.parse(execFileSync("python3", [script, "--expect-json"], { cwd: REPO_ROOT, encoding: "utf8" }));
+}
+
+async function parseOnWorkbench(page: import("@playwright/test").Page, file: string): Promise<any[]> {
+  const consoleErrors: string[] = [];
+  page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message}`));
+  page.on("console", (msg) => {
+    if (msg.type() === "error") consoleErrors.push(`console.error: ${msg.text()}`);
+  });
+  await page.goto("/workbench.html");
+  const booted = await page.evaluate(async () => {
+    try { await (window as any).DocParseEngine.init(); return "ok"; } catch (e) { return String((e as Error).message); }
+  });
+  expect(booted, `engine failed to boot; console:\n  ${consoleErrors.join("\n  ")}`).toBe("ok");
+  const b64 = readFileSync(resolve(REPO_ROOT, file)).toString("base64");
+  const out = await page.evaluate(async ({ name, b64 }) => {
+    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    try {
+      const r = await (window as any).DocParseEngine.parseFile(new File([bytes], name));
+      return { blocks: r.blocks, error: "" };
+    } catch (e) {
+      return { blocks: [], error: String((e as Error).message) };
+    }
+  }, { name: basename(file), b64 });
+  expect(out.error, `${file} failed to parse`).toBe("");
+  expect(consoleErrors).toEqual([]);
+  return out.blocks;
+}
+
+const cellText = (c: any) => (typeof c === "string" ? c : (c?.text ?? ""));
+
+// G2b. The workbench sorted worksheet parts as strings (sheet10 before sheet2)
+// and named them Sheet1..N. This fixture has 11 sheets stored in lexicographic
+// zip order, with a tab order that is not the part numbering. Its Leads sheet
+// also has blank cells mid-row, which must not shift later values left.
+test("workbench XLSX: sheets in tab order with real names, cells in their columns", async ({ page }) => {
+  test.setTimeout(180_000);
+  const want = expectationsFrom("benchmarks/check_xlsx_positions.py");
+  const blocks = await parseOnWorkbench(page, "data/test_files/challenge/challenge_sparse_rows.xlsx");
+
+  const sheets = blocks.filter((b) => b.type === "section" && b.kind === "sheet");
+  expect(sheets.map((s) => s.name)).toEqual(want.sheets);
+
+  const byName = Object.fromEntries(sheets.map((s) => [s.name, s]));
+  const tableOf = (name: string) => (byName[name]?.blocks ?? []).find((b: any) => b.type === "table");
+  for (const [name, first] of Object.entries(want.firstHeader)) {
+    expect(cellText(tableOf(name)?.headers?.[0]), `sheet ${name} paired with the wrong part`).toBe(first);
+  }
+  const rows = (tableOf("Leads")?.rows ?? []).map((r: any[]) => r.map(cellText));
+  expect(rows).toEqual(want.leads);
+});
+
+// G2. The workbench returned no speaker notes. The server emits each slide's
+// notes as {kind:"notes", name:"Slide N"} right after the slide, resolving the
+// notes part through the slide's rels. In this fixture notesSlideK is never
+// slide K's notes, one slide has none, and one empty slide has notes.
+test("workbench PPTX: speaker notes follow their slide, resolved through its rels", async ({ page }) => {
+  test.setTimeout(180_000);
+  const want: [string, string, string][] = expectationsFrom("benchmarks/create_pptx_order_fixture.py");
+  const blocks = await parseOnWorkbench(page, "data/test_files/pptx_slide_order_notes.pptx");
+  const got = blocks
+    .filter((b) => b.type === "section")
+    .map((b) => [b.kind ?? "", b.name ?? "", (b.blocks ?? []).map((c: any) => c.text ?? "").join("|")]);
+  expect(got).toEqual(want);
 });
