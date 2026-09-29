@@ -64,6 +64,14 @@
     // Text format parsers (html_parser before eml_parser — dependency)
     { name: 'docparse/services/html_parser',      path: 'docparse/services/html_parser.ail' },
     { name: 'docparse/services/csv_parser',       path: 'docparse/services/csv_parser.ail' },
+    // markdown_parser is split for the per-module WASM type-check budget
+    // (the combined module exceeded the embedder's 8s wall-clock on ordinary
+    // visitor hardware — "Parse failed." for DOCX with tracked changes and
+    // comments). Load the halves before the parser that imports them:
+    // markdown_table imports markdown_inline.
+    { name: 'docparse/services/markdown_inline',   path: 'docparse/services/markdown_inline.ail' },
+    { name: 'docparse/services/markdown_table',    path: 'docparse/services/markdown_table.ail' },
+    { name: 'docparse/services/markdown_roundtrip', path: 'docparse/services/markdown_roundtrip.ail' },
     { name: 'docparse/services/markdown_parser',   path: 'docparse/services/markdown_parser.ail' },
     { name: 'docparse/services/rtf_parser',       path: 'docparse/services/rtf_parser.ail' },
     { name: 'docparse/services/eml_parser',       path: 'docparse/services/eml_parser.ail' },

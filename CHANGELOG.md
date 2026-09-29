@@ -11,6 +11,36 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: the workbench demo failed on DOCX files with tracked changes or comments
+
+- **The in-browser workbench returned "Parse failed." for
+  `track_changes_move.docx` and `comments.docx`** — the two formats its own
+  "Structural Readouts" panel advertises as differentiators. The engine error
+  was `Module docparse/services/markdown_parser failed: type error in
+  mdProcessLine: WASM type-checker budget exceeded (8s, 68608 type-checker
+  steps)`. Because the browser bundle loads every parser module eagerly at
+  boot, a module that fails to type-check takes the whole engine down, so
+  every upload in the same session failed — the `.rtf` failure in the same
+  session ("no result from engine.call") was the same dead engine, not an RTF
+  defect. The budget is wall-clock and per-module, so which visitor hits it
+  depends on their hardware.
+- **Same known class as the `output_formatter` fix** (1344ms → 544ms), same
+  remedy: `markdown_parser` (the package's largest module) is split into
+  `markdown_inline` (the inline formatting scanner), `markdown_table` (row/cell
+  parsing and colSpan/merged topology) and `markdown_roundtrip` (the comment
+  and track-change blockquote readers). Each imports only what it needs, and
+  `markdown_parser` stays the facade: `parseMarkdown`, `parseMarkdownMeta` and
+  `mdInlineRuns` are still exported from it unchanged, so no importer changes.
+- `MODULES_TO_LOAD` in `docs/js/wasm-demo.js` and the vendor script's module
+  list gain the three new modules (before `markdown_parser` — it imports
+  them), and the vendored `docs/ailang/docparse/services/` mirror is
+  re-synced. CI re-vendors on deploy; the in-tree copies keep local browser
+  tests against the same bundle.
+- The durable fix for the class — type-checking only the modules a given
+  format actually needs (per-format lazy loading) rather than whichever module
+  next crosses the budget — is noted as follow-up work; `loadExtraModule`
+  already exists for the lab pages, so the loader supports it.
+
 ### Docs: correct API examples, pricing figures, and stale AI-required claims
 
 - **curl/Python examples** in `integrations.html`, `docs/lab/samples/guide.html`,
