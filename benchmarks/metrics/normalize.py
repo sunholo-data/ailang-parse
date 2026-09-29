@@ -19,6 +19,8 @@ Common element schema:
 
 from __future__ import annotations
 
+import copy
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
@@ -32,6 +34,65 @@ class NormalizedElement:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# --- Machine-local values -------------------------------------------------
+
+LOCAL_IMAGE_SRC = "<local-image-file>"
+
+_BASE64 = re.compile(r"^[A-Za-z0-9+/=\s]+$")
+_WIN_ABS = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def is_local_image_path(src: Any) -> bool:
+    """True when an image `src` names a file the parser wrote on THIS machine.
+
+    Office images are extracted to a temp file and `src` holds its path, with
+    `dataLength` = len(path). Both change with the machine, the temp dir and
+    the naming scheme (G9 is changing it), so they cannot sit in a golden.
+    Deliberately not tied to one directory or file-name pattern: any absolute
+    path (POSIX, Windows, UNC) or file: URI counts. Inline base64 also starts
+    with '/' ('/9j/' is a JPEG), so a string made only of base64 characters is
+    NOT a path. Relative srcs (HTML's 'logo.png') are document content and are
+    kept.
+    """
+    if not isinstance(src, str) or not src or src.startswith("data:"):
+        return False
+    if src.startswith("file:") or "docparse-img" in src:
+        return True
+    looks_absolute = src.startswith("/") or src.startswith("\\") or bool(_WIN_ABS.match(src))
+    return looks_absolute and not _BASE64.match(src)
+
+
+def _canon_blocks(blocks: list) -> None:
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "image" and is_local_image_path(b.get("src")):
+            b["src"] = LOCAL_IMAGE_SRC
+            b.pop("dataLength", None)
+        _canon_blocks(b.get("blocks", []))
+
+
+def canonicalize_output(output_json: dict) -> dict:
+    """A copy of a parse result with machine- and run-specific values removed.
+
+    - `document.filename`: the absolute input path, different on every machine.
+    - local image files: `src` becomes LOCAL_IMAGE_SRC, `dataLength` is dropped.
+
+    Applied to golden and actual alike before any comparison, and by
+    generate_golden.sh before a golden is written.
+    """
+    out = copy.deepcopy(output_json)
+    doc = out.get("document", {})
+    doc.pop("filename", None)
+    _canon_blocks(doc.get("blocks", []))
+    return out
+
+
+def canonicalize_images_in_place(output_json: dict) -> None:
+    """Image half of canonicalize_output, for writing goldens (keeps filename)."""
+    _canon_blocks(output_json.get("document", {}).get("blocks", []))
 
 
 # --- AILANG normalizer ---
