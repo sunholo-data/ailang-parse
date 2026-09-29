@@ -1,13 +1,13 @@
 module docparse/services/pptx_generator
 
-import std/string (length, intToStr, find, substring)
-import std/list (foldl, length as listLength)
+import std/string (length, intToStr, find, substring, split)
+import std/list (foldl, length as listLength, reverse, concat, any)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
-import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pptxTplDropSpans, pptxTplDropElems, pptxTplInsertBeforeFirst, pptxTplInsertBeforeLast)
+import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pptxTplDropSpans, pptxTplDropElems, pptxTplInsertBeforeFirst, pptxTplInsertBeforeLast, pptxTplLastIndexOf)
 
 -- PPTX Generator — converts Block ADT to a valid .pptx file.
 --
@@ -22,6 +22,9 @@ import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pp
 --   ppt/slideLayouts/_rels/slideLayout1.xml.rels
 --   ppt/slideMasters/slideMaster1.xml
 --   ppt/slideMasters/_rels/slideMaster1.xml.rels
+--   ppt/notesSlides/notesSlideN.xml   (only for slides with speaker notes;
+--   ppt/notesMasters/notesMaster1.xml  N is the slide's own number, and the
+--   ppt/theme/theme2.xml               master/theme only when any slide has notes)
 --
 -- Limitations:
 --   - No embedded images (needs writeEntryBytes)
@@ -57,14 +60,34 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
   -- or if no slides, put all blocks on one slide
   let slideContents = pptxCollectSlides(doc.blocks);
   let slideCount = pptxCountSlides(slideContents);
+  let hasNotes = pptxAnyNotes(slideContents);
+  let orphans = pptxOrphanNotes(doc.blocks);
+  let orphanNote = if orphans > 0
+    then ", ${intToStr(orphans)} notes section(s) with no preceding slide dropped"
+    else "";
 
-  -- Build all ZIP entries
-  let contentTypes = pptxContentTypes(slideCount);
+  -- Build all ZIP entries. With no speaker notes every part below is exactly
+  -- what it was before notes were written, byte for byte.
+  let contentTypes = if hasNotes
+    then pptxTplInsertBeforeLast(pptxContentTypes(slideCount), "</Types>",
+      "${pptxNotesMasterContentTypes("/ppt/notesMasters/notesMaster1.xml", "/ppt/theme/theme2.xml")}${pptxNotesContentTypes(slideContents, 1)}")
+    else pptxContentTypes(slideCount);
   let rootRels = pptxRootRels();
-  let presentation = pptxPresentation(slideCount, pptxSldSzFor(slideSize));
-  let presRels = pptxPresentationRels(slideCount);
+  let presentation = if hasNotes
+    then pptxTplInsertBeforeFirst(pptxPresentation(slideCount, pptxSldSzFor(slideSize)),
+      "<p:sldIdLst>", pptxNotesMasterIdLst("rId${intToStr(slideCount + 6)}"))
+    else pptxPresentation(slideCount, pptxSldSzFor(slideSize));
+  let presRels = if hasNotes
+    then pptxTplInsertBeforeLast(pptxPresentationRels(slideCount), "</Relationships>",
+      pptxNotesMasterRel("rId${intToStr(slideCount + 6)}", "notesMasters/notesMaster1.xml"))
+    else pptxPresentationRels(slideCount);
   let slideEntries = pptxBuildSlideEntries(slideContents, 1);
-  let slideRelEntries = pptxBuildSlideRelEntries(slideCount, 1);
+  let slideRelEntries = pptxBuildSlideRelEntries(slideContents, 1, "slideLayout1.xml");
+  let notesEntries = if hasNotes
+    then concat(pptxNotesMasterEntries("ppt/notesMasters/notesMaster1.xml", "theme2.xml"),
+      concat([{name: "ppt/theme/theme2.xml", content: pptxTheme()}],
+        pptxNotesEntries(slideContents, 1, "../notesMasters/notesMaster1.xml")))
+    else [];
   let layout = pptxSlideLayout();
   let layoutRels = pptxSlideLayoutRels();
   let master = pptxSlideMaster();
@@ -94,27 +117,28 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
     -- Only four parts are ours; everything else the template declared is
     -- carried untouched, which is what makes the theme, masters, layouts,
     -- table styles and media all arrive without being re-derived.
-    let ourParts = pptxAppendEntries(
+    let ourParts = concat(pptxAppendEntries(
       [
-        {name: "[Content_Types].xml", content: pptxRefContentTypes(ref, slideCount)},
-        {name: "ppt/presentation.xml", content: pptxRefPresentation(ref, slideCount, slideSize)},
-        {name: "ppt/_rels/presentation.xml.rels", content: pptxRefPresRels(ref, slideCount)}
+        {name: "[Content_Types].xml", content: pptxRefNotesContentTypes(ref, slideContents, pptxRefContentTypes(ref, slideCount))},
+        {name: "ppt/presentation.xml", content: pptxRefNotesPresentation(ref, hasNotes, pptxRefPresentation(ref, slideCount, slideSize))},
+        {name: "ppt/_rels/presentation.xml.rels", content: pptxRefNotesPresRels(ref, hasNotes, pptxRefPresRels(ref, slideCount))}
       ],
       pptxRefSlideEntries(slideContents, 1),
-      pptxRefSlideRelEntries(slideCount, 1, ref.layoutTarget));
+      pptxBuildSlideRelEntries(slideContents, 1, ref.layoutTarget)),
+      if hasNotes then pptxRefNotesEntries(ref, slideContents) else []);
     -- Carried parts are already base64, so the whole archive goes through
     -- createArchiveWithBytes whether or not the content has images.
     let allBytes = pptxAppendByteEntries(pptxPartsToByteEntries(ourParts), ref.entries);
     match createArchiveWithBytes(outputPath, allBytes) {
-      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s))",
+      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s)${orphanNote})",
       Err(e) => "Error generating PPTX: ${e}"
     }
   } else {
-  let allEntries = pptxAppendEntries(baseEntries, slideEntries, slideRelEntries);
+  let allEntries = concat(pptxAppendEntries(baseEntries, slideEntries, slideRelEntries), notesEntries);
 
   let result = createArchive(outputPath, allEntries);
   match result {
-    Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides)",
+    Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote})",
     Err(e) => "Error generating PPTX: ${e}"
   }
   }
@@ -122,13 +146,18 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
 
 -- Collect blocks into slide groups. SectionBlock(kind="slide") boundaries define slides.
 -- If no slides, all blocks go onto one slide.
-type SlideGroup = { blocks: [Block], rest: [Block] }
+--
+-- A SectionBlock(kind="notes") is that slide's speaker notes: the PPTX and ODP
+-- parsers emit it directly AFTER its slide section, so it attaches to the
+-- slide group immediately before it. Its name ("Slide N") is not used to find
+-- the slide — position is the contract, and a name can be stale after an edit.
+type PptxSlide = { blocks: [Block], notes: [Block] }
 
-pure func pptxCollectSlides(blocks: [Block]) -> [[Block]] {
+pure func pptxCollectSlides(blocks: [Block]) -> [PptxSlide] {
   let hasSlides = pptxHasSlideBlocks(blocks);
   if hasSlides
-  then pptxSplitBySlides(blocks, [])
-  else [blocks]
+  then reverse(pptxSplitBySlides(blocks, []))
+  else [{blocks: blocks, notes: []}]
 }
 
 pure func pptxHasSlideBlocks(blocks: [Block]) -> bool =
@@ -141,41 +170,184 @@ pure func pptxHasSlideBlocks(blocks: [Block]) -> bool =
     _ :: rest => pptxHasSlideBlocks(rest)
   }
 
--- Split blocks by SectionBlock(kind="slide") — each section's children become one slide
-pure func pptxSplitBySlides(blocks: [Block], acc: [[Block]]) -> [[Block]] =
+-- Split blocks by SectionBlock(kind="slide") — each section's children become
+-- one slide. acc is built REVERSED (most recent slide at the head) so a notes
+-- section attaches in O(1) and the caller reverses once; the old
+-- append-to-the-end walk was quadratic in the slide count.
+pure func pptxSplitBySlides(blocks: [Block], acc: [PptxSlide]) -> [PptxSlide] =
   match blocks {
     [] => acc,
     SectionBlock(s) :: rest =>
       if s.kind == "slide"
-      then pptxSplitBySlides(rest, pptxAppendSlide(acc, s.blocks))
+      then pptxSplitBySlides(rest, {blocks: s.blocks, notes: []} :: acc)
+      else if s.kind == "notes"
+      then pptxSplitBySlides(rest, pptxAttachNotes(acc, s.blocks))
       else pptxSplitBySlides(rest, acc),
-    b :: rest => pptxSplitBySlides(rest, acc)
+    _ :: rest => pptxSplitBySlides(rest, acc)
   }
 
-pure func pptxAppendSlide(acc: [[Block]], slide: [Block]) -> [[Block]] =
+-- A notes section before any slide has nowhere to go and is dropped; the
+-- generator's result line reports it (pptxOrphanNotes). No parser emits that
+-- shape — it would take a hand-built block list.
+pure func pptxAttachNotes(acc: [PptxSlide], notes: [Block]) -> [PptxSlide] =
   match acc {
-    [] => [slide],
-    x :: [] => [x, slide],
-    x :: rest => x :: pptxAppendSlide(rest, slide)
+    [] => [],
+    -- Bound first: the v0.35 parser (our declared floor) reads a record
+    -- literal followed by :: in an arm body as a pattern.
+    s :: rest => {
+      let withNotes = {blocks: s.blocks, notes: concat(s.notes, notes)};
+      withNotes :: rest
+    }
   }
 
-pure func pptxCountSlides(slides: [[Block]]) -> int = listLength(slides)
+-- Notes sections that precede every slide section, i.e. the ones dropped above.
+pure func pptxOrphanNotes(blocks: [Block]) -> int =
+  match blocks {
+    [] => 0,
+    SectionBlock(s) :: rest =>
+      if s.kind == "slide" then 0
+      else if s.kind == "notes" then 1 + pptxOrphanNotes(rest)
+      else pptxOrphanNotes(rest),
+    _ :: rest => pptxOrphanNotes(rest)
+  }
+
+pure func pptxCountSlides(slides: [PptxSlide]) -> int = listLength(slides)
+
+pure func pptxHasNotes(s: PptxSlide) -> bool = listLength(s.notes) > 0
+
+pure func pptxAnyNotes(slides: [PptxSlide]) -> bool = any(pptxHasNotes, slides)
 
 -- Build slide XML entries
-pure func pptxBuildSlideEntries(slides: [[Block]], idx: int) -> [{name: string, content: string}] =
+pure func pptxBuildSlideEntries(slides: [PptxSlide], idx: int) -> [{name: string, content: string}] =
   match slides {
     [] => [],
     slide :: rest =>
-      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxSlideXml(slide)} in
+      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxSlideXml(slide.blocks)} in
       entry :: pptxBuildSlideEntries(rest, idx + 1)
   }
 
--- Build slide relationship entries
-pure func pptxBuildSlideRelEntries(count: int, idx: int) -> [{name: string, content: string}] =
-  if idx > count then []
-  else
-    let entry = {name: "ppt/slides/_rels/slide${intToStr(idx)}.xml.rels", content: pptxSlideRels()} in
-    entry :: pptxBuildSlideRelEntries(count, idx + 1)
+-- Build slide relationship entries: the layout, plus the notes slide when this
+-- slide has notes. Shared by the plain and reference-deck paths; only the
+-- layout target differs.
+pure func pptxBuildSlideRelEntries(slides: [PptxSlide], idx: int, layoutTarget: string) -> [{name: string, content: string}] =
+  match slides {
+    [] => [],
+    slide :: rest =>
+      let notesRel = if pptxHasNotes(slide) then pptxSlideNotesRel(idx) else "" in
+      let entry = {name: "ppt/slides/_rels/slide${intToStr(idx)}.xml.rels",
+                   content: pptxTplInsertBeforeLast(pptxRefSlideRels(layoutTarget), "</Relationships>", notesRel)} in
+      entry :: pptxBuildSlideRelEntries(rest, idx + 1, layoutTarget)
+  }
+
+pure func pptxSlideNotesRel(idx: int) -> string =
+  "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide\" Target=\"../notesSlides/notesSlide${intToStr(idx)}.xml\"/>"
+
+-- ============================================================
+-- Speaker notes (ECMA-376 §13.3.5 notesSlide, §13.3.4 notesMaster)
+-- ============================================================
+--
+-- notesSlideN belongs to slideN: numbered by the slide, not by a notes counter,
+-- so the numbers have gaps where a slide has no notes. Nothing requires them to
+-- be contiguous, and the parser goes through the slide's rels regardless.
+--
+-- A notes slide without a notes master is a "repair this file" prompt in
+-- PowerPoint, so any deck with notes gets one: ours on the plain path, the
+-- template's (or ours when it has none) on the reference-deck path.
+
+pure func pptxNotesEntries(slides: [PptxSlide], idx: int, masterTarget: string) -> [{name: string, content: string}] =
+  match slides {
+    [] => [],
+    slide :: rest =>
+      if pptxHasNotes(slide)
+      then {name: "ppt/notesSlides/notesSlide${intToStr(idx)}.xml", content: pptxNotesSlideXml(slide.notes)}
+        :: {name: "ppt/notesSlides/_rels/notesSlide${intToStr(idx)}.xml.rels", content: pptxNotesSlideRels(idx, masterTarget)}
+        :: pptxNotesEntries(rest, idx + 1, masterTarget)
+      else pptxNotesEntries(rest, idx + 1, masterTarget)
+  }
+
+pure func pptxNotesContentTypes(slides: [PptxSlide], idx: int) -> string =
+  match slides {
+    [] => "",
+    slide :: rest =>
+      let here = if pptxHasNotes(slide)
+        then "<Override PartName=\"/ppt/notesSlides/notesSlide${intToStr(idx)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml\"/>"
+        else "" in
+      "${here}${pptxNotesContentTypes(rest, idx + 1)}"
+  }
+
+pure func pptxNotesMasterContentTypes(masterPart: string, themePart: string) -> string =
+  "<Override PartName=\"${masterPart}\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml\"/><Override PartName=\"${themePart}\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>"
+
+-- presentation.xml: <p:notesMasterIdLst> sits after sldMasterIdLst and before
+-- handoutMasterIdLst / sldIdLst (CT_Presentation sequence).
+pure func pptxNotesMasterIdLst(relId: string) -> string =
+  "<p:notesMasterIdLst><p:notesMasterId r:id=\"${relId}\"/></p:notesMasterIdLst>"
+
+pure func pptxNotesMasterRel(relId: string, target: string) -> string =
+  "<Relationship Id=\"${relId}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster\" Target=\"${target}\"/>"
+
+pure func pptxNotesSlideRels(idx: int, masterTarget: string) -> string =
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster\" Target=\"${masterTarget}\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"../slides/slide${intToStr(idx)}.xml\"/></Relationships>"
+
+-- Our notes master plus its rels. The theme it points at is written by the
+-- caller, because on the reference path its name depends on the template.
+pure func pptxNotesMasterEntries(masterPart: string, themeFile: string) -> [{name: string, content: string}] =
+  [
+    {name: masterPart, content: pptxNotesMaster()},
+    {name: pptxRelsPartFor(masterPart), content: "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme\" Target=\"../theme/${themeFile}\"/></Relationships>"}
+  ]
+
+-- "ppt/notesMasters/notesMaster1.xml" -> "ppt/notesMasters/_rels/notesMaster1.xml.rels"
+pure func pptxRelsPartFor(part: string) -> string {
+  let slash = pptxTplLastIndexOf(part, "/");
+  "${substring(part, 0, slash + 1)}_rels/${substring(part, slash + 1, length(part))}.rels"
+}
+
+-- A notes page: the slide thumbnail and the notes body, both placeholders so
+-- they take their geometry and text style from the notes master. idx="1" on
+-- the body is what PowerPoint itself writes; it inherits by type.
+pure func pptxNotesSlideXml(notes: [Block]) -> string {
+  let ns = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"";
+  let paras = pptxNotesParas(notes);
+  let body = if length(paras) > 0 then paras else "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>";
+  "${xmlDecl()}<p:notes ${ns}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Slide Image Placeholder 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"sldImg\"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Notes Placeholder 2\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${body}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>"
+}
+
+-- One <a:p> per line. The parser joins a notes body's paragraphs with "\n",
+-- so splitting on it gives back the same paragraphs, blank ones included.
+pure func pptxNotesParas(blocks: [Block]) -> string =
+  foldl(\acc b. "${acc}${pptxNotesBlockParas(b)}", "", blocks)
+
+pure func pptxNotesBlockParas(b: Block) -> string =
+  match b {
+    TextBlock(t) => pptxNotesLines(t.text),
+    HeadingBlock(h) => pptxNotesLines(h.text),
+    ListBlock(l) => foldl(\acc i. "${acc}${pptxNotesLines(i)}", "", l.items),
+    SectionBlock(s) => pptxNotesParas(s.blocks),
+    _ => ""
+  }
+
+pure func pptxNotesLines(text: string) -> string =
+  foldl(\acc line. "${acc}${pptxNotesPara(line)}", "", split(text, "\n"))
+
+pure func pptxNotesPara(line: string) -> string
+  tests [
+    ("", "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>"),
+    ("Q&A <5 min", "<a:p><a:r><a:rPr lang=\"en-US\"/><a:t>Q&amp;A &lt;5 min</a:t></a:r></a:p>")
+  ]
+{
+  if length(line) == 0 then "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>"
+  else "<a:p><a:r><a:rPr lang=\"en-US\"/><a:t>${xmlEscape(line)}</a:t></a:r></a:p>"
+}
+
+-- Minimal notes master, modelled on PowerPoint's default: the six notes-page
+-- placeholders with explicit geometry on a portrait 7.5x10in page (notesSz),
+-- clrMap, and a notesStyle so notes text has a defined size and colour.
+pure func pptxNotesMaster() -> string =
+  "${xmlDecl()}<p:notesMaster xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:bg><p:bgRef idx=\"1001\"><a:schemeClr val=\"bg1\"/></p:bgRef></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>${pptxNotesMasterPh("2", "Header Placeholder 1", "<p:ph type=\"hdr\" sz=\"quarter\"/>", "0", "0", "2971800", "457200", "")}${pptxNotesMasterPh("3", "Date Placeholder 2", "<p:ph type=\"dt\" idx=\"1\"/>", "3884613", "0", "2971800", "457200", "")}<p:sp><p:nvSpPr><p:cNvPr id=\"4\" name=\"Slide Image Placeholder 3\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"sldImg\" idx=\"2\"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"381000\" y=\"685800\"/><a:ext cx=\"6096000\" cy=\"3429000\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln w=\"12700\"><a:solidFill><a:prstClr val=\"black\"/></a:solidFill></a:ln></p:spPr></p:sp>${pptxNotesMasterPh("5", "Notes Placeholder 4", "<p:ph type=\"body\" sz=\"quarter\" idx=\"3\"/>", "685800", "4343400", "5486400", "4114800", "")}${pptxNotesMasterPh("6", "Footer Placeholder 5", "<p:ph type=\"ftr\" sz=\"quarter\" idx=\"4\"/>", "0", "8685213", "2971800", "457200", "")}${pptxNotesMasterPh("7", "Slide Number Placeholder 6", "<p:ph type=\"sldNum\" sz=\"quarter\" idx=\"5\"/>", "3884613", "8685213", "2971800", "457200", "<a:fld id=\"{6C5F3B0E-2A41-4C8A-9E4B-DA1A5E0C0F01}\" type=\"slidenum\"><a:rPr lang=\"en-US\"/><a:t>\u2039#\u203a</a:t></a:fld>")}</p:spTree></p:cSld><p:clrMap bg1=\"lt1\" tx1=\"dk1\" bg2=\"lt2\" tx2=\"dk2\" accent1=\"accent1\" accent2=\"accent2\" accent3=\"accent3\" accent4=\"accent4\" accent5=\"accent5\" accent6=\"accent6\" hlink=\"hlink\" folHlink=\"folHlink\"/><p:notesStyle><a:lvl1pPr marL=\"0\" algn=\"l\" defTabSz=\"914400\" rtl=\"0\" eaLnBrk=\"1\" latinLnBrk=\"0\" hangingPunct=\"1\"><a:defRPr sz=\"1200\" kern=\"1200\"><a:solidFill><a:schemeClr val=\"tx1\"/></a:solidFill><a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/><a:cs typeface=\"+mn-cs\"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>"
+
+pure func pptxNotesMasterPh(id: string, name: string, ph: string, x: string, y: string, cx: string, cy: string, content: string) -> string =
+  "<p:sp><p:nvSpPr><p:cNvPr id=\"${id}\" name=\"${name}\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr>${ph}</p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"${x}\" y=\"${y}\"/><a:ext cx=\"${cx}\" cy=\"${cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert=\"horz\" lIns=\"91440\" tIns=\"45720\" rIns=\"91440\" bIns=\"45720\" rtlCol=\"0\"/><a:lstStyle/><a:p>${content}<a:endParaRPr lang=\"en-US\"/></a:p></p:txBody></p:sp>"
 
 -- Append slide entries to base entries
 pure func pptxAppendEntries(
@@ -270,19 +442,66 @@ pure func pptxRefContentTypes(ref: PptxRefDoc, slideCount: int) -> string =
 pure func pptxRefSlideRels(layoutTarget: string) -> string =
   "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/${layoutTarget}\"/></Relationships>"
 
-pure func pptxRefSlideRelEntries(count: int, idx: int, layoutTarget: string) -> [{name: string, content: string}] =
-  if idx > count then []
-  else
-    let entry = {name: "ppt/slides/_rels/slide${intToStr(idx)}.xml.rels", content: pptxRefSlideRels(layoutTarget)} in
-    entry :: pptxRefSlideRelEntries(count, idx + 1, layoutTarget)
-
-pure func pptxRefSlideEntries(slides: [[Block]], idx: int) -> [{name: string, content: string}] =
+pure func pptxRefSlideEntries(slides: [PptxSlide], idx: int) -> [{name: string, content: string}] =
   match slides {
     [] => [],
     slide :: rest =>
-      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxStripOurTypography(pptxSlideXml(slide))} in
+      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxStripOurTypography(pptxSlideXml(slide.blocks))} in
       entry :: pptxRefSlideEntries(rest, idx + 1)
   }
+
+-- Reference-deck notes. The template's notes master is reused when it has one
+-- (its look is the point of a template); otherwise ours is added beside the
+-- template's parts, with its theme at a theme part name the template does not
+-- use. Either way the presentation's notes-master wiring is REPLACED with ours:
+-- a template may relate a notes master without listing it in
+-- <p:notesMasterIdLst> (python-pptx writes exactly that), and a notes master
+-- PowerPoint cannot find through the id list is one it offers to repair.
+pure func pptxRefNotesMasterPart(ref: PptxRefDoc) -> string =
+  if length(ref.notesMasterPart) > 0 then ref.notesMasterPart
+  else "ppt/notesMasters/notesMaster1.xml"
+
+-- "ppt/notesMasters/notesMaster1.xml" -> "notesMasters/notesMaster1.xml"
+pure func pptxRefNotesMasterUnderPpt(ref: PptxRefDoc) -> string {
+  let p = pptxRefNotesMasterPart(ref);
+  substring(p, length("ppt/"), length(p))
+}
+
+pure func pptxRefNotesEntries(ref: PptxRefDoc, slides: [PptxSlide]) -> [{name: string, content: string}] {
+  let notes = pptxNotesEntries(slides, 1, "../${pptxRefNotesMasterUnderPpt(ref)}");
+  if length(ref.notesMasterPart) > 0 then notes
+  else {
+    let themePart = ref.freeThemePart;
+    let themeFile = substring(themePart, length("ppt/theme/"), length(themePart));
+    concat(pptxNotesMasterEntries(pptxRefNotesMasterPart(ref), themeFile),
+      {name: themePart, content: pptxTheme()} :: notes)
+  }
+}
+
+pure func pptxRefNotesContentTypes(ref: PptxRefDoc, slides: [PptxSlide], ct: string) -> string =
+  if not pptxAnyNotes(slides) then ct
+  else {
+    let master = if length(ref.notesMasterPart) > 0 then ""
+      else pptxNotesMasterContentTypes("/${pptxRefNotesMasterPart(ref)}", "/${ref.freeThemePart}");
+    pptxTplInsertBeforeLast(ct, "</Types>", "${master}${pptxNotesContentTypes(slides, 1)}")
+  }
+
+pure func pptxRefNotesPresentation(ref: PptxRefDoc, hasNotes: bool, pres: string) -> string =
+  if not hasNotes then pres
+  else {
+    let stripped = pptxTplDropElems(
+      pptxTplDropSpans(pres, "<p:notesMasterIdLst>", "</p:notesMasterIdLst>"),
+      "<p:notesMasterIdLst", "notesMasterIdLst");
+    let anchor = if find(stripped, "<p:handoutMasterIdLst") >= 0 then "<p:handoutMasterIdLst" else "<p:sldIdLst";
+    pptxTplInsertBeforeFirst(stripped, anchor, pptxNotesMasterIdLst("rIdDPNM1"))
+  }
+
+pure func pptxRefNotesPresRels(ref: PptxRefDoc, hasNotes: bool, rels: string) -> string =
+  if not hasNotes then rels
+  else pptxTplInsertBeforeLast(
+    pptxTplDropElems(rels, "<Relationship", "/relationships/notesMaster\""),
+    "</Relationships>",
+    pptxNotesMasterRel("rIdDPNM1", pptxRefNotesMasterUnderPpt(ref)))
 
 -- Remove the typography this generator invented, so the template's governs.
 --

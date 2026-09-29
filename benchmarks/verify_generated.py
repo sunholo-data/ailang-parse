@@ -1006,6 +1006,110 @@ def verify_style_templates() -> bool:
     return ok
 
 
+# ── Speaker notes in generated decks ─────────────────────────────────────────
+
+def _odp_page_notes(odp: Path) -> list[str]:
+    """Notes text per draw:page of a LibreOffice-exported ODP, in page order."""
+    ns = {
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        "draw": "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0",
+        "presentation": "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0",
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+    }
+    with zipfile.ZipFile(odp) as z:
+        root = ET.fromstring(z.read("content.xml"))
+    out = []
+    for page in root.iter(f"{{{ns['draw']}}}page"):
+        texts = []
+        for notes in page.findall("presentation:notes", ns):
+            for frame in notes.findall("draw:frame", ns):
+                if frame.get(f"{{{ns['presentation']}}}class") != "notes":
+                    continue
+                texts += ["".join(p.itertext()) for p in frame.iter(f"{{{ns['text']}}}p")]
+        out.append("\n".join(texts))
+    return out
+
+
+def verify_pptx_notes() -> bool:
+    """A generated deck's speaker notes are readable by other engines, on the right slide.
+
+    check_pptx_notes_roundtrip.py proves our own parser reads them back; this
+    proves python-pptx and LibreOffice do too, because a notes part that only
+    our parser understands is not a speaker note. LibreOffice is the renderer
+    CI has; PowerPoint and Keynote are checked by hand (verify-docs skill).
+    """
+    import tempfile
+    repo = Path(__file__).resolve().parent.parent
+    fixture = repo / "data" / "test_files" / "pptx_slide_order_notes.pptx"
+    print("── pptx speaker notes ──")
+    if not fixture.exists():
+        print("  L7 PptxNotes:  SKIP (pptx_slide_order_notes.pptx missing)")
+        return True
+    ok = True
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpd = Path(tmp)
+        env = {**os.environ, "DOCPARSE_OUTPUT_DIR": str(tmpd)}
+        subprocess.run([str(repo / "bin" / "docparse"), str(fixture)], cwd=repo, env=env,
+                       capture_output=True, timeout=300)
+        doc = json.load(open(tmpd / f"{fixture.name}.json"))
+        slides = [b for b in doc["document"]["blocks"]
+                  if b.get("type") == "section" and b.get("kind") == "slide"]
+        want = [""] * len(slides)
+        for b in doc["document"]["blocks"]:
+            if b.get("type") == "section" and b.get("kind") == "notes":
+                n = int(b["name"].split()[-1])
+                want[n - 1] = "\n".join(c.get("text", "") for c in b.get("blocks", []))
+        for label, extra in [("plain", []),
+                             ("ref", ["--reference-doc", str(repo / "data" / "test_files" / "pandoc_basic.pptx")])]:
+            deck = tmpd / f"notes_{label}.pptx"
+            r = _run_docparse(repo, [str(fixture), "--convert", str(deck)] + extra)
+            if r.returncode != 0 or not deck.exists():
+                print(f"  L7 PptxNotes:  FAIL [{label}] (generation failed)")
+                ok = False
+                continue
+            errs, _ = verify_structure(deck)
+            try:
+                from pptx import Presentation
+                prs = Presentation(str(deck))
+                got = [s.notes_slide.notes_text_frame.text if s.has_notes_slide else ""
+                       for s in prs.slides]
+                if got != want:
+                    errs.append(f"python-pptx notes per slide differ: "
+                                f"{sum(1 for g in got if g)} slides with notes, want "
+                                f"{sum(1 for w in want if w)}")
+                    errs += [f"slide {i}: {g!r} != {w!r}"
+                             for i, (g, w) in enumerate(zip(got, want), 1) if g != w][:4]
+                lib = "python-pptx"
+            except ImportError:
+                lib = "python-pptx SKIP"
+            exe = _soffice()
+            if exe:
+                odir = tmpd / f"odp_{label}"
+                subprocess.run([exe, "--headless", "--convert-to", "odp", str(deck),
+                                "--outdir", str(odir)], capture_output=True, timeout=180)
+                odp = odir / f"{deck.stem}.odp"
+                if not odp.exists():
+                    errs.append("LibreOffice could not open the deck")
+                else:
+                    got = _odp_page_notes(odp)
+                    if got != want:
+                        errs.append("LibreOffice notes per slide differ")
+                        errs += [f"slide {i}: {g!r} != {w!r}"
+                                 for i, (g, w) in enumerate(zip(got, want), 1) if g != w][:4]
+                lib += ", LibreOffice"
+            else:
+                lib += ", LibreOffice SKIP"
+            if errs:
+                print(f"  L7 PptxNotes:  FAIL [{label}]")
+                for e in errs:
+                    print(f"     ⚠ {e}")
+                ok = False
+            else:
+                print(f"  L7 PptxNotes:  PASS [{label}] ({sum(1 for w in want if w)} notes on "
+                      f"their slides; {lib})")
+    return ok
+
+
 def main():
     print("=== DocParse Generated File Verification ===\n")
 
@@ -1023,6 +1127,8 @@ def main():
     all_pass = verify_reference_doc() and all_pass
     print()
     all_pass = verify_style_templates() and all_pass
+    print()
+    all_pass = verify_pptx_notes() and all_pass
     print()
     for path in files:
         print(f"── {path.name} ──")

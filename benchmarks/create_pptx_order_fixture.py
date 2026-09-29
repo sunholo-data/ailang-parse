@@ -22,7 +22,12 @@ This fixture breaks each of those coincidences on purpose:
     never slideN.xml's notes and never deck position N's either;
   * one slide has no notes, one slide is empty but HAS notes, one notes page
     keeps its text in a plain text box (no body placeholder), one inside a
-    group shape, one spans two paragraphs.
+    group shape, one spans two paragraphs;
+  * one slide body holds a slide-number FIELD (<a:fld type="slidenum">) and
+    one notes body a date field (<a:fld type="datetime1">), written as
+    [[type|cached text]] in DECK. A field's <a:t> is the value PowerPoint last
+    rendered, which is what the reader saw; the parser used to drop it,
+    turning "Slide 10 of 13" into "Slide  of 13" (design doc G4).
 
 Expectations are computed here, from DECK and FILE_NUMBER below, never from
 parser output: a golden generated from our own output would only prove the
@@ -62,8 +67,8 @@ DECK = [
     (None, None, "This slide is intentionally blank; pause here", "body"),
     ("Team", "Who does what", "Introduce the new hires", "group"),
     ("Risks", "What could go wrong", "Be candid about hiring risk", "body"),
-    ("Budget", "Spend by quarter", "Budget is draft until board sign-off", "body"),
-    ("Metrics", "What we measure", "Tie each metric to a decision", "body"),
+    ("Budget", "Spend by quarter", "Budget is draft as of [[datetime1|29/09/2026]]", "body"),
+    ("Metrics", "Slide [[slidenum|10]] of 13", "Tie each metric to a decision", "body"),
     ("Timeline", "Milestones", "Milestone three moved a week", "body"),
     ("Asks", "What we need", "Make the ask explicit", "body"),
     ("Close", "Thank you", "Take questions for ten minutes", "body"),
@@ -80,6 +85,39 @@ assert sorted(FILE_NUMBER) == list(range(1, len(DECK) + 1))
 # slide's deck position nor its file number.
 NOTES_ORDER = [12, 3, 13, 9, 2, 5, 8, 1, 10, 7, 6, 11]
 assert sorted(NOTES_ORDER) == [p for p, d in enumerate(DECK, 1) if d[2] is not None]
+
+
+FIELD = re.compile(r"\[\[(\w+)\|([^\]]*)\]\]")
+
+
+def shown(text: str) -> str:
+    """What a reader sees: each [[type|cached]] field is its cached text."""
+    return FIELD.sub(lambda m: m.group(2), text)
+
+
+def fieldify(xml: bytes) -> bytes:
+    """Turn each [[type|cached]] inside a run into a real <a:fld> run.
+
+    python-pptx cannot write fields, so the marker goes in as plain text and is
+    split here: the run is closed before it, the field carries the cached
+    value in its own <a:t>, and a new run picks up the text after it.
+    """
+    s = xml.decode()
+    run = re.compile(r"(<a:r>(?:<a:rPr[^>]*/>)?<a:t>)([^<]*?)\[\[(\w+)\|([^\]]*)\]\]([^<]*)(</a:t></a:r>)")
+    n = [0]
+
+    def split(m: re.Match) -> str:
+        n[0] += 1
+        guid = f"{{B6F15528-21DE-4FAA-801E-634DDDAF4B{n[0]:02X}}}"
+        after = (f'<a:r><a:rPr lang="en-US"/><a:t>{m.group(5)}</a:t></a:r>'
+                 if m.group(5) else "")
+        return (f"{m.group(1)}{m.group(2)}</a:t></a:r>"
+                f'<a:fld id="{guid}" type="{m.group(3)}"><a:rPr lang="en-US"/>'
+                f"<a:t>{m.group(4)}</a:t></a:fld>{after}")
+
+    out = run.sub(split, s)
+    assert "[[" not in out, "field marker left unconverted"
+    return out.encode()
 
 
 def build(path: Path) -> None:
@@ -132,6 +170,11 @@ def build(path: Path) -> None:
             name = notes_part[pos]
             parts[name] = wrap_body_in_group(parts[name])
 
+    # Field markers -> real <a:fld> runs, in slides and notes alike.
+    for name in parts:
+        if re.fullmatch(r"ppt/(slides|notesSlides)/\w+\.xml", name):
+            parts[name] = fieldify(parts[name])
+
     # Store the entries shuffled — [Content_Types].xml stays first.
     names = [n for n in parts if n != "[Content_Types].xml"]
     random.Random(21).shuffle(names)
@@ -170,10 +213,10 @@ def expected_sections() -> list[tuple[str, str, str]]:
     """(kind, name, text) for every top-level section, in order."""
     out = []
     for pos, (title, body, notes, _) in enumerate(DECK, start=1):
-        text = "" if title is None else f"{title}|{body}"
+        text = "" if title is None else f"{title}|{shown(body)}"
         out.append(("slide", "", text))
         if notes is not None:
-            out.append(("notes", f"Slide {pos}", notes))
+            out.append(("notes", f"Slide {pos}", shown(notes)))
     return out
 
 
@@ -201,6 +244,15 @@ def check_structure() -> int:
         if re.search(r"(\d+)", name.rsplit("/", 1)[1]).group(1) in (str(pos + 1), str(FILE_NUMBER[pos])):
             print(f"FAIL fixture: {name} numbering matches its slide")
             failures += 1
+    slide_flds = [n for n in names if b"<a:fld " in parts[n]]
+    notes_flds = [n for n in parts if n.startswith("ppt/notesSlides/notesSlide")
+                  and re.search(rb'type="body".*?<a:fld ', parts[n], re.S)]
+    if not slide_flds:
+        print("FAIL fixture: no slide carries an <a:fld> field run")
+        failures += 1
+    if not notes_flds:
+        print("FAIL fixture: no notes body carries an <a:fld> field run")
+        failures += 1
     return failures
 
 
