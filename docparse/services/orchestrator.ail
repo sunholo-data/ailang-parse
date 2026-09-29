@@ -1024,7 +1024,7 @@ pure func orchDeepSkippedWarningDropped() -> bool
   let deepWarnings = orchDropDeepSkippedWarning(
     ["Attachment 1 unreadable", orchDeepSkippedWarningMsg()]);
   not orchHasDeepSkippedWarning(deepWarnings) &&
-    deepWarnings == ["Attachment 1 unreadable"]
+    orchSameWarnings(deepWarnings, ["Attachment 1 unreadable"])
 }
 
 -- Arm 2: the shallow path with --deep still attaches it (direct
@@ -1033,11 +1033,20 @@ pure func orchDeepSkippedWarningDropped() -> bool
 pure func orchDeepSkippedWarningKeptByPurePath() -> bool
   tests [((), true)]
 {
-  orchAppendDeepSkippedWarning([], true) == [orchDeepSkippedWarningMsg()] &&
-  orchAppendDeepSkippedWarning(["kept"], true) ==
-    ["kept", orchDeepSkippedWarningMsg()] &&
-  orchAppendDeepSkippedWarning(["kept"], false) == ["kept"]
+  orchSameWarnings(orchAppendDeepSkippedWarning([], true), [orchDeepSkippedWarningMsg()]) &&
+  orchSameWarnings(orchAppendDeepSkippedWarning(["kept"], true),
+    ["kept", orchDeepSkippedWarningMsg()]) &&
+  orchSameWarnings(orchAppendDeepSkippedWarning(["kept"], false), ["kept"])
 }
+
+-- List equality needs Eq[list[string]], which the declared AILANG floor does
+-- not provide; compare element by element instead.
+pure func orchSameWarnings(xs: [string], ys: [string]) -> bool =
+  match (xs, ys) {
+    ([], []) => true,
+    (x :: xr, y :: yr) => x == y && orchSameWarnings(xr, yr),
+    _ => false
+  }
 
 -- =====================================================================
 -- AI path without subprocess — ! {AI, Clock, Env, FS, IO, Net}
