@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.48.0](https://github.com/sunholo-data/ailang-parse/compare/v0.47.0...v0.48.0) — 2026-09-29
+
 ### The office suite gates on structure, and can now fail CI
 
 v0.47.0's XLSX column shift, sheet/data mislabel and PPTX slide-order bugs all
