@@ -465,6 +465,13 @@ jobs:
       - name: PPTX slide order and speaker-note attribution (exact)
         run: uv run benchmarks/create_pptx_order_fixture.py --verify
 
+      # PPTX -> PPTX used to drop every speaker note. Parses the same fixture,
+      # converts it (plain and under three reference decks), parses the result
+      # and requires the identical notes on the identical slides, plus the
+      # notesSlide/notesMaster wiring in the package.
+      - name: PPTX -> PPTX speaker notes round trip (exact)
+        run: python3 benchmarks/check_pptx_notes_roundtrip.py
+
       # Scores the failures, which no other suite looks at: a failed parse must
       # exit non-zero and write nothing. An explicit --pdf-backend failure used
       # to be returned as the document's only block, so the CLI exited 0 and a

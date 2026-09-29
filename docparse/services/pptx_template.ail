@@ -51,7 +51,10 @@ import std/result (Result, Ok, Err)
 --
 -- ppt/notesSlides/** is dropped with the slides: a notes slide relates back to
 -- a slide that no longer exists, and a dangling relationship is a repair
--- prompt in PowerPoint.
+-- prompt in PowerPoint. The generator writes its OWN notes slides for the
+-- document's speaker notes, pointed at the template's notes master when it has
+-- one (notesMasterPart) and at one of ours otherwise (written at
+-- ppt/notesMasters/notesMaster1.xml with its theme at freeThemePart).
 
 -- A loaded reference deck. `active` false is the no-template case, and every
 -- consumer branches on it, so one value type covers both paths and there is no
@@ -65,7 +68,9 @@ export type PptxRefDoc = {
   layoutTarget: string,
   layoutCount: int,
   masterCount: int,
-  sldSz: string
+  sldSz: string,
+  notesMasterPart: string,
+  freeThemePart: string
 }
 
 -- No reference deck. Every string empty so the generator's `active` branch is
@@ -79,7 +84,9 @@ export pure func pptxTplNone() -> PptxRefDoc = {
   layoutTarget: "",
   layoutCount: 0,
   masterCount: 0,
-  sldSz: ""
+  sldSz: "",
+  notesMasterPart: "",
+  freeThemePart: ""
 }
 
 -- ============================================================
@@ -119,7 +126,9 @@ func pptxTplBuild(path: string, names: [string]) -> Result[PptxRefDoc, string] !
       layoutTarget: pptxTplFirstLayout(names),
       layoutCount: pptxTplCountUnder(names, "ppt/slideLayouts/slideLayout"),
       masterCount: pptxTplCountUnder(names, "ppt/slideMasters/slideMaster"),
-      sldSz: sldSz
+      sldSz: sldSz,
+      notesMasterPart: pptxTplFirstNotesMaster(names),
+      freeThemePart: pptxTplFreeThemePart(names, 1)
     })
   }
 }
@@ -232,6 +241,39 @@ export pure func pptxTplFirstLayout(names: [string]) -> string
   }
 }
 
+-- The template's notes master, as a full part name, or "" when it has none.
+-- First one wins: a presentation has at most one notes master (§19.2.1.21).
+export pure func pptxTplFirstNotesMaster(names: [string]) -> string
+  tests [
+    ([], ""),
+    (["ppt/notesMasters/_rels/notesMaster1.xml.rels"], ""),
+    (["ppt/slides/slide1.xml", "ppt/notesMasters/notesMaster1.xml"], "ppt/notesMasters/notesMaster1.xml")
+  ]
+{
+  match names {
+    [] => "",
+    n :: rest =>
+      if pptxTplStartsWith(n, "ppt/notesMasters/notesMaster") && pptxTplIsXml(n)
+      then n
+      else pptxTplFirstNotesMaster(rest)
+  }
+}
+
+-- The first ppt/theme/themeN.xml the template does NOT use, for the theme of a
+-- notes master we add. Theme numbers need not be contiguous, so each candidate
+-- is checked rather than counting.
+export pure func pptxTplFreeThemePart(names: [string], n: int) -> string
+  tests [
+    (([], 1), "ppt/theme/theme1.xml"),
+    ((["ppt/theme/theme1.xml"], 1), "ppt/theme/theme2.xml"),
+    ((["ppt/theme/theme1.xml", "ppt/theme/theme3.xml", "ppt/theme/theme2.xml"], 1), "ppt/theme/theme4.xml")
+  ]
+{
+  let cand = "ppt/theme/theme${intToStr(n)}.xml";
+  if n > 1000 || not pptxTplHas(names, cand) then cand
+  else pptxTplFreeThemePart(names, n + 1)
+}
+
 pure func pptxTplIsXml(n: string) -> bool =
   if length(n) < 4 then false
   else substring(n, length(n) - 4, length(n)) == ".xml"
@@ -315,7 +357,19 @@ pure func pptxTplDropElemsScan(xml: string, openTag: string, needle: string, fro
   else pptxTplDropElemAt(xml, openTag, needle, from + i)
 }
 
+-- The match must end the tag NAME: "<Relationship" is also a prefix of the
+-- root "<Relationships>", and treating that as an element ran "up to the next
+-- />" across the root's open tag — when the first child was a match, the root
+-- open tag was deleted with it and the part stopped being XML.
 pure func pptxTplDropElemAt(xml: string, openTag: string, needle: string, start: int) -> string {
+  let after = start + length(openTag);
+  let c = substring(xml, after, after + 1);
+  if c == " " || c == "/" || c == ">" || c == "\n" || c == "\t" || c == "\r"
+  then pptxTplDropElemMatched(xml, openTag, needle, start)
+  else pptxTplDropElemsScan(xml, openTag, needle, after)
+}
+
+pure func pptxTplDropElemMatched(xml: string, openTag: string, needle: string, start: int) -> string {
   let rest = substring(xml, start, length(xml));
   let e = find(rest, "/>");
   if e < 0 then xml
