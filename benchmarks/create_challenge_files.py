@@ -446,8 +446,8 @@ def create_challenge_sparse_rows_xlsx():
     leads = [
         (1, dict(enumerate(header))),
         # The reported shape: mid-row, and trailing blanks
-        (2, {0: "Robert", 2: "Adapt", 3: "adaptagency.com", 4: "Kresten Finsen Wiinblad",
-             5: "CEO", 7: "LinkedIn outreach, 3 July 2026"}),
+        (2, {0: "Jordan", 2: "ExampleCo", 3: "example-co.example", 4: "Sam Placeholder",
+             5: "CEO", 7: "Intro call, 3 July 2026"}),
         # Leading blanks and a number after a gap
         (3, {2: "Northwind", 6: 5551234, 10: "no owner yet"}),
         # Dense row, the only kind the positional read got right

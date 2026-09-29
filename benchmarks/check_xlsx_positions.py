@@ -26,8 +26,8 @@ FIXTURE = Path("data/test_files/challenge/challenge_sparse_rows.xlsx")
 
 EXPECTED_SHEETS = ["Leads", "Summary", "Gaps"] + [f"Tab {n:02d}" for n in (2, 4, 5, 6, 7, 8, 9, 10, 11)]
 EXPECTED_LEADS = [
-    ["Robert", "", "Adapt", "adaptagency.com", "Kresten Finsen Wiinblad", "CEO", "",
-     "LinkedIn outreach, 3 July 2026", "", "", ""],
+    ["Jordan", "", "ExampleCo", "example-co.example", "Sam Placeholder", "CEO", "",
+     "Intro call, 3 July 2026", "", "", ""],
     ["", "", "Northwind", "", "", "", "5551234", "", "", "", "no owner yet"],
     ["Ada", "Dr", "Analytical", "analytical.org", "Ada L", "CTO", "5550000",
      "Referral", "Won", "Mark", "signed"],

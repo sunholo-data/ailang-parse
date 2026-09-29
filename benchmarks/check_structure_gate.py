@@ -38,7 +38,7 @@ PREFIX = ROOT / "office" / "regressions" / "v0_47_0_prefix"
 # file -> (check that must fail, substring its report must contain)
 EXPECTED = {
     "challenge_sparse_rows.xlsx": [
-        ("table_grids", "row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'"),
+        ("table_grids", "row 2 col 3 (C2): expected 'ExampleCo' got 'example-co.example'"),
         ("table_grids", "sheet 'Summary': holds the data expected under sheet 'Tab 10'"),
     ],
     "poi_two_sheets.xlsx": [

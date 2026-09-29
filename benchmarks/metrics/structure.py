@@ -6,7 +6,7 @@ order and speaker notes under the wrong slide all scored 100%. That is how the
 v0.47.0 XLSX and PPTX bugs shipped. This module compares the parsed document
 to its golden by POSITION and says exactly what moved:
 
-    sheet 'Leads' row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'
+    sheet 'Leads' row 2 col 3 (C2): expected 'ExampleCo' got 'example-co.example'
 
 Three checks, each gated through a ``*_match`` key:
 

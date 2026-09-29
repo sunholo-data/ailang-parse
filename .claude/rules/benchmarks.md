@@ -45,7 +45,7 @@ uv run benchmarks/failure_check.py
   or sheet each notes/comment section follows), `table_grids` (every cell at
   its (row, col), header = row 1), `block_sequence` (recursive block types,
   heading levels, list kind). Failures print what moved:
-  `sheet 'Leads' row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'`.
+  `sheet 'Leads' row 2 col 3 (C2): expected 'ExampleCo' got 'example-co.example'`.
 - Baseline: 100% across all files. The suite exits 1 below that (it used to
   always exit 0, so CI's "must be 100%" step could not fail).
 - Run after any parser change to catch regressions

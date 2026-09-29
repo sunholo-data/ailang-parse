@@ -37,7 +37,7 @@ A failure says what moved. Run against the pre-fix parser (bc7f098):
 
 ```
 sheet 'Tab 05': holds the data expected under sheet 'Leads' (same header row), which differs from it:
-sheet 'Tab 05' (data of sheet 'Leads') row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'
+sheet 'Tab 05' (data of sheet 'Leads') row 2 col 3 (C2): expected 'ExampleCo' got 'example-co.example'
 sheet 'Sheet1': holds the data expected under sheet 'Sheet2'
 slide 1: expected slide "Kickoff" got slide "Timeline"
 notes 'Slide 1': missing (expected after slide "Kickoff")
@@ -360,7 +360,7 @@ Reported by a partner testing a real two-sheet workbook: on one sheet, 28 of
 115 rows came back with values moved left. His example row,
 
 ```
-Robert | · | Adapt | adaptagency.com | Kresten Finsen Wiinblad | CEO | · | LinkedIn outreach, 3 July 2026 | · | · | ·
+Jordan | · | ExampleCo | example-co.example | Sam Placeholder | CEO | · | Intro call, 3 July 2026 | · | · | ·
 ```
 
 parsed as six values in the first six columns.

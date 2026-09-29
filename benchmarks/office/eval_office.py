@@ -9,7 +9,7 @@ And by POSITION (metrics/structure.py, v0.47.0 G8): the outline of sections
 and comments (sheet names and order, slide order, which slide each speaker
 note and comment follows), every table cell at its (row, col), and the block
 type sequence. Failures print what moved, e.g.
-    sheet 'Leads' row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'
+    sheet 'Leads' row 2 col 3 (C2): expected 'ExampleCo' got 'example-co.example'
 
 Exits 1 unless every file scores 100%.
 
