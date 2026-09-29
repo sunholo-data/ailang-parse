@@ -579,6 +579,20 @@ and the first document's file holds the second's bytes.
 
 **Size.** S.
 
+**Status (feat/gaps-img).** Implemented as above: the name is the sha256 of
+the decoded bytes, written via a `.part` file and renamed. Test:
+`benchmarks/check_image_temp_paths.py` (DOCX pair built from `image_vml.docx`;
+PPTX output carries no image blocks, so no PPTX pair). Blast radius, checked
+against `sunholo-data/docparse` run locally under `serve-api`: no hosted output
+reads the file back (`useAI: false` is hard-coded, so `layout_ai` never runs;
+html/qmd emit the path string; the Office generators drop path images to a
+placeholder). But the JSON `filepath` parameter accepts any server path, and
+`/tmp/docparse-images/docparse-img-0.<ext>` was predictable. That is a separate
+docparse issue. For G8: with content names the image `src` is machine-independent
+(`/tmp/docparse-images/docparse-img-<sha256><ext>`), so goldens can keep it and
+`normalize.py` needs no path placeholder. `dataLength` for a temp-file image
+is now the path length (102 for `.jpg`, 103 for `.jpeg`).
+
 ---
 
 ## Priority order and milestones

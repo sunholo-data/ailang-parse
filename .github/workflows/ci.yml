@@ -472,6 +472,13 @@ jobs:
       - name: Run failure check (failed parses must not write output)
         run: uv run benchmarks/failure_check.py
 
+      # Every document used to write its images to docparse-img-<N> with N
+      # restarting at 0, so documents in one batch (or concurrent API requests)
+      # overwrote each other's files and an earlier document's `src` named a
+      # later document's image. Exact: sha256 of each src file vs its own ZIP.
+      - name: Image temp files hold each document's own bytes (exact)
+        run: uv run benchmarks/check_image_temp_paths.py
+
       # These two are named in .claude/rules/benchmarks.md as the guards for
       # "the blind spot" — parse-side goldens and "does the file open" both
       # pass structurally invalid output through — but neither had ever run in
