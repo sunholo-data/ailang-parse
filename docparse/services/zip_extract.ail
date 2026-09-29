@@ -7,7 +7,8 @@ import std/option (Some, None, getOrElse)
 import std/xml (parseLenient, findAll, findFirst, getAttr)
 import std/result (Ok, Err)
 import std/bytes (fromBase64)
-import std/fs (mkdirAllResult, writeFileBytes, readFileBytes)
+import std/fs (mkdirAllResult, writeFileBytes, readFileBytes, renameFileResult)
+import std/crypto (sha256Bytes, sha256Hex)
 import docparse/types/document (Block, ImageBlock, SectionBlock, mkImage, mkNamedSection)
 
 -- ZIP extraction layer for Office documents
@@ -560,6 +561,20 @@ export pure func imageBytesCap() -> int = 67108864   -- 64 MiB
 
 export pure func imageTempDir() -> string = "/tmp/docparse-images"
 
+-- Temp file for one image: named by the SHA-256 of its decoded bytes.
+--
+-- The name used to be `docparse-img-${counter}` with the counter restarting at
+-- 0 for every document, so two documents parsed in one batch, or concurrently
+-- under serve-api, wrote the same paths and the earlier document's `src` ended
+-- up naming the later document's image (G9, v0.47.0 partner follow-ups).
+-- A content name cannot collide across different images, needs no effect
+-- beyond FS (the CLI runs without Rand/Clock), and is deterministic: the same
+-- image always gets the same path on every machine, so goldens are stable and
+-- `shasum -a 256` of the file matches its name. Two documents holding the
+-- same image share one file with identical bytes.
+export pure func imageTempPath(tempDir: string, bytesSha256: string, entry: string) -> string =
+  "${tempDir}/docparse-img-${bytesSha256}${mediaExtension(entry)}"
+
 -- Human-readable form for warnings/notes. The parse functions return [Block]
 -- and cannot surface the ADT itself without a breaking export change, so they
 -- render the typed error through this.
@@ -609,13 +624,23 @@ func mediaToFilesFrom(zipPath: string, entries: [string], tempDir: string,
         then Err(ImageCapExceeded({entry: entry, capBytes: imageBytesCap(),
                                    runningBytes: bytesSoFar + rawLen}))
         else {
-          let path = "${tempDir}/docparse-img-${show(counter)}${mediaExtension(entry)}";
           match fromBase64(b64) {
             Some(bytes) => {
-              writeFileBytes(path, bytes);
-              mediaToFilesFrom(zipPath, rest, tempDir, counter + 1,
-                               mkImage(path, "", mime) :: acc,
-                               bytesSoFar + rawLen, files + 1)
+              let path = imageTempPath(tempDir, sha256Bytes(bytes), entry);
+              -- Write beside the target, then rename over it: a reader of
+              -- `path` sees either no file or the whole image, never a
+              -- half-written one while another parse writes the same bytes.
+              -- The part name is unique per (source document, entry index),
+              -- so concurrent writers of a shared image use different parts.
+              let part = "${path}.${substring(sha256Hex(zipPath), 0, 16)}-${show(counter)}.part";
+              writeFileBytes(part, bytes);
+              match renameFileResult(part, path) {
+                Err(msg) => Err(ImageWriteFailed({entry: entry, detail: msg})),
+                Ok(_) =>
+                  mediaToFilesFrom(zipPath, rest, tempDir, counter + 1,
+                                   mkImage(path, "", mime) :: acc,
+                                   bytesSoFar + rawLen, files + 1)
+              }
             },
             -- Not valid base64: keep the empty-data block rather than failing
             -- the whole document over one corrupt entry.
