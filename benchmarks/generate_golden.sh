@@ -16,8 +16,22 @@ mkdir -p "$GOLDEN_DIR"
 
 cd "$REPO_DIR"
 
+# Usage: bash benchmarks/generate_golden.sh              # every suite file
+#        bash benchmarks/generate_golden.sh FILE [FILE]  # just these (a path,
+#            or a name under data/test_files/ or data/test_files/challenge/)
+# Regenerating one golden should not rewrite the other hundred.
+
 # Collect all test files (stress tests live in data/test_files/stress/ and are excluded by path)
 FILES=()
+if [ "$#" -gt 0 ]; then
+  for arg in "$@"; do
+    if [ -f "$arg" ]; then FILES+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+    elif [ -f "$TEST_DIR/$arg" ]; then FILES+=("$TEST_DIR/$arg")
+    elif [ -f "$TEST_DIR/challenge/$arg" ]; then FILES+=("$TEST_DIR/challenge/$arg")
+    else echo "No such test file: $arg" >&2; exit 2
+    fi
+  done
+else
 # The challenge/ office files are scored by the suite but were missing from
 # this list, so their goldens could not be refreshed here at all — they had to
 # be hand-edited or left stale. Globbed on the same extensions as the top level.
@@ -30,6 +44,7 @@ for f in "$TEST_DIR"/*.docx "$TEST_DIR"/*.pptx "$TEST_DIR"/*.xlsx \
   [ -f "$f" ] || continue
   FILES+=("$f")
 done
+fi
 
 TOTAL=${#FILES[@]}
 echo "=== Generating golden outputs for $TOTAL files (batch mode) ==="
@@ -77,7 +92,12 @@ for f in "${FILES[@]}"; do
   output_json="$OUTPUT_DIR/${fname}.json"
 
   if [ -f "$output_json" ] && [ "$output_json" -nt "$MARKER" ]; then
-    cp "$output_json" "$GOLDEN_DIR/${fname}.json"
+    # Not a plain copy: extracted images carry a temp-file path in `src`
+    # (and dataLength = that path's length), which is machine- and
+    # run-specific. write_golden.py replaces it with a placeholder the suite
+    # compares against, and keeps an existing golden's document.filename so
+    # regenerating does not churn it (the suite ignores filename).
+    python3 "$SCRIPT_DIR/metrics/write_golden.py" "$output_json" "$GOLDEN_DIR/${fname}.json"
     echo "  $fname ... OK"
     PASS=$((PASS + 1))
   else
