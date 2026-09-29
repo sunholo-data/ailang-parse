@@ -396,6 +396,105 @@ def create_challenge_merged_cells_xlsx():
     print(f"  Created {path}")
 
 
+def create_challenge_sparse_rows_xlsx():
+    """XLSX whose rows omit blank cells, on sheets with no merge regions.
+
+    Tests: cell references (§18.3.1.4 r=) and workbook sheet order
+    (§18.2.20 sheets + workbook.xml.rels).
+    Regression for a partner report: Excel writes no <c> for a blank cell, and
+    a merge-free sheet was read positionally, so every value after a blank
+    shifted left a column. The workbook also has 11 sheets whose parts are
+    stored in lexicographic zip order (sheet1, sheet10, sheet11, sheet2, ...)
+    and whose tab order does not follow the part numbers, so sheet order and
+    names must come from workbook.xml + its rels, not the zip listing.
+
+    Written as raw XML so the omitted cells and zip order are exact; openpyxl
+    would normalise both.
+    """
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    def col(i):
+        s = ""
+        i += 1
+        while i:
+            i, r = divmod(i - 1, 26)
+            s = chr(65 + r) + s
+        return s
+
+    def row_xml(r, cells):
+        # cells: {col_index: value}; blanks are simply absent, as Excel writes them
+        cs = "".join(
+            f'<c r="{col(c)}{r}" t="inlineStr"><is><t>{escape(str(v))}</t></is></c>'
+            if isinstance(v, str) else f'<c r="{col(c)}{r}"><v>{v}</v></c>'
+            for c, v in sorted(cells.items()))
+        return f'<row r="{r}">{cs}</row>'
+
+    def sheet_xml(rows):
+        body = "".join(row_xml(r, cells) for r, cells in rows)
+        return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                f'<sheetData>{body}</sheetData></worksheet>')
+
+    header = ["First name", "Title", "Company", "Website", "Contact", "Role",
+              "Phone", "Source", "Status", "Owner", "Notes"]
+    leads = [
+        (1, dict(enumerate(header))),
+        # The reported shape: mid-row, and trailing blanks
+        (2, {0: "Robert", 2: "Adapt", 3: "adaptagency.com", 4: "Kresten Finsen Wiinblad",
+             5: "CEO", 7: "LinkedIn outreach, 3 July 2026"}),
+        # Leading blanks and a number after a gap
+        (3, {2: "Northwind", 6: 5551234, 10: "no owner yet"}),
+        # Dense row, the only kind the positional read got right
+        (4, dict(enumerate(["Ada", "Dr", "Analytical", "analytical.org", "Ada L",
+                            "CTO", 5550000, "Referral", "Won", "Mark", "signed"]))),
+    ]
+    # part number -> (tab name, rows). Tab order below deliberately differs.
+    parts = {3: ("Leads", leads),
+             1: ("Summary", [(1, {0: "Metric", 1: "Value"}), (2, {0: "Leads", 2: "see Leads"})])}
+    for n in range(2, 12):
+        if n not in parts:
+            parts[n] = (f"Tab {n:02d}", [(1, {0: "Sheet part", 1: n})])
+    tab_order = [3, 1] + [n for n in range(2, 12) if n not in (1, 3)]
+
+    ct = "".join(f'<Override PartName="/xl/worksheets/sheet{n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                 for n in parts)
+    files = {
+        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            f'{ct}</Types>',
+        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>',
+        "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+            + "".join(f'<sheet name="{parts[n][0]}" sheetId="{i + 1}" r:id="rId{n}"/>'
+                      for i, n in enumerate(tab_order))
+            + '</sheets></workbook>',
+        "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + "".join(f'<Relationship Id="rId{n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{n}.xml"/>'
+                      for n in parts)
+            + '</Relationships>',
+    }
+    # Lexicographic part order, as the partner's workbook was listed
+    for n in sorted(parts, key=lambda n: f"sheet{n}.xml"):
+        files[f"xl/worksheets/sheet{n}.xml"] = sheet_xml(parts[n][1])
+
+    path = OUTPUT_DIR / "challenge_sparse_rows.xlsx"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 9, 29, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, data)
+    print(f"  Created {path}")
+
+
 def create_challenge_real_world():
     """DOCX that mixes many features like a real-world report.
 
@@ -652,6 +751,7 @@ def main():
         ("Field codes (TOC, dates, page numbers)", create_challenge_fields),
         ("Hyperlinks with URLs", create_challenge_hyperlinks),
         ("XLSX merged cells", create_challenge_merged_cells_xlsx),
+        ("XLSX sparse rows + sheet order", create_challenge_sparse_rows_xlsx),
         ("Equations (OMML)", create_challenge_equations),
         ("Real-world mixed document", create_challenge_real_world),
     ]
