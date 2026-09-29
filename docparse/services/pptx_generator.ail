@@ -192,7 +192,12 @@ pure func pptxSplitBySlides(blocks: [Block], acc: [PptxSlide]) -> [PptxSlide] =
 pure func pptxAttachNotes(acc: [PptxSlide], notes: [Block]) -> [PptxSlide] =
   match acc {
     [] => [],
-    s :: rest => {blocks: s.blocks, notes: concat(s.notes, notes)} :: rest
+    -- Bound first: the v0.35 parser (our declared floor) reads a record
+    -- literal followed by :: in an arm body as a pattern.
+    s :: rest => {
+      let withNotes = {blocks: s.blocks, notes: concat(s.notes, notes)};
+      withNotes :: rest
+    }
   }
 
 -- Notes sections that precede every slide section, i.e. the ones dropped above.
