@@ -7,7 +7,10 @@ import { defineConfig, devices } from "@playwright/test";
 // `cp -r docs _site && bash docs/wasm/download.sh` (mv ailang.wasm into
 // `_site/wasm/`) before `npx playwright test`.
 
-const PORT = 8765;
+// Overridable because 8765 is also the local `ailang coordinator` port: with
+// reuseExistingServer the suite would silently run against the coordinator
+// (every page 404s) instead of _site/.
+const PORT = Number(process.env.BROWSER_TEST_PORT || 8765);
 const SITE_ROOT = "../../_site";
 
 export default defineConfig({

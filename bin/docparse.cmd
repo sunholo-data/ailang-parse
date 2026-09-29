@@ -255,6 +255,9 @@ for %%m in (
     docparse\services\layout_ai.ail
     docparse\services\output_formatter.ail
     docparse\services\csv_parser.ail
+    docparse\services\markdown_inline.ail
+    docparse\services\markdown_quote.ail
+    docparse\services\markdown_table.ail
     docparse\services\markdown_parser.ail
     docparse\services\html_parser.ail
     docparse\services\epub_parser.ail

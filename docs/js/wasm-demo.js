@@ -64,7 +64,13 @@
     // Text format parsers (html_parser before eml_parser — dependency)
     { name: 'docparse/services/html_parser',      path: 'docparse/services/html_parser.ail' },
     { name: 'docparse/services/csv_parser',       path: 'docparse/services/csv_parser.ail' },
-    { name: 'docparse/services/markdown_parser',   path: 'docparse/services/markdown_parser.ail' },
+    // markdown_inline/_quote/_table before markdown_parser — split out of it to
+    // keep it inside the per-module type-check budget; it imports all three
+    // (and markdown_table imports markdown_inline).
+    { name: 'docparse/services/markdown_inline',  path: 'docparse/services/markdown_inline.ail' },
+    { name: 'docparse/services/markdown_quote',   path: 'docparse/services/markdown_quote.ail' },
+    { name: 'docparse/services/markdown_table',   path: 'docparse/services/markdown_table.ail' },
+    { name: 'docparse/services/markdown_parser',  path: 'docparse/services/markdown_parser.ail' },
     { name: 'docparse/services/rtf_parser',       path: 'docparse/services/rtf_parser.ail' },
     { name: 'docparse/services/eml_parser',       path: 'docparse/services/eml_parser.ail' },
     { name: 'docparse/services/tex_parser',       path: 'docparse/services/tex_parser.ail' },
@@ -86,6 +92,33 @@
   ];
 
   var EXTRA_STDLIBS = ['std/xml', 'std/list', 'std/io', 'std/bytes'];
+
+  // Per-module type-check consumption from the loads this page actually did
+  // (typeCheckMs is wall-clock and machine-dependent; typeCheckSteps is
+  // deterministic for identical source). Read by tests/browser/module-budget.
+  var moduleLoadStats = [];
+  // Per-module wall-clock limit for the in-browser type-checker (see initWasm).
+  var TYPECHECK_BUDGET_MS = 30000;
+  // A module slower than this still loads, but is a visitor on hardware slow
+  // enough that the old 8s limit would have refused them — say so in the
+  // console, with the deterministic step count worth quoting in a report.
+  var SLOW_MODULE_MS = 8000;
+  function warnIfSlow(name, r) {
+    if (r && r.success && typeof r.typeCheckMs === 'number' && r.typeCheckMs > SLOW_MODULE_MS) {
+      console.warn('[DocParse] ' + name + ' took ' + Math.round(r.typeCheckMs) + 'ms to type-check (' +
+        r.typeCheckSteps + ' steps) — slow machine or a module that has grown; limit is ' + TYPECHECK_BUDGET_MS + 'ms');
+    }
+  }
+  function recordLoadStats(name, r) {
+    if (!r) return;
+    moduleLoadStats.push({
+      name: name,
+      ok: !!r.success,
+      ms: typeof r.typeCheckMs === 'number' ? Math.round(r.typeCheckMs) : null,
+      steps: typeof r.typeCheckSteps === 'number' ? r.typeCheckSteps : null,
+      budgetMs: typeof r.budgetMs === 'number' ? r.budgetMs : null
+    });
+  }
 
   // ── State ──
   var engine = null;
@@ -255,16 +288,23 @@
 
         // Raise the WASM type-check budget before loading modules. The runtime
         // default is 2s per module (v0.22.x, sized on the module corpus of the
-        // time); the v0.34.0 runtime type-checks the same sources measurably
-        // slower, which pushed docx_parser (eml charset decoding, numbering
-        // resolution, style-level lists) and markdown_parser over it. ailang#662
-        // made the limit embedder-configurable for exactly this case: a host
-        // that has already downloaded a ~40 MB WASM binary prefers a slower
-        // boot to a refused one, and this page shows real progress per module.
-        // The deterministic step counts in each loadModule result still report
-        // headroom, so the module-budget spec can watch growth.
+        // time), and ailang#662 made it embedder-configurable for exactly this
+        // case: a host that has already downloaded a ~40 MB WASM binary prefers
+        // a slower boot to a refused one, and this page shows real progress per
+        // module.
+        //
+        // The limit is WALL-CLOCK, so it is really a statement about the
+        // slowest visitor's hardware. At 8s it refused a partner's machine
+        // (September 2026): markdown_parser had reached 68,608 of its 105k
+        // steps when the 8s ran out, so every DOCX they dropped failed. The
+        // heaviest modules take ~2s on an M4 Max and a machine 4-5x slower
+        // exists in the wild, so 8s had no real margin. Module cost is now
+        // gated deterministically in CI (tests/browser/module-budget.spec.ts
+        // fails on type-checker STEPS), which is what the wall-clock limit was
+        // standing in for; the limit remains only as a hang guard against a
+        // pathological module, and 30s still bounds that.
         if (typeof ailangSetTypeCheckBudget === 'function') {
-          ailangSetTypeCheckBudget(8000);
+          ailangSetTypeCheckBudget(TYPECHECK_BUDGET_MS);
         }
 
         // Load AILANG Parse modules
@@ -279,6 +319,8 @@
           var code = await resp.text();
 
           var result = repl.loadModule(mod.name, code);
+          recordLoadStats(mod.name, result);
+          warnIfSlow(mod.name, result);
           if (!result.success) throw new Error('Module ' + mod.name + ' failed: ' + result.error);
         }
 
@@ -425,18 +467,21 @@
   window.docparseWasm = {
     ready: function () { return initWasm().then(function () { return engine; }); },
     modules: function () { return MODULES_TO_LOAD.slice(); },
+    loadStats: function () { return moduleLoadStats.slice(); },
     assetBase: function () { return ASSET_BASE; },
     // The blocks from the most recent parse, or null if nothing parsed yet.
     lastBlocks: function () { return (lastOutput && lastOutput.blocks) || null; },
     parseFile: function (file) { return window.handleDocParseFile(file); },
-    // Load an extra module on demand. The WASM type-checker has a 2s per-module
-    // budget and docx_generator alone eats over half of it, so it is not in the
-    // default set — only pages that generate documents pay for it.
+    // Load an extra module on demand. docx_generator is the single most
+    // expensive module to type-check (~150k steps), so it is not in the default
+    // set — only pages that generate documents pay for it.
     loadExtraModule: async function (name, path) {
       var resp = await fetch(MODULE_BASE + path + '?v=' + Date.now());
       if (!resp.ok) throw new Error('failed to fetch ' + path);
       if (!engine || !engine.repl) throw new Error('engine not ready');
       var r = engine.repl.loadModule(name, await resp.text());
+      recordLoadStats(name, r);
+      warnIfSlow(name, r);
       if (!r.success) throw new Error('module ' + name + ' failed: ' + r.error);
       return true;
     }
@@ -2332,6 +2377,11 @@
         else if (ext === 'md')                      r = engine.call('parseMarkdownContent', content);
         else if (ext === 'txt')                     r = engine.call('parseMarkdownContent', content);
         else if (ext === 'tex' || ext === 'latex' || ext === 'ltx') r = engine.call('parseTexContent', content);
+        // .rtf was listed as a text format but had no branch here, so every RTF
+        // dropped on the workbench fell through with r undefined and failed as
+        // "Parse failed: no result from engine.call". The homepage demo's own
+        // path always had it.
+        else if (ext === 'rtf')                     r = engine.call('parseRtfContent', content);
         if (!r || !r.success) {
           // Surface the full WASM result so callers can inspect it in DevTools.
           var rawErr = r ? r.error : 'no result from engine.call';
@@ -2344,7 +2394,8 @@
                  : ext === 'csv' ? 'parseCsvContent'
                  : ext === 'tsv' ? 'parseCsvContent'
                  : ext === 'md' || ext === 'txt' ? 'parseMarkdownContent'
-                 : ext === 'tex' || ext === 'latex' || ext === 'ltx' ? 'parseTexContent' : 'unknown',
+                 : ext === 'tex' || ext === 'latex' || ext === 'ltx' ? 'parseTexContent'
+                 : ext === 'rtf' ? 'parseRtfContent' : 'unknown',
             wasmResult: r,
             error: rawErr
           });
