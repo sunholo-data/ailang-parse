@@ -158,3 +158,40 @@ test("workbench parses the partner-reported files via DocParseEngine", async ({ 
     for (const needle of c.expect) expect(r.json, `${c.name} output`).toContain(needle);
   }
 });
+
+// Slide order in the browser path. JS extracts the ZIP and used to .sort() the
+// slide part names, so slide10.xml came before slide2.xml — and file names are
+// not the deck order anyway. The fixture's presentation.xml orders 13 slides
+// differently from their file numbers (built by
+// benchmarks/create_pptx_order_fixture.py); titles must come out in deck order.
+const ORDER_PPTX = resolve(__dirname, "../../data/test_files/pptx_slide_order_notes.pptx");
+const DECK_TITLES = ["Kickoff", "Agenda", "Market", "Pricing", "Roadmap", "Team",
+  "Risks", "Budget", "Metrics", "Timeline", "Asks", "Close"];
+
+test("browser parses PPTX slides in presentation order", async ({ page }) => {
+  test.setTimeout(180_000);
+  const consoleErrors: string[] = [];
+  page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message}`));
+  page.on("console", (msg) => {
+    if (msg.type() === "error") consoleErrors.push(`console.error: ${msg.text()}`);
+  });
+  await page.goto("/");
+  try {
+    await page.waitForFunction(
+      () => (window as unknown as { DocParseEngine?: { isReady: () => boolean } }).DocParseEngine?.isReady() === true,
+      null,
+      { timeout: 120_000 },
+    );
+  } catch (e) {
+    throw new Error(`${(e as Error).message}\n\nConsole errors:\n  - ${consoleErrors.join("\n  - ")}`);
+  }
+  await page.locator("#file-input").setInputFiles(ORDER_PPTX);
+  await page.locator('[data-tab="blocks"]').click();
+  const panel = page.locator("#panel-blocks");
+  await expect(panel).toContainText("Close", { timeout: 30_000 });
+  const text = (await panel.textContent()) ?? "";
+  const positions = DECK_TITLES.map((t) => text.indexOf(t));
+  expect(positions.every((p) => p >= 0)).toBe(true);
+  expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  expect(consoleErrors).toEqual([]);
+});

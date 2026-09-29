@@ -446,6 +446,12 @@ jobs:
       - name: Run structural benchmark (53 files, must be 100%)
         run: uv run benchmarks/run_benchmarks.py --suite office
 
+      # Slide order and notes-to-slide attribution, checked against
+      # expectations computed by the fixture's own build script. The office
+      # suite scores bag-of-words, which cannot see order or attribution.
+      - name: PPTX slide order and speaker-note attribution (exact)
+        run: uv run benchmarks/create_pptx_order_fixture.py --verify
+
       # Scores the failures, which no other suite looks at: a failed parse must
       # exit non-zero and write nothing. An explicit --pdf-backend failure used
       # to be returned as the document's only block, so the CLI exited 0 and a

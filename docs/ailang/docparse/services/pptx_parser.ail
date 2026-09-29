@@ -3,10 +3,10 @@ module docparse/services/pptx_parser
 import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, intToStr)
+import std/string (contains, length, trim, stringToInt, join, intToStr, endsWith)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
-import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection)
-import docparse/services/zip_extract (readCoreProperties, findSlideEntries, findNotesSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget, extractMediaToFiles, imageTempDir, imageExtractErrorText)
+import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection, mkNamedSection)
+import docparse/services/zip_extract (readCoreProperties, findSlideEntries, readZipEntry, findMediaEntries, readImageEntry, mediaMimeType, readPptxSlideRels, pptxResolveTarget, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
 
 -- PPTX Parser
@@ -46,14 +46,18 @@ import docparse/services/omml (renderOmml)
 --     </p:cSld>
 --   </p:sld>
 
--- Parse all slides from a PPTX file
+-- Parse all slides from a PPTX file.
+--
+-- Slides come out in presentation order (findSlideEntries reads
+-- ppt/presentation.xml's sldIdLst), each as one SectionBlock(kind="slide") —
+-- including slides with no extractable content, so the Nth slide section is
+-- always slide N. Each slide's speaker notes follow it directly as
+-- SectionBlock(kind="notes", name="Slide N"), then its comments.
 export func parsePptx(filepath: string) -> [Block] ! {FS} {
   let slideEntries = findSlideEntries(filepath);
   let totalSlides = listLength(slideEntries);
   let cappedEntries = take(500, slideEntries);
-  -- Speaker notes follow the slides, as they did before e9de665 deleted them.
-  let notesBlocks = pptxParseNotesSlides(filepath, findNotesSlideEntries(filepath));
-  let slideBlocks = concat(parseSlides(filepath, cappedEntries), notesBlocks);
+  let slideBlocks = parseSlides(filepath, cappedEntries);
   if totalSlides > 500
   then {
     let warning = mkText(
@@ -84,20 +88,20 @@ export func parsePptxImages(filepath: string) -> [Block] ! {FS} {
 func parseSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
   pptxParseSlidesFrom(filepath, entries, 1)
 
+-- An empty slide still yields its (empty) section. It used to be dropped,
+-- which shifted every later slide down a position: the 5th section was no
+-- longer slide 5, disagreeing with the "Slide N" anchors on comments and notes.
 func pptxParseSlidesFrom(filepath: string, entries: [string], slideNo: int) -> [Block] ! {FS} =
   match entries {
     [] => [],
     entry :: rest => {
       let xml = readZipEntry(filepath, entry);
+      let relsXml = readPptxSlideRels(filepath, entry);
       let blocks = parseSlideXml(xml);
-      let comments = pptxSlideComments(filepath, entry, xml, slideNo);
+      let notes = pptxSlideNotes(filepath, relsXml, slideNo);
+      let comments = pptxSlideComments(filepath, relsXml, xml, slideNo);
       let moreBlocks = pptxParseSlidesFrom(filepath, rest, slideNo + 1);
-      if pptxHasContent(blocks)
-      then {
-        let section = mkSection("slide", blocks);
-        section :: concat(comments, moreBlocks)
-      }
-      else concat(comments, moreBlocks)
+      mkSection("slide", blocks) :: concat(notes, concat(comments, moreBlocks))
     }
   }
 
@@ -115,9 +119,8 @@ func pptxParseSlidesFrom(filepath: string, entries: [string], slideNo: int) -> [
 -- Which comment part belongs to which slide comes from the slide's own
 -- relationships, not from matching "comment1.xml" to "slide1.xml" — that
 -- numbering coincidence holds for simple decks and mis-attributes on the rest.
-func pptxSlideComments(filepath: string, slideEntry: string, slideXml: string,
+func pptxSlideComments(filepath: string, relsXml: string, slideXml: string,
                         slideNo: int) -> [Block] ! {FS} {
-  let relsXml = readPptxSlideRels(filepath, slideEntry);
   let targets = pptxCommentTargets(relsXml);
   let anchor = pptxSlideAnchor(slideXml, slideNo);
   pptxReadCommentParts(filepath, targets, anchor)
@@ -125,11 +128,15 @@ func pptxSlideComments(filepath: string, slideEntry: string, slideXml: string,
 
 -- Comment-part targets declared by a slide's relationships
 pure func pptxCommentTargets(relsXml: string) -> [string] =
+  pptxSlideRelTargets(relsXml, pptxIsCommentRel)
+
+-- Targets (as ZIP paths) of the slide relationships matching `keep`
+pure func pptxSlideRelTargets(relsXml: string, keep: XmlNode -> bool) -> [string] =
   if length(relsXml) == 0 then []
   else match parseLenient(relsXml) {
     Ok(root) =>
       map(\r. pptxResolveTarget(getOrElse(getAttr(r, "Target"), "")),
-          filter(pptxIsCommentRel, findAll(root, "Relationship"))),
+          filter(keep, findAll(root, "Relationship"))),
     Err(_) => []
   }
 
@@ -528,20 +535,6 @@ func extractPptxImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
     Err(e) => [mkText(imageExtractErrorText(e), "warning", 0)]
   }
 
--- Check if a block list has content
-pure func pptxHasContent(blocks: [Block]) -> bool =
-  any(pptxBlockHasContent, blocks)
-
-pure func pptxBlockHasContent(b: Block) -> bool =
-  match b {
-    TextBlock(t) => length(trim(t.text)) > 0,
-    HeadingBlock(h) => length(trim(h.text)) > 0,
-    TableBlock(_) => true,
-    ListBlock(_) => true,
-    ImageBlock(_) => true,
-    SectionBlock(s) => pptxHasContent(s.blocks)
-  }
-
 pure func pptxParseIntOrDefault(s: string, default: int) -> int =
   getOrElse(stringToInt(s), default)
 
@@ -553,26 +546,44 @@ pure func pptxParseIntOrDefault(s: string, default: int) -> int =
 -- versions") overwrote this module with a reduced browser variant and deleted
 -- the whole section. The only test covering it was a golden no suite read.
 
--- Parse all notes slide entries
-func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
-  match entries {
+-- Which notes part belongs to which slide is the slide's own relationship
+-- (Type ".../notesSlide"), exactly as for comments. notesSlideN is NOT slideN's
+-- notes in general: the numbers diverge as soon as a deck is reordered, or a
+-- slide without notes precedes one with them. The notes used to be read by
+-- listing ppt/notesSlides/ and appended after ALL the slides with no link back,
+-- so a reader could not tell which slide a note was for — and on a long deck
+-- they sat past the end of everything a reader or a size-capped consumer saw.
+func pptxSlideNotes(filepath: string, relsXml: string, slideNo: int) -> [Block] ! {FS} =
+  match pptxSlideRelTargets(relsXml, pptxIsNotesRel) {
     [] => [],
-    entry :: rest => {
-      let xml = readZipEntry(filepath, entry);
-      let noteText = pptxExtractNoteText(xml);
-      let moreBlocks = pptxParseNotesSlides(filepath, rest);
+    target :: _ => {
+      let noteText = pptxExtractNoteText(readZipEntry(filepath, target));
       if length(trim(noteText)) > 0
-      then {
-        let noteBlock = mkSection("notes", [mkText(noteText, "speaker-notes", 0)]);
-        noteBlock :: moreBlocks
-      }
-      else moreBlocks
+      then [mkNamedSection("notes", "Slide ${intToStr(slideNo)}",
+                           [mkText(noteText, "speaker-notes", 0)])]
+      else []
     }
   }
 
+pure func pptxIsNotesRel(r: XmlNode) -> bool =
+  endsWith(getOrElse(getAttr(r, "Type"), ""), "/notesSlide")
+
 -- Extract speaker note text from a notesSlide XML
 -- Notes text lives in: p:notes/p:cSld/p:spTree/p:sp[ph@type="body"]/p:txBody
-pure func pptxExtractNoteText(xml: string) -> string {
+pure func pptxExtractNoteText(xml: string) -> string
+  tests [
+    -- body placeholder with an idx
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"sldNum\" idx=\"5\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>7</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Say hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "Say hello"),
+    -- no body placeholder: plain text box, page number ignored
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"sldNum\" idx=\"5\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>7</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>In a text box</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "In a text box"),
+    -- body placeholder inside a group shape
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"9\" name=\"g\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Grouped</a:t></a:r></a:p></p:txBody></p:sp></p:grpSp></p:spTree></p:cSld></p:notes>", "Grouped"),
+    -- body wins over a plain text box
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>Stray</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Real notes</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "Real notes"),
+    -- only page furniture: no notes
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"sldNum\" idx=\"5\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>7</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"ftr\" idx=\"4\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Footer</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "")
+  ]
+{
   if length(xml) == 0 then ""
   else match parseLenient(xml) {
     Ok(root) => pptxFindNotesBodyText(root),
@@ -580,34 +591,42 @@ pure func pptxExtractNoteText(xml: string) -> string {
   }
 }
 
--- Find the body placeholder in the notes shape tree and extract its text
-pure func pptxFindNotesBodyText(root: XmlNode) -> string =
-  getOrElse(
+-- The notes text is the body placeholder's. Every body placeholder is read (not
+-- just the first with text), shapes inside groups included, and when a notes
+-- page has no body placeholder text at all the plain (non-placeholder) text
+-- shapes are used instead — some writers put notes in an ordinary text box.
+-- Never read: the slide image, header, footer, date and slide-number
+-- placeholders, which carry page furniture rather than notes.
+pure func pptxFindNotesBodyText(root: XmlNode) -> string {
+  let shapes = getOrElse(
     optFlatMap(\csld.
-      optFlatMap(\spTree.
-        pptxFindNotesTextInShapes(getChildren(spTree)),
+      optMap(\spTree. pptxNotesShapes(getChildren(spTree)),
         findFirst(csld, "p:spTree")),
       findFirst(root, "p:cSld")),
-    "")
-
--- Search shapes for the body placeholder (type="body") and extract text
-pure func pptxFindNotesTextInShapes(nodes: [XmlNode]) -> Option[string] =
-  match nodes {
-    [] => None,
-    sp :: rest => {
-      let tag = getTag(sp);
-      if tag == "p:sp" then {
-        let phType = getPlaceholderType(sp);
-        if phType == "body" then
-          match findFirst(sp, "p:txBody") {
-            Some(txBody) => {
-              let text = join("\n", map(extractDrawingMLText, findAll(txBody, "a:p")));
-              if length(trim(text)) > 0 then Some(text) else pptxFindNotesTextInShapes(rest)
-            },
-            None => pptxFindNotesTextInShapes(rest)
-          }
-        else pptxFindNotesTextInShapes(rest)
-      }
-      else pptxFindNotesTextInShapes(rest)
-    }
+    []);
+  let body = pptxNonEmpty(map(pptxShapeText,
+    filter(\sp. getPlaceholderType(sp) == "body", shapes)));
+  match body {
+    [] => join("\n", pptxNonEmpty(map(pptxShapeText,
+            filter(\sp. getPlaceholderType(sp) == "none", shapes)))),
+    _ => join("\n", body)
   }
+}
+
+-- Shapes of a notes shape tree, flattening group shapes
+pure func pptxNotesShapes(nodes: [XmlNode]) -> [XmlNode] =
+  flatMap(\n. {
+    let tag = getTag(n);
+    if tag == "p:sp" then [n]
+    else if tag == "p:grpSp" then pptxNotesShapes(getChildren(n))
+    else []
+  }, nodes)
+
+pure func pptxShapeText(sp: XmlNode) -> string =
+  match findFirst(sp, "p:txBody") {
+    Some(txBody) => join("\n", map(extractDrawingMLText, findAll(txBody, "a:p"))),
+    None => ""
+  }
+
+pure func pptxNonEmpty(xs: [string]) -> [string] =
+  filter(\t. length(trim(t)) > 0, xs)

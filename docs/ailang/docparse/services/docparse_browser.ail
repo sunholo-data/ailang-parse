@@ -12,12 +12,12 @@ module docparse/services/docparse_browser
 
 import std/xml (parseLenient, findAll, findAllTexts, findFirst, getText, getAttr, getChildren)
 import std/json (encode, decode, jo, kv, js, jb, ja, jnum, asArray, getString, getInt, getBool, getArray, asString, getStringArrayOrEmpty)
-import std/string (length, join)
+import std/string (length, join, split)
 import std/ai (callJsonSimple)
 import std/math (intToFloat)
 import std/result (Ok, Err)
 import std/option (Some, None, getOrElse, map as optMap)
-import std/list (map)
+import std/list (map, filter)
 import std/map (empty as emptyMap, insert as mapInsert)
 import docparse/types/document (Block, TextBlock, SectionBlock, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkSection)
 import docparse/services/format_router (detectFormat, getExtension, officeType,
@@ -25,6 +25,7 @@ import docparse/services/format_router (detectFormat, getExtension, officeType,
 import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml,
     hasContent, extractMetadata, parseDocxWithCommentsXml, docxCommentsOnlyXml)
 import docparse/services/pptx_parser (extractSlideBlocks)
+import docparse/services/zip_extract (pptxOrderSlideEntries)
 import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
@@ -67,15 +68,21 @@ export pure func parseMetadataXml(coreXml: string) -> string {
 export pure func parsePptxSlide(slideXml: string) -> string {
   if length(slideXml) == 0 then encode(ja([]))
   else match parseLenient(slideXml) {
-    Ok(root) => {
-      let blocks = extractSlideBlocks(root);
-      if hasContent(blocks)
-      then encode(ja(blocksToJson([mkSection("slide", blocks)])))
-      else encode(ja([]))
-    },
+    -- An empty slide still gets its section, as in pptx_parser: dropping it
+    -- shifted every later slide down one position.
+    Ok(root) => encode(ja(blocksToJson([mkSection("slide", extractSlideBlocks(root))]))),
     Err(_) => encode(ja([]))
   }
 }
+
+-- Order PPTX slide part names the way the deck orders them: ppt/presentation.xml's
+-- sldIdLst resolved through ppt/_rels/presentation.xml.rels, with a NUMERIC
+-- file-name fallback when either part is missing. JS used to .sort() the names,
+-- which puts slide10.xml before slide2.xml. `entries` and the result are
+-- newline-joined part names ("ppt/slides/slide1.xml\nppt/slides/slide2.xml").
+export pure func orderPptxSlides(presXml: string, relsXml: string, entries: string) -> string =
+  join("\n", pptxOrderSlideEntries(presXml, relsXml,
+                                   filter(\e. length(e) > 0, split(entries, "\n"))))
 
 -- Parse XLSX shared strings XML into Map, then parse sheet XML
 export pure func parseXlsxSheet(sheetXml: string, sharedStringsXml: string, sheetName: string) -> string {

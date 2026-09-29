@@ -112,6 +112,7 @@ TEST_MODULES=(
   docparse/services/docx_template.ail
   docparse/services/odt_parser.ail
   docparse/services/odp_parser.ail
+  docparse/services/pptx_parser.ail
 )
 
 usage() {
@@ -251,7 +252,10 @@ do_test() {
   for mod in "${TEST_MODULES[@]}"; do
     echo ""
     echo "--- $(basename "$mod") ---"
-    ailang test "$mod"
+    # --allow-skips: a property derived from an `ensures` whose parameter is an
+    # XmlNode has no generator and is reported as skipped (pptx_parser has
+    # three). That is not a failure; a failing test or property still exits 1.
+    ailang test --allow-skips "$mod"
   done
 }
 

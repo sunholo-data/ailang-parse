@@ -120,7 +120,7 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "How do I parse a PPTX file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .pptx file to the AILANG Parse API or use the Python/JS/Go SDK. The parser reads PresentationML directly and returns structured JSON with slide content, speaker notes, tables, and metadata."}},
-    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Speaker notes from notesSlide XML are extracted as section blocks with kind \"notes\", each wrapping the note text with style \"speaker-notes\". Notes follow the slide sections in document order. The note text is preserved in full; character formatting inside a note is not currently carried."}},
+    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Speaker notes from notesSlide XML are extracted as section blocks with kind \"notes\", each wrapping the note text with style \"speaker-notes\". Each slide's notes section follows that slide directly and carries name \"Slide N\"; slides come out in the deck's presentation order. The note text is preserved in full; character formatting inside a note is not currently carried."}},
     {"@type": "Question", "name": "How are tables in slides handled?", "acceptedAnswer": {"@type": "Answer", "text": "Tables within slides are extracted with full row/column structure, merged cells (gridSpan/vMerge), and cell content. They appear as table blocks within their parent slide section."}},
     {"@type": "Question", "name": "Does PPTX parsing preserve slide order?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Slides are parsed in presentation order as defined in presentation.xml. Each slide becomes a section block numbered by its position."}},
     {"@type": "Question", "name": "What about shapes and text boxes in slides?", "acceptedAnswer": {"@type": "Answer", "text": "All text-bearing shapes (titles, subtitles, content placeholders, freeform text boxes) are extracted. Shape text is ordered by placeholder type then position on the slide."}},
@@ -286,7 +286,7 @@ timeline: Q3 launch"
       </div>
 
       <h2 id="speaker-notes">Speaker Notes</h2>
-      <p>PPTX stores speaker notes in separate <code>notesSlide</code> XML files, one per slide. These contain the presenter's talking points, data sources, and context that doesn't appear on the projected slide. AILANG Parse extracts each note as a section block with <code>kind: "notes"</code>, wrapping the note text with <code>style: "speaker-notes"</code>. Notes follow the slide sections in document order.</p>
+      <p>PPTX stores speaker notes in separate <code>notesSlide</code> XML files, one per slide. These contain the presenter's talking points, data sources, and context that doesn't appear on the projected slide. AILANG Parse extracts each note as a section block with <code>kind: "notes"</code>, wrapping the note text with <code>style: "speaker-notes"</code>. Each notes section sits directly after the slide it belongs to and names it (<code>name: "Slide 3"</code>) &mdash; the link comes from the slide's own relationships, not from matching <code>notesSlide3.xml</code> to <code>slide3.xml</code>. Slides come out in the deck's presentation order (<code>ppt/presentation.xml</code>), not file-name order.</p>
 
       <p>This is critical for AI applications: the notes often contain more actionable content than the slide bullet points. A training deck's slide says "Security Best Practices" &mdash; the notes contain the actual procedures and exceptions.</p>
 
@@ -294,7 +294,7 @@ timeline: Q3 launch"
   {"type": "heading", "level": 1, "text": "Security Best Practices"},
   {"type": "text", "text": "Follow the principle of least privilege"},
   {"type": "text", "text": "Rotate credentials every 90 days"},
-  {"type": "section", "kind": "notes", "blocks": [
+  {"type": "section", "kind": "notes", "name": "Slide 3", "blocks": [
     {"type": "text", "style": "speaker-notes",
      "text": "Exception: service accounts in prod-critical path use 180-day rotation per SEC-2024-003. Mention the incident from January if anyone pushes back on rotation frequency."}
   ]}

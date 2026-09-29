@@ -77,6 +77,54 @@ partner's exact message. `BROWSER_TEST_PORT` overrides the test server port:
 8765 is also the local `ailang coordinator` port, and `reuseExistingServer`
 silently ran the suite against it.
 
+### PPTX: slides in presentation order, speaker notes attached to their slide
+
+- **Fixed: slide order.** Slide parts were never ordered — `findSlideEntries`
+  filtered the ZIP listing as it came — so a real 21-slide deck parsed as
+  1, 10, 11, …, 19, 2, 20, 21, 3, …, 9. Order now comes from
+  `ppt/presentation.xml`'s `<p:sldIdLst>`, resolved through
+  `ppt/_rels/presentation.xml.rels`. That is the order PowerPoint shows: file
+  names keep their numbers when slides are dragged around. When those parts are
+  missing or unparsable the fallback is a numeric sort on the file name, never
+  a lexicographic one. The 500-slide cap is unchanged.
+- **Fixed: speaker notes are attached to their slide.** Notes used to be read
+  by listing `ppt/notesSlides/` and appended after every slide with no link
+  back. Each slide's notes are now resolved through that slide's own
+  relationships (`…/notesSlide`), the same way comments already were (never
+  by matching `notesSlideN` to `slideN`), and emitted directly after the slide
+  as `{"kind": "notes", "name": "Slide N"}`. Markdown labels them
+  `*Speaker notes (Slide N):*` (they previously read as more slide text), and
+  HTML gives them `class="section-notes"`.
+- **Fixed: notes dropped entirely** when the notes text was not in the first
+  body placeholder: text inside a group shape, or in a plain text box with no
+  body placeholder, was skipped. Every body placeholder is now read, groups
+  included, falling back to non-placeholder text shapes. Slide-number, header,
+  footer and date placeholders are still excluded.
+- **Changed: empty slides keep their section.** A slide with no extractable
+  content used to be dropped, which shifted every later slide down one place
+  and put the section count out of step with the `Slide N` anchors on notes
+  and comments. It now yields an empty `{"kind": "slide", "blocks": []}`.
+- **Browser (WASM):** the demo sorted slide file names as strings too. It now
+  orders them through a new `orderPptxSlides` binding, which calls the same
+  `pptxOrderSlideEntries` as the CLI, and the Playwright smoke test checks
+  this. The browser path still extracts no speaker notes.
+- New fixture `data/test_files/pptx_slide_order_notes.pptx`, built by
+  `benchmarks/create_pptx_order_fixture.py` (`--verify` checks the parser
+  against expectations computed from the build script, not from parser
+  output). It has 13 slides stored shuffled, a presentation order different
+  from the file numbering, `notesSlideN` never matching its slide, one slide
+  with no notes, one empty slide that has notes, and notes in a text box and
+  in a group.
+- Goldens regenerated, each a correct fix: `poi_comment.pptx` and
+  `python_pptx_table.pptx` (were in ZIP order, now presentation order;
+  poi_comment's comment anchors now name the right slide),
+  `challenge_speaker_notes.pptx` and `poi_sampleshow.pptx` (notes follow their
+  slide, named), and `python_pptx_slides.pptx` (three empty slides, previously
+  no blocks at all).
+- `bin/docparse --test` now runs `pptx_parser.ail`'s inline tests, and passes
+  `--allow-skips`, because a property derived from an `ensures` over an
+  `XmlNode` has no generator and is reported as skipped rather than failed.
+
 ### Docs: correct API examples, pricing figures, and stale AI-required claims
 
 - **curl/Python examples** in `integrations.html`, `docs/lab/samples/guide.html`,

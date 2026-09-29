@@ -808,11 +808,31 @@
   }
 
   // ── PPTX parsing ──
+
+  // Slide parts in the deck's own order. The file names are not the order —
+  // PowerPoint keeps slide7.xml as slide7.xml when it is dragged to the front —
+  // and a plain .sort() is lexicographic (slide10 before slide2). AILANG's
+  // orderPptxSlides reads presentation.xml's sldIdLst through its rels; if the
+  // engine call fails, fall back to a numeric sort, never a string one.
+  async function orderPptxSlideEntries(zip, entries) {
+    var numeric = entries.slice().sort(function (a, b) {
+      return parseInt(a.match(/(\d+)\.xml$/)[1], 10) - parseInt(b.match(/(\d+)\.xml$/)[1], 10);
+    });
+    var presEntry = zip.file('ppt/presentation.xml');
+    var relsEntry = zip.file('ppt/_rels/presentation.xml.rels');
+    if (!engine || !presEntry || !relsEntry) return numeric;
+    var presXml = await presEntry.async('string');
+    var relsXml = await relsEntry.async('string');
+    var r = engine.call('orderPptxSlides', presXml, relsXml, numeric.join('\n'));
+    if (!r.success || !r.result) return numeric;
+    var ordered = String(r.result).split('\n').filter(function (n) { return n.length > 0; });
+    return ordered.length === numeric.length ? ordered : numeric;
+  }
+
   async function parsePptxZip(zip) {
     var allBlocks = [];
-    var slideEntries = Object.keys(zip.files)
-      .filter(function (n) { return n.match(/^ppt\/slides\/slide\d+\.xml$/); })
-      .sort();
+    var slideEntries = await orderPptxSlideEntries(zip, Object.keys(zip.files)
+      .filter(function (n) { return n.match(/^ppt\/slides\/slide\d+\.xml$/); }));
 
     pipelineLog('xml', 'Found ' + slideEntries.length + ' slide(s)');
 
@@ -1369,9 +1389,8 @@
     }
     try {
       var zip = await JSZip.loadAsync(buffer);
-      var slideEntries = Object.keys(zip.files)
-        .filter(function (e) { return e.match(/^ppt\/slides\/slide\d+\.xml$/) && e.indexOf('_rels') === -1; })
-        .sort();
+      var slideEntries = await orderPptxSlideEntries(zip, Object.keys(zip.files)
+        .filter(function (e) { return e.match(/^ppt\/slides\/slide\d+\.xml$/) && e.indexOf('_rels') === -1; }));
 
       var slides = [];
       for (var i = 0; i < Math.min(slideEntries.length, MAX_SLIDES); i++) {
