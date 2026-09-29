@@ -18,6 +18,32 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
 (function () {
   'use strict';
 
+  // ── Referral attribution capture (?ref=<code> → localStorage.docparse_ref) ──
+  // Partner referral links land here as www.sunholo.com/ailang-parse/<page>?ref=<code>.
+  // First touch wins: an existing docparse_ref value is never overwritten. The
+  // key is later read by the docparse dashboard/approve pages at
+  // www.sunholo.com/docparse/ (same origin, same localStorage). Runs only on
+  // the www.sunholo.com origin; no network calls, no UI. localStorage is
+  // wrapped in try/catch — storage failures must never break the page.
+  (function captureRef() {
+    if (window.location.hostname !== 'www.sunholo.com') return;
+    var refCode = new URLSearchParams(window.location.search).get('ref');
+    if (!refCode || !/^[a-z0-9-]{2,32}$/.test(refCode)) return;
+    try {
+      var existing = window.localStorage.getItem('docparse_ref');
+      if (existing === null || existing === '') {
+        window.localStorage.setItem('docparse_ref', refCode);
+      }
+    } catch (e) { /* storage unavailable — skip capture */ }
+    try {
+      // Clean the address bar: strip ref, keep any other params and the hash.
+      var params = new URLSearchParams(window.location.search);
+      params.delete('ref');
+      var qs = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+    } catch (e) { /* replaceState unavailable — leave the URL as it is */ }
+  })();
+
   // ── Ensure <head> has OG tags and all CSS files ──
   (function ensureHead() {
     var head = document.head;
