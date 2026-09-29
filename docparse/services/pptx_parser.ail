@@ -328,17 +328,40 @@ pure func extractDrawingMLText(p: XmlNode) -> string {
 pure func extractDrawingMLRuns(nodes: [XmlNode]) -> string =
   join("", map(drawingMLNodeText, nodes))
 
--- Extract text contribution from a single DrawingML node
+-- Extract text contribution from a single DrawingML node.
+--
+-- a:fld (slide number, date/time, custom field) is a run whose <a:t> is the
+-- CACHED value — what PowerPoint last rendered, and so what the reader saw.
+-- It is read exactly like a:r. Before v0.47.x it fell to the "" arm, turning
+-- "Slide <fld>7</fld> of 20" into "Slide  of 20". Page-furniture placeholders
+-- (sldNum/dt/ftr) in NOTES stay excluded by pptxFindNotesBodyText, which
+-- filters by placeholder type before any paragraph is read.
 pure func drawingMLNodeText(node: XmlNode) -> string {
   let tag = getTag(node);
-  if tag == "a:r" then extractDrawingMLRunText(node)
+  if tag == "a:r" || tag == "a:fld" then extractDrawingMLRunText(node)
   else if tag == "a:br" then "\n"
   else if tag == "m:oMath" then renderOmml(node)
   else if tag == "m:oMathPara" then renderOmml(node)
   else ""
 }
 
--- Extract text from a single a:r run
+-- String seam over extractDrawingMLText, so the paragraph walk (field runs
+-- included) is covered by inline tests without a whole slide around it.
+pure func pptxParaText(xml: string) -> string
+  tests [
+    ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:r><a:t>Slide </a:t></a:r><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2B}\" type=\"slidenum\"><a:rPr lang=\"en-US\"/><a:t>7</a:t></a:fld><a:r><a:t> of 20</a:t></a:r></a:p>", "Slide 7 of 20"),
+    ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2C}\" type=\"datetime1\"><a:rPr lang=\"en-US\"/><a:t>9/29/2026</a:t></a:fld></a:p>", "9/29/2026"),
+    ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2D}\" type=\"slidenum\"><a:rPr lang=\"en-US\"/></a:fld></a:p>", ""),
+    ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:r><a:t>plain</a:t></a:r></a:p>", "plain")
+  ]
+{
+  match parseLenient(xml) {
+    Ok(root) => extractDrawingMLText(root),
+    Err(_) => ""
+  }
+}
+
+-- Extract text from a single a:r run (or a:fld field run: same shape)
 pure func extractDrawingMLRunText(run: XmlNode) -> string =
   getOrElse(optMap(getText, findFirst(run, "a:t")), "")
 
@@ -358,7 +381,7 @@ pure func extractDrawingMLParaRuns(p: XmlNode) -> [InlineRun] {
 
 pure func drawingMLNodeRuns(node: XmlNode) -> [InlineRun] {
   let tag = getTag(node);
-  if tag == "a:r" then [extractDrawingMLRun(node)]
+  if tag == "a:r" || tag == "a:fld" then [extractDrawingMLRun(node)]
   else if tag == "a:br" then [plainRun("\n")]
   else if tag == "m:oMath" then [plainRun(renderOmml(node))]
   else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
@@ -594,6 +617,8 @@ pure func pptxExtractNoteText(xml: string) -> string
     ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"9\" name=\"g\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Grouped</a:t></a:r></a:p></p:txBody></p:sp></p:grpSp></p:spTree></p:cSld></p:notes>", "Grouped"),
     -- body wins over a plain text box
     ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>Stray</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Real notes</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "Real notes"),
+    -- a field in the body is its cached text; a field in the sldNum placeholder stays excluded
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"sldNum\" idx=\"5\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2E}\" type=\"slidenum\"><a:t>7</a:t></a:fld></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Draft as of </a:t></a:r><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2F}\" type=\"datetime1\"><a:t>9/29/2026</a:t></a:fld></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "Draft as of 9/29/2026"),
     -- only page furniture: no notes
     ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"sldNum\" idx=\"5\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>7</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"ftr\" idx=\"4\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Footer</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "")
   ]
