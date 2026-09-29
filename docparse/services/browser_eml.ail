@@ -1,0 +1,38 @@
+module docparse/services/browser_eml
+
+import std/json (encode, ja)
+import docparse/services/eml_parser (parseEml, parseEmlMetadata, parseMbox, parseMboxMetadata, parseMboxThreaded)
+import docparse/services/output_formatter (blocksToJson, metadataToJson)
+
+-- Browser (WASM) bindings for EML and MBOX.
+--
+-- Loaded on demand by docs/js/wasm-demo.js (LAZY_MODULES) the first time a
+-- file of this format is parsed, with the parser modules it imports, so the
+-- boot set stays small; docparse_browser holds the always-loaded bindings.
+-- Pure: JavaScript reads the file (and the ZIP, via JSZip) and passes strings
+-- in; the parsing is the same AILANG the CLI runs.
+
+-- Parse EML email content -> JSON array of blocks
+export pure func parseEmlContent(content: string) -> string {
+  encode(ja(blocksToJson(parseEml(content))))
+}
+
+-- Parse EML metadata (Subject, From, Date) -> JSON metadata object
+export pure func parseEmlMeta(content: string) -> string {
+  encode(metadataToJson(parseEmlMetadata(content)))
+}
+
+-- Parse MBOX archive -> JSON array of blocks (all messages)
+export pure func parseMboxContent(content: string) -> string {
+  encode(ja(blocksToJson(parseMbox(content))))
+}
+
+-- Parse MBOX metadata (from first message) -> JSON metadata object
+export pure func parseMboxMeta(content: string) -> string {
+  encode(metadataToJson(parseMboxMetadata(content)))
+}
+
+-- Parse MBOX with thread reconstruction -> JSON array of thread blocks
+export pure func parseMboxThreadedContent(content: string) -> string {
+  encode(ja(blocksToJson(parseMboxThreaded(content))))
+}
