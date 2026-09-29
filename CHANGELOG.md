@@ -197,6 +197,45 @@ Tests:
 - New inline tests: `pptxParaText` and `pptxExtractNoteText` (fields),
   `pptxNotesPara`, `pptxTplFirstNotesMaster` and `pptxTplFreeThemePart`.
 
+### XLSX: comments follow their own sheet, and rows keep their sheet positions
+
+Two gaps left open by the v0.47.0 XLSX fixes (design doc
+`v0_47_0_partner_report_followups.md`, G3 and G7).
+
+**Comments were matched to sheets by position.** The Nth comment part went
+to the Nth sheet. Excel numbers comment parts by creation order, and only for
+sheets that have comments, so whenever a sheet without comments came first,
+comments landed on the wrong sheet and were anchored to the wrong cell's text.
+Each sheet's comment parts are now read from its own rels
+(`xl/worksheets/_rels/sheetN.xml.rels`, Type ending `/comments` or
+`/threadedComment`, relative or absolute targets). Threaded-comment authors
+come from the person part that `workbook.xml.rels` names. A workbook with no
+sheet rels at all, like the hand-built `challenge_threaded_comments.xlsx`,
+still works when it has a single sheet. A comment part that no sheet claims is
+no longer dropped or guessed onto a sheet. It is emitted unanchored after the
+last sheet, and a warning names the part.
+
+**Rows after an empty row moved up.** Excel writes no `<row>` for an empty
+row, and rows were appended in the order they were met, so
+`pandoc_basic.xlsx`'s row 6 came back as row 4. Rows are now placed by their
+`r=`. An interior gap of up to 100 rows is filled with that many blank rows.
+A longer gap collapses to one blank separator row with a warning
+(`Sheet Gaps: rows 7-399 are empty; collapsed to one blank row.`), so a sheet
+never grows by thousands of blank rows. Filled rows count toward the
+5,000-row cap. Leading empty rows are not filled, so the header row does not
+change, and trailing ones never appear. A blank row inside a vertical merge
+keeps its covered-cell markers. Timings are unchanged within noise:
+`poi_many_merges.xlsx` 5.43s → 5.47s (median of 6), and a dense
+5,000×20 sheet 6.44s → 6.49s.
+
+Tests: `challenge_comments_multisheet.xlsx` (new) and a `Gaps` sheet in
+`challenge_sparse_rows.xlsx`, with exact assertions in
+`benchmarks/check_xlsx_positions.py`. The same script also checks the
+unlinked-part case on a copy of the fixture with its sheet rels removed. Five
+goldens gain blank rows where the sheet has them: `pandoc_basic`,
+`challenge_formula_cached`, `challenge_formulas`, `challenge_merged_cells`
+and `challenge_sparse_rows`.
+
 ## [v0.47.0](https://github.com/sunholo-data/ailang-parse/compare/v0.46.0...v0.47.0) — 2026-09-29
 
 ### Workbench DOCX parsing works again, and RTF works on the workbench at all

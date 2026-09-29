@@ -6,7 +6,7 @@ import std/iter (FoldStep, Continue, Stop)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, startsWith, endsWith, substring, intToStr, split, find, charAt, charCode)
-import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl, foldlE, any, dedup, sortBy)
+import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl, foldlE, mapE, flatMapE, any, dedup, sortBy)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList, values as mapValues)
 import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withCellColours)
 import docparse/services/colour (normaliseHex, applyTint, parseTint, indexedColour, themeSlotName)
@@ -46,8 +46,18 @@ export func parseXlsxWithWarnings(filepath: string) -> XlsxParsed ! {FS} {
   let styles = loadXlsxStyles(filepath);
   -- Sheets in the workbook's own tab order, each paired with its real name
   let sheets = xlsxWorkbookSheets(filepath, findSheetEntries(filepath));
-  let parsed = parseSheetsWithNames(filepath, map(xlsxPairVal, sheets), sharedStrings, styles,
-                                    map(xlsxPairKey, sheets));
+  let parts = map(xlsxPairVal, sheets);
+  -- Comment parts resolved to their sheets through each sheet's rels
+  let plan = xlsxCommentPlan(filepath, parts);
+  let persons = match concat(flatMap(xlsxScThreaded, plan.sheets), plan.orphanThreaded) {
+    [] => [],
+    _ => xlsxReadPersons(filepath)
+  };
+  let sheetsParsed = parseSheetsWithNames(filepath, parts, sharedStrings, styles,
+                                          map(xlsxPairKey, sheets), plan, persons);
+  let orphans = xlsxOrphanComments(filepath, plan, persons);
+  let parsed = { blocks: concat(sheetsParsed.blocks, orphans.blocks),
+                 warnings: concat(sheetsParsed.warnings, orphans.warnings) };
   -- Warn if shared strings were truncated
   let blocks = if stringCount >= 50000
   then {
@@ -90,13 +100,126 @@ type XlsxComment = {
 -- Read every comment attached to one worksheet as raw records. The threaded
 -- copy wins over the legacy compatibility shim for the same cell. Anchor
 -- resolution happens against the streamed sheet rows in the caller.
-func xlsxSheetCommentRecords(filepath: string, sheetIdx: int) -> [XlsxComment] ! {FS} {
-  let legacy = xlsxReadLegacyComments(filepath, sheetIdx);
-  let threaded = xlsxReadThreadedComments(filepath, sheetIdx);
+func xlsxSheetCommentRecords(filepath: string, parts: XlsxSheetComments,
+                             persons: [(string, string)]) -> [XlsxComment] ! {FS} {
+  let legacy = flatMapE(\e. xlsxReadLegacyComments(filepath, e), parts.legacy);
+  let threaded = flatMapE(\e. xlsxReadThreadedComments(filepath, e, persons), parts.threaded);
   -- Threaded comments supersede the legacy compatibility copy for the same cell
   let threadedRefs = map(\c. c.ref, threaded);
   concat(threaded, filter(\c. not xlsxRefSeen(c.ref, threadedRefs), legacy))
 }
+
+-- === Which comment parts belong to which sheet ==========================
+--
+-- A sheet names its own comment parts in xl/worksheets/_rels/sheetN.xml.rels
+-- (Type ending /comments for legacy notes, /threadedComment for review
+-- threads). Excel numbers the parts by creation order and only for sheets
+-- that HAVE comments, so pairing the Nth part with the Nth sheet attached
+-- comments to the wrong sheet whenever a sheet without comments came first.
+--
+-- Fallback: a hand-built workbook may carry comment parts and no sheet rels
+-- at all (challenge_threaded_comments.xlsx). When no sheet claims any part
+-- and there is exactly one sheet, that sheet takes every part. Any part still
+-- unclaimed is an orphan: emitted unanchored after the last sheet, with a
+-- warning, rather than dropped or guessed onto a sheet.
+type XlsxSheetComments = { sheet: string, legacy: [string], threaded: [string] }
+type XlsxCommentPlan = { sheets: [XlsxSheetComments], orphanLegacy: [string], orphanThreaded: [string] }
+
+func xlsxCommentPlan(filepath: string, sheetParts: [string]) -> XlsxCommentPlan ! {FS} {
+  let legacyAll = findXlsxCommentEntries(filepath);
+  let threadedAll = findXlsxThreadedEntries(filepath);
+  match (legacyAll, threadedAll) {
+    -- No comment parts: no sheet rels need reading.
+    ([], []) => { sheets: [], orphanLegacy: [], orphanThreaded: [] },
+    _ => {
+      let linked = mapE(\p. xlsxSheetCommentRels(p, readZipEntry(filepath, xlsxSheetRelsPath(p))), sheetParts);
+      xlsxPlanComments(linked, legacyAll, threadedAll)
+    }
+  }
+}
+
+pure func xlsxPlanComments(linked: [XlsxSheetComments], legacyAll: [string], threadedAll: [string]) -> XlsxCommentPlan {
+  let claimedL = flatMap(xlsxScLegacy, linked);
+  let claimedT = flatMap(xlsxScThreaded, linked);
+  match (claimedL, claimedT, linked) {
+    ([], [], [only]) => { sheets: [{ sheet: only.sheet, legacy: legacyAll, threaded: threadedAll }],
+                          orphanLegacy: [], orphanThreaded: [] },
+    _ => { sheets: linked,
+           orphanLegacy: filter(\e. not xlsxRefSeen(e, claimedL), legacyAll),
+           orphanThreaded: filter(\e. not xlsxRefSeen(e, claimedT), threadedAll) }
+  }
+}
+
+pure func xlsxScSheet(s: XlsxSheetComments) -> string = s.sheet
+pure func xlsxScLegacy(s: XlsxSheetComments) -> [string] = s.legacy
+pure func xlsxScThreaded(s: XlsxSheetComments) -> [string] = s.threaded
+
+pure func xlsxSheetCommentsFor(plan: XlsxCommentPlan, part: string) -> XlsxSheetComments =
+  match filter(\s. xlsxScSheet(s) == part, plan.sheets) {
+    [] => { sheet: part, legacy: [], threaded: [] },
+    s :: _ => s
+  }
+
+-- The comment parts one sheet's rels point at.
+pure func xlsxSheetCommentRels(part: string, relsXml: string) -> XlsxSheetComments =
+  if length(relsXml) == 0 then { sheet: part, legacy: [], threaded: [] }
+  else match parseLenient(relsXml) {
+    Ok(root) => {
+      let rels = findAll(root, "Relationship");
+      let dir = xlsxPartDir(part);
+      { sheet: part,
+        legacy: xlsxRelTargets(rels, dir, "/comments"),
+        threaded: xlsxRelTargets(rels, dir, "/threadedComment") }
+    },
+    Err(_) => { sheet: part, legacy: [], threaded: [] }
+  }
+
+-- Targets of the relationships whose Type ends with suffix, resolved against
+-- the source part's directory. Matched on the suffix, not the full URI: the
+-- threaded-comment relationship URI differs between Excel builds.
+pure func xlsxRelTargets(rels: [XmlNode], dir: string, suffix: string) -> [string] =
+  map(\r. xlsxResolveRelTarget(dir, getOrElse(getAttr(r, "Target"), "")),
+      filter(\r. endsWith(getOrElse(getAttr(r, "Type"), ""), suffix), rels))
+
+-- "xl/worksheets/sheet2.xml" -> "xl/worksheets"
+pure func xlsxPartDir(part: string) -> string
+  tests [("xl/worksheets/sheet2.xml", "xl/worksheets"), ("sheet.xml", "")]
+{
+  let segs = split(part, "/");
+  join("/", take(listLength(segs) - 1, segs))
+}
+
+-- "xl/worksheets/sheet2.xml" -> "xl/worksheets/_rels/sheet2.xml.rels"
+pure func xlsxSheetRelsPath(part: string) -> string
+  tests [("xl/worksheets/sheet2.xml", "xl/worksheets/_rels/sheet2.xml.rels")]
+{
+  let segs = split(part, "/");
+  let n = listLength(segs);
+  let name = getOrElse(nth(segs, n - 1), part);
+  let dir = join("/", take(n - 1, segs));
+  if length(dir) == 0 then "_rels/${name}.rels" else "${dir}/_rels/${name}.rels"
+}
+
+-- A relationship target: absolute ("/xl/comments/comment1.xml") from the
+-- package root, otherwise relative to the source part's directory, with
+-- "../" and "./" segments folded away.
+pure func xlsxResolveRelTarget(dir: string, target: string) -> string
+  tests [(("xl/worksheets", "../comments1.xml"), "xl/comments1.xml"),
+         (("xl/worksheets", "/xl/comments/comment1.xml"), "xl/comments/comment1.xml"),
+         (("xl/worksheets", "../threadedComments/threadedComment1.xml"), "xl/threadedComments/threadedComment1.xml"),
+         (("xl/worksheets", "./notes.xml"), "xl/worksheets/notes.xml"),
+         (("xl", "persons/person.xml"), "xl/persons/person.xml")]
+{
+  let segs = if startsWith(target, "/") then split(substring(target, 1, length(target)), "/")
+             else concat(split(dir, "/"), split(target, "/"));
+  join("/", reverse(foldl(xlsxPathStep, [], segs)))
+}
+
+-- One path segment onto a reversed segment stack.
+pure func xlsxPathStep(acc: [string], seg: string) -> [string] =
+  if seg == "" || seg == "." then acc
+  else if seg == ".." then (match acc { [] => [], _ :: rest => rest })
+  else seg :: acc
 
 pure func xlsxRefSeen(ref: string, refs: [string]) -> bool =
   match filter(\r. r == ref, refs) {
@@ -123,21 +246,15 @@ pure func xlsxCommentBlock(c: XlsxComment, texts: [(string, string)]) -> Block {
 }
 
 -- Legacy notes: xl/comments1.xml (or xl/comments/comment1.xml)
-func xlsxReadLegacyComments(filepath: string, sheetIdx: int) -> [XlsxComment] ! {FS} {
-  let entries = findXlsxCommentEntries(filepath);
-  match nth(entries, sheetIdx) {
-    Some(entry) => {
-      let xml = readZipEntry(filepath, entry);
-      if length(xml) == 0 then []
-      else match parseLenient(xml) {
-        Ok(root) => {
-          let authors = findAllTexts(root, "author");
-          map(\n. xlsxLegacyComment(n, authors), findAll(root, "comment"))
-        },
-        Err(_) => []
-      }
+func xlsxReadLegacyComments(filepath: string, entry: string) -> [XlsxComment] ! {FS} {
+  let xml = readZipEntry(filepath, entry);
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => {
+      let authors = findAllTexts(root, "author");
+      map(\n. xlsxLegacyComment(n, authors), findAll(root, "comment"))
     },
-    None => []
+    Err(_) => []
   }
 }
 
@@ -164,28 +281,29 @@ pure func xlsxAuthorAt(authors: [string], idx: int) -> string =
 pure func parseIntOr(s: string, dflt: int) -> int = getOrElse(stringToInt(s), dflt)
 
 -- Threaded comments: xl/threadedComments/*.xml, authors in xl/persons/*.xml
-func xlsxReadThreadedComments(filepath: string, sheetIdx: int) -> [XlsxComment] ! {FS} {
-  let entries = findXlsxThreadedEntries(filepath);
-  match nth(entries, sheetIdx) {
-    Some(entry) => {
-      let xml = readZipEntry(filepath, entry);
-      if length(xml) == 0 then []
-      else {
-        let persons = xlsxReadPersons(filepath);
-        match parseLenient(xml) {
-          Ok(root) => map(\n. xlsxThreadedComment(n, persons),
-                          findAll(root, "threadedComment")),
-          Err(_) => []
-        }
-      }
-    },
-    None => []
+func xlsxReadThreadedComments(filepath: string, entry: string, persons: [(string, string)]) -> [XlsxComment] ! {FS} {
+  let xml = readZipEntry(filepath, entry);
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => map(\n. xlsxThreadedComment(n, persons), findAll(root, "threadedComment")),
+    Err(_) => []
   }
 }
 
--- personId GUID -> display name
+-- personId GUID -> display name. The person parts are workbook-level:
+-- workbook.xml.rels names them (Type ending /person). A workbook with no such
+-- relationship (hand-built, like challenge_threaded_comments.xlsx) falls back
+-- to every xl/persons/ part in the package. Read once per workbook, and only
+-- when some sheet has threaded comments.
 func xlsxReadPersons(filepath: string) -> [(string, string)] ! {FS} {
-  let entries = findXlsxPersonEntries(filepath);
+  let linked = match parseLenient(readZipEntry(filepath, "xl/_rels/workbook.xml.rels")) {
+    Ok(root) => xlsxRelTargets(findAll(root, "Relationship"), "xl", "/person"),
+    Err(_) => []
+  };
+  let entries = match linked {
+    [] => findXlsxPersonEntries(filepath),
+    _ => linked
+  };
   xlsxReadPersonEntries(filepath, entries)
 }
 
@@ -432,8 +550,11 @@ pure func xlsxFillGap(merges: [XlsxMerge], rowNum: int, from: int, to: int) -> [
 -- as the positional read did. Counting only non-empty rows let a sheet of
 -- 50k styled-blank rows walk all 50k instead of stopping at the cap.
 pure func xlsxBuildRow(rowNode: XmlNode, ss: Map[int, string], styles: Map[int, XlsxXfColour],
-                       merges: [XlsxMerge]) -> [TableCell] {
-  let rowNum = xlsxRowNumber(rowNode);
+                       merges: [XlsxMerge]) -> [TableCell] =
+  xlsxBuildRowAt(rowNode, xlsxRowNumber(rowNode), ss, styles, merges)
+
+pure func xlsxBuildRowAt(rowNode: XmlNode, rowNum: int, ss: Map[int, string], styles: Map[int, XlsxXfColour],
+                         merges: [XlsxMerge]) -> [TableCell] {
   -- Every merge test below is per (col, row); narrowing to the regions that
   -- touch this row once saves a scan of all of them for every cell.
   let rowMerges = filter(\m. rowNum >= m.startRow && rowNum <= m.endRow, merges);
@@ -635,9 +756,11 @@ pure func xlsxGetSheetName(names: [string], idx: int, entry: string) -> string =
 type XlsxParsed = { blocks: [Block], warnings: [string] }
 
 func parseSheetsWithNames(filepath: string, entries: [string], sharedStrings: Map[int, string],
-                          styles: Map[int, XlsxXfColour], names: [string]) -> XlsxParsed ! {FS} =
+                          styles: Map[int, XlsxXfColour], names: [string],
+                          plan: XlsxCommentPlan, persons: [(string, string)]) -> XlsxParsed ! {FS} =
   foldlE(func(acc: XlsxParsed, item: (string, int)) -> XlsxParsed ! {FS} {
-    let one = xlsxParseOneSheet(filepath, xlsxEntryName(item), sharedStrings, styles, names, xlsxEntryIdx(item));
+    let one = xlsxParseOneSheet(filepath, xlsxEntryName(item), sharedStrings, styles, names, xlsxEntryIdx(item),
+                                xlsxSheetCommentsFor(plan, xlsxEntryName(item)), persons);
     { blocks: concat(acc.blocks, one.blocks), warnings: concat(acc.warnings, one.warnings) }
   }, { blocks: [], warnings: [] }, xlsxIndexed(entries, 0))
 
@@ -655,12 +778,13 @@ pure func xlsxIndexed(entries: [string], idx: int) -> [(string, int)] =
 -- are resolved from the streamed rows), then the sheet itself, streamed.
 -- Everything large here is local to this frame, so it is freeable on return.
 func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, string],
-                       styles: Map[int, XlsxXfColour], names: [string], idx: int) -> XlsxParsed ! {FS} {
+                       styles: Map[int, XlsxXfColour], names: [string], idx: int,
+                       commentParts: XlsxSheetComments, persons: [(string, string)]) -> XlsxParsed ! {FS} {
   let sheetName = xlsxGetSheetName(names, idx, entry);
   -- Cell comments follow their sheet, each anchored to the cell (and the
   -- cell's value) it annotates. Read the comment records before streaming so
   -- the row fold can collect the anchor cells' text as it goes.
-  let comments = xlsxSheetCommentRecords(filepath, idx);
+  let comments = xlsxSheetCommentRecords(filepath, commentParts, persons);
   let refs = filter(\r. length(r) > 0, dedup(map(\c. c.ref, comments)));
   let streamed = xlsxStreamSheet(filepath, entry, sharedStrings, styles, refs);
   let blocks = xlsxSheetBlocks(streamed.rows, sheetName);
@@ -668,7 +792,8 @@ func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, 
   let condFmt = xlsxConditionalFormats(filepath, entry);
   let cleanName = xlsxCleanSheetName(sheetName);
   { blocks: concat(blocks, wrapped),
-    warnings: concat(xlsxCondFmtWarning(cleanName, condFmt), xlsxFlagWarnings(cleanName, streamed.flags)) }
+    warnings: concat(concat(xlsxCondFmtWarning(cleanName, condFmt), xlsxFlagWarnings(cleanName, streamed.flags)),
+                     map(\g. xlsxGapWarning(cleanName, g), streamed.gaps)) }
 }
 
 -- Fold-accumulator record for streaming one worksheet out of the ZIP.
@@ -685,7 +810,11 @@ type XlsxStreamFold = {
   flags: [string],
   merges: [XlsxMerge],
   refs: [string],
-  texts: [(string, string)]
+  texts: [(string, string)],
+  -- Sheet row number of the last row placed, and the empty ranges too long
+  -- to fill (see xlsxPlaceRow).
+  lastRow: int,
+  gaps: [(int, int)]
 }
 
 -- Stream one worksheet straight out of the ZIP archive: one streaming pass
@@ -693,17 +822,17 @@ type XlsxStreamFold = {
 -- <row>. Returns rows in document order plus the displayed text of any cell
 -- referenced by a comment. The sheet XML string is never materialised.
 func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], styles: Map[int, XlsxXfColour], refs: [string])
-    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string] } ! {FS} {
+    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string], gaps: [(int, int)] } ! {FS} {
   let merges = match scanFoldStep(filepath, entry, "mergeCell", { merges: [], count: 0 }, xlsxFoldMerge) {
     Ok(acc) => reverse(acc.merges),
     Err(_) => []
   };
   match scanFoldStep(filepath, entry, "row",
     { rows: [], count: 0, ss: ss, styles: styles, flagged: xlsxAnyFlagged(styles), flags: [],
-      merges: merges, refs: refs, texts: [] },
+      merges: merges, refs: refs, texts: [], lastRow: 0, gaps: [] },
     xlsxFoldRowStep) {
-    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags },
-    Err(_) => { rows: [], texts: [], flags: [] }
+    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps) },
+    Err(_) => { rows: [], texts: [], flags: [], gaps: [] }
   }
 }
 
@@ -724,7 +853,8 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
   if acc.count >= 5000 then
     (if xlsxRefsAllFound(acc.refs, acc.texts) then Stop(acc) else Continue(acc))
   else {
-    let cells = xlsxBuildRow(rowNode, acc.ss, acc.styles, acc.merges);
+    let rowNum = xlsxRowNumber(rowNode);
+    let cells = xlsxBuildRowAt(rowNode, rowNum, acc.ss, acc.styles, acc.merges);
     let texts = if listLength(acc.refs) > 0
       then xlsxCollectRefTexts(findAll(rowNode, "c"), acc.ss, acc.refs, acc.texts)
       else acc.texts;
@@ -732,14 +862,71 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
       then xlsxCollectFlags(findAll(rowNode, "c"), acc.styles, acc.flags)
       else acc.flags;
     let acc2 = { acc | texts: texts, flags: flags };
-    let acc3 = if xlsxRowHasCells(rowNode)
-      then { acc2 | rows: cells :: acc2.rows, count: acc2.count + 1 }
-      else acc2;
+    let acc3 = if xlsxRowHasCells(rowNode) then xlsxPlaceRow(acc2, cells, rowNum) else acc2;
     if acc3.count >= 5000 && xlsxRefsAllFound(acc3.refs, acc3.texts)
     then Stop(acc3)
     else Continue(acc3)
   }
 }
+
+-- === Row positions (ECMA-376 §18.3.1.73 row r=) ==========================
+--
+-- Excel writes no <row> for an empty row, so appending rows in the order they
+-- are met moved every row after a gap up. Each row is placed at its r=
+-- instead: an interior gap of up to xlsxMaxRowGap rows is filled with that
+-- many blank rows, and a longer one (a data block and a totals block far
+-- below it) collapses to a single blank separator row, recorded in gaps so
+-- the caller can warn. A gap never produces thousands of blank rows.
+--
+-- Filled rows count toward the 5000-row cap like any other. Leading empty
+-- rows are not filled (the first row stays the header), and trailing ones
+-- never appear: filling happens only when a later row with cells arrives,
+-- and never when that row would not fit under the cap. A row with no r=, or
+-- one pointing backwards, takes the next row number in reading order.
+pure func xlsxMaxRowGap() -> int = 100
+
+-- The next row down (every row of a dense sheet) is one record update; only
+-- a gap, a missing r= or a backwards r= takes the general path.
+pure func xlsxPlaceRow(acc: XlsxStreamFold, cells: [TableCell], rowNum: int) -> XlsxStreamFold =
+  if rowNum == acc.lastRow + 1
+  then { acc | rows: cells :: acc.rows, count: acc.count + 1, lastRow: rowNum }
+  else xlsxPlaceRowGap(acc, cells, rowNum)
+
+pure func xlsxPlaceRowGap(acc: XlsxStreamFold, cells: [TableCell], rowNum: int) -> XlsxStreamFold {
+  let r = if rowNum > acc.lastRow then rowNum else acc.lastRow + 1;
+  let gap = if acc.count == 0 then 0 else r - acc.lastRow - 1;
+  let fill = xlsxGapFill(gap, xlsxMaxRowGap());
+  let gaps = if gap > xlsxMaxRowGap() then (acc.lastRow + 1, r - 1) :: acc.gaps else acc.gaps;
+  if acc.count + fill >= 5000
+  -- No room for this row after its gap: the cap is reached here, and the
+  -- blank rows would only have been trailing ones.
+  then { acc | count: 5000, lastRow: r, gaps: gaps }
+  else {
+    let filled = if fill == 0 then acc.rows else xlsxBlankRows(acc.merges, acc.lastRow + 1, fill, acc.rows);
+    { acc | rows: cells :: filled, count: acc.count + fill + 1, lastRow: r, gaps: gaps }
+  }
+}
+
+-- Blank rows to insert for a gap of `gap` missing rows.
+pure func xlsxGapFill(gap: int, bound: int) -> int
+  requires { bound >= 1 }
+  ensures { result >= 0 && result <= bound && result <= gap || gap <= 0 && result == 0 }
+  tests [((0, 100), 0), ((2, 100), 2), ((100, 100), 100), ((101, 100), 1), ((393, 100), 1)]
+{
+  if gap <= 0 then 0 else if gap <= bound then gap else 1
+}
+
+-- n blank rows from sheet row `from` down, prepended onto a reversed row list.
+-- A blank row inside a vertical merge region keeps its covered-cell markers.
+pure func xlsxBlankRows(merges: [XlsxMerge], from: int, n: int, rows: [[TableCell]]) -> [[TableCell]] =
+  if n <= 0 then rows
+  else xlsxBlankRows(merges, from + 1, n - 1,
+                     xlsxFillGap(merges, from, 0, xlsxMaxColForRow(merges, from) + 1) :: rows)
+
+pure func xlsxGapWarning(sheet: string, gap: (int, int)) -> string =
+  match gap {
+    (a, b) => "Sheet ${sheet}: rows ${intToStr(a)}-${intToStr(b)} are empty; collapsed to one blank row."
+  }
 
 -- Collect the displayed text of any cell in this row whose ref is a comment
 -- anchor. parseXlsxCell is the exact resolver the whole-XML pass used.
@@ -756,6 +943,21 @@ pure func xlsxRefCollected(ref: string, texts: [(string, string)]) -> bool =
 
 pure func xlsxRefsAllFound(refs: [string], texts: [(string, string)]) -> bool =
   not any(\r. not xlsxRefCollected(r, texts), refs)
+
+-- Comment parts no sheet claims (see xlsxCommentPlan). Their cell refs are
+-- real but the sheet is unknown, so they are emitted unanchored rather than
+-- attached to a guessed sheet, and a warning names each part.
+func xlsxOrphanComments(filepath: string, plan: XlsxCommentPlan, persons: [(string, string)]) -> XlsxParsed ! {FS} =
+  match concat(plan.orphanLegacy, plan.orphanThreaded) {
+    [] => { blocks: [], warnings: [] },
+    orphanParts => {
+      let records = xlsxSheetCommentRecords(filepath,
+        { sheet: "", legacy: plan.orphanLegacy, threaded: plan.orphanThreaded }, persons);
+      { blocks: map(\c. xlsxWrapComment(mkUnanchoredComment(c.id, c.author, c.date, c.text, c.parentId, false)), records),
+        warnings: map(\e. "Comment part ${e} is not linked from any sheet; its comments are emitted unanchored after the last sheet.",
+                      orphanParts) }
+    }
+  }
 
 -- Keep the SectionBlock(kind: "comment") wrapper used by every other format
 pure func xlsxWrapComment(b: Block) -> Block =
@@ -805,7 +1007,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
     -- carry no colour on this path.
     let foldResult = parseFoldStep(sanitizeXml(xml), "row",
       { rows: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
-        merges: merges, refs: [], texts: [] },
+        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [] },
       xlsxFoldRowStep);
     let parsedRows = match foldResult {
       Ok(acc2) => reverse(acc2.rows),
