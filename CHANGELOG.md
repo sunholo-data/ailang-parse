@@ -149,6 +149,54 @@ WASM type-check headroom (design doc G6, repo side):
   format that loads it. The first DOCX, for example, waits about 3s for its
   parsers.
 
+### PPTX → PPTX keeps speaker notes; field text (slide numbers, dates) is read
+
+Since v0.47.0 the parser attaches each slide's speaker notes as
+`SectionBlock{kind:"notes", name:"Slide N"}` right after the slide. Converting
+a deck back to PPTX still dropped all of them: `pptxSplitBySlides` kept only
+slide sections, and the generator wrote no notes parts. On
+`pptx_slide_order_notes.pptx`, parse → `--convert` → parse returned 0 of 12
+notes (design doc G1).
+
+- The generator now writes `ppt/notesSlides/notesSlideN.xml` for each slide
+  that has notes. N is the slide's own number. Each part gets rels in both
+  directions and a content-type override. A notes master
+  (`notesMaster1.xml` + its own theme) is listed in `<p:notesMasterIdLst>`.
+  A notes section attaches to the slide before it. A notes section with no
+  slide before it is dropped and counted in the result line.
+- `--reference-doc` reuses the template's notes master when it has one.
+  Otherwise ours is added, with its theme on a theme part name the template
+  does not use. Either way the notes-master id list and relationship are
+  rewritten, because python-pptx decks relate a notes master without listing
+  it.
+- Decks with no notes are byte-identical to before, on both paths.
+- Fixed in `pptxTplDropElems`: `"<Relationship"` also matched the root
+  `<Relationships>` tag. When the root's first child was a dropped
+  relationship, the root's open tag was cut with it. This was the failing
+  `pptxTplDropSlideRels_test_2` inline test on main.
+
+`a:fld` runs (slide number, date/time, custom fields) now contribute their
+cached `<a:t>`, the value the reader last saw, in slide text, tables and
+notes. "Slide `<fld>`10`</fld>` of 13" used to parse as "Slide  of 13" (G4).
+Page-furniture placeholders (`sldNum`/`dt`/`ftr`) in notes stay excluded.
+
+Tests:
+- `benchmarks/check_pptx_notes_roundtrip.py` (new, in CI). Covers plain and
+  three reference decks: no notes master, a related and listed one, and one
+  that is related only. Each case requires the identical `(kind, name, text)`
+  section list after the round trip, each note directly after its own slide,
+  and the notes wiring resolved in the package. On main every case fails
+  with `0 != 12`.
+- `verify_generated.py` has a new `L7 PptxNotes` stage. It checks that
+  python-pptx and LibreOffice (via ODP export) read each generated note on
+  the right slide. Keynote was checked by hand and shows all 12 notes on the
+  right slides for the plain and both reference-deck outputs.
+- `create_pptx_order_fixture.py`: the fixture now has a `slidenum` field in
+  one slide body and a `datetime1` field in one notes body. `--verify`
+  asserts the exact strings, which fails on main.
+- New inline tests: `pptxParaText` and `pptxExtractNoteText` (fields),
+  `pptxNotesPara`, `pptxTplFirstNotesMaster` and `pptxTplFreeThemePart`.
+
 ## [v0.47.0](https://github.com/sunholo-data/ailang-parse/compare/v0.46.0...v0.47.0) — 2026-09-29
 
 ### Workbench DOCX parsing works again, and RTF works on the workbench at all
