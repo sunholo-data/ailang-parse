@@ -11,6 +11,65 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### The office suite gates on structure, and can now fail CI
+
+v0.47.0's XLSX column shift, sheet/data mislabel and PPTX slide-order bugs all
+scored 100% on the office suite. It gated tables on table count and merge
+count only (`cell_text_jaccard` was computed and never scored),
+`normalize.py` threw section names away, and text was compared as a set of
+words. The suite also always exited 0, and `run_benchmarks.py` dropped the
+exit code, so CI's "must be 100%" step could not have failed anyway.
+
+New `benchmarks/metrics/structure.py` compares each output to its golden by
+position. Three checks are gated:
+
+- **`sections`**: the outline of every section and comment, in order: kind,
+  name, and the first text inside, so unnamed slides are distinguishable. It
+  covers sheet names and order, slide order, and which slide or sheet each
+  notes or comment entry follows.
+- **`table_grids`**: every table cell at its (row, col). The header row is
+  row 1, so a sheet read from A1 reports its own coordinates.
+- **`block_sequence`**: recursive block types, heading levels and list kind.
+
+A failure says what moved. Run against the pre-fix parser (bc7f098):
+
+```
+sheet 'Tab 05': holds the data expected under sheet 'Leads' (same header row), which differs from it:
+sheet 'Tab 05' (data of sheet 'Leads') row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'
+sheet 'Sheet1': holds the data expected under sheet 'Sheet2'
+slide 1: expected slide "Kickoff" got slide "Timeline"
+notes 'Slide 1': missing (expected after slide "Kickoff")
+```
+
+Those pre-fix outputs are kept in `benchmarks/office/regressions/v0_47_0_prefix/`.
+`benchmarks/check_structure_gate.py` runs in CI and asserts that all four
+still fail with these messages, so the gate cannot quietly stop seeing
+structure. `eval_office.py` exits 1 below 100%, prints each failing check's
+diffs under `## Failures`, and deletes last run's outputs before parsing, so
+a file that fails to parse is no longer scored on stale JSON. A new
+`--actual-dir DIR` flag scores existing outputs without parsing.
+
+Machine-local values are gone from the comparison. `document.filename` is
+ignored. An extracted image's temp path in `src` becomes
+`<local-image-file>` on both sides, and its `dataLength` (the path's length)
+is dropped. This matches any absolute POSIX, Windows or UNC path or `file:`
+URI, so it keeps working when G9 renames the files. Inline base64 and
+relative HTML srcs are kept. `generate_golden.sh FILE...` now regenerates
+only the named files, writes image paths as the placeholder, and keeps each
+golden's existing filename.
+
+Three stale goldens were regenerated. The new gate failed on exactly these
+three, and on nothing else in the 111-file suite:
+
+- `ailang_architecture.md` predated f68307e (lazy list continuation). It had
+  the four-item "Design Principles" list split into 1-item lists and stray
+  paragraphs. It now has one ordered list of four items, which matches the
+  source.
+- `image_vml.docx` and `pandoc_inline_images.docx` predated 38b0974, which
+  moved images to temp files. They held inline base64 lengths, and one
+  `pandoc_inline_images` image had a base64 `src` while the other had none.
+  All their non-image blocks are unchanged.
+
 ## [v0.47.0](https://github.com/sunholo-data/ailang-parse/compare/v0.46.0...v0.47.0) — 2026-09-29
 
 ### Workbench DOCX parsing works again, and RTF works on the workbench at all

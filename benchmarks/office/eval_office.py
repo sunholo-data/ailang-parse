@@ -2,8 +2,16 @@
 
 Evaluates DocParse output against golden expected outputs on structural
 features: track changes, comments, headers/footers, merged cells, text boxes,
-speaker notes, images, tables, lists (count + ordered/unordered classification),
-and text content.
+images, tables, lists (count + ordered/unordered classification), and text
+content.
+
+And by POSITION (metrics/structure.py, v0.47.0 G8): the outline of sections
+and comments (sheet names and order, slide order, which slide each speaker
+note and comment follows), every table cell at its (row, col), and the block
+type sequence. Failures print what moved, e.g.
+    sheet 'Leads' row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'
+
+Exits 1 unless every file scores 100%.
 
 Covers: DOCX, PPTX, XLSX, ODT, ODP, ODS, EPUB, HTML, CSV, Markdown.
 
@@ -13,6 +21,7 @@ Usage:
     uv run benchmarks/office/eval_office.py                  # full report
     uv run benchmarks/office/eval_office.py --json           # JSON output
     uv run benchmarks/office/eval_office.py --file tables.docx  # single file
+    uv run benchmarks/office/eval_office.py --actual-dir DIR    # score existing outputs
 """
 
 from __future__ import annotations
@@ -28,7 +37,12 @@ from typing import Any
 
 # Add parent to path for metrics imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "metrics"))
-from normalize import NormalizedElement, normalize_ailang
+from normalize import NormalizedElement, canonicalize_output, normalize_ailang
+from structure import check_structure
+
+# Checks that compare by POSITION. Printed in full on failure, because the
+# point of them is to say what moved, not just that something did.
+STRUCTURE_CHECKS = ("sections", "table_grids", "block_sequence")
 
 
 REPO_DIR = Path(__file__).parent.parent.parent
@@ -382,22 +396,24 @@ def run_batch(test_files: list[Path]) -> tuple[float, bool]:
     return elapsed_ms, result.returncode == 0
 
 
-def evaluate_file(test_file: Path, golden_file: Path) -> dict:
+def evaluate_file(test_file: Path, golden_file: Path, output_dir: Path = OUTPUT_DIR) -> dict:
     """Compare DocParse output against golden (assumes batch already ran)."""
     fname = test_file.name
 
-    # Load golden
+    # Load golden. Both sides are canonicalised first: document.filename and
+    # extracted-image temp paths differ per machine and per run, and are not
+    # what a golden is for.
     with open(golden_file) as f:
-        golden_json = json.load(f)
+        golden_json = canonicalize_output(json.load(f))
     golden_els = normalize_ailang(golden_json)
 
     # Load actual output (filename-based: sample.docx → sample.docx.json)
-    output_json = OUTPUT_DIR / f"{fname}.json"
+    output_json = output_dir / f"{fname}.json"
     if not output_json.exists():
         return {"file": fname, "status": "FAIL", "error": f"no {fname}.json", "time_ms": 0}
 
     with open(output_json) as f:
-        actual_json = json.load(f)
+        actual_json = canonicalize_output(json.load(f))
     actual_els = normalize_ailang(actual_json)
 
     # Run all checks
@@ -412,6 +428,11 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
         "text_similarity": check_text_jaccard(golden_els, actual_els),
         "metadata": check_metadata(golden_json, actual_json),
         "colours": check_colours(golden_json, actual_json),
+        # Positional: section/sheet/slide order and notes/comment placement,
+        # table cells by (row, col), block type sequence. Every check above is
+        # a count or a bag of words, which is how v0.47.0's column shift,
+        # sheet/data mislabel and slide-order bugs all scored 100%.
+        **check_structure(golden_json, actual_json),
     }
 
     # Compute overall score (applicable checks that pass)
@@ -454,15 +475,15 @@ def evaluate_file(test_file: Path, golden_file: Path) -> dict:
 def print_report(results: list[dict], batch_ms: float = 0) -> None:
     """Print a markdown-style report."""
     print("\n# DocParse Structural Benchmark\n")
-    print(f"| File | Score | Elements | Tables | Lists | Changes | Comments | Hdr/Ftr | TextBox | Jaccard |")
-    print(f"|------|-------|----------|--------|-------|---------|----------|---------|---------|---------|")
+    print(f"| File | Score | Elements | Tables | Lists | Changes | Comments | Hdr/Ftr | TextBox | Struct | Jaccard |")
+    print(f"|------|-------|----------|--------|-------|---------|----------|---------|---------|--------|---------|")
 
     total_score = 0
     total_files = 0
 
     for r in results:
         if r["status"] != "OK":
-            print(f"| {r['file']} | FAIL | — | — | — | — | — | — | — | — |")
+            print(f"| {r['file']} | FAIL | — | — | — | — | — | — | — | — | — |")
             continue
 
         total_files += 1
@@ -489,13 +510,54 @@ def print_report(results: list[dict], batch_ms: float = 0) -> None:
         hdrftr = cell(c["headers_footers"], "header_match")
         textbox = cell(c["text_boxes"])
         jaccard = f"{c['text_similarity']['jaccard']:.2f}"
+        struct = "PASS" if not _failed_structure(r) else \
+            "/".join(n.split("_")[0].upper() for n in _failed_structure(r))
 
         score_pct = f"{r['score']:.0%}"
-        print(f"| {r['file']} | {score_pct} | {r['actual_elements']} | {tables} | {lists} | {changes} | {comments} | {hdrftr} | {textbox} | {jaccard} |")
+        print(f"| {r['file']} | {score_pct} | {r['actual_elements']} | {tables} | {lists} | {changes} | {comments} | {hdrftr} | {textbox} | {struct} | {jaccard} |")
 
     mean_score = total_score / total_files if total_files else 0
     batch_s = batch_ms / 1000
     print(f"\n**Mean score: {mean_score:.1%}** across {total_files} files ({batch_s:.1f}s batch)\n")
+
+    failing = [r for r in results if r["status"] != "OK" or r["score"] < 1.0]
+    if failing:
+        print("## Failures\n")
+        for r in failing:
+            if r["status"] != "OK":
+                print(f"- **{r['file']}**: {r.get('error', 'FAIL')}")
+                continue
+            print(f"- **{r['file']}** ({r['score']:.0%}): failing checks: "
+                  + ", ".join(_failed_checks(r)))
+            for name in _failed_structure(r):
+                chk = r["checks"][name]
+                print(f"  - {name}:")
+                for d in chk.get("diffs", []):
+                    print(f"    - {d}")
+                more = chk.get("diff_count", 0) - len(chk.get("diffs", []))
+                if more > 0:
+                    print(f"    - … {more} more")
+        print()
+
+
+def _failed_checks(r: dict) -> list[str]:
+    """Names of the scored checks that failed, as the scorer counts them."""
+    out = []
+    for name, check in r["checks"].items():
+        if name == "text_similarity":
+            if check["jaccard"] < 0.95:
+                out.append(name)
+        elif name == "metadata":
+            out += [f"metadata.{f}" for f, v in check.items() if v.get("golden") and not v["match"]]
+        elif isinstance(check, dict) and check.get("applicable"):
+            keys = [k for k in check if k.endswith("_match")]
+            if keys and not all(check[k] for k in keys):
+                out.append(name)
+    return out
+
+
+def _failed_structure(r: dict) -> list[str]:
+    return [n for n in STRUCTURE_CHECKS if n in _failed_checks(r)]
 
 
 def main():
@@ -503,6 +565,10 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output JSON instead of markdown")
     parser.add_argument("--file", help="Evaluate a single file")
     parser.add_argument("--stress", action="store_true", help="Run stress tests (large/slow files) instead of standard suite")
+    parser.add_argument("--actual-dir", type=Path,
+                        help="Score the <file>.json outputs already in this directory instead of "
+                             "parsing (e.g. the output of an older parser, to prove a check "
+                             "catches a known bug)")
     args = parser.parse_args()
 
     os.chdir(REPO_DIR)
@@ -543,19 +609,28 @@ def main():
             continue
         eval_pairs.append((tf, golden))
 
-    # Run batch: compile once, parse all files
-    batch_files = [tf for tf, _ in eval_pairs]
-    if not args.json:
-        print(f"  Running batch parse ({len(batch_files)} files)...", file=sys.stderr)
-    batch_ms, batch_ok = run_batch(batch_files)
-    if not args.json:
-        status = "OK" if batch_ok else "WARN (non-zero exit)"
-        print(f"  Batch done in {batch_ms:.0f}ms [{status}]", file=sys.stderr)
+    output_dir = args.actual_dir.resolve() if args.actual_dir else OUTPUT_DIR
+    if args.actual_dir:
+        batch_ms = 0.0
+        eval_pairs = [(tf, g) for tf, g in eval_pairs if (output_dir / f"{tf.name}.json").exists()]
+    else:
+        # Remove last run's outputs first: a file that fails to parse this
+        # time would otherwise be scored on the stale JSON from a previous run.
+        for tf, _ in eval_pairs:
+            (OUTPUT_DIR / f"{tf.name}.json").unlink(missing_ok=True)
+        # Run batch: compile once, parse all files
+        batch_files = [tf for tf, _ in eval_pairs]
+        if not args.json:
+            print(f"  Running batch parse ({len(batch_files)} files)...", file=sys.stderr)
+        batch_ms, batch_ok = run_batch(batch_files)
+        if not args.json:
+            status = "OK" if batch_ok else "WARN (non-zero exit)"
+            print(f"  Batch done in {batch_ms:.0f}ms [{status}]", file=sys.stderr)
 
     # Evaluate each file against golden
     results = []
     for tf, golden in eval_pairs:
-        result = evaluate_file(tf, golden)
+        result = evaluate_file(tf, golden, output_dir)
         if not args.json:
             status = f"{result['score']:.0%}" if result["status"] == "OK" else "FAIL"
             print(f"  {tf.name}: {status}", file=sys.stderr)
@@ -565,6 +640,15 @@ def main():
         print(json.dumps(results, indent=2))
     else:
         print_report(results, batch_ms)
+
+    # The suite is a gate: CI runs it as "must be 100%", so anything less has
+    # to fail the step. Before this it always exited 0 and only a human
+    # reading the table could see a regression.
+    failed = [r["file"] for r in results if r["status"] != "OK" or r["score"] < 1.0]
+    if failed or not results:
+        print(f"FAIL: {len(failed)} file(s) below 100%: {', '.join(failed)}" if failed
+              else "FAIL: no files evaluated", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

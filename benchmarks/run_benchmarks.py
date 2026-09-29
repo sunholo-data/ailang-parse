@@ -12,19 +12,21 @@ Usage:
 
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_DIR = Path(__file__).parent.parent
 
 
-def run_office(json_output: bool = False, stress: bool = False):
-    """Run Office structural benchmark."""
+def run_office(json_output: bool = False, stress: bool = False) -> int:
+    """Run Office structural benchmark. Returns its exit code: non-zero when
+    any file scores below 100%, which is what fails the CI step."""
     cmd = ["uv", "run", str(REPO_DIR / "benchmarks" / "office" / "eval_office.py")]
     if stress:
         cmd.append("--stress")
     if json_output:
         cmd.append("--json")
-    subprocess.run(cmd, cwd=str(REPO_DIR))
+    return subprocess.run(cmd, cwd=str(REPO_DIR)).returncode
 
 
 def run_pdf(ai_backend: str = "gemini", json_output: bool = False):
@@ -118,17 +120,22 @@ def main():
         run_competitors(comp, args.json)
         return
 
+    # The office suite is a gate; the others are measurements. Its exit code
+    # was dropped here, so CI's "must be 100%" step could never fail.
+    rc = 0
     if args.suite in ("office", "all"):
-        run_office(args.json)
+        rc = run_office(args.json)
 
     if args.suite == "stress":
-        run_office(args.json, stress=True)
+        rc = run_office(args.json, stress=True)
 
     if args.suite in ("officedocbench", "all"):
         run_officedocbench(args.json)
 
     if args.suite in ("pdf", "all"):
         run_pdf(args.ai, args.json)
+
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

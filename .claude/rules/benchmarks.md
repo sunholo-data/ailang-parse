@@ -40,8 +40,22 @@ uv run benchmarks/failure_check.py
 
 - Golden outputs in `benchmarks/office/golden/`
 - Checks: tables, merged cells, track changes, comments, headers/footers, text boxes, images, metadata, text Jaccard
-- Baseline: 100% across all files
+- Positional checks (`benchmarks/metrics/structure.py`, gated): `sections`
+  (section/comment outline: sheet names and order, slide order, which slide
+  or sheet each notes/comment section follows), `table_grids` (every cell at
+  its (row, col), header = row 1), `block_sequence` (recursive block types,
+  heading levels, list kind). Failures print what moved:
+  `sheet 'Leads' row 2 col 3 (C2): expected 'Adapt' got 'adaptagency.com'`.
+- Baseline: 100% across all files. The suite exits 1 below that (it used to
+  always exit 0, so CI's "must be 100%" step could not fail).
 - Run after any parser change to catch regressions
+- `document.filename` is ignored, and extracted-image temp paths (`src`, and
+  `dataLength` = the path's length) are canonicalised to `<local-image-file>`
+  on both sides, so goldens hold no machine-local paths.
+- Regenerate only what changed: `bash benchmarks/generate_golden.sh FILE...`.
+  It canonicalises image paths and keeps each golden's existing filename.
+- `python3 benchmarks/check_structure_gate.py` proves the gate still fails on
+  the pre-fix (bc7f098) outputs stored in `office/regressions/v0_47_0_prefix/`.
 
 ## Stress Tests
 
