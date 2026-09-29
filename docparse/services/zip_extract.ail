@@ -1,8 +1,8 @@
 module docparse/services/zip_extract
 
 import std/zip (listEntries, readEntry, readEntryBytes)
-import std/string (contains, length, endsWith, startsWith, split, substring)
-import std/list (last as listLast, reverse, length as listLength)
+import std/string (contains, length, endsWith, startsWith, split, substring, find, chars, charCode, stringToInt, join)
+import std/list (last as listLast, reverse, length as listLength, sortBy, findIndex)
 import std/result (Ok, Err)
 import std/bytes (fromBase64)
 import std/fs (mkdirAllResult, writeFileBytes, readFileBytes)
@@ -169,10 +169,13 @@ pure func filterByPrefix(entries: [string], prefix: string) -> [string] =
       else filterByPrefix(rest, prefix)
   }
 
--- Find all slide entries in a PPTX ZIP (ppt/slides/slide*.xml)
+-- Find all slide entries in a PPTX ZIP (ppt/slides/slide*.xml), in slide order.
+-- ZIP listings arrive in plain lexicographic order, which interleaves slide10
+-- between slide1 and slide2 — a 21-slide deck parsed as 1, 10..19, 2, 20, 21,
+-- 3..9 — so the numeric suffix sort below is what restores deck order.
 export func findSlideEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
-    Ok(entries) => filterSlides(entries),
+    Ok(entries) => sortBySlideNumber(filterSlides(entries)),
     Err(_) => []
   }
 }
@@ -193,10 +196,11 @@ pure func isSlideEntry(entry: string) -> bool {
   endsWith(entry, ".xml")
 }
 
--- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml)
+-- Find all notes slide entries in a PPTX ZIP (ppt/notesSlides/notesSlide*.xml),
+-- in the same numeric order as the slides themselves.
 export func findNotesSlideEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
-    Ok(entries) => filterNotesSlides(entries),
+    Ok(entries) => sortBySlideNumber(filterNotesSlides(entries)),
     Err(_) => []
   }
 }
@@ -217,10 +221,61 @@ pure func isNotesSlideEntry(entry: string) -> bool {
   endsWith(entry, ".xml")
 }
 
--- Find all worksheet entries in an XLSX ZIP (xl/worksheets/sheet*.xml)
+-- Numeric suffix of a slide entry: "ppt/slides/slide12.xml" -> 12,
+-- "ppt/notesSlides/notesSlide3.xml" -> 3; an entry without digits sorts as 0.
+-- ZIP listings come back in plain lexicographic order, which puts slide10
+-- between slide1 and slide2 — a 21-slide deck parsed as 1, 10..19, 2, 20, 21,
+-- 3..9 — so slide/notes processing sorts by this number instead. (Decks whose
+-- sldIdLst reorders slides away from file numbering would need sldIdLst-derived
+-- ordering; numbering-matches-order is the overwhelmingly common case.)
+export pure func slideNumberOf(entry: string) -> int
+  tests [
+    ("ppt/slides/slide1.xml", 1),
+    ("ppt/slides/slide10.xml", 10),
+    ("ppt/slides/slide21.xml", 21),
+    ("ppt/notesSlides/notesSlide3.xml", 3),
+    ("ppt/slides/slide.xml", 0)
+  ]
+{
+  let base = pptxBaseName(entry);
+  let dot = find(base, ".");
+  let stem = if dot >= 0 then substring(base, 0, dot) else base;
+  match findIndex(\c. charCode(c) >= 48 && charCode(c) <= 57, chars(stem)) {
+    Some(i) =>
+      match stringToInt(substring(stem, i, length(stem))) {
+        Some(n) => n,
+        None => 0
+      },
+    None => 0
+  }
+}
+
+-- Slide entries in ascending numeric-suffix order (stable for equal numbers).
+pure func sortBySlideNumber(entries: [string]) -> [string] =
+  sortBy(func(a: string, b: string) -> int { slideNumberOf(a) - slideNumberOf(b) }, entries)
+
+-- Test seam: the sorted order joined into one string. The test harness
+-- compares the expected value as a literal and rejects list literals, so the
+-- sort is asserted through this string view.
+pure func slideOrderText(entries: [string]) -> string
+  tests [
+    (["ppt/slides/slide1.xml", "ppt/slides/slide10.xml", "ppt/slides/slide2.xml"],
+     "ppt/slides/slide1.xml, ppt/slides/slide2.xml, ppt/slides/slide10.xml"),
+    (["ppt/slides/slide21.xml", "ppt/slides/slide3.xml", "ppt/slides/slide20.xml"],
+     "ppt/slides/slide3.xml, ppt/slides/slide20.xml, ppt/slides/slide21.xml"),
+    ([], "")
+  ]
+{
+  join(", ", sortBySlideNumber(entries))
+}
+
+-- Find all worksheet entries in an XLSX ZIP (xl/worksheets/sheet*.xml), in
+-- sheet order — same numeric-suffix reasoning as findSlideEntries: a workbook
+-- with 10+ sheets would otherwise parse sheet10 as the second sheet, and the
+-- sheet names from workbook.xml are matched to entries BY INDEX.
 export func findSheetEntries(path: string) -> [string] ! {FS} {
   match listEntries(path) {
-    Ok(entries) => filterSheets(entries),
+    Ok(entries) => sortBySlideNumber(filterSheets(entries)),
     Err(_) => []
   }
 }

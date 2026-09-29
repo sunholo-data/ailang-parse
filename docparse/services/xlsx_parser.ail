@@ -1,6 +1,6 @@
 module docparse/services/xlsx_parser
 
-import std/xml (parseLenient, sanitizeXml, parseElements, parseFoldStep, findAll, findAllTexts, findAllAttrs, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, sanitizeXml, parseElements, parseFoldStep, findAll, findAllTexts, findFirst, getText, getAttr, getChildren, getTag)
 import std/zip (scanFold, scanFoldStep)
 import std/iter (FoldStep, Continue, Stop)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
@@ -263,12 +263,14 @@ pure func xlsxFoldSi(acc: { pairs: [(int, string)], idx: int }, si: XmlNode) -> 
 pure func xlsxFoldRow(acc: { rows: [[TableCell]], count: int, ss: Map[int, string], merges: [XlsxMerge] }, rowNode: XmlNode) -> { rows: [[TableCell]], count: int, ss: Map[int, string], merges: [XlsxMerge] } {
   if acc.count >= 5000 then acc
   else {
-    -- The merge-aware walk also fills the cells Excel omits, so it is only
-    -- worth its cost when the sheet actually declares merge regions.
-    let cells = if listLength(acc.merges) > 0
-      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, emptyMap(), acc.merges,
-                                  xlsxRowNumber(rowNode), 0)
-      else parseXlsxRow(rowNode, acc.ss, emptyMap());
+    -- The merge-aware walk fills the cells Excel omits BY COLUMN REFERENCE
+    -- whether or not the sheet declares merge regions: Excel writes only the
+    -- populated cells of a row and omits every blank, so without it any row
+    -- with an internal blank loses the position of everything after the gap
+    -- and the values shift left. (Gap-filling used to be gated on there being
+    -- merges, which is why merge-free sheets collapsed.)
+    let cells = xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, emptyMap(), acc.merges,
+                                  xlsxRowNumber(rowNode), 0);
     if listLength(cells) > 0
     then { rows: cells :: acc.rows, count: acc.count + 1, ss: acc.ss, merges: acc.merges }
     else acc
@@ -405,7 +407,7 @@ pure func xlsxBuildRowWithMerges(cells: [XmlNode], ss: Map[int, string], styles:
   match cells {
     [] => xlsxFillGap(merges, rowNum, nextCol, xlsxMaxColForRow(merges, rowNum) + 1),
     c :: rest => {
-      let cellCol = xlsxCellRefCol(getOrElse(getAttr(c, "r"), "A1"));
+      let cellCol = xlsxCellColAt(c, nextCol);
       let gapCells = xlsxFillGap(merges, rowNum, nextCol, cellCol);
       let base = parseXlsxStyledCell(c, ss, styles);
       let cs = xlsxGetColSpan(merges, cellCol, rowNum);
@@ -413,6 +415,15 @@ pure func xlsxBuildRowWithMerges(cells: [XmlNode], ss: Map[int, string], styles:
       concat(concat(gapCells, [cell]),
              xlsxBuildRowWithMerges(rest, ss, styles, merges, rowNum, cellCol + 1))
     }
+  }
+
+-- Column of a cell from its r="B3" reference. A cell with no usable reference
+-- is the NEXT sequential position rather than column A: a producer that omits
+-- r would otherwise have its whole row collapse onto column A.
+pure func xlsxCellColAt(c: XmlNode, nextCol: int) -> int =
+  match getAttr(c, "r") {
+    Some(ref) => if length(ref) == 0 then nextCol else xlsxCellRefCol(ref),
+    None => nextCol
   }
 
 pure func xlsxRowNumber(row: XmlNode) -> int =
@@ -444,17 +455,62 @@ pure func extractRichText(runs: [XmlNode]) -> string =
   join("", map(\r. getOrElse(optMap(getText, findFirst(r, "t")), ""), runs))
 
 -- Read real sheet names from xl/workbook.xml
--- Returns ordered list of sheet names (e.g. ["Main", "Secondary"])
+-- Returns ordered list of sheet names (e.g. ["Main", "Secondary"]).
 func readWorkbookSheetNames(filepath: string) -> [string] ! {FS} {
-  let xml = readZipEntry(filepath, "xl/workbook.xml");
-  if length(xml) == 0 then []
-  else match parseLenient(xml) {
-    Ok(root) => {
-      findAllAttrs(root, "sheet", "name")
-    },
+  xlsxSheetNamesFrom(readZipEntry(filepath, "xl/workbook.xml"))
+}
+
+-- Extract ordered sheet names from a workbook.xml string. Tags are matched on
+-- the LOCAL name (after any ':'): some producers emit the workbook part with a
+-- namespace prefix ("x:sheet"), and when that happened this returned [] and
+-- every sheet fell back to the generic "Sheet N" label — the only copy of the
+-- author's sheet names silently dropped from the output.
+pure func xlsxSheetNamesFrom(xml: string) -> [string] =
+  match parseLenient(xml) {
+    Ok(root) => map(\n. getOrElse(getAttr(n, "name"), ""),
+                    filter(\n. xlsxLocalName(getTag(n)) == "sheet", xlsxSheetsSection(root))),
     Err(_) => []
   }
+
+-- Test seam: sheet names joined with ", " (the test harness compares expected
+-- values as literals and rejects list literals). Covers the plain, namespaced,
+-- and empty shapes of workbook.xml.
+pure func xlsxSheetNamesText(xml: string) -> string
+  tests [
+    ("<workbook><sheets><sheet name=\"Main\" sheetId=\"1\"/><sheet name=\"Secondary\" sheetId=\"2\"/></sheets></workbook>",
+     "Main, Secondary"),
+    ("<workbook xmlns:x=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><x:sheets><x:sheet name=\"Contacts\"/></x:sheets></workbook>",
+     "Contacts"),
+    ("<workbook><sheets/></workbook>", ""),
+    ("not xml", "")
+  ]
+{
+  join(", ", xlsxSheetNamesFrom(xml))
 }
+
+-- The <sheets> wrapper (matched on the local name). If it is absent entirely,
+-- fall back to a document-wide search so a bare <sheet> still resolves.
+pure func xlsxSheetsSection(root: XmlNode) -> [XmlNode] =
+  match xlsxFindLocal(root, "sheets") {
+    Some(s) => getChildren(s),
+    None => findAll(root, "sheet")
+  }
+
+-- First element whose LOCAL tag name matches, at any depth.
+pure func xlsxFindLocal(node: XmlNode, name: string) -> Option[XmlNode] =
+  match filter(\c. xlsxLocalName(getTag(c)) == name, getChildren(node)) {
+    c :: _ => Some(c),
+    [] => xlsxFindLocalIn(getChildren(node), name)
+  }
+
+pure func xlsxFindLocalIn(nodes: [XmlNode], name: string) -> Option[XmlNode] =
+  match nodes {
+    [] => None,
+    n :: rest => match xlsxFindLocal(n, name) {
+      Some(c) => Some(c),
+      None => xlsxFindLocalIn(rest, name)
+    }
+  }
 
 -- Get sheet name by index, falling back to cleaned entry path
 pure func xlsxGetSheetName(names: [string], idx: int, entry: string) -> string =
@@ -568,10 +624,10 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
   if acc.count >= 5000 then
     (if xlsxRefsAllFound(acc.refs, acc.texts) then Stop(acc) else Continue(acc))
   else {
-    let cells = if listLength(acc.merges) > 0
-      then xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.styles, acc.merges,
-                                  xlsxRowNumber(rowNode), 0)
-      else parseXlsxRow(rowNode, acc.ss, acc.styles);
+    -- Same rationale as xlsxFoldRow: fill omitted cells by column reference
+    -- unconditionally, merges or not.
+    let cells = xlsxBuildRowWithMerges(findAll(rowNode, "c"), acc.ss, acc.styles, acc.merges,
+                                  xlsxRowNumber(rowNode), 0);
     let texts = if listLength(acc.refs) > 0
       then xlsxCollectRefTexts(findAll(rowNode, "c"), acc.ss, acc.refs, acc.texts)
       else acc.texts;
@@ -611,9 +667,13 @@ pure func xlsxWrapComment(b: Block) -> Block =
 -- Build a sheet's blocks (heading, or a named section with heading + table)
 -- from parsed rows. Shared by the streaming ZIP path and parseSheetXml.
 pure func xlsxSheetBlocks(parsedRows: [[TableCell]], sheetName: string) -> [Block] {
+  -- The column-aware row walk restores leading and internal blanks; this pad
+  -- restores the TRAILING width, so every row of the sheet aligns to the
+  -- sheet's widest row instead of ending at its own last populated cell.
+  let rows = xlsxPadRows(parsedRows);
   let cleanName = xlsxCleanSheetName(sheetName);
   let heading = mkHeading(cleanName, 1);
-  match parsedRows {
+  match rows {
     [] => [heading],
     firstRow :: dataRows => {
       let tableBlock = mkTable(dataRows, firstRow);
@@ -621,6 +681,39 @@ pure func xlsxSheetBlocks(parsedRows: [[TableCell]], sheetName: string) -> [Bloc
       [section]
     }
   }
+}
+
+-- Pad every row to the sheet's widest row with empty cells.
+pure func xlsxPadRows(rows: [[TableCell]]) -> [[TableCell]] {
+  let width = xlsxMaxRowLen(rows);
+  map(\r. xlsxPadTo(r, width, simpleCell("")), rows)
+}
+
+pure func xlsxMaxRowLen(rows: [[TableCell]]) -> int =
+  foldl(func(acc: int, r: [TableCell]) -> int {
+    if listLength(r) > acc then listLength(r) else acc
+  }, 0, rows)
+
+-- Pad a list to exactly `width` elements by appending copies of `blank`.
+-- Generic so the string instance below can carry the tests (TableCell has no
+-- Eq, and the test harness compares expected values as literals).
+pure func xlsxPadTo(xs: [a], width: int, blank: a) -> [a] =
+  if listLength(xs) >= width then xs
+  else xlsxPadTo(xs ++ [blank], width, blank)
+
+-- Test seam for xlsxPadTo: pad a list of strings to width 3, joined with "|"
+-- (the test harness compares expected values as literals and rejects list
+-- literals, so the padding is asserted through this string view).
+pure func xlsxPadTexts3(xs: [string]) -> string
+  tests [
+    ([], "||"),
+    (["a"], "a||"),
+    (["a", "b"], "a|b|"),
+    (["a", "b", "c"], "a|b|c"),
+    (["a", "b", "c", "d"], "a|b|c|d")
+  ]
+{
+  join("|", xlsxPadTo(xs, 3, ""))
 }
 
 -- Parse a single worksheet's XML into blocks (materialised-string variant).
@@ -649,6 +742,39 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
     xlsxSheetBlocks(parsedRows, sheetName)
   }
 }
+
+-- Test seam: sparse-row alignment, end to end through parseSheetXml. Row 1
+-- has a blank at column B (Excel omitted the <c> element); row 2 is full;
+-- row 3 ends two columns short. Every row must come back aligned to the
+-- sheet's widest row (4 cells), with row 1's blank restored at position B
+-- and rows 1 and 3 padded to the sheet width — not shifted left, not
+-- truncated. Rendered as "a|b|c" lines joined with "\n" (TableCell has no
+-- Eq and the test harness compares expected values as literals).
+pure func xlsxSparseRowFixture(sheetXml: string) -> string
+  tests [
+    ("<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"C1\" t=\"s\"><v>1</v></c><c r=\"D1\" t=\"s\"><v>2</v></c></row><row r=\"2\"><c r=\"A2\" t=\"s\"><v>3</v></c><c r=\"B2\" t=\"s\"><v>4</v></c><c r=\"C2\" t=\"s\"><v>5</v></c><c r=\"D2\" t=\"s\"><v>6</v></c></row><row r=\"3\"><c r=\"A3\" t=\"s\"><v>6</v></c><c r=\"B3\" t=\"s\"><v>4</v></c></row></sheetData></worksheet>",
+     "Robert||Adapt|adaptagency.com\nKresten Finsen Wiinblad|CEO|LinkedIn outreach, 3 July 2026|row three\nrow three|CEO||")
+  ]
+{
+  let ss = mapFromList([(0, "Robert"), (1, "Adapt"), (2, "adaptagency.com"),
+                        (3, "Kresten Finsen Wiinblad"), (4, "CEO"),
+                        (5, "LinkedIn outreach, 3 July 2026"), (6, "row three")]);
+  join("\n", xlsxTableTexts(parseSheetXml(sheetXml, ss, "Contacts")))
+}
+
+-- Text view of every table in the blocks: the header row first, then the
+-- data rows, each as "|" -joined cell texts.
+pure func xlsxTableTexts(blocks: [Block]) -> [string] =
+  match blocks {
+    [] => [],
+    TableBlock(t) :: rest => {
+      let headerLine = join("|", map(\c. c.text, t.headers));
+      let rowLines = map(\row. join("|", map(\c. c.text, row)), t.rows);
+      concat(headerLine :: rowLines, xlsxTableTexts(rest))
+    },
+    SectionBlock(s) :: rest => concat(xlsxTableTexts(s.blocks), xlsxTableTexts(rest)),
+    _ :: rest => xlsxTableTexts(rest)
+  }
 
 -- Clean sheet entry path to a human-readable sheet name
 -- Input: "xl/worksheets/sheet1.xml" -> "Sheet 1"

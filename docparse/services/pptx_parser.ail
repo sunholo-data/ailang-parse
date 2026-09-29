@@ -552,6 +552,14 @@ pure func pptxParseIntOrDefault(s: string, default: int) -> int =
 -- Restored after e9de665 ("Sync source .ail modules with docs/ailang/ browser
 -- versions") overwrote this module with a reduced browser variant and deleted
 -- the whole section. The only test covering it was a golden no suite read.
+--
+-- Ceiling audit (client XLSX/PPTX write-up, 2026-09): there is NO slide-count
+-- or file-size cap on this path — pptxParseNotesSlides walks every notesSlide
+-- entry and the only bound upstream is std/zip's per-entry decompression cap,
+-- orders of magnitude above any notes part. The ways notes could disappear on
+-- a real deck while a small fixture passed were: a notesSlide that fails to
+-- parse (now warned, not silently dropped) and note text living in a shape
+-- other than a body placeholder (now covered by the sole-shape fallback).
 
 -- Parse all notes slide entries
 func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS} =
@@ -559,24 +567,50 @@ func pptxParseNotesSlides(filepath: string, entries: [string]) -> [Block] ! {FS}
     [] => [],
     entry :: rest => {
       let xml = readZipEntry(filepath, entry);
-      let noteText = pptxExtractNoteText(xml);
-      let moreBlocks = pptxParseNotesSlides(filepath, rest);
-      if length(trim(noteText)) > 0
-      then {
-        let noteBlock = mkSection("notes", [mkText(noteText, "speaker-notes", 0)]);
-        noteBlock :: moreBlocks
-      }
-      else moreBlocks
+      let here = if length(xml) == 0 then []
+      else match pptxExtractNoteTextOr(xml) {
+        Some(text) =>
+          if length(trim(text)) > 0
+          then [mkSection("notes", [mkText(text, "speaker-notes", 0)])]
+          else [],
+        -- A notesSlide that EXISTS but fails to parse is reported, not
+        -- dropped: on a real deck a silent drop reads as "the speaker notes
+        -- were not included" with nothing in the output to explain why.
+        None => [mkText("Warning: speaker notes present in ${entry} could not be read — the notesSlide XML failed to parse", "warning", 0)]
+      };
+      concat(here, pptxParseNotesSlides(filepath, rest))
     }
   }
 
--- Extract speaker note text from a notesSlide XML
--- Notes text lives in: p:notes/p:cSld/p:spTree/p:sp[ph@type="body"]/p:txBody
-pure func pptxExtractNoteText(xml: string) -> string {
-  if length(xml) == 0 then ""
-  else match parseLenient(xml) {
-    Ok(root) => pptxFindNotesBodyText(root),
-    Err(_) => ""
+-- Extract speaker note text from a notesSlide XML. Some(text) when the part
+-- parses (text possibly empty), None when it fails to parse.
+pure func pptxExtractNoteTextOr(xml: string) -> Option[string] =
+  match parseLenient(xml) {
+    Ok(root) => Some(pptxFindNotesBodyText(root)),
+    Err(_) => None
+  }
+
+-- Test seam: note text as a plain string. "(unparsed)" marks a None (the
+-- part failed to parse) so the failure modes are distinguishable in tests.
+pure func pptxNoteTextFromXml(xml: string) -> string
+  tests [
+    -- standard body placeholder
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type=\"body\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Remember the Q3 numbers</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>",
+     "Remember the Q3 numbers"),
+    -- no body placeholder: the note is the sole textual shape (a sldNum
+    -- placeholder is excluded, so "3" never wins)
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type=\"sldNum\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:t>3</a:t></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>Real note text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>",
+     "Real note text"),
+    -- sole textual shape with no placeholder at all
+    ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Sole note</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>",
+     "Sole note"),
+    -- unparseable part
+    ("<p:notes><p:cSld>", "(unparsed)")
+  ]
+{
+  match pptxExtractNoteTextOr(xml) {
+    Some(text) => text,
+    None => "(unparsed)"
   }
 }
 
@@ -592,6 +626,16 @@ pure func pptxFindNotesBodyText(root: XmlNode) -> string =
 
 -- Search shapes for the body placeholder (type="body") and extract text
 pure func pptxFindNotesTextInShapes(nodes: [XmlNode]) -> Option[string] =
+  match pptxFindNotesBodyTextInShapes(nodes) {
+    Some(text) => Some(text),
+    -- Fallback: some producers put the note in a shape with no body
+    -- placeholder. If the shapes carry exactly one non-empty text and it is
+    -- not the slide-number placeholder ("sldNum"), that text is the note.
+    None => pptxSoleTextInShapes(nodes)
+  }
+
+-- The body-placeholder-only walk (the historical behaviour).
+pure func pptxFindNotesBodyTextInShapes(nodes: [XmlNode]) -> Option[string] =
   match nodes {
     [] => None,
     sp :: rest => {
@@ -602,12 +646,28 @@ pure func pptxFindNotesTextInShapes(nodes: [XmlNode]) -> Option[string] =
           match findFirst(sp, "p:txBody") {
             Some(txBody) => {
               let text = join("\n", map(extractDrawingMLText, findAll(txBody, "a:p")));
-              if length(trim(text)) > 0 then Some(text) else pptxFindNotesTextInShapes(rest)
+              if length(trim(text)) > 0 then Some(text) else pptxFindNotesBodyTextInShapes(rest)
             },
-            None => pptxFindNotesTextInShapes(rest)
+            None => pptxFindNotesBodyTextInShapes(rest)
           }
-        else pptxFindNotesTextInShapes(rest)
+        else pptxFindNotesBodyTextInShapes(rest)
       }
-      else pptxFindNotesTextInShapes(rest)
+      else pptxFindNotesBodyTextInShapes(rest)
     }
   }
+
+-- Sole non-slide-number textual shape in a notes shape tree: Some(text) when
+-- exactly one shape has text after excluding "sldNum" placeholders.
+pure func pptxSoleTextInShapes(nodes: [XmlNode]) -> Option[string] {
+  let texts = filter(\t. length(trim(t)) > 0,
+                 flatMap(\n.
+                   if getTag(n) == "p:sp" && getPlaceholderType(n) != "sldNum"
+                   then match findFirst(n, "p:txBody") {
+                     Some(txBody) => [join("\n", map(extractDrawingMLText, findAll(txBody, "a:p")))],
+                     None => []
+                   }
+                   else [], nodes));
+  if listLength(texts) == 1
+  then match texts { t :: _ => Some(t), [] => None }
+  else None
+}
