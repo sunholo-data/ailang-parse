@@ -70,6 +70,37 @@ three, and on nothing else in the 111-file suite:
   `pandoc_inline_images` image had a base64 `src` while the other had none.
   All their non-image blocks are unchanged.
 
+### Extracted images no longer overwrite each other across documents
+
+DOCX and PPTX images are written to `/tmp/docparse-images/` and the image
+block's `src` is that path. The file was named `docparse-img-<N>`, with `N`
+restarting at 0 for every document. Two documents in one batch, or two
+concurrent parses under `serve-api`, wrote the same file, and the earlier
+document's `src` then named the later document's image. Checked on v0.47.0:
+a batch of two DOCX with one `.jpeg` each gave both documents
+`src: /tmp/docparse-images/docparse-img-0.jpeg`, holding the second
+document's bytes.
+
+The file is now named by the SHA-256 of its decoded bytes:
+`docparse-img-<sha256><ext>`. Different images cannot share a name. The same
+image gets the same path on every run and every machine, so no golden needs a
+path normaliser. `shasum -a 256` of the file matches its name. Each file is
+written to a `.part` beside it and renamed into place, so a reader never sees
+a half-written image while another parse writes the same bytes.
+
+Temp growth changes shape. Before, files were overwritten, so the directory
+held at most the largest document's images. Now it holds one file per
+distinct image ever extracted, until something clears it. The parser still
+never deletes these files, because the path is its output. A long-running
+host (the hosted API's `/tmp` is in-memory on Cloud Run) should remove a
+request's image files once the response is built.
+
+New `benchmarks/check_image_temp_paths.py` (in CI) parses three DOCX in one
+batch, two of them differing only in their `.jpeg` bytes. It asserts that
+each `src` file's sha256 is one of that document's own media entries, that
+different images never share a path, and that a re-parse gives the same
+`src`. It fails on v0.47.0.
+
 ## [v0.47.0](https://github.com/sunholo-data/ailang-parse/compare/v0.46.0...v0.47.0) — 2026-09-29
 
 ### Workbench DOCX parsing works again, and RTF works on the workbench at all
