@@ -1,0 +1,77 @@
+module docparse/services/mcp/request
+
+import std/string (length, trim, substring, toLower, contains)
+import std/json (Json, getString, jo, kv, js)
+import std/option (Some, None)
+
+-- Resolve the API key for an MCP tool call.
+--
+-- Why: the hosted MCP endpoint originally took the dp_ key only as a tool
+-- argument, so an agent had to hold it in model context (chat history, traces,
+-- logs). MCP registries inject secrets only as HTTP headers. serve-api binds
+-- the tools/call request headers into a declared `_headers: Json` param (and
+-- the REST @route path does the same), with names canonicalized by Go:
+-- "Authorization", "X-Api-Key". Tools mark apiKey @optional so a call that
+-- carries only the header is not rejected as a missing parameter.
+--
+-- Order: an explicit apiKey argument wins (existing clients keep working),
+-- then Authorization: Bearer (the ailang_parse CLI convention), then
+-- X-API-Key (the Python SDK convention).
+
+-- Extract the key from an Authorization header value. "Bearer <key>" (any case)
+-- and a bare key both resolve; another scheme (e.g. Basic) is not ours → "".
+@noexpose
+export pure func bearerKey(authValue: string) -> string tests [
+  ("Bearer dp_abc123", "dp_abc123"),
+  ("bearer dp_abc123", "dp_abc123"),
+  ("BEARER  dp_abc123 ", "dp_abc123"),
+  ("dp_abc123", "dp_abc123"),
+  ("Basic dXNlcjpwYXNz", ""),
+  ("", "")
+] {
+  let v = trim(authValue);
+  if length(v) == 0 then ""
+  else if length(v) > 7 && toLower(substring(v, 0, 7)) == "bearer " then trim(substring(v, 7, length(v)))
+  else if contains(v, " ") then ""
+  else v
+}
+
+-- The key carried by the request headers, or "" when there is none.
+@noexpose
+export pure func headerApiKey(headers: Json) -> string {
+  let fromAuth = match getString(headers, "Authorization") {
+    Some(a) => bearerKey(a),
+    None => ""
+  };
+  if length(fromAuth) > 0 then fromAuth
+  else match getString(headers, "X-Api-Key") {
+    Some(k) => trim(k),
+    None => ""
+  }
+}
+
+-- Effective key for a tool call: the explicit argument if passed, else the
+-- request's header key.
+@noexpose
+export pure func resolveApiKey(explicit: string, headers: Json) -> string =
+  if length(explicit) > 0 then explicit else headerApiKey(headers)
+
+test "argument wins over headers" {
+  resolveApiKey("dp_arg", jo([kv("Authorization", js("Bearer dp_hdr"))])) == "dp_arg"
+}
+
+test "bearer header when no argument" {
+  resolveApiKey("", jo([kv("Authorization", js("Bearer dp_hdr"))])) == "dp_hdr"
+}
+
+test "x-api-key header when no argument" {
+  resolveApiKey("", jo([kv("X-Api-Key", js("dp_x"))])) == "dp_x"
+}
+
+test "non-bearer authorization falls through to x-api-key" {
+  resolveApiKey("", jo([kv("Authorization", js("Basic abc")), kv("X-Api-Key", js("dp_x"))])) == "dp_x"
+}
+
+test "no key anywhere" {
+  resolveApiKey("", jo([])) == ""
+}
