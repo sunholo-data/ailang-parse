@@ -1,0 +1,89 @@
+module docparse/services/mcp/request
+
+import std/string (length, trim, substring, toLower, contains)
+import std/env (getEnvOr)
+
+-- Resolve the API key for an MCP tool call, preferring request HEADERS over the
+-- apiKey argument.
+--
+-- Why: the hosted MCP endpoint (docparse.ailang.sunholo.com/mcp/) originally
+-- took the dp_ API key as a tool argument. An agent then had to hold the key in
+-- its model context, so the key landed in chat/session history, traces and
+-- logs — which made the endpoint unusable for platforms whose MCP registries
+-- can only inject secrets as headers (${ENV} references). Every tool therefore
+-- resolves its key through `resolveApiKey`:
+--
+--   1. an explicitly passed apiKey argument always wins (existing clients keep
+--      working unchanged), then
+--   2. the request's Authorization header (Bearer scheme, per the ailang_parse
+--      CLI convention), then
+--   3. the request's X-API-Key header (per the Python SDK convention).
+--
+-- The serve-api transport injects the incoming request's HTTP headers into the
+-- per-request environment. Both header spellings the deployment might use are
+-- consulted — the AILANG namespaced form (AILANG_HEADER_<NAME>, uppercased,
+-- hyphens to underscores) and the CGI form (HTTP_<NAME>) — so a runtime naming
+-- change does not reach this package.
+
+-- Env var names under which the serve-api transport exposes the request's
+-- Authorization header, in consultation order.
+pure func authHeaderEnvNames() -> [string] =
+  ["AILANG_HEADER_AUTHORIZATION", "HTTP_AUTHORIZATION"]
+
+-- Env var names under which the serve-api transport exposes the request's
+-- X-API-Key header, in consultation order.
+pure func apiKeyHeaderEnvNames() -> [string] =
+  ["AILANG_HEADER_X_API_KEY", "HTTP_X_API_KEY"]
+
+-- Extract the API key from an Authorization header value.
+-- "Bearer <key>" (case-insensitive scheme) and a bare key both resolve;
+-- any other scheme (e.g. Basic) is not ours and yields "".
+export pure func bearerKey(authValue: string) -> string tests [
+  ("Bearer dp_abc123", "dp_abc123"),
+  ("bearer dp_abc123", "dp_abc123"),
+  ("BEARER dp_abc123", "dp_abc123"),
+  ("Bearer  dp_abc123", "dp_abc123"),
+  (" Bearer dp_abc123 ", "dp_abc123"),
+  ("dp_abc123", "dp_abc123"),
+  ("Basic dXNlcjpwYXNz", ""),
+  ("", "")
+] {
+  let v = trim(authValue);
+  if length(v) == 0 then ""
+  else if length(v) > 7 && toLower(substring(v, 0, 7)) == "bearer " then trim(substring(v, 7, length(v)))
+  else if contains(v, " ") then ""
+  else v
+}
+
+-- First env var in `names` that is set and parses to a non-empty key via
+-- `parse`. "" when none do.
+func firstEnvKey(names: [string], parse: string -> string) -> string ! {Env} =
+  match names {
+    [] => "",
+    n :: rest => {
+      let k = parse(getEnvOr(n, ""));
+      if length(k) > 0 then k else firstEnvKey(rest, parse)
+    }
+  }
+
+-- The API key carried by the current request's headers, or "" when the request
+-- carries none. Does NOT look at the apiKey argument — use resolveApiKey.
+export func headerApiKey() -> string ! {Env} {
+  let fromAuth = firstEnvKey(authHeaderEnvNames(), bearerKey);
+  if length(fromAuth) > 0 then fromAuth
+  else firstEnvKey(apiKeyHeaderEnvNames(), \v. trim(v))
+}
+
+-- Is the current request authenticated via a header key? Used by the tool
+-- manifest to drop apiKey from the advertised schemas, so models are never
+-- tempted to fill the key into an argument.
+export func hasHeaderKey() -> bool ! {Env} =
+  length(headerApiKey()) > 0
+
+-- Effective API key for a tool call: the explicit argument if the client
+-- passed one, otherwise the request's header key. An omitted/empty argument
+-- resolves to the header key, so a tools/call without apiKey works whenever
+-- the request is header-authenticated.
+export func resolveApiKey(explicit: string) -> string ! {Env} =
+  if length(explicit) > 0 then explicit
+  else headerApiKey()

@@ -2,90 +2,164 @@ module docparse/services/tools
 
 import std/json (encode, jo, kv, js, ja, jb)
 import std/list (map)
+import docparse/services/mcp/request (hasHeaderKey)
 
 -- Returns canonical tool definitions for Claude, OpenAI, MCP, and A2A agent frameworks.
 -- Each format includes input schemas so agents can auto-discover how to call AILANG Parse.
 -- Includes all 7 MCP tools: 4 local + 3 hosted-only (auth, authPoll, account).
+--
+-- When the request authenticates with a header key (Authorization: Bearer or
+-- X-API-Key), the apiKey property is OMITTED from the advertised schemas: the
+-- header already carries the key for every tool, and advertising the argument
+-- only tempts models to put a secret into their context. Clients that pass
+-- apiKey explicitly still work — the argument is kept whenever no header key
+-- is present (local mode, or a caller that has not migrated yet).
 @nowrap
 @route("GET", "/api/v1/tools")
-export pure func tools() -> string {
+export func tools() -> string ! {Env} {
+  let headerAuth = hasHeaderKey();
   encode(jo([
     kv("tools", ja([
-      mcpParseToolDef(),
-      mcpConvertToolDef(),
+      mcpParseToolDef(headerAuth),
+      mcpConvertToolDef(headerAuth),
       mcpFormatsToolDef(),
       mcpEstimateToolDef(),
       mcpAuthToolDef(),
       mcpAuthPollToolDef(),
-      mcpAccountToolDef()
+      mcpAccountToolDef(headerAuth)
+    ])),
+    kv("auth", jo([
+      kv("schemes", ja([
+        jo([
+          kv("id", js("header_bearer")),
+          kv("type", js("http")),
+          kv("scheme", js("bearer")),
+          kv("header", js("Authorization")),
+          kv("description", js("Send Authorization: Bearer <dp_ API key> with every request (how the ailang_parse CLI authenticates). The key then applies to every tool call and the apiKey argument is not needed. Preferred: the key never enters model context."))
+        ]),
+        jo([
+          kv("id", js("header_api_key")),
+          kv("type", js("apiKey")),
+          kv("in", js("header")),
+          kv("name", js("X-API-Key")),
+          kv("description", js("Send X-API-Key: <dp_ API key> with every request (how the Python SDK authenticates). Same effect as the Bearer header."))
+        ]),
+        jo([
+          kv("id", js("api_key_argument")),
+          kv("type", js("apiKey")),
+          kv("in", js("body")),
+          kv("name", js("apiKey")),
+          kv("description", js("Legacy: pass the key as the apiKey tool argument. Still supported for existing clients; omitted from the schemas above when a header key is present."))
+        ])
+      ])),
+      kv("device_flow", js("call mcpAuth to get a key via RFC 8628 device authorization"))
     ])),
     kv("mcp", js("/mcp/")),
     kv("a2a", js("/.well-known/agent.json"))
   ]))
 }
 
-pure func mcpParseToolDef() -> Json =
+pure func mcpParseToolDef(dropApiKey: bool) -> Json {
+  let props = if dropApiKey then
+    [
+      kv("filepath", jo([
+        kv("type", js("string")),
+        kv("description", js("Absolute file path, or a sample_id (e.g. sample_docx_formatting) from mcpFormats"))
+      ])),
+      kv("outputFormat", jo([
+        kv("type", js("string")),
+        kv("enum", ja(map(js, ["blocks", "markdown", "html", "a2ui"]))),
+        kv("default", js("blocks")),
+        kv("description", js("blocks = structured JSON; markdown = rendered Markdown; html = rendered HTML; a2ui = A2UI components for agent-driven rendering. Local mode also accepts a2ui+editable, which adds block_index props; hosted mode does not."))
+      ])),
+      kv("requestId", jo([
+        kv("type", js("string")),
+        kv("description", js("Request ID from a previous parse to replay it. Optional."))
+      ]))
+    ]
+  else
+    [
+      kv("filepath", jo([
+        kv("type", js("string")),
+        kv("description", js("Absolute file path, or a sample_id (e.g. sample_docx_formatting) from mcpFormats"))
+      ])),
+      kv("outputFormat", jo([
+        kv("type", js("string")),
+        kv("enum", ja(map(js, ["blocks", "markdown", "html", "a2ui"]))),
+        kv("default", js("blocks")),
+        kv("description", js("blocks = structured JSON; markdown = rendered Markdown; html = rendered HTML; a2ui = A2UI components for agent-driven rendering. Local mode also accepts a2ui+editable, which adds block_index props; hosted mode does not."))
+      ])),
+      kv("apiKey", jo([
+        kv("type", js("string")),
+        kv("description", js("Optional API key (dp_...) for hosted mode. Get one via mcpAuth. Preferred alternative: send Authorization: Bearer <key> or X-API-Key: <key> as a request header — the key then applies to every tool call and never enters model context."))
+      ])),
+      kv("requestId", jo([
+        kv("type", js("string")),
+        kv("description", js("Request ID from a previous parse to replay it. Optional."))
+      ]))
+    ];
   jo([
     kv("name", js("mcpParse")),
-    kv("description", js("Parse any document into structured blocks, markdown, or HTML. Accepts a file path or sample_id. Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are deterministic and instant. PDF, images, audio, video require AI. In hosted mode, pass an apiKey from mcpAuth.")),
+    kv("description", js("Parse any document into structured blocks, markdown, or HTML. Accepts a file path or sample_id. Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are deterministic and instant. PDF, images, audio, video require AI. In hosted mode, pass an apiKey from mcpAuth, or authenticate with an Authorization: Bearer / X-API-Key request header.")),
     kv("endpoint", js("POST /mcp/v1/parse")),
     kv("mcp_tool", js("docparse.services.mcp.tools.mcpParse")),
     kv("inputSchema", jo([
       kv("type", js("object")),
-      kv("properties", jo([
-        kv("filepath", jo([
-          kv("type", js("string")),
-          kv("description", js("Absolute file path, or a sample_id (e.g. sample_docx_formatting) from mcpFormats"))
-        ])),
-        kv("outputFormat", jo([
-          kv("type", js("string")),
-          kv("enum", ja(map(js, ["blocks", "markdown", "html", "a2ui"]))),
-          kv("default", js("blocks")),
-          kv("description", js("blocks = structured JSON; markdown = rendered Markdown; html = rendered HTML; a2ui = A2UI components for agent-driven rendering. Local mode also accepts a2ui+editable, which adds block_index props; hosted mode does not."))
-        ])),
-        kv("apiKey", jo([
-          kv("type", js("string")),
-          kv("description", js("API key (dp_...) for hosted mode. Get one via mcpAuth. Not needed in local mode."))
-        ])),
-        kv("requestId", jo([
-          kv("type", js("string")),
-          kv("description", js("Request ID from a previous parse to replay it. Optional."))
-        ]))
-      ])),
+      kv("properties", jo(props)),
       kv("required", ja([js("filepath")]))
     ]))
   ])
+}
 
-pure func mcpConvertToolDef() -> Json =
+pure func mcpConvertToolDef(dropApiKey: bool) -> Json {
+  let props = if dropApiKey then
+    [
+      kv("input", jo([
+        kv("type", js("string")),
+        kv("description", js("Path to input file, a sample_id, an https:// URL, or a gs:// ref (Business tier)"))
+      ])),
+      kv("outputFormat", jo([
+        kv("type", js("string")),
+        kv("enum", ja(map(js, ["docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"]))),
+        kv("description", js("Target format. Case-insensitive; a leading dot is accepted, and markdown/htm/quarto are aliases for md/html/qmd."))
+      ])),
+      kv("outputPath", jo([
+        kv("type", js("string")),
+        kv("description", js("Local mode only: path to write the output file; if omitted, the input filename with the new extension. IGNORED in hosted mode, where the document comes back in the response as `content` encoded per `encoding` (base64 for the ZIP containers docx/pptx/xlsx/odt/odp/ods, utf8 for html/md/qmd) alongside `filename` and `content_type`. Branch on `encoding`, never on the target."))
+      ]))
+    ]
+  else
+    [
+      kv("input", jo([
+        kv("type", js("string")),
+        kv("description", js("Path to input file, a sample_id, an https:// URL, or a gs:// ref (Business tier)"))
+      ])),
+      kv("outputFormat", jo([
+        kv("type", js("string")),
+        kv("enum", ja(map(js, ["docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"]))),
+        kv("description", js("Target format. Case-insensitive; a leading dot is accepted, and markdown/htm/quarto are aliases for md/html/qmd."))
+      ])),
+      kv("outputPath", jo([
+        kv("type", js("string")),
+        kv("description", js("Local mode only: path to write the output file; if omitted, the input filename with the new extension. IGNORED in hosted mode, where the document comes back in the response as `content` encoded per `encoding` (base64 for the ZIP containers docx/pptx/xlsx/odt/odp/ods, utf8 for html/md/qmd) alongside `filename` and `content_type`. Branch on `encoding`, never on the target."))
+      ])),
+      kv("apiKey", jo([
+        kv("type", js("string")),
+        kv("description", js("Optional API key (dp_...) for hosted mode. Preferred alternative: send Authorization: Bearer <key> or X-API-Key: <key> as a request header — the key then applies to every tool call and never enters model context."))
+      ]))
+    ];
   jo([
     kv("name", js("mcpConvert")),
-    kv("description", js("Generate a document. Parses the input, then generates the target format: DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto). To AUTHOR a document, write Markdown and convert it — front matter, inline formatting, links, images and tables all carry through. In hosted mode the generated document is returned inline in the response (see outputPath) and an apiKey is required.")),
+    kv("description", js("Generate a document. Parses the input, then generates the target format: DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD (Quarto). To AUTHOR a document, write Markdown and convert it — front matter, inline formatting, links, images and tables all carry through. In hosted mode the generated document is returned inline in the response (see outputPath) and an apiKey (or an auth header) is required.")),
     kv("endpoint", js("POST /mcp/v1/convert")),
     kv("mcp_tool", js("docparse.services.mcp.tools.mcpConvert")),
     kv("inputSchema", jo([
       kv("type", js("object")),
-      kv("properties", jo([
-        kv("input", jo([
-          kv("type", js("string")),
-          kv("description", js("Path to input file, a sample_id, an https:// URL, or a gs:// ref (Business tier)"))
-        ])),
-        kv("outputFormat", jo([
-          kv("type", js("string")),
-          kv("enum", ja(map(js, ["docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "qmd"]))),
-          kv("description", js("Target format. Case-insensitive; a leading dot is accepted, and markdown/htm/quarto are aliases for md/html/qmd."))
-        ])),
-        kv("outputPath", jo([
-          kv("type", js("string")),
-          kv("description", js("Local mode only: path to write the output file; if omitted, the input filename with the new extension. IGNORED in hosted mode, where the document comes back in the response as `content` encoded per `encoding` (base64 for the ZIP containers docx/pptx/xlsx/odt/odp/ods, utf8 for html/md/qmd) alongside `filename` and `content_type`. Branch on `encoding`, never on the target."))
-        ])),
-        kv("apiKey", jo([
-          kv("type", js("string")),
-          kv("description", js("API key (dp_...) for hosted mode. Not needed in local mode."))
-        ]))
-      ])),
+      kv("properties", jo(props)),
       kv("required", ja([js("input"), js("outputFormat")]))
     ]))
   ])
+}
 
 pure func mcpFormatsToolDef() -> Json =
   jo([
@@ -162,27 +236,39 @@ pure func mcpAuthPollToolDef() -> Json =
     ]))
   ])
 
-pure func mcpAccountToolDef() -> Json =
+pure func mcpAccountToolDef(dropApiKey: bool) -> Json {
+  let props = if dropApiKey then
+    [
+      kv("action", jo([
+        kv("type", js("string")),
+        kv("enum", ja(map(js, ["status", "pricing", "usage", "history", "keys"]))),
+        kv("default", js("status")),
+        kv("description", js("status = tier + quota remaining; pricing = tier details (no auth); usage = per-key stats; history = recent parses; keys = list API keys"))
+      ]))
+    ]
+  else
+    [
+      kv("apiKey", jo([
+        kv("type", js("string")),
+        kv("description", js("Optional API key (dp_...). Required for all actions except 'pricing'. Preferred alternative: send Authorization: Bearer <key> or X-API-Key: <key> as a request header."))
+      ])),
+      kv("action", jo([
+        kv("type", js("string")),
+        kv("enum", ja(map(js, ["status", "pricing", "usage", "history", "keys"]))),
+        kv("default", js("status")),
+        kv("description", js("status = tier + quota remaining; pricing = tier details (no auth); usage = per-key stats; history = recent parses; keys = list API keys"))
+      ]))
+    ];
   jo([
     kv("name", js("mcpAccount")),
-    kv("description", js("View account: tier, quota, usage, keys, pricing, and parse history. Pass action='pricing' without an apiKey to see tiers. Other actions (status, usage, history, keys) require an apiKey. Hosted mode only.")),
+    kv("description", js("View account: tier, quota, usage, keys, pricing, and parse history. Pass action='pricing' without an apiKey to see tiers. Other actions (status, usage, history, keys) require an apiKey — passed as an argument or carried by an Authorization: Bearer / X-API-Key request header. Hosted mode only.")),
     kv("endpoint", js("POST /mcp/v1/account")),
     kv("mcp_tool", js("docparse.services.mcp.account.mcpAccount")),
     kv("hosted_only", jb(true)),
     kv("inputSchema", jo([
       kv("type", js("object")),
-      kv("properties", jo([
-        kv("apiKey", jo([
-          kv("type", js("string")),
-          kv("description", js("API key (dp_...). Required for all actions except 'pricing'."))
-        ])),
-        kv("action", jo([
-          kv("type", js("string")),
-          kv("enum", ja(map(js, ["status", "pricing", "usage", "history", "keys"]))),
-          kv("default", js("status")),
-          kv("description", js("status = tier + quota remaining; pricing = tier details (no auth); usage = per-key stats; history = recent parses; keys = list API keys"))
-        ]))
-      ])),
+      kv("properties", jo(props)),
       kv("required", ja([]))
     ]))
   ])
+}
