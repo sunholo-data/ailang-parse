@@ -11,6 +11,13 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Added — MCP tools accept the API key from a request header
+
+- `mcpParse`, `mcpConvert` and `mcpAccount` resolve the key as: explicit `apiKey` argument, then `Authorization: Bearer <key>`, then `X-API-Key`. An agent connected through an MCP registry that injects the key as a header never holds it in model context.
+- `apiKey` (plus `requestId` on `mcpParse` and `action` on `mcpAccount`) is now `@optional`: absent from the tool's `required` list, so a header-only call is not rejected as a missing parameter. Headers arrive through serve-api's `_headers` binding, which is not advertised in the schema and cannot be set from the arguments.
+- New `docparse/services/mcp/request` (`resolveApiKey`, `headerApiKey`, `bearerKey`), `@noexpose`.
+- Requires AILANG >= 0.50.0 (serve-api `_headers` on MCP + `@optional`, ailang `31be3668b`).
+
 ## [v0.48.0](https://github.com/sunholo-data/ailang-parse/compare/v0.47.0...v0.48.0) — 2026-09-29
 
 ### The office suite gates on structure, and can now fail CI

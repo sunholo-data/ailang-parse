@@ -3,7 +3,7 @@ module docparse/services/mcp/tools
 import std/string (length, intToStr, toLower, split, contains, startsWith)
 import std/list (concat, last, map, filter)
 import std/option (Some, None)
-import std/json (encode, decode, jo, kv, js, ja, jb, getString)
+import std/json (Json, encode, decode, jo, kv, js, ja, jb, getString)
 import std/fs (readFile, writeFile, fileExists)
 import std/env (getEnvOr)
 import std/process (exec, NotFound as ProcNotFound)
@@ -37,19 +37,22 @@ import docparse/services/odp_generator (generateOdp)
 import docparse/services/ods_generator (generateOds)
 import docparse/services/qmd_generator (generateQmd)
 import docparse/services/samples (sampleResolvePath)
+import docparse/services/mcp/request (resolveApiKey)
 
 -- Parse any document into structured blocks, markdown, or HTML.
 -- Accepts a file path or sample_id (e.g. sample_docx_formatting).
 -- Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS) are deterministic.
 -- PDF, images, audio, video require AI.
--- In hosted mode, pass an apiKey (from mcpAuth) or use Bearer token auth.
--- Pass a requestId from a previous parse to replay it.
+-- In hosted mode, authenticate with an Authorization: Bearer or X-API-Key
+-- request header (preferred: the key never enters model context), or pass an
+-- apiKey from mcpAuth. Pass a requestId from a previous parse to replay it.
 @route("POST", "/mcp/v1/parse")
-export func mcpParse(filepath: string, outputFormat: string, apiKey: string, requestId: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
+@optional("apiKey", "requestId")
+export func mcpParse(filepath: string, outputFormat: string, apiKey: string, requestId: string, _headers: Json) -> string ! {Clock, AI, Env, FS, IO, Net} {
   let mode = getEnvOr("DOCPARSE_MODE", "local");
 
   if mode == "hosted" then
-    mcpParseHosted(filepath, outputFormat, apiKey, requestId)
+    mcpParseHosted(filepath, outputFormat, resolveApiKey(apiKey, _headers), requestId)
   else
     mcpParseLocal(filepath, outputFormat)
 }
@@ -91,7 +94,7 @@ func mcpParseHosted(filepath: string, outputFormat: string, apiKey: string, requ
   if length(apiKey) == 0 then
     encode(jo([
       kv("error", js("AUTH_REQUIRED")),
-      kv("message", js("An API key is required for hosted parsing. Use mcpAuth to get one via device authorization.")),
+      kv("message", js("An API key is required for hosted parsing. Send Authorization: Bearer <key> or X-API-Key, or use mcpAuth to get one via device authorization.")),
       kv("suggested_fix", js("Call mcpAuth to start device authorization and get an API key."))
     ]))
   else {
@@ -212,19 +215,22 @@ func mcpFormatOutcome(outcome: ParseOutcome, outputFormat: string) -> string ! {
 -- Convert a document from one format to another.
 -- Parses the input file, then generates the output in the target format.
 -- Returns the output file path on success.
--- In hosted mode, pass an apiKey (from mcpAuth) for authenticated access.
+-- In hosted mode, authenticate with an Authorization: Bearer or X-API-Key
+-- request header, or pass an apiKey from mcpAuth.
 @route("POST", "/mcp/v1/convert")
-export func mcpConvert(input: string, outputFormat: string, outputPath: string, apiKey: string) -> string ! {Clock, AI, Env, FS, IO, Net} {
+@optional("apiKey")
+export func mcpConvert(input: string, outputFormat: string, outputPath: string, apiKey: string, _headers: Json) -> string ! {Clock, AI, Env, FS, IO, Net} {
   let mode = getEnvOr("DOCPARSE_MODE", "local");
+  let key = resolveApiKey(apiKey, _headers);
 
-  if mode == "hosted" && length(apiKey) == 0 then
+  if mode == "hosted" && length(key) == 0 then
     encode(jo([
       kv("error", js("AUTH_REQUIRED")),
-      kv("message", js("An API key is required for hosted conversion. Use mcpAuth to get one via device authorization.")),
+      kv("message", js("An API key is required for hosted conversion. Send Authorization: Bearer <key> or X-API-Key, or use mcpAuth to get one via device authorization.")),
       kv("suggested_fix", js("Call mcpAuth to start device authorization and get an API key."))
     ]))
   else if mode == "hosted" then
-    mcpConvertHosted(input, outputFormat, apiKey)
+    mcpConvertHosted(input, outputFormat, key)
   else {
   -- Resolve sample IDs
   let resolved = if contains(input, ".") then input
