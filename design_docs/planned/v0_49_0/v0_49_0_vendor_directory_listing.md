@@ -108,7 +108,7 @@ the user's point of view. The author has to state them.
      receives a `dp_` key.
    - `/api/v1/capabilities` advertises the flow under `auth.device_flow`.
 2. **Website sign-in.** Sign in on the API page, generate a key, then pass it as
-   `Authorization: Bearer dp_…` or `X-API-Key` (#85). This suits any client that accepts a static
+   `Authorization: Bearer dp_…` or `X-API-Key`. Live on the hosted MCP since docparse v0.30.0. This suits any client that accepts a static
    header: Claude Code `--header`, Codex `bearer_token_env_var`, the SDK bridges.
 3. **No-key discovery.**
    - Without a key: `tools/list`, `mcpFormats` (callable with `{}` once ailang v0.50.0's
@@ -360,7 +360,7 @@ should fail CI first.
 | # | Milestone | Repo | Done when |
 |---|---|---|---|
 | M1 ✅ | `@mcp_title` / `@mcp_hints` in `serve-api` | ailang | **Done 2026-10-01 (ailang `9305f1c19`).** Emitted by both MCP implementations; the built-in `submit_feedback` is annotated. Also fixed: zero-arg tools advertised a required `"_"`, so prod `mcpFormats` rejected `{}` (`290e53886`). Purity bugs found on the way are filed as ailang#1443. |
-| M2 | Annotate the **hosted** tools, which live in the private **`docparse`** repo (`docparse_api/services/mcp_*.ail`, plus `editDocument` and `getUploadUrl` in `api_server.ail`). Prod serves `serve-api docparse_api/` on **AILANG v0.42.0** (Dockerfile pin), which needs bumping to ≥ v0.50.0. Also: prod's MCP tools are a **fork** of this repo's `docparse/services/mcp/` (#85's header auth landed only here; prod ignores a Bearer header, verified 2026-10-01). Converge them by importing the package's MCP module, or at least `resolveApiKey`, after an `ailang_parse` 0.49.0 release. | docparse (+ ailang-parse release) | Prod `tools/list` shows a title and a hint on all 10 tools; the smoke gate is in CI. |
+| M2 | Annotate the 9 remaining **hosted** tools in the private **`docparse`** repo (`docparse_api/services/mcp_*.ail`, `editDocument` and `getUploadUrl` in `api_server.ail`) with `@mcp_title` / `@mcp_hints`. **Unblocked:** docparse v0.30.0 (prod, 2026-10-01) runs AILANG v0.50.0 with header API keys. Verified live: a Bearer header is read (`INVALID_API_KEY` for a bogus key), `apiKey` is optional, `mcpFormats` takes `{}`, and `submit_feedback` is annotated. Still open: prod's MCP tools remain a fork of this repo's `docparse/services/mcp/`; converge them later. | docparse |
 | M3a | AILANG platform pieces from `m-serveapi-directory-ready`: `@mcp_auth` lazy auth, the listed-surface projection, the reusable OAuth module, and `ailang mcp directory-check` (D2b) | ailang | A gated tool called without a Bearer token gets an HTTP 401 with resource metadata; open tools still answer; tests on both MCP implementations. |
 | M3 | Configure the AILANG OAuth module for Parse (Firebase approve page as login, `dp_` keys as tokens), the protected-resource metadata, the listed OAuth-only surface, and the OpenAI commerce strip (D2a, D2c, D2d) | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
 | M4 ✅ | Agent Plugins manifest and CI validation | docparse-skill | **Done 2026-10-01 (docparse-skill `a573d7c`).** Strict Claude validation, the Agent Plugins schema and cross-manifest checks, and a Codex install smoke test all run in CI and are green. The OpenAI ZIP build moves to M7. |

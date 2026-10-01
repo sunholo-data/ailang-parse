@@ -93,9 +93,10 @@ curl -X POST http://localhost:8080/mcp/ \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'</code></pre>
 
       <h3>Hosted</h3>
-      <p>No local install required. Connect to the hosted endpoint. Discovery works without a key; parse and convert tools take your key as the <code>apiKey</code> argument (see <a href="#agent-auth-flow">Agent Auth Flow</a>):</p>
+      <p>No local install required. Connect to the hosted endpoint. Discovery works without a key; send your key as a header (or as the <code>apiKey</code> argument; see <a href="#agent-auth-flow">Agent Auth Flow</a>):</p>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/mcp/ \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dp_your_api_key" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}'</code></pre>
 
       <h3>With AI parsing</h3>
@@ -187,7 +188,7 @@ ailang serve-api --mcp --routes-only \
         <li>Agent calls <code>mcpAuthPoll(deviceCode)</code> every 5s &rarr; receives <code>api_key</code> + <code>tier</code></li>
         <li>Agent includes <code>apiKey</code> in all subsequent parse/convert calls</li>
       </ol>
-      <p><strong>Hosted endpoint today:</strong> pass the key as the <code>apiKey</code> argument (from the device flow above, or generated on the <a href="api.html#api-key-panel">API page</a>). <strong>Self-hosted</strong> (<code>ailang serve-api</code> on the open-source package, from <code>ailang_parse</code> 0.49): you can send the key as <code>Authorization: Bearer dp_…</code> or <code>X-API-Key</code> instead, so it never enters the model's context. Header keys and OAuth sign-in are coming to the hosted endpoint.</p>
+      <p><strong>Prefer a header.</strong> Clients that can send a fixed header can skip the device flow. Generate a key on the <a href="api.html#api-key-panel">API page</a> and send it as <code>Authorization: Bearer dp_…</code> (or <code>X-API-Key</code>). The key then never enters the model's context, and <code>apiKey</code> can be left out of every call. An explicit <code>apiKey</code> argument still works and takes precedence.</p>
 
 
       <h2 id="mcp-registry">Install from the MCP Registry</h2>
