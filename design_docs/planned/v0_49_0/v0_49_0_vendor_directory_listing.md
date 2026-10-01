@@ -116,16 +116,34 @@ the user's point of view. The author has to state them.
 Both `.well-known` endpoints return 404, and `codex mcp list` reports the server's auth as
 "Unsupported".
 
-**The open question is whether directory review accepts agent-run device auth.** In a
-claude.ai or ChatGPT connector the transport would be unauthenticated, with sign-in happening
-inside the chat (the model shows the URL and code, then passes the key as `apiKey`). That works
-mechanically today. Two risks:
-- the directories' "supported OAuth flow" wording;
-- the key passing through model context.
+**Verdict (researched 2026-10-01, quotes checked against the saved pages): OAuth is a BLOCKER for both directories.**
 
-**Test it before building anything (M3a):** add the URL as a custom connector in claude.ai and in
-ChatGPT developer mode, run the device flow end to end in chat, and record what each client does.
-Then ask the reviewers, or read the review checklist, about tool-mediated auth.
+- **Anthropic.**
+  - Software Directory Policy §5D: *"Remote MCP servers that connect to a remote service and
+    require authentication must use secure OAuth 2.0…"*
+    (support.claude.com/en/articles/13145358).
+  - Submission page: *"OAuth 2.0 if your tools act on a user's account, or no authentication for
+    public data."*
+  - The supported connector auth types are `oauth_dcr`, `oauth_cimd`, `oauth_anthropic_creds`,
+    `custom_connection`, `static_headers` (beta, limited organizations, an org-level credential)
+    and `none`. Agent-run device codes are not among them.
+  - Our pattern (open discovery, gated parse) is supported as **lazy authentication**, but:
+    *"Claude starts sign-in only when the HTTP request itself fails with `401 Unauthorized` and a
+    `WWW-Authenticate` header. A tool handler can't produce that response."*
+- **OpenAI.**
+  - Plugin guidelines forbid collecting *"Access credentials and authentication secrets (such as
+    API keys, MFA/OTP codes, or passwords)"*. An `apiKey` tool argument filled in by the model is
+    exactly that.
+  - Auth guide: *"For an authenticated MCP server, you are expected to implement an OAuth 2.1 flow
+    that conforms to the MCP authorization spec."* ChatGPT cannot present custom API keys.
+  - Mixed auth needs per-tool `securitySchemes` (`noauth` or `oauth2`) **and** tool errors that
+    carry `_meta["mcp/www_authenticate"]`.
+  - Commerce rule: plugins *"must not display subscription plans, initiate new subscriptions, or
+    promote upgrades"*. Signing in to an existing paid account is allowed.
+  - Reviewer login must be username/password with no inaccessible 2FA.
+
+Sources are saved under the session scratchpad (`oauth-research/`). Re-fetch them at submission
+time.
 
 ### G3 — No OpenAI package
 
@@ -177,25 +195,41 @@ Proposed mapping for Parse (to confirm against each tool's behaviour in hosted m
 | `mcpAuth` / `mcpAuthPoll` | Sign in / check sign-in | | ✗ | | Kept for clients without OAuth (D2). |
 | `submit_feedback` | Send feedback | | ✗ | ✓ | |
 
-### D2 — Device-code auth stays the core; MCP OAuth only if the directories require it
+### D2 — Device-code auth stays for agents; the LISTED surface is OAuth-only
 
-Device auth is the agent-native path: it works in every MCP client, headless agents included,
-and the website-key-plus-header path (#85) covers clients that can be configured. Neither
-changes.
+The research verdict makes M3 mandatory. It also constrains **what the listed endpoint may
+expose.**
 
-**If M3a shows the directories need spec-shaped auth,** add a thin OAuth front door onto the
-same backend. It adds no second identity system:
-- **Resource metadata:** `/.well-known/oauth-protected-resource` on the MCP host names the
-  authorization server.
-- **Authorization server:** `/authorize`, `/token`, `/register` (dynamic client registration)
-  and its own metadata endpoint.
-  - `/authorize` renders the **same approve page** the device flow uses
-    (`/docparse/approve.html`, Firebase sign-in).
-  - `/token` mints a scoped `dp_` key, so the existing Bearer path validates it unchanged.
-- **401 challenge** only for tools that need a key. Discovery, `mcpFormats`, pricing and the
-  device-flow tools stay open.
-
-The OAuth layer belongs to the Parse service (`/api/v1/auth/*`), not to AILANG.
+1. **Authorization server (Parse, `/api/v1/auth/*`).**
+   - Endpoints: RFC 8414 metadata, `/authorize` with S256 PKCE, `/token` (accepts
+     form-urlencoded), and CIMD (preferred) or DCR `/register`.
+   - `/authorize` reuses the device flow's approve page (Firebase sign-in), so there is no second
+     identity system.
+   - `/token` mints a scoped `dp_` key, so the Bearer path (#85) validates it unchanged.
+   - Redirect URIs: `https://claude.ai/api/mcp/auth_callback`, a loopback callback for Claude
+     Code (any port), and ChatGPT's callback (take it from OpenAI's auth page).
+2. **Protected-resource metadata** at `/.well-known/oauth-protected-resource`. Its `resource` must
+   equal the listed MCP URL exactly.
+3. **Lazy auth at the HTTP layer (AILANG fix lane).** A gated `tools/call` without a Bearer
+   token must get an HTTP **401 + `WWW-Authenticate: Bearer resource_metadata=…`** *before* the
+   tool runs. A tool handler cannot produce that, so `serve-api` has to. Proposal:
+   - an `@mcp_auth("oauth2")` annotation (default `noauth`), from which `serve-api` emits the
+     401 challenge;
+   - per-tool `securitySchemes` in tool metadata for ChatGPT;
+   - `_meta["mcp/www_authenticate"]` on auth errors.
+   This mirrors how M1 landed: one annotation, generic in `serve-api`, then adopted by Parse.
+4. **A separate listed surface.** The directory endpoint (e.g. `/mcp/` as listed, or a new
+   `/mcp/connect/`) must expose **no `apiKey` argument and no `mcpAuth`/`mcpAuthPoll`**,
+   because the model must not handle secrets (OpenAI's restricted-data rule).
+   - The current endpoint, with device codes and the `apiKey` argument, stays for CLIs,
+     headless agents, SDK bridges and the MCP Registry.
+   - Decide whether this is two `serve-api` module sets or one module with a surface flag.
+5. **OpenAI listing only:** no pricing tiers or upgrade prompts in tool output. `mcpFormats`
+   currently embeds pricing tiers, and `mcpAccount(action:"pricing")` exists to advise on signup.
+   Strip both from the OpenAI-listed surface; signing in to an existing paid account is fine.
+6. **Reviewer account:** username and password with no inaccessible 2FA. If the approve page is
+   Google sign-in only, OpenAI review needs an email/password option or a test account without
+   2FA.
 
 ### D3 — One repo, two manifest sets, one skill tree
 
@@ -245,14 +279,14 @@ should fail CI first.
 |---|---|---|---|
 | M1 ✅ | `@mcp_title` / `@mcp_hints` in `serve-api` | ailang | **Done 2026-10-01 (ailang `9305f1c19`).** Emitted by both MCP implementations; the built-in `submit_feedback` is annotated. Also fixed: zero-arg tools advertised a required `"_"`, so prod `mcpFormats` rejected `{}` (`290e53886`). Purity bugs found on the way are filed as ailang#1443. |
 | M2 | Annotate Parse tools and bump the AILANG pin (**needs an AILANG release containing M1**; the current pin rejects `@mcp_title` as an unknown attribute) | ailang-parse | Prod `tools/list` shows a title and a hint on all 10 tools; the smoke gate is in CI. |
-| M3a | Run the device flow end to end in claude.ai and ChatGPT custom connectors; settle whether directories accept it (G2) | — |  Recorded result for each client. |
-| M3 | MCP OAuth front door onto the device-auth backend (D2). **Only if M3a requires it.** | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
+| M3a | `@mcp_auth` lazy auth in `serve-api`: HTTP 401 + `WWW-Authenticate`, per-tool `securitySchemes`, `_meta["mcp/www_authenticate"]` (D2.3) | ailang | A gated tool called without a Bearer token gets an HTTP 401 with resource metadata; open tools still answer; tests on both MCP implementations. |
+| M3 | OAuth authorization server, protected-resource metadata, and the listed OAuth-only surface (D2.1, 2, 4, 5) | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
 | M4 ✅ | Agent Plugins manifest and CI validation | docparse-skill | **Done 2026-10-01 (docparse-skill `a573d7c`).** Strict Claude validation, the Agent Plugins schema and cross-manifest checks, and a Codex install smoke test all run in CI and are green. The OpenAI ZIP build moves to M7. |
 | M5 | Review collateral | ailang-parse | Reviewer account seeded (no MFA); 5+3 test cases written; demo video recorded; privacy and terms URLs return 200. |
 | M6 | Submit to both directories (manual) | — | Anthropic submission (connector and plugin bundle) and OpenAI submission accepted into review. |
 | M7 | Release-time sync | ailang-parse, docparse-skill | One `sdk-v*` tag updates the MCP Registry, fast-forwards the Anthropic-tracked branch and attaches the OpenAI ZIP. |
 
-M2 (which needs ailang v0.50.0, now released) gates Anthropic. M3a decides whether M3 is needed at all.
+Critical path for both directories: M2, then M3a (AILANG), then M3 (Parse), then M5, then M6.
 
 ## Out of scope
 
@@ -264,12 +298,15 @@ M2 (which needs ailang v0.50.0, now released) gates Anthropic. M3a decides wheth
 
 ## Open questions
 
-1. Does directory review accept agent-run device auth (G2, M3a)? Note that parsing needs a key
-   (`AUTH_REQUIRED`) but discovery and pricing do not.
+1. ~~Does directory review accept agent-run device auth?~~ **No.** Both directories require
+   OAuth for account-backed tools, and OpenAI forbids the model handling API keys (G2).
+1a. Is the listed surface one module with a flag, or two module sets (D2.4)?
+1b. Does the approve page offer email/password for an OpenAI reviewer (D2.6)?
 2. Which tracked branch should Anthropic follow: `main` of `docparse-skill`, or a `release`
    branch the tag job fast-forwards? A release branch keeps unreleased skill edits out of the
    directory.
-3. Does `editDocument` ever overwrite its input in place? That decides its `destructiveHint`.
+3. ~~Does `editDocument` overwrite its input?~~ **No.** It returns modified blocks (live
+   `tools/list` description), so it is not destructive.
 4. Who owns the reviewer account and its seed data, given the account must not have MFA?
 
 ## Verification notes
