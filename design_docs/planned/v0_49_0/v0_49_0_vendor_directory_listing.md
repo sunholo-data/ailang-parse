@@ -156,26 +156,44 @@ Proposed mapping for Parse (to confirm against each tool's behaviour in hosted m
 | `mcpAuth` / `mcpAuthPoll` | Sign in / check sign-in | | ✗ | | Kept for clients without OAuth (D2). |
 | `submit_feedback` | Send feedback | | ✗ | ✓ | |
 
-### D2 — Implement MCP OAuth on the hosted server, keep device-flow tools as the fallback
+### D2 — Device-code auth stays the core; MCP OAuth is a thin front door onto it
 
-- **Protected-resource metadata:** serve `/.well-known/oauth-protected-resource`, naming our
-  authorization server.
-- **Authorization server:** wraps the existing sign-in. It issues a short-lived access token that
-  resolves to the same account as a `dp_` key.
-- **401 challenge:** an unauthenticated call that needs auth gets a 401 with a
-  `WWW-Authenticate` header.
-- **Existing paths stay:**
-  - `Bearer dp_…` keeps working (SDK bridges, CI users);
-  - `mcpAuth` and `mcpAuthPoll` stay for clients that can't do OAuth;
-  - the server instructions tell OAuth-capable clients not to use them.
+**Today's model (keep it).** Auth is RFC 8628 device authorization. An agent calls `mcpAuth`,
+shows the user a URL and code, the user signs in in their own browser, and `mcpAuthPoll`
+returns a key. That works in **every** MCP client, including headless agents and CLIs that
+have no browser of their own. Since #85 the key can also arrive as an
+`Authorization: Bearer` or `X-API-Key` header, so a client that can inject headers keeps it
+out of model context.
 
-**Open question that may shrink the scope:** if anonymous calls (sample docs, a free quota)
-already work without a key, the connector can be listed for the anonymous tier first and OAuth
-can follow. **Measure this before M3.**
+**Why the directories still need more.** Directory clients (claude.ai, ChatGPT) do not let the
+model run a login. They run the MCP authorization flow themselves: a 401 with a
+`WWW-Authenticate` header, then protected-resource metadata, then OAuth 2.1 authorization code
++ PKCE in the user's browser. They then attach the token as a `Bearer` header on every call.
+With only tool-mediated auth, Codex already reports the server's auth as **"Unsupported"**
+(`codex mcp list`, 2026-10-01). In the directory clients, the key would also travel through
+the model as an `apiKey` argument, which reviewers will flag.
 
-The OAuth layer belongs to the Parse service (Cloud Run, `/api/v1/auth/*`), not to AILANG.
-Whether `serve-api` should grow generic OAuth resource-server support is out of scope here.
-Raise it in the code-execution doc if that server needs auth too.
+**Design: reuse the device-auth backend; add no second identity system.**
+- **`/.well-known/oauth-protected-resource` on the MCP host** names the authorization server.
+- **Authorization server endpoints:** `/authorize`, `/token`, `/register` (dynamic client
+  registration; both directory clients use it), and `/.well-known/oauth-authorization-server`.
+  - `/authorize` renders the **same sign-in page** the device flow's verification URL uses.
+  - `/token` mints a token that resolves to the same account and quota as a `dp_` key.
+    Simplest version: the token *is* a scoped `dp_` key, so the existing `Bearer` path (#85)
+    validates it unchanged.
+- **The 401 challenge only goes to calls that need auth.** `tools/list`, `mcpFormats`,
+  `mcpEstimate` and `mcpAuth*` stay open, so discovery and the device flow still work
+  unauthenticated.
+- **`mcpAuth` / `mcpAuthPoll` stay** for agents and clients without OAuth. The server
+  instructions tell OAuth-capable clients that they are unnecessary.
+
+**Measured 2026-10-01: there is no anonymous tier.** `mcpParse` on a sample with no key
+returns `AUTH_REQUIRED`. So a directory listing cannot ship without auth, and **M3 is on the
+critical path for both directories.**
+
+The OAuth layer belongs to the Parse service (`/api/v1/auth/*`), not to AILANG. Whether
+`serve-api` should grow generic OAuth resource-server support is a question for the
+code-execution doc.
 
 ### D3 — One repo, two manifest sets, one skill tree
 
@@ -223,10 +241,10 @@ should fail CI first.
 
 | # | Milestone | Repo | Done when |
 |---|---|---|---|
-| M1 | `@mcp_title` / `@mcp_hints` in `serve-api` | ailang | `tools/list` from a test module emits title and annotations; the pure-default and missing-hint warning are covered by tests. |
-| M2 | Annotate Parse tools and bump the AILANG pin | ailang-parse | Prod `tools/list` shows a title and a hint on all 10 tools; the smoke gate is in CI. |
-| M3 | MCP OAuth on the hosted server (scope set by the anonymous-tier measurement) | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
-| M4 | Agent Plugins manifest and CI validation | docparse-skill | `claude plugin validate --strict` and the Agent Plugins schema check pass in CI; the ZIP builds; Codex installs from it locally. |
+| M1 ✅ | `@mcp_title` / `@mcp_hints` in `serve-api` | ailang | **Done 2026-10-01 (ailang `9305f1c19`).** Emitted by both MCP implementations; the built-in `submit_feedback` is annotated. Also fixed: zero-arg tools advertised a required `"_"`, so prod `mcpFormats` rejected `{}` (`290e53886`). Purity bugs found on the way are filed as ailang#1443. |
+| M2 | Annotate Parse tools and bump the AILANG pin (**needs an AILANG release containing M1**; the current pin rejects `@mcp_title` as an unknown attribute) | ailang-parse | Prod `tools/list` shows a title and a hint on all 10 tools; the smoke gate is in CI. |
+| M3 | MCP OAuth front door onto the device-auth backend (D2) | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
+| M4 ✅ | Agent Plugins manifest and CI validation | docparse-skill | **Done 2026-10-01 (docparse-skill `a573d7c`).** Strict Claude validation, the Agent Plugins schema and cross-manifest checks, and a Codex install smoke test all run in CI and are green. The OpenAI ZIP build moves to M7. |
 | M5 | Review collateral | ailang-parse | Reviewer account seeded (no MFA); 5+3 test cases written; demo video recorded; privacy and terms URLs return 200. |
 | M6 | Submit to both directories (manual) | — | Anthropic submission (connector and plugin bundle) and OpenAI submission accepted into review. |
 | M7 | Release-time sync | ailang-parse, docparse-skill | One `sdk-v*` tag updates the MCP Registry, fast-forwards the Anthropic-tracked branch and attaches the OpenAI ZIP. |
@@ -243,8 +261,8 @@ M1 is the critical path for Anthropic, and M3 is the critical path for both.
 
 ## Open questions
 
-1. Do Parse tools work anonymously (samples or a free quota)? If they do, list without OAuth
-   first (D2).
+1. ~~Do Parse tools work anonymously?~~ **No** (measured 2026-10-01: `AUTH_REQUIRED` on a
+   sample). OAuth (M3) is required before either listing.
 2. Which tracked branch should Anthropic follow: `main` of `docparse-skill`, or a `release`
    branch the tag job fast-forwards? A release branch keeps unreleased skill edits out of the
    directory.
