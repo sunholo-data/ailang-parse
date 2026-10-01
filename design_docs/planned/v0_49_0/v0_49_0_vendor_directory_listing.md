@@ -94,17 +94,38 @@ We can't derive the hints from effect rows. Every Parse tool declares a broad ro
 `mcpParse` is `! {Clock, AI, Env, FS, IO, Net}`), even though most of them are read-only from
 the user's point of view. The author has to state them.
 
-### G2 — No MCP OAuth (likely blocker for both)
+### G2 — Auth is self-serve, but not in the shape directory clients drive (open question, not a known blocker)
 
-- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` both
-  return 404.
-- Today auth works in two ways:
-  - the **tools** `mcpAuth` and `mcpAuthPoll` run an RFC 8628 device-code flow that hands the
-    model a `dp_` API key, which it then passes back as `apiKey`;
-  - an `Authorization: Bearer dp_…` header.
-- Directory clients expect the MCP authorization spec instead: a 401 with
-  `WWW-Authenticate`, protected-resource metadata, then an OAuth 2.1 + PKCE flow run by the
-  **client**, not by the model.
+**What exists (documented at sunholo.com/ailang-parse/api.html#agent-guide and /mcp.html, checked live on 2026-10-01):**
+1. **Agent-run device flow (RFC 8628).**
+   - Over MCP: `mcpAuth` then `mcpAuthPoll`.
+   - Over REST: `POST /api/v1/auth/device` then `/poll`.
+   - The user approves at `sunholo.com/docparse/approve.html?code=…` (returns 200) and the agent
+     receives a `dp_` key.
+   - `/api/v1/capabilities` advertises the flow under `auth.device_flow`.
+2. **Website sign-in.** Sign in on the API page, generate a key, then pass it as
+   `Authorization: Bearer dp_…` or `X-API-Key` (#85). This suits any client that accepts a static
+   header: Claude Code `--header`, Codex `bearer_token_env_var`, the SDK bridges.
+3. **No-key discovery.**
+   - Without a key: `tools/list`, `mcpFormats` (callable with `{}` once ailang v0.50.0's
+     zero-arg fix is deployed), `mcpAccount(action:"pricing")` and the device-flow tools.
+   - Parsing returns `AUTH_REQUIRED` with a `suggested_fix` pointing at `mcpAuth`.
+
+**What is not there:** the MCP *authorization spec* shape. That means a 401 with
+`WWW-Authenticate`, `/.well-known/oauth-protected-resource`, and client-run OAuth 2.1 + PKCE.
+Both `.well-known` endpoints return 404, and `codex mcp list` reports the server's auth as
+"Unsupported".
+
+**The open question is whether directory review accepts agent-run device auth.** In a
+claude.ai or ChatGPT connector the transport would be unauthenticated, with sign-in happening
+inside the chat (the model shows the URL and code, then passes the key as `apiKey`). That works
+mechanically today. Two risks:
+- the directories' "supported OAuth flow" wording;
+- the key passing through model context.
+
+**Test it before building anything (M3a):** add the URL as a custom connector in claude.ai and in
+ChatGPT developer mode, run the device flow end to end in chat, and record what each client does.
+Then ask the reviewers, or read the review checklist, about tool-mediated auth.
 
 ### G3 — No OpenAI package
 
@@ -156,44 +177,25 @@ Proposed mapping for Parse (to confirm against each tool's behaviour in hosted m
 | `mcpAuth` / `mcpAuthPoll` | Sign in / check sign-in | | ✗ | | Kept for clients without OAuth (D2). |
 | `submit_feedback` | Send feedback | | ✗ | ✓ | |
 
-### D2 — Device-code auth stays the core; MCP OAuth is a thin front door onto it
+### D2 — Device-code auth stays the core; MCP OAuth only if the directories require it
 
-**Today's model (keep it).** Auth is RFC 8628 device authorization. An agent calls `mcpAuth`,
-shows the user a URL and code, the user signs in in their own browser, and `mcpAuthPoll`
-returns a key. That works in **every** MCP client, including headless agents and CLIs that
-have no browser of their own. Since #85 the key can also arrive as an
-`Authorization: Bearer` or `X-API-Key` header, so a client that can inject headers keeps it
-out of model context.
+Device auth is the agent-native path: it works in every MCP client, headless agents included,
+and the website-key-plus-header path (#85) covers clients that can be configured. Neither
+changes.
 
-**Why the directories still need more.** Directory clients (claude.ai, ChatGPT) do not let the
-model run a login. They run the MCP authorization flow themselves: a 401 with a
-`WWW-Authenticate` header, then protected-resource metadata, then OAuth 2.1 authorization code
-+ PKCE in the user's browser. They then attach the token as a `Bearer` header on every call.
-With only tool-mediated auth, Codex already reports the server's auth as **"Unsupported"**
-(`codex mcp list`, 2026-10-01). In the directory clients, the key would also travel through
-the model as an `apiKey` argument, which reviewers will flag.
+**If M3a shows the directories need spec-shaped auth,** add a thin OAuth front door onto the
+same backend. It adds no second identity system:
+- **Resource metadata:** `/.well-known/oauth-protected-resource` on the MCP host names the
+  authorization server.
+- **Authorization server:** `/authorize`, `/token`, `/register` (dynamic client registration)
+  and its own metadata endpoint.
+  - `/authorize` renders the **same approve page** the device flow uses
+    (`/docparse/approve.html`, Firebase sign-in).
+  - `/token` mints a scoped `dp_` key, so the existing Bearer path validates it unchanged.
+- **401 challenge** only for tools that need a key. Discovery, `mcpFormats`, pricing and the
+  device-flow tools stay open.
 
-**Design: reuse the device-auth backend; add no second identity system.**
-- **`/.well-known/oauth-protected-resource` on the MCP host** names the authorization server.
-- **Authorization server endpoints:** `/authorize`, `/token`, `/register` (dynamic client
-  registration; both directory clients use it), and `/.well-known/oauth-authorization-server`.
-  - `/authorize` renders the **same sign-in page** the device flow's verification URL uses.
-  - `/token` mints a token that resolves to the same account and quota as a `dp_` key.
-    Simplest version: the token *is* a scoped `dp_` key, so the existing `Bearer` path (#85)
-    validates it unchanged.
-- **The 401 challenge only goes to calls that need auth.** `tools/list`, `mcpFormats`,
-  `mcpEstimate` and `mcpAuth*` stay open, so discovery and the device flow still work
-  unauthenticated.
-- **`mcpAuth` / `mcpAuthPoll` stay** for agents and clients without OAuth. The server
-  instructions tell OAuth-capable clients that they are unnecessary.
-
-**Measured 2026-10-01: there is no anonymous tier.** `mcpParse` on a sample with no key
-returns `AUTH_REQUIRED`. So a directory listing cannot ship without auth, and **M3 is on the
-critical path for both directories.**
-
-The OAuth layer belongs to the Parse service (`/api/v1/auth/*`), not to AILANG. Whether
-`serve-api` should grow generic OAuth resource-server support is a question for the
-code-execution doc.
+The OAuth layer belongs to the Parse service (`/api/v1/auth/*`), not to AILANG.
 
 ### D3 — One repo, two manifest sets, one skill tree
 
@@ -243,13 +245,14 @@ should fail CI first.
 |---|---|---|---|
 | M1 ✅ | `@mcp_title` / `@mcp_hints` in `serve-api` | ailang | **Done 2026-10-01 (ailang `9305f1c19`).** Emitted by both MCP implementations; the built-in `submit_feedback` is annotated. Also fixed: zero-arg tools advertised a required `"_"`, so prod `mcpFormats` rejected `{}` (`290e53886`). Purity bugs found on the way are filed as ailang#1443. |
 | M2 | Annotate Parse tools and bump the AILANG pin (**needs an AILANG release containing M1**; the current pin rejects `@mcp_title` as an unknown attribute) | ailang-parse | Prod `tools/list` shows a title and a hint on all 10 tools; the smoke gate is in CI. |
-| M3 | MCP OAuth front door onto the device-auth backend (D2) | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
+| M3a | Run the device flow end to end in claude.ai and ChatGPT custom connectors; settle whether directories accept it (G2) | — |  Recorded result for each client. |
+| M3 | MCP OAuth front door onto the device-auth backend (D2). **Only if M3a requires it.** | ailang-parse | A connector added by URL in claude.ai and ChatGPT developer mode completes OAuth and calls `mcpParse` on a real document; `Bearer dp_` and the device-flow tools still work. |
 | M4 ✅ | Agent Plugins manifest and CI validation | docparse-skill | **Done 2026-10-01 (docparse-skill `a573d7c`).** Strict Claude validation, the Agent Plugins schema and cross-manifest checks, and a Codex install smoke test all run in CI and are green. The OpenAI ZIP build moves to M7. |
 | M5 | Review collateral | ailang-parse | Reviewer account seeded (no MFA); 5+3 test cases written; demo video recorded; privacy and terms URLs return 200. |
 | M6 | Submit to both directories (manual) | — | Anthropic submission (connector and plugin bundle) and OpenAI submission accepted into review. |
 | M7 | Release-time sync | ailang-parse, docparse-skill | One `sdk-v*` tag updates the MCP Registry, fast-forwards the Anthropic-tracked branch and attaches the OpenAI ZIP. |
 
-M1 is the critical path for Anthropic, and M3 is the critical path for both.
+M2 (which needs ailang v0.50.0, now released) gates Anthropic. M3a decides whether M3 is needed at all.
 
 ## Out of scope
 
@@ -261,8 +264,8 @@ M1 is the critical path for Anthropic, and M3 is the critical path for both.
 
 ## Open questions
 
-1. ~~Do Parse tools work anonymously?~~ **No** (measured 2026-10-01: `AUTH_REQUIRED` on a
-   sample). OAuth (M3) is required before either listing.
+1. Does directory review accept agent-run device auth (G2, M3a)? Note that parsing needs a key
+   (`AUTH_REQUIRED`) but discovery and pricing do not.
 2. Which tracked branch should Anthropic follow: `main` of `docparse-skill`, or a `release`
    branch the tag job fast-forwards? A release branch keeps unreleased skill edits out of the
    directory.
