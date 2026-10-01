@@ -1,6 +1,6 @@
 module docparse/services/docx_parser
 
-import std/xml (parseLenient, findAll, findAllTexts, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars)
@@ -444,15 +444,20 @@ pure func extractChangeText(node: XmlNode) -> string {
 }
 
 -- Extract text from a run in a track change
--- Checks w:delText first (used by w:del and w:moveFrom), then w:t
-pure func extractRunChangeText(run: XmlNode) -> string {
-  match findFirst(run, "w:delText") {
-    Some(t) => getText(t),
-    None => match findFirst(run, "w:t") {
-      Some(t) => getText(t),
-      None => ""
-    }
-  }
+-- Same child walk as extractRunText, with w:delText (used by w:del and
+-- w:moveFrom) in place of w:t — so deletions split by a line break or tab
+-- keep their full text too.
+pure func extractRunChangeText(run: XmlNode) -> string =
+  join("", map(docxRunChangeChildText, getChildren(run)))
+
+pure func docxRunChangeChildText(node: XmlNode) -> string {
+  let tag = getTag(node);
+  if tag == "w:delText" then getText(node)
+  else if tag == "w:t" then getText(node)
+  else if tag == "w:br" || tag == "w:cr" then "\n"
+  else if tag == "w:tab" then "\t"
+  else if tag == "w:noBreakHyphen" then "-"
+  else ""
 }
 
 -- Extract text from structured document tags (w:sdt -> w:sdtContent)
@@ -497,18 +502,31 @@ pure func docxGetRunFont(run: XmlNode) -> string =
       findFirst(run, "w:rPr")),
     "")
 
+-- Text contribution of one child of a run, in document order (ECMA-376
+-- §17.3.3): w:t carries text; w:br/w:cr are line breaks (soft line breaks —
+-- Shift+Enter in Word, which Google Docs exports use to lay out Q/A pairs);
+-- w:tab is a tab; w:noBreakHyphen renders as a hyphen; w:softHyphen is an
+-- optional break hint that contributes nothing. Anything else (w:rPr, marks,
+-- drawing anchors) contributes no text.
+pure func docxRunChildText(node: XmlNode) -> string {
+  let tag = getTag(node);
+  if tag == "w:t" then getText(node)
+  else if tag == "w:br" || tag == "w:cr" then "\n"
+  else if tag == "w:tab" then "\t"
+  else if tag == "w:noBreakHyphen" then "-"
+  else ""
+}
+
 -- Extract text from a single w:r (run)
+-- Walks ALL children in order: a run may hold several <w:t> elements split by
+-- <w:br>/<w:tab> (a single Shift+Enter in Google Docs produces exactly this),
+-- and taking only the first w:t silently dropped every line after the break.
 -- Strips PUA characters from symbol font runs (Wingdings, Webdings, Symbol)
 pure func extractRunText(run: XmlNode) -> string {
-  match findFirst(run, "w:t") {
-    Some(t) => {
-      let text = getText(t);
-      let font = docxGetRunFont(run);
-      if docxIsSymbolFont(font) then docxStripPuaChars(text)
-      else text
-    },
-    None => ""
-  }
+  let text = join("", map(docxRunChildText, getChildren(run)));
+  let font = docxGetRunFont(run);
+  if docxIsSymbolFont(font) then docxStripPuaChars(text)
+  else text
 }
 
 -- Extract the paragraph style name from w:pPr/w:pStyle
@@ -1276,10 +1294,53 @@ pure func docxExtractCommentTexts(paragraphs: [XmlNode]) -> [string] =
   match paragraphs {
     [] => [],
     p :: rest => {
-      let pText = join("", findAllTexts(p, "w:t"));
+      let pText = extractParagraphText(p, emptyMap());
       if length(pText) > 0
       then pText :: docxExtractCommentTexts(rest)
       else docxExtractCommentTexts(rest)
     }
+  }
+
+-- === Test helper: paragraph texts from a body-only document.xml ============
+--
+-- Pure, so the inline tests below can exercise run-level text extraction
+-- (w:t, w:br, w:cr, w:tab inside one run) without the filesystem. Golden
+-- fixtures that only count blocks cannot catch a lost line break: the block
+-- count is identical before and after the fix, so the exact block text is
+-- what these tests assert.
+-- Plain text of the body's blocks, one per line, in block order — a flat,
+-- exact-text view for inline tests (the test harness compares against scalar
+-- literals only). Empty blocks contribute empty lines, so the line count is
+-- also part of the assertion.
+pure func docxXmlBodyText(xml: string) -> string
+  tests [
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>P1 before</w:t><w:br/><w:t>P1 AFTER BREAK same run</w:t></w:r></w:p><w:p><w:r><w:t>P2 before</w:t><w:br w:type=\"textWrapping\"/><w:t>P2 AFTER textWrapping break</w:t></w:r></w:p><w:p><w:r><w:t>P3 before</w:t><w:br/></w:r><w:r><w:t>P3 AFTER BREAK next run</w:t></w:r></w:p><w:p><w:r><w:t>P4 tab</w:t><w:tab/><w:t>P4 AFTER TAB</w:t></w:r></w:p></w:body></w:document>",
+     "P1 before\nP1 AFTER BREAK same run\nP2 before\nP2 AFTER textWrapping break\nP3 before\nP3 AFTER BREAK next run\nP4 tab\tP4 AFTER TAB"),
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>plain</w:t></w:r></w:p></w:body></w:document>",
+     "plain"),
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:ins w:id=\"1\" w:author=\"a\" w:date=\"2024-01-01\"><w:r><w:t>added</w:t><w:br/><w:t>more</w:t></w:r></w:ins></w:p><w:p><w:del w:id=\"2\" w:author=\"a\" w:date=\"2024-01-01\"><w:r><w:delText>gone</w:delText><w:br/><w:delText>still gone</w:delText></w:r></w:del></w:p></w:body></w:document>",
+     "added\nmore\nadded\nmore\n\ngone\nstill gone"),
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>hy</w:t><w:noBreakHyphen/><w:t>phen and</w:t><w:softHyphen/><w:t>soft</w:t></w:r></w:p></w:body></w:document>",
+     "hy-phen andsoft")
+  ]
+{
+  match parseLenient(xml) {
+    Ok(root) =>
+      match findFirst(root, "w:body") {
+        Some(body) =>
+          join("\n", map(docxBlockPlainText, processBodyChildren(getChildren(body), emptyMap(), emptyMap()))),
+        None => ""
+      },
+    Err(_) => ""
+  }
+}
+
+-- Plain text of one content block, for tests and text-only consumers.
+pure func docxBlockPlainText(b: Block) -> string =
+  match b {
+    TextBlock(t) => t.text,
+    HeadingBlock(h) => h.text,
+    ChangeBlock(c) => c.text,
+    _ => ""
   }
 
