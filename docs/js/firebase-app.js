@@ -171,6 +171,11 @@
       }
       if (headerUserName) headerUserName.textContent = user.displayName || user.email || '';
       if (headerUserEmail) headerUserEmail.textContent = user.email || '';
+
+      // Fire-and-forget referral attribution. The API Explorer and pricing
+      // pages sign people in and mint keys too, so a partner-referred visitor
+      // who never opens the docparse dashboard must still be credited.
+      claimReferral();
     } else {
       // Signed out — clear cached API key so it doesn't leak to another account
       localStorage.removeItem('dp_api_key');
@@ -244,6 +249,40 @@
   function getIdToken() {
     if (!currentUser) return Promise.reject(new Error('Not signed in'));
     return currentUser.getIdToken();
+  }
+
+  // ── Referral attribution (docparse design_docs/planned/referral_tracking.md) ──
+  // components.js saves a partner's ?ref= code to localStorage.docparse_ref on
+  // first touch. At sign-in we hand it to the server once, fire-and-forget; the
+  // server records it on the account (first write wins permanently, no
+  // self-referral, unknown codes ignored). The key is cleared only after the
+  // server confirms, so a failure retries on the next sign-in. Same code as
+  // docparse/docs/js/firebase-app.js — keep the two in step.
+  function claimReferral() {
+    var ref = null;
+    try { ref = localStorage.getItem('docparse_ref'); } catch (e) { /* storage unavailable */ }
+    if (!ref || !currentUser) return;
+    currentUser.getIdToken().then(function (token) {
+      return fetch(API_BASE + '/api/v1/referral/claim', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ ref: ref })
+      });
+    }).then(function (r) { return r.json(); })
+      .then(function (data) {
+        var result = typeof data.result === 'string' ? JSON.parse(data.result) : data;
+        if (result.ok) {
+          try { localStorage.removeItem('docparse_ref'); } catch (e) { /* ignore */ }
+        } else {
+          console.error('Referral claim not recorded:', result.error || result);
+        }
+      })
+      .catch(function (err) {
+        console.error('Referral claim failed (will retry on next sign-in):', err);
+      });
   }
 
   // ── API Key Management ──
