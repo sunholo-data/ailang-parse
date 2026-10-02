@@ -11,6 +11,16 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.49.0](https://github.com/sunholo-data/ailang-parse/compare/v0.48.0...v0.49.0) — 2026-10-02
+
+### Fixed — DOCX text after a line break or tab inside a run was silently dropped
+
+- Only the first `<w:t>` of each run was read, so everything after a `<w:br>`, `<w:cr>` or `<w:tab>` in the same run vanished (exit 0, no warning). Google Docs exports lay out soft line breaks (Shift+Enter) this way, so Q/A paragraphs lost their answers, and addresses and signature blocks lost every line after the first.
+- `extractRunText` and `extractRunChangeText` now walk the run's children in order: `w:t`/`w:delText` → text, `w:br`/`w:cr` → `\n`, `w:tab` → `\t`, `w:noBreakHyphen` → `-`, `w:softHyphen` → nothing. Tracked insertions and deletions keep their full text too.
+- Comment text now goes through the paragraph extractor, so breaks inside comments survive.
+- Side effect: a run holding a drawing no longer pulls the first line of a nested textbox into the surrounding paragraph (the old recursive lookup did). The textbox still appears as its own block.
+- Inline tests assert the exact block text. Block count is the same before and after the fix, so a count-only gate could not catch this (#86).
+
 ### Added — MCP tools accept the API key from a request header
 
 - `mcpParse`, `mcpConvert` and `mcpAccount` resolve the key as: explicit `apiKey` argument, then `Authorization: Bearer <key>`, then `X-API-Key`. An agent connected through an MCP registry that injects the key as a header never holds it in model context.
