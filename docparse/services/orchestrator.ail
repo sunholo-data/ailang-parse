@@ -871,7 +871,8 @@ func orchEmlResolveOneBlock(block: Block, counter: int, projectRoot: string)
   -> { block: Block, count: int } ! {IO, FS, Process} {
   match block {
     SectionBlock(s) => {
-      if s.kind == "attachment" && orchEmlHasData(s.blocks) then {
+      if s.kind == "attachment" && orchEmlHasData(s.blocks)
+         && orchEmlCanParseExt(orchEmlGetExt(s.blocks)) then {
         let b64 = orchEmlGetData(s.blocks);
         let ext = orchEmlGetExt(s.blocks);
         let meta = orchEmlGetMeta(s.blocks);
@@ -927,6 +928,17 @@ func orchEmlParseAttachment(filepath: string, ext: string, projectRoot: string)
   }
   else [mkText("[unsupported attachment format: ${ext}]", "error", 0)]
 }
+
+-- Extensions this pass has a parser for.
+--
+-- Resolving REPLACES the attachment section with the parsed result, which
+-- drops the base64 data block. For an image that would be a net loss: there
+-- is no image parser, so --deep would turn bytes into
+-- "[unsupported attachment format: png]" and a photo that parses fine without
+-- --deep would vanish with it. An extension that is not in this set is left
+-- untouched instead, data block and all.
+pure func orchEmlCanParseExt(ext: string) -> bool =
+  ext == "docx" || ext == "xlsx" || ext == "pptx" || ext == "pdf"
 
 pure func orchEmlHasData(blocks: [Block]) -> bool =
   match blocks {

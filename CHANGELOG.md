@@ -11,6 +11,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.50.0](https://github.com/sunholo-data/ailang-parse/compare/v0.49.0...v0.50.0) — 2026-10-06
+
+### Fixed — EML image attachments were dropped, bytes and all
+
+- An `image/*` MIME part produced a `[attachment: name, mime]` placeholder and its base64 was discarded, so a mailed photo or poster could not be recovered from the parse. `eparse attachments --extract` wrote nothing for a message whose index row listed the image (reported from a real 4.6 MB iPhone Mail message; Python's stdlib `email` decodes the same part to a valid PNG, so the bytes were there).
+- Images join PDF and the OOXML formats in `emlIsResolvableMime`, so the part is now emitted as an `attachment` section with `attachment-meta`, `attachment-data` (base64) and `attachment-ext`. That is the shape consumers already read for a PDF, so nothing downstream needed changing.
+- Attachment detection no longer keys on `Content-Disposition: attachment` alone. iPhone Mail sends a photo as `Content-Disposition: inline; filename=…`, and HTML mail embeds images as a bare `image/png` part with a `Content-ID` and no disposition header at all; neither reached the attachment branch. A part is now an attachment if its disposition says so, or it carries a filename, or its type is one whose bytes we keep. The disposition test stays first, so nothing that already took that branch stops taking it.
+- An image with no filename is named from its `Content-ID` — the name the HTML body itself uses (`cid:…`) — with path separators stripped, since the value becomes a filename in a temp directory and in a caller's `--extract` target.
+- `--deep` no longer destroys what it cannot parse: resolution replaces the attachment section with the parsed result, which drops the data block, so an image became `[unsupported attachment format: png]`. The pass now skips extensions it has no parser for and leaves their bytes alone.
+- Six inline tests, the module's first (`docparse/services/eml_parser.ail` joins the `--test` list). The defect was invisible to a golden diff: exit 0, a well-formed JSON, and a perfectly valid placeholder where the bytes should have been.
+
 ## [v0.49.0](https://github.com/sunholo-data/ailang-parse/compare/v0.48.0...v0.49.0) — 2026-10-02
 
 ### Fixed — DOCX text after a line break or tab inside a run was silently dropped
