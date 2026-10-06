@@ -46,6 +46,7 @@
         <a href="#data-we-collect">Data We Collect</a>
         <a href="#legal-basis">Legal Basis (GDPR)</a>
         <a href="#data-processor">Data Processor Role</a>
+        <a href="#ai-assistants">AI Assistant Connections</a>
         <a href="#ai-providers">AI Provider Handling</a>
         <a href="#sub-processors">Sub-processors</a>
         <a href="#transfers">International Transfers</a>
@@ -59,7 +60,7 @@
 
     <main class="dp-docs-content legal-content">
 
-      <p class="legal-updated">Last updated: 25 September 2026</p>
+      <p class="legal-updated">Last updated: 6 October 2026</p>
 
       <h2 id="who-we-are">1. Who We Are</h2>
       <p>AILANG Parse is operated by <strong>Holosun ApS</strong> (CVR 44324687), a company registered in Denmark. We provide a document parsing service that extracts structured content from Office documents, PDFs, images, and other file formats.</p>
@@ -117,8 +118,8 @@
           </tr>
           <tr>
             <td><strong>Account &amp; auth</strong></td>
-            <td>Email address, authentication tokens (via Firebase)</td>
-            <td>Until account deletion</td>
+            <td>Email address, display name and profile photo URL, and the sign-in provider (Google or GitHub) with its user ID, via Firebase Authentication. Access keys issued to AI assistants you connect (stored hashed; see <a href="#ai-assistants" style="color:var(--dp-blue)">AI Assistant Connections</a>)</td>
+            <td>Until account deletion. Connection keys expire after 24 hours; refresh tokens after 30 days</td>
           </tr>
           <tr>
             <td><strong>API keys</strong></td>
@@ -127,8 +128,8 @@
           </tr>
           <tr>
             <td><strong>Request records</strong></td>
-            <td>Per API request: request ID, account and API key ID, endpoint, file name or source reference, input and output format, whether AI was used, file size, outcome and error code, timestamp. <strong>Request history</strong>: up to 10&nbsp;KB of the parsed output, kept so you can replay the request. It&rsquo;s on by default; turn it off in your <a href="dashboard.html" style="color:var(--dp-blue)">dashboard</a> or with <code>POST /api/v1/account/history</code> and new requests keep metadata only. The file name is stored as you send it; if it identifies a person, rename the file before upload.</td>
-            <td>Automatically deleted 12 months after the request. Your history shows the last 30, 180 or 365 days depending on plan.</td>
+            <td>Per API request: request ID, account and API key ID, endpoint, file name or source reference, input and output format, whether AI was used, file size, outcome and error code, timestamp. <strong>Request history</strong>: up to 10&nbsp;KB of the parsed output, kept so you can replay the request. It&rsquo;s on by default; turn it off in your <a href="https://www.sunholo.com/docparse/dashboard.html" style="color:var(--dp-blue)">dashboard</a> or with <code>POST /api/v1/account/history</code> and new requests keep metadata only. The file name is stored as you send it; if it identifies a person, rename the file before upload.</td>
+            <td>Automatically deleted 12 months after the request. Your history shows the last 30, 180 or 365 days depending on plan. You can delete all of your request history at any time from the dashboard (<em>Delete history</em>).</td>
           </tr>
           <tr>
             <td><strong>Usage metrics</strong></td>
@@ -144,6 +145,19 @@
       </table>
 
       <p><strong>Referrals:</strong> If you signed up through a partner&rsquo;s referral link, that partner can see your email address, when you signed up, your plan, and how many documents you&rsquo;ve processed. They never see the content of your documents.</p>
+
+
+      <h3 id="ai-assistants">Using AILANG Parse from Claude, ChatGPT or another AI assistant</h3>
+      <p>You can connect AILANG Parse to an AI assistant that supports the Model Context Protocol (MCP), at <code>https://docparse.ailang.sunholo.com/mcp/connect/</code>. When you connect:</p>
+      <ul>
+        <li><strong>Sign-in.</strong> You sign in to AILANG Parse on our own page, with Google or GitHub through Firebase Authentication. The assistant never receives your Google or GitHub password or tokens. The sign-in page shows which app is asking and where it will send you back, and nothing is granted until you choose <em>Allow</em>.</li>
+        <li><strong>What we store for a connection.</strong> We issue the assistant an access key for your account, labelled <code>oauth: &lt;app&gt;</code> (for example <code>oauth: claude.ai</code>). It expires after 24 hours. The assistant then uses a refresh token to get a new key, which replaces the old one. Refresh tokens are valid for 30 days and are replaced each time they are used. We store keys and refresh tokens only as SHA-256 hashes, never in readable form, in Google Cloud Firestore in the EU (Belgium). Expired sign-in and refresh records are deleted automatically, and an expired key stops working immediately.</li>
+        <li><strong>What the assistant sends us.</strong> Only the tool call: the document or text you ask it to work on and the options for that request. We do not receive your conversation, your chat history or other files.</li>
+        <li><strong>What the assistant receives.</strong> The tool&rsquo;s result: parsed or converted content, estimates, or information about your account. From then on that content is handled under the assistant provider&rsquo;s own privacy policy (for example Anthropic&rsquo;s or OpenAI&rsquo;s), not ours.</li>
+        <li><strong>Requests made through an assistant</strong> are recorded like any other API request (see <em>Request records</em> above), and your request-history setting applies.</li>
+        <li><strong>Disconnecting.</strong> Revoke the connection at any time from your <a href="https://www.sunholo.com/docparse/dashboard.html" style="color:var(--dp-blue)">dashboard</a> (API keys labelled <code>oauth: &hellip;</code>), or remove the connector in the assistant. Revoking stops access at once. You can also ask us at <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a>.</li>
+        <li><strong>Feedback tool.</strong> If you or the assistant use &ldquo;Send feedback&rdquo;, we store the report text and any contact detail you include, so a person can review it. Don&rsquo;t include personal or confidential content.</li>
+      </ul>
 
       <div class="dp-callout" style="margin-top:16px">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -235,6 +249,7 @@
         <li><strong>Withdraw consent</strong> at any time</li>
       </ul>
       <p>To exercise these rights, contact <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a>. We will respond within 30 days.</p>
+      <p>To delete your account, email <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a> from the address you sign in with. We delete the account, its API keys and connections, and its request records within 30 days.</p>
       <p>You also have the right to lodge a complaint with <strong>Datatilsynet</strong> (the Danish Data Protection Authority) at <a href="https://www.datatilsynet.dk" target="_blank" rel="noopener" style="color:var(--dp-blue)">datatilsynet.dk</a>.</p>
 
       <h2 id="security">9. Security</h2>
