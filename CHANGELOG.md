@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.50.0](https://github.com/sunholo-data/ailang-parse/compare/v0.49.0...v0.50.0) — 2026-10-06
+
 ### Fixed — EML image attachments were dropped, bytes and all
 
 - An `image/*` MIME part produced a `[attachment: name, mime]` placeholder and its base64 was discarded, so a mailed photo or poster could not be recovered from the parse. `eparse attachments --extract` wrote nothing for a message whose index row listed the image (reported from a real 4.6 MB iPhone Mail message; Python's stdlib `email` decodes the same part to a valid PNG, so the bytes were there).
