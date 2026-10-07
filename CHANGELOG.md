@@ -11,6 +11,114 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.51.0](https://github.com/sunholo-data/ailang-parse/compare/v0.50.0...v0.51.0) — 2026-10-08
+
+### DOCX/XLSX fidelity: custom heading styles, real lists, breaks, bookmarks, run colour, formulas — and warnings when the output approximates the source
+
+A 14-file head-to-head against the raw OOXML (2026-10-07) found 6 files that
+silently lost structure and 0 that said so. Every defect below is fixed, and
+each has a fixture-level check (inline tests over the raw XML shape; the
+office-suite goldens were regenerated through the orchestrator's own recipe).
+
+**P1 — custom heading styles resolve to headings.** `ChapterTitle` /
+`SectionHeader` / `Subsection`, defined with `basedOn` Heading1/2/3, came back
+as text blocks with their style name, so every outline missed them.
+`docx_parser` now resolves the `styles.xml` `basedOn` chain (with a cycle
+guard that bottoms out at 0 instead of hanging) to the nearest built-in
+heading name or `w:outlineLvl`, honouring a paragraph's own `w:pPr/
+w:outlineLvl` and the style's own `w:outlineLvl` (0-based; 9 = body text, so
+Word's `TOCHeading` stays body text). The original style name stays readable
+in the source; the block is a heading at the resolved level.
+
+**P2 — lists are lists.** Each `ListBullet`/`ListBullet2`/`ListBullet3`
+paragraph used to come back as a separate ONE-ITEM list block with no depth.
+Consecutive list paragraphs now merge into ONE `ListBlock`: items
+concatenated, per-item nesting level in `itemLevels` (from `w:ilvl`, or —
+when a paragraph carries no explicit level — the style's numbering level,
+which is how python-docx's `List Bullet 2/3` nest), ordered-vs-bullet kept
+per run of same-kind items. An all-level-0 list stays FLAT (no `itemLevels`
+in the JSON), and `itemRuns` is dropped when nothing is formatted, so an
+ordinary bulleted paragraph serialises as one list, not as before. The merge
+runs in both parse paths (plain and comment-anchored), keeping comment anchor
+block indices honest.
+
+**P3 — breaks are structure, not blank lines.** A paragraph holding only a
+`w:br w:type="page"` used to emit an EMPTY text block, indistinguishable from
+a blank line, and a mid-document `w:pPr/w:sectPr` was invisible (only the
+final body-level `sectPr` was emitted). Explicit break markers now exist:
+`{kind: "page-break"}`, `{kind: "column-break"}` for `w:br` page/column
+breaks, and `{kind: "section-break"}` for mid-document `sectPr` — replacing
+the empty text block when the paragraph holds nothing else, following the
+text when it doesn't. `w:lastRenderedPageBreak` is deliberately NOT emitted:
+it marks where Word last *rendered* a page boundary, not where the document
+declares one, and including it would move output on every re-save. A page/
+column `w:br` no longer also contributes a `\n` to the paragraph text.
+
+**P4 — the parse says what it approximated.** The `[Block]`-returning DOCX
+parsers cannot carry a warnings list, so approximations are emitted as
+warning-styled blocks at the end of the body — the convention the image cap
+and the XLSX truncation warning already use. Emitted when (and only when)
+they apply: a referenced paragraph style that `styles.xml` does not define
+and that is not a built-in heading (rendered as plain text); field results
+returned as the values last cached in the document (`w:fldSimple` /
+`w:instrText` — FILENAME showed the original file's name, not the truth);
+a `w:footnoteReference` with NO `word/footnotes.xml` part at all; and
+`commentRangeStart` with no matching `End` (the comment degrades to
+unanchored, which is correct, but it is a degradation). A clean document
+emits no warning blocks, so existing output is byte-identical.
+
+**P5 — run colour.** `InlineRun` gains `color` ("#rrggbb" lowercase or "",
+same convention as `TableCell.fill/color`), read from `w:color` — the
+PASSED/FAILED/WARNING runs in `challenge_formatting.docx` carry it now. The
+field joins `coalesceRuns`' identity (like `href` before it: omit it there
+and it vanishes before any generator sees it) and is emitted in the JSON only
+when set.
+
+**P6 — bookmarks.** `w:bookmarkStart` was dropped entirely, so every
+internal link's target resolved to nothing. Each named bookmark is now an
+anchor section (`{kind: "bookmark", name: …}`) in document order.
+
+**P1b — XLSX formulas.** Formula cells (`<c><f>expr</f><v>…</v></c>`) came
+back as EMPTY cells — no formula, no value. `TableCell` gains `formula`
+("`=B2-C2"` form; shared formulas left blank rather than duplicated):
+`text` carries the CACHED value the workbook last computed, and when the
+workbook stores no cached value (hand-built files write `<v></v>`) the
+formula stands alone and the parse warns —
+`Sheet "Revenue": 5 formula cell(s) have no cached value; the formulas are
+kept but their results are not computed`. A formula cell is never dropped as
+a blank cell.
+
+**P2b — footnote text.** `word/footnotes.xml` wraps each note in
+`w:footnote`, which is not a body node — so `parseDocxFootnotes` parsed every
+note to ZERO blocks and the note text was silently dropped (poi_footnotes.docx
+returned the reference and nothing else). The wrappers are now unwrapped
+(headers/footers, whose children ARE body nodes, pass through untouched), the
+separator/continuation furniture notes are skipped, and endnotes get the same
+treatment. The public `sample_docx_footnotes` / `challenge_footnotes.docx`
+fixture still lacks a `footnotes.xml` part entirely — the parser now warns
+about exactly that, and the fixture needs rebuilding through the normal
+fixture scripts (no ZIP writer is available in the deterministic parser, so
+the rebuild belongs to the fixture tooling).
+
+**Already right, and now pinned by tests:** comments (author/date/anchor,
+table-spanning ranges), orphaned comments, OMML equations, hyperlinks, tables,
+Title/Subtitle → H1/H2, tracked changes.
+
+- New inline tests: `docxStyleLevelsView` (basedOn chains, own-outlineLvl
+  precedence, the 9=body-text rule, cycle guard), block-shape views for
+  custom headings, direct `outlineLvl`, page/column/section breaks,
+  bookmark anchors, flat and nested list merging, footnote/endnote
+  unwrapping, and every warning message (plus the clean-document no-warning
+  case); `xlsxFormulaCellView` (empty cached value, cached value, literal).
+- Goldens regenerated through the orchestrator recipe for all 33 affected
+  DOCX, 16 XLSX and the stress XLSX; the remaining 60+ goldens are
+  byte-identical, which is the determinism check.
+- `InlineRun.color` and `TableCell.formula` are additive record fields, empty
+  by default and omitted from the JSON when empty, exposed through the
+  existing constructors (`plainRun`, `simpleCell`/`mkTable`) — consumers that
+  construct records directly must add `color: ""` / `formula: ""` (the type
+  error points at the literal).
+
 ## [v0.50.0](https://github.com/sunholo-data/ailang-parse/compare/v0.49.0...v0.50.0) — 2026-10-06
 
 ### Fixed — EML image attachments were dropped, bytes and all

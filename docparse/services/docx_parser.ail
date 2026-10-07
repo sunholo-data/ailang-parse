@@ -1,14 +1,15 @@
 module docparse/services/docx_parser
 
-import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
+import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag, findAllAttrs)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, charCode, chars)
-import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember)
-import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
+import std/string (contains, length, trim, stringToInt, join, charCode, chars, substring)
+import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember, insert as mapInsert)
+import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last, dedup)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkNamedSection, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
+import docparse/services/colour (normaliseHex)
 
 -- DOCX Parser
 -- Parses Word document XML into a list of content Blocks.
@@ -43,8 +44,11 @@ export func parseDocx(filepath: string) -> [Block] ! {FS} {
   let xml = readDocxContent(filepath);
   let rels = docxLoadRels(filepath);
   let nums = docxLoadNumberingContext(filepath);
+  let hlevels = docxLoadHeadingLevels(filepath);
   match parseLenient(xml) {
-    Ok(root) => extractBodyBlocksWithNums(root, rels, nums),
+    Ok(root) => concat(extractBodyBlocksWithNums(root, rels, nums),
+                       docxPartWarnings(root, readDocxStyles(filepath),
+                                        listLength(findFootnoteEntries(filepath)) > 0)),
     Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
   }
 }
@@ -56,6 +60,126 @@ export func parseDocx(filepath: string) -> [Block] ! {FS} {
 -- documents always got.
 func docxLoadNumberingContext(filepath: string) -> Map[string, string] ! {FS} =
   docxNumberingContext(readDocxNumbering(filepath), readDocxStyles(filepath))
+
+-- Custom heading styles resolved to levels, parsed once per document
+-- (P1: a style like ChapterTitle basedOn Heading1 is a level-1 heading, and
+-- every consumer of the outline should see it as one).
+func docxLoadHeadingLevels(filepath: string) -> Map[string, int] ! {FS} =
+  docxStyleHeadingLevels(readDocxStyles(filepath))
+
+-- === Custom heading styles (ECMA-376 §17.7 styles.xml) ===================
+--
+-- A custom style like ChapterTitle defined with basedOn Heading1 IS a heading:
+-- Word shows it in the navigation pane, and the outline is what consumers of
+-- this parser's blocks actually read. Without resolving the chain, such a
+-- paragraph comes back as a text block with style="ChapterTitle" and every
+-- outline silently misses it.
+--
+-- Resolution, in priority order for a paragraph:
+--   1. the paragraph's own w:pPr/w:outlineLvl (a direct outline level);
+--   2. the pStyle's built-in level (styleId Heading1..6, Title, Subtitle);
+--   3. the style's own w:outlineLvl in styles.xml (0-based; 9 means body text);
+--   4. the basedOn chain walked with a cycle guard, taking the nearest
+--      ancestor with an outline level or a built-in heading name.
+-- The original style name is kept on the emitted block either way.
+
+-- The resolved level for every paragraph style defined in styles.xml.
+-- Empty input (no styles part) yields an empty map: every paragraph then
+-- resolves exactly as it did before style resolution existed.
+export pure func docxStyleHeadingLevels(stylesXml: string) -> Map[string, int] =
+  if length(stylesXml) == 0 then emptyMap()
+  else match parseLenient(stylesXml) {
+    Ok(root) => {
+      let styles = findAll(root, "w:style");
+      let basedOn = mapFromList(flatMap(docxStyleBasedOnEntry, styles));
+      let outline = mapFromList(flatMap(docxStyleOutlineEntry, styles));
+      mapFromList(flatMap(\sid. docxLevelEntry(sid, basedOn, outline),
+                          docxDefinedStyleIds(styles)))
+    },
+    Err(_) => emptyMap()
+  }
+
+-- styleIds of the styles defined in styles.xml (the w:styleId attribute).
+pure func docxDefinedStyleIds(styles: [XmlNode]) -> [string] =
+  flatMap(\s. match getAttr(s, "w:styleId") { Some(sid) => [sid], None => [] }, styles)
+
+pure func docxLevelEntry(sid: string, basedOn: Map[string, string], outline: Map[string, string])
+    -> [(string, int)] =
+  [(sid, docxResolveHeadingLevel(sid, basedOn, outline, 0))]
+
+-- basedOn edge for one style: (styleId, parentStyleId)
+pure func docxStyleBasedOnEntry(style: XmlNode) -> [(string, string)] =
+  match getAttr(style, "w:styleId") {
+    Some(sid) =>
+      match optFlatMap(\b. getAttr(b, "w:val"), findFirst(style, "w:basedOn")) {
+        Some(parent) => [(sid, parent)],
+        None => []
+      },
+    None => []
+  }
+
+-- Own outlineLvl for one style, RAW (0-based, 9 = body text; absent = inherit)
+pure func docxStyleOutlineEntry(style: XmlNode) -> [(string, string)] =
+  match getAttr(style, "w:styleId") {
+    Some(sid) =>
+      match optFlatMap(\ol. getAttr(ol, "w:val"),
+                       optFlatMap(\ppr. findFirst(ppr, "w:outlineLvl"),
+                                  findFirst(style, "w:pPr"))) {
+        Some(v) => [(sid, v)],
+        None => []
+      },
+    None => []
+  }
+
+-- Resolve one styleId to a heading level (0 = not a heading).
+-- depth bounds the basedOn walk: a cycle (A basedOn B basedOn A) or a chain
+-- longer than 16 resolves to 0 rather than hanging the parser.
+pure func docxResolveHeadingLevel(sid: string, basedOn: Map[string, string],
+                                  outline: Map[string, string], depth: int) -> int {
+  if length(sid) == 0 || depth > 16 then 0
+  else {
+    let builtin = headingLevelFromStyle(sid);
+    if builtin > 0 then builtin
+    else match mapLookup(outline, sid) {
+      -- The style declares its own outline level; it wins over the chain.
+      -- outlineLvl 9 (and anything unparsable) means body text.
+      Some(v) => docxOutlineLevel(v),
+      None => match mapLookup(basedOn, sid) {
+        Some(parent) => docxResolveHeadingLevel(parent, basedOn, outline, depth + 1),
+        None => 0
+      }
+    }
+  }
+}
+
+-- w:outlineLvl val -> heading level: 0-based 0..5 map to H1..H6, 6..8 clamp
+-- to H6, 9+ is body text.
+pure func docxOutlineLevel(v: string) -> int =
+  match stringToInt(v) {
+    Some(n) => if n <= 5 then n + 1 else if n <= 8 then 6 else 0,
+    None => 0
+  }
+
+-- A paragraph's own w:pPr/w:outlineLvl, as a heading level (0 = none)
+pure func docxParaOutlineLevel(p: XmlNode) -> int =
+  match optFlatMap(\ol. getAttr(ol, "w:val"),
+                   optFlatMap(\ppr. findFirst(ppr, "w:outlineLvl"),
+                              findFirst(p, "w:pPr"))) {
+    Some(v) => docxOutlineLevel(v),
+    None => 0
+  }
+
+-- The heading level for a paragraph: built-in style name, then its own
+-- outlineLvl, then the style's resolved level.
+pure func docxParaHeadingLevel(style: string, p: XmlNode, hlevels: Map[string, int]) -> int {
+  let byName = headingLevelFromStyle(style);
+  if byName > 0 then byName
+  else {
+    let direct = docxParaOutlineLevel(p);
+    if direct > 0 then direct
+    else getOrElse(mapLookup(hlevels, style), 0)
+  }
+}
 
 -- === Hyperlink targets (ECMA-376 §17.16.22) ==============================
 --
@@ -168,16 +292,39 @@ func parseSectionEntries(filepath: string, entries: [string], kind: string) -> [
 -- Headers, footers, footnotes and endnotes each have their own rels part
 -- (word/_rels/headerN.xml.rels …) which is not loaded, so hyperlink targets
 -- inside them stay unresolved rather than being resolved against the wrong map.
+--
+-- Footnotes and endnotes wrap each note in a w:footnote / w:endnote element,
+-- which is NOT a body node — without unwrapping it, every note parsed to zero
+-- blocks and its text was silently dropped. The separator/continuation notes
+-- (w:type="separator" / "continuationSeparator") carry no text and are
+-- skipped; they are Word's rendering furniture, not content.
 export pure func parseSectionXml(xml: string) -> [Block] {
   if length(xml) == 0 then []
   else match parseLenient(xml) {
     Ok(root) => {
       let children = getChildren(root);
-      processBodyChildren(children, emptyMap(), emptyMap())
+      processBodyChildren(docxUnwrapNoteChildren(children), emptyMap(), emptyMap(), emptyMap())
     },
     Err(_) => []
   }
 }
+
+-- Unwrap w:footnote / w:endnote wrappers into their body nodes. Anything else
+-- (a header's w:p children) passes through untouched.
+pure func docxUnwrapNoteChildren(nodes: [XmlNode]) -> [XmlNode] =
+  flatMap(docxUnwrapNoteNode, nodes)
+
+pure func docxUnwrapNoteNode(node: XmlNode) -> [XmlNode] {
+  let tag = getTag(node);
+  if tag == "w:footnote" || tag == "w:endnote" then
+    if isNoteSeparatorType(node) then []
+    else getChildren(node)
+  else [node]
+}
+
+pure func isNoteSeparatorType(node: XmlNode) -> bool =
+  let t = getOrElse(getAttr(node, "w:type"), "") in
+  t == "separator" || t == "continuationSeparator"
 -- Check if a block list has any non-empty content
 export pure func hasContent(blocks: [Block]) -> bool =
   any(blockHasContent, blocks)
@@ -204,75 +351,267 @@ export pure func extractBodyBlocks(root: XmlNode) -> [Block] =
 export pure func extractBodyBlocksWithRels(root: XmlNode, rels: Map[string, string]) -> [Block] =
   extractBodyBlocksWithNums(root, rels, emptyMap())
 
-export pure func extractBodyBlocksWithNums(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
+export pure func extractBodyBlocksWithNums(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] =
+  extractBodyBlocksWithStyles(root, rels, nums, emptyMap())
+
+-- Same walk, with custom heading styles resolved from styles.xml (empty map =
+-- only built-in style names are headings, exactly as before style resolution).
+export pure func extractBodyBlocksWithStyles(root: XmlNode, rels: Map[string, string],
+                                             nums: Map[string, string],
+                                             hlevels: Map[string, int]) -> [Block] {
   match findFirst(root, "w:body") {
     Some(body) => {
       let children = getChildren(body);
-      processBodyChildren(children, rels, nums)
+      processBodyChildren(children, rels, nums, hlevels)
     },
     None => []
   }
 }
 
--- Process children of w:body (paragraphs and tables)
-pure func processBodyChildren(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string]) -> [Block] =
-  flatMap(\n. processBodyNode(n, rels, nums), nodes)
+-- Process children of w:body (paragraphs and tables), then merge the
+-- consecutive one-item list paragraphs into single list blocks with their
+-- nesting levels (see docxGroupLists).
+pure func processBodyChildren(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string],
+                              hlevels: Map[string, int]) -> [Block] =
+  docxGroupLists(flatMap(\n. processBodyNode(n, rels, nums, hlevels), nodes))
 
 -- Process a single body-level node
-pure func processBodyNode(node: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
+pure func processBodyNode(node: XmlNode, rels: Map[string, string], nums: Map[string, string],
+                          hlevels: Map[string, int]) -> [Block] {
   let tag = getTag(node);
   if tag == "w:p" then {
-    let mainBlock = parseParagraph(node, rels, nums);
+    let mainBlock = parseParagraph(node, rels, nums, hlevels);
     let changeBlocks = extractParagraphChanges(node);
-    let textBoxBlocks = extractTextBoxes(node, rels, nums);
-    mainBlock :: concat(changeBlocks, textBoxBlocks)
+    let textBoxBlocks = extractTextBoxes(node, rels, nums, hlevels);
+    let breaks = docxParaBreakBlocks(node);
+    -- A paragraph that holds nothing but a page/column/section break used to
+    -- come back as an EMPTY text block — indistinguishable from a blank line.
+    -- The break marker replaces it. A paragraph with text keeps the text and
+    -- gains the break marker after it.
+    let dropMain = listLength(breaks) > 0 && docxIsBlankTextBlock(mainBlock);
+    concat(docxParaBookmarks(node),
+           concat(if dropMain then [] else [mainBlock],
+                  concat(changeBlocks, concat(textBoxBlocks, breaks))))
   }
   else if tag == "w:tbl" then [parseTable(node, rels)]
-  else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels, nums)
+  else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels, nums, hlevels)
   -- A body-level w:sectPr is a section break. Emitted as an empty marker block
   -- so consumers can see where a section ends; also deleted by e9de665.
   else if tag == "w:sectPr" then [mkSection("section-break", [])]
   else []
 }
 
+-- Is this block an empty (or whitespace-only) TextBlock?
+pure func docxIsBlankTextBlock(b: Block) -> bool =
+  match b {
+    TextBlock(t) => length(trim(t.text)) == 0 && listLength(t.runs) == 0,
+    _ => false
+  }
+
+-- === Page / column / section breaks (ECMA-376 §17.16.18, §17.6) ==========
+--
+-- A w:br with w:type="page" (inside a run) and a w:sectPr inside a paragraph's
+-- w:pPr are real structure: Word starts a new page / a new section there.
+-- They used to become empty text blocks indistinguishable from blank
+-- paragraphs (and only the FINAL body-level sectPr was emitted at all). Each
+-- is now an explicit marker section, keeping the kind the document declared.
+-- w:lastRenderedPageBreak is deliberately NOT emitted: it marks where Word
+-- last RENDERED a page boundary, not where the document declares one.
+
+-- Break markers declared by one paragraph, in document order: page, column,
+-- then the mid-document section break from pPr/sectPr.
+pure func docxParaBreakBlocks(p: XmlNode) -> [Block] {
+  let brs = findAll(p, "w:br");
+  let page = any(\b. getOrElse(getAttr(b, "w:type"), "") == "page", brs);
+  let col = any(\b. getOrElse(getAttr(b, "w:type"), "") == "column", brs);
+  let sect = match optFlatMap(\ppr. findFirst(ppr, "w:sectPr"), findFirst(p, "w:pPr")) {
+    Some(_) => true,
+    None => false
+  };
+  concat(if page then [mkSection("page-break", [])] else [],
+         concat(if col then [mkSection("column-break", [])] else [],
+                if sect then [mkSection("section-break", [])] else []))
+}
+
+-- === Bookmark anchors (ECMA-376 §17.13.22) ===============================
+--
+-- w:bookmarkStart/End name a position in the text that internal links point
+-- at. They were dropped entirely, so a TOC entry's target (or any cross
+-- reference) resolved to nothing. Each named start is now an anchor block
+-- carrying the bookmark's name; the End is implied by the next block.
+pure func docxParaBookmarks(p: XmlNode) -> [Block] =
+  map(\b. mkNamedSection("bookmark", getOrElse(getAttr(b, "w:name"), ""), []),
+      filter(\b. length(getOrElse(getAttr(b, "w:name"), "")) > 0,
+             findAll(p, "w:bookmarkStart")))
+
 -- Extract blocks from a body-level structured document tag (w:sdt)
 -- SDTs can wrap paragraphs, tables, and nested SDTs at the body level
-pure func extractSdtBodyBlocks(sdt: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] =
+pure func extractSdtBodyBlocks(sdt: XmlNode, rels: Map[string, string], nums: Map[string, string],
+                               hlevels: Map[string, int]) -> [Block] =
   match findFirst(sdt, "w:sdtContent") {
-    Some(content) => processBodyChildren(getChildren(content), rels, nums),
+    Some(content) => processBodyChildren(getChildren(content), rels, nums, hlevels),
     None => []
   }
 
 -- Extract text from text boxes (wps:txbx / w:txbxContent) inside a node
 -- Text boxes appear inside drawings within paragraphs
-pure func extractTextBoxes(node: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
+pure func extractTextBoxes(node: XmlNode, rels: Map[string, string], nums: Map[string, string],
+                           hlevels: Map[string, int]) -> [Block] {
   let txbxContents = findAll(node, "w:txbxContent");
-  extractTextBoxContent(txbxContents, rels, nums)
+  extractTextBoxContent(txbxContents, rels, nums, hlevels)
 }
 
 -- Parse text box content nodes into blocks wrapped in a SectionBlock
-pure func extractTextBoxContent(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string]) -> [Block] =
+pure func extractTextBoxContent(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string],
+                                hlevels: Map[string, int]) -> [Block] =
   flatMap(\txbx.
-    let blocks = processBodyChildren(getChildren(txbx), rels, nums) in
+    let blocks = processBodyChildren(getChildren(txbx), rels, nums, hlevels) in
     if hasContent(blocks) then [mkSection("textbox", blocks)]
     else [],
     nodes)
 
+-- === List grouping (ECMA-376 §17.9) ======================================
+--
+-- One DOCX list paragraph used to become one ONE-ITEM list block, so a
+-- three-item bulleted list read as three unrelated lists and a nested list
+-- carried no depth at all. Consecutive list paragraphs are now merged into
+-- ONE list block: items concatenated, per-item nesting level carried in
+-- itemLevels (0 = top level), and the block stays flat (no itemLevels in the
+-- JSON) when every item sits at level 0 — so ordinary lists serialise exactly
+-- as they did before nesting existed.
+--
+-- A merge requires the SAME ordered flag: a bullet followed by a numbered item
+-- stays two blocks, because a single ListBlock cannot say both.
+
+-- Merge `b` into the reversed accumulator, extending a preceding list when
+-- b is a single-item list paragraph with the same ordered flag.
+pure func docxMergeListInto(acc: [Block], b: Block) -> [Block] =
+  match (acc, b) {
+    (ListBlock(l1) :: rest, ListBlock(l2)) =>
+      if l1.ordered == l2.ordered && listLength(l2.items) == 1
+      then ListBlock(docxMergeListRec(l1, l2)) :: rest
+      else b :: acc,
+    _ => b :: acc
+  }
+
+pure func docxMergeListRec(l1: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]},
+                           l2: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]})
+    -> {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]} {
+  let n1 = listLength(l1.items);
+  let n2 = listLength(l2.items);
+  { items: concat(l1.items, l2.items),
+    ordered: l1.ordered,
+    itemRuns: concat(docxRunsRows(l1.itemRuns, n1), docxRunsRows(l2.itemRuns, n2)),
+    itemLevels: concat(docxLevelRows(l1.itemLevels, n1), docxLevelRows(l2.itemLevels, n2)) }
+}
+
+-- Parallel-array padding: itemRuns is either empty (nothing formatted) or
+-- exactly as long as items. Padding keeps the parallel invariant across merges.
+pure func docxRunsRows(runs: [[InlineRun]], n: int) -> [[InlineRun]] =
+  if listLength(runs) == n then runs
+  else if listLength(runs) == 0 then docxNEmptyRunRows(n)
+  else runs
+
+pure func docxNEmptyRunRows(n: int) -> [[InlineRun]] =
+  if n <= 0 then [] else [] :: docxNEmptyRunRows(n - 1)
+
+pure func docxLevelRows(levels: [int], n: int) -> [int] =
+  if listLength(levels) == n then levels
+  else if listLength(levels) == 0 then docxNZeroLevels(n)
+  else levels
+
+pure func docxNZeroLevels(n: int) -> [int] =
+  if n <= 0 then [] else 0 :: docxNZeroLevels(n - 1)
+
+-- Merge consecutive one-item list paragraphs across a produced block list.
+-- After merging, every list is normalised: a list whose items are ALL at
+-- level 0 loses itemLevels, and one where NO item is formatted loses
+-- itemRuns — so an ordinary flat list serialises exactly as it did before
+-- nesting existed, and only genuinely nested lists carry the field.
+pure func docxGroupLists(blocks: [Block]) -> [Block] =
+  map(docxFinalizeListBlock, reverse(docxGroupListsStep(blocks, [])))
+
+pure func docxGroupListsStep(blocks: [Block], acc: [Block]) -> [Block] =
+  match blocks {
+    [] => acc,
+    b :: rest => docxGroupListsStep(rest, docxMergeListInto(acc, b))
+  }
+
+pure func docxFinalizeListBlock(b: Block) -> Block =
+  match b {
+    ListBlock(l) =>
+      ListBlock({ l | itemRuns: docxTrimEmptyRunRows(l.itemRuns),
+                      itemLevels: if docxAnyNested(l.itemLevels) then l.itemLevels else [] }),
+    _ => b
+  }
+
+-- itemRuns stays only when some item actually carries formatting
+pure func docxTrimEmptyRunRows(runs: [[InlineRun]]) -> [[InlineRun]] =
+  if any(\r. listLength(r) > 0, runs) then runs else []
+
+pure func docxAnyNested(levels: [int]) -> bool =
+  match levels {
+    [] => false,
+    n :: rest => n > 0 || docxAnyNested(rest)
+  }
+
 -- Parse a w:p (paragraph) element into a Block
-pure func parseParagraph(p: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> Block {
+pure func parseParagraph(p: XmlNode, rels: Map[string, string], nums: Map[string, string],
+                         hlevels: Map[string, int]) -> Block {
   let text = extractParagraphText(p, rels);
   let style = extractParagraphStyle(p);
-  let headingLevel = headingLevelFromStyle(style);
+  let headingLevel = docxParaHeadingLevel(style, p, hlevels);
   let runs = extractParagraphRuns(p, rels);
   if headingLevel > 0
   then mkHeadingRuns(text, headingLevel, runs)
   else if isListParagraph(p, nums)
-  -- One DOCX list paragraph is one item, so itemRuns is parallel with a single
-  -- entry. Kept empty when the item has no formatting, so the field only
-  -- appears where it carries information.
-  then mkListRuns([text], isOrderedList(p, nums), if listLength(runs) > 0 then [runs] else [])
+  -- One DOCX list paragraph is one item, at its own nesting level; the
+  -- grouping pass merges consecutive paragraphs into one block. Kept empty
+  -- when the item has no formatting, so the field only appears where it
+  -- carries information.
+  then ListBlock({items: [text],
+                  ordered: isOrderedList(p, nums),
+                  itemRuns: if listLength(runs) > 0 then [runs] else [],
+                  itemLevels: [docxParaLevelInt(p, nums)]})
   else mkTextRuns(text, style, 0, runs)
 }
+
+-- The paragraph's nesting level as an int. w:ilvl is 0-based; when the
+-- paragraph has no explicit level, the STYLE's numbering level is used —
+-- python-docx's List Bullet 2 / List Number 3 styles carry numPr WITHOUT an
+-- ilvl, and their nesting is the style NAME's trailing number (N -> N-1).
+pure func docxParaLevelInt(p: XmlNode, nums: Map[string, string]) -> int {
+  let lvl = match stringToInt(docxParaIlvl(p, nums)) {
+    Some(n) => if n < 0 then 0 else n,
+    None => 0
+  };
+  if lvl > 0 then lvl
+  else docxStyleSuffixLevel(docxParaStyleId(p))
+}
+
+-- "ListBullet2" / "List Number 3" -> 1 / 2; anything without a trailing
+-- number >= 2 is top level. Only consulted for paragraphs that have no
+-- explicit ilvl anywhere.
+pure func docxStyleSuffixLevel(sid: Option[string]) -> int =
+  match sid {
+    Some(name) =>
+      match stringToInt(docxTrailingDigits(name)) {
+        Some(n) => if n >= 2 then n - 1 else 0,
+        None => 0
+      },
+    None => 0
+  }
+
+-- The run of digits at the end of s, "" when there is none
+pure func docxTrailingDigits(s: string) -> string =
+  if length(s) == 0 then ""
+  else {
+    let last = substring(s, length(s) - 1, length(s));
+    if last == "0" || last == "1" || last == "2" || last == "3" || last == "4"
+       || last == "5" || last == "6" || last == "7" || last == "8" || last == "9"
+    then "${docxTrailingDigits(substring(s, 0, length(s) - 1))}${last}"
+    else ""
+  }
 
 -- Extract all text from a paragraph by concatenating runs
 -- Handles track changes: includes w:ins and w:moveTo text,
@@ -346,14 +685,24 @@ pure func extractRun(run: XmlNode) -> InlineRun {
       -- DOCX has no "code" run property. Inferring one from a monospace font
       -- would be a guess, so it stays false rather than fabricated.
       code: false, href: "",
-      vertAlign: docxVertAlign(rPr)
+      vertAlign: docxVertAlign(rPr),
+      color: docxRunColor(rPr)
     },
     None => plainRun(text)
   }
 }
 
+-- w:color (§17.3.2.35): the run's own font colour, "#rrggbb" lowercase or ""
+-- when the run declares none (or "auto"). A colour the run merely INHERITS
+-- from a paragraph or character style is not extracted.
+pure func docxRunColor(rPr: XmlNode) -> string =
+  match findFirst(rPr, "w:color") {
+    Some(c) => normaliseHex(getOrElse(getAttr(c, "w:val"), "")),
+    None => ""
+  }
+
 pure func docxRunIsFormatted(r: InlineRun) -> bool =
-  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0 || length(r.color) > 0
 
 -- ECMA-376 toggle properties: a bare <w:b/> means ON, but <w:b w:val="0"/>
 -- means OFF. Presence alone is not the signal — a paragraph that explicitly
@@ -454,7 +803,7 @@ pure func docxRunChangeChildText(node: XmlNode) -> string {
   let tag = getTag(node);
   if tag == "w:delText" then getText(node)
   else if tag == "w:t" then getText(node)
-  else if tag == "w:br" || tag == "w:cr" then "\n"
+  else if tag == "w:br" || tag == "w:cr" then docxBrText(node)
   else if tag == "w:tab" then "\t"
   else if tag == "w:noBreakHyphen" then "-"
   else ""
@@ -511,11 +860,18 @@ pure func docxGetRunFont(run: XmlNode) -> string =
 pure func docxRunChildText(node: XmlNode) -> string {
   let tag = getTag(node);
   if tag == "w:t" then getText(node)
-  else if tag == "w:br" || tag == "w:cr" then "\n"
+  else if tag == "w:br" || tag == "w:cr" then docxBrText(node)
   else if tag == "w:tab" then "\t"
   else if tag == "w:noBreakHyphen" then "-"
   else ""
 }
+
+-- A w:br is a soft line break ("\n") UNLESS it names a structural break
+-- (w:type="page" / "column"), which is emitted as its own marker block and
+-- contributes nothing to the paragraph text.
+pure func docxBrText(br: XmlNode) -> string =
+  let t = getOrElse(getAttr(br, "w:type"), "") in
+  if t == "page" || t == "column" then "" else "\n"
 
 -- Extract text from a single w:r (run)
 -- Walks ALL children in order: a run may hold several <w:t> elements split by
@@ -785,8 +1141,8 @@ pure func parseCell(tc: XmlNode, rels: Map[string, string]) -> TableCell {
   let cs = getCellGridSpan(tc);
   let vm = getCellVMerge(tc);
   if vm == "continue"
-  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: ""}
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: ""}
+  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: "", formula: ""}
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Get gridSpan value from w:tcPr/w:gridSpan[@w:val]
@@ -913,10 +1269,16 @@ export pure func docxWalkBodyRootWithRels(root: XmlNode, rels: Map[string, strin
   docxWalkBodyRootFull(root, rels, emptyMap())
 
 export pure func docxWalkBodyRootFull(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk =
+  docxWalkBodyRootFullWithStyles(root, rels, nums, emptyMap())
+
+-- Same walk, with custom heading styles resolved from styles.xml.
+export pure func docxWalkBodyRootFullWithStyles(root: XmlNode, rels: Map[string, string],
+                                                nums: Map[string, string],
+                                                hlevels: Map[string, int]) -> DocxWalk =
   match findFirst(root, "w:body") {
     Some(body) => {
-      let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels, nums);
-      { blocks: reverse(st.blocks), anchors: reverse(st.anchors),
+      let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels, nums, hlevels);
+      { blocks: map(docxFinalizeListBlock, reverse(st.blocks)), anchors: reverse(st.anchors),
         open: st.open, count: st.count }
     },
     None => docxEmptyWalk()
@@ -925,41 +1287,47 @@ export pure func docxWalkBodyRootFull(root: XmlNode, rels: Map[string, string], 
 pure func docxEmptyWalk() -> DocxWalk =
   { blocks: [], anchors: [], open: [], count: 0 }
 
-pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk =
+pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk, rels: Map[string, string], nums: Map[string, string],
+                        hlevels: Map[string, int]) -> DocxWalk =
   match nodes {
     [] => st,
-    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st, rels, nums), rels, nums)
+    node :: rest => docxWalkNodes(rest, docxWalkNode(node, st, rels, nums, hlevels), rels, nums, hlevels)
   }
 
 -- Process one body-level node: emit its blocks (reusing processBodyNode so
 -- block extraction stays in one place) and scan it for comment markers.
-pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk {
+-- Consecutive one-item lists merge here too, so the anchor block indices the
+-- walk reports are indices into the SAME list the caller sees.
+pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string], nums: Map[string, string],
+                       hlevels: Map[string, int]) -> DocxWalk {
   let tag = getTag(node);
   if tag == "w:sdt" then
     -- SDTs emit their content's blocks, so recurse rather than counting them
     -- as one node; the recursion keeps the index accounting correct.
     match findFirst(node, "w:sdtContent") {
-      Some(content) => docxWalkNodes(getChildren(content), st, rels, nums),
+      Some(content) => docxWalkNodes(getChildren(content), st, rels, nums, hlevels),
       None => st
     }
   else {
-    let emitted = processBodyNode(node, rels, nums);
+    let emitted = processBodyNode(node, rels, nums, hlevels);
     let scanned =
       if tag == "w:p" then docxScanParagraph(node, st)
       else if tag == "w:tbl" then docxScanParagraphs(findAll(node, "w:p"), st)
       else st;
-    { blocks: docxPrependAll(emitted, scanned.blocks),
+    let before = listLength(scanned.blocks);
+    let mergedBlocks = docxPrependMergeAll(emitted, scanned.blocks);
+    { blocks: mergedBlocks,
       anchors: scanned.anchors,
       open: scanned.open,
-      count: scanned.count + listLength(emitted) }
+      count: scanned.count + (listLength(mergedBlocks) - before) }
   }
 }
 
--- Prepend a list onto a reversed accumulator
-pure func docxPrependAll(xs: [Block], acc: [Block]) -> [Block] =
+-- Prepend a list onto a reversed accumulator, merging list paragraphs
+pure func docxPrependMergeAll(xs: [Block], acc: [Block]) -> [Block] =
   match xs {
     [] => acc,
-    x :: rest => docxPrependAll(rest, x :: acc)
+    x :: rest => docxPrependMergeAll(rest, docxMergeListInto(acc, x))
   }
 
 -- Scan several paragraphs in document order (table cells, nested tables)
@@ -1088,11 +1456,31 @@ type DocxPlacedComment = {
 -- order) meets each comment beside its target. Comments whose anchor could not
 -- be resolved go in a trailing group, explicitly labelled unanchored.
 export func parseDocxWithComments(filepath: string) -> [Block] ! {FS} =
-  parseDocxWithCommentsXmlRelsNum(readDocxContent(filepath),
-                                  readComments(filepath),
-                                  readCommentsExtended(filepath),
-                                  docxLoadRels(filepath),
-                                  docxLoadNumberingContext(filepath))
+  docxBodyWithComments(readDocxContent(filepath),
+                       readComments(filepath),
+                       readCommentsExtended(filepath),
+                       docxLoadRels(filepath),
+                       docxLoadNumberingContext(filepath),
+                       docxLoadHeadingLevels(filepath),
+                       readDocxStyles(filepath),
+                       listLength(findFootnoteEntries(filepath)) > 0)
+
+-- The full CLI entry: comments spliced at anchors, custom heading styles
+-- resolved, and approximation warnings appended.
+export pure func docxBodyWithComments(documentXml: string, commentsXml: string,
+                                      extXml: string, rels: Map[string, string],
+                                      nums: Map[string, string], hlevels: Map[string, int],
+                                      stylesXml: string, hasFootnotesPart: bool) -> [Block] {
+  match parseLenient(documentXml) {
+    Ok(root) => {
+      let walk = docxWalkBodyRootFullWithStyles(root, rels, nums, hlevels);
+      let placed = docxCommentsFromXml(commentsXml, extXml, walk.anchors);
+      concat(docxSpliceComments(walk.blocks, placed),
+             docxPartWarnings(root, stylesXml, hasFootnotesPart))
+    },
+    Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
+  }
+}
 
 -- Pure core of the anchored parse, over raw XML strings.
 --
@@ -1301,6 +1689,72 @@ pure func docxExtractCommentTexts(paragraphs: [XmlNode]) -> [string] =
     }
   }
 
+-- === Parse warnings (what the output approximates) ========================
+--
+-- The parsers in this package return [Block] and cannot surface a warnings
+-- list in their exported type, so approximations are emitted as warning-styled
+-- text blocks at the end of the body — the convention the image-extraction
+-- cap and the XLSX shared-strings truncation already use. A reader (or an
+-- agent) that sees output MUST be able to see when that output is not the
+-- source document.
+--
+-- Deliberately quiet by construction: a well-formed document with defined
+-- styles, no fields, terminated comment ranges and a footnotes part emits NO
+-- warning blocks at all, so existing output stays byte-identical.
+export pure func docxPartWarnings(root: XmlNode, stylesXml: string, hasFootnotesPart: bool) -> [Block] =
+  map(\w. mkText(w, "warning", 0),
+      concat(docxUndefinedStyleWarnings(root, stylesXml),
+             concat(docxFieldWarning(root),
+                    concat(docxFootnoteWarning(root, hasFootnotesPart),
+                           docxUnterminatedRangeWarning(root)))))
+
+-- Paragraph styles the document references but styles.xml does not define,
+-- and which are not a built-in heading name. They are rendered as plain text;
+-- a reader should know that the source styled them at all.
+pure func docxUndefinedStyleWarnings(root: XmlNode, stylesXml: string) -> [string] {
+  let referenced = dedup(findAllAttrs(root, "w:pStyle", "w:val"));
+  let defined = docxDefinedStyleSet(stylesXml);
+  let unknown = filter(\sid. length(sid) > 0 && not docxStyleKnown(sid, defined), referenced);
+  if listLength(unknown) == 0 then []
+  else ["Warning: ${show(listLength(unknown))} paragraph style(s) are not defined in styles.xml and were rendered as plain text: ${join(", ", unknown)}"]
+}
+
+pure func docxDefinedStyleSet(stylesXml: string) -> [string] =
+  if length(stylesXml) == 0 then []
+  else match parseLenient(stylesXml) {
+    Ok(root) => docxDefinedStyleIds(findAll(root, "w:style")),
+    Err(_) => []
+  }
+
+-- Built-in style names resolve without styles.xml, so they are never "unknown"
+pure func docxStyleKnown(sid: string, defined: [string]) -> bool =
+  headingLevelFromStyle(sid) > 0 || any(\d. d == sid, defined)
+
+-- Fields (w:fldSimple / w:instrText) come back as their LAST CACHED result;
+-- the formula is never evaluated here.
+pure func docxFieldWarning(root: XmlNode) -> [string] =
+  if listLength(findAll(root, "w:fldSimple")) + listLength(findAll(root, "w:instrText")) == 0 then []
+  else ["Warning: field results are returned as the values last cached in the document; field codes are not evaluated"]
+
+-- A w:footnoteReference with no word/footnotes.xml part at all: the note text
+-- does not exist in the package, only the marker does.
+pure func docxFootnoteWarning(root: XmlNode, hasFootnotesPart: bool) -> [string] =
+  if hasFootnotesPart || listLength(findAll(root, "w:footnoteReference")) == 0 then []
+  else ["Warning: the document references footnote(s) but contains no word/footnotes.xml part; the note text is not available"]
+
+-- commentRangeStart with no matching commentRangeEnd: the comment degrades to
+-- unanchored, which is the correct behaviour — but it is a degradation, so say so.
+pure func docxUnterminatedRangeWarning(root: XmlNode) -> [string] {
+  let starts = findAllAttrs(root, "w:commentRangeStart", "w:id");
+  let ends = findAllAttrs(root, "w:commentRangeEnd", "w:id");
+  let open = filter(\id. not docxIdIn(id, ends), starts);
+  if listLength(open) == 0 then []
+  else ["Warning: ${show(listLength(open))} comment range(s) start but never end; their comments are unanchored"]
+}
+
+pure func docxIdIn(id: string, ids: [string]) -> bool =
+  any(\x. x == id, ids)
+
 -- === Test helper: paragraph texts from a body-only document.xml ============
 --
 -- Pure, so the inline tests below can exercise run-level text extraction
@@ -1328,7 +1782,7 @@ pure func docxXmlBodyText(xml: string) -> string
     Ok(root) =>
       match findFirst(root, "w:body") {
         Some(body) =>
-          join("\n", map(docxBlockPlainText, processBodyChildren(getChildren(body), emptyMap(), emptyMap()))),
+          join("\n", map(docxBlockPlainText, processBodyChildren(getChildren(body), emptyMap(), emptyMap(), emptyMap()))),
         None => ""
       },
     Err(_) => ""
@@ -1343,4 +1797,242 @@ pure func docxBlockPlainText(b: Block) -> string =
     ChangeBlock(c) => c.text,
     _ => ""
   }
+
+-- === Inline tests: block shapes over raw document.xml ======================
+--
+-- The test harness compares scalar literals only, so block shapes are asserted
+-- through this compact view: one entry per block, comma-joined, in block order.
+--   text:T            a TextBlock with text T
+--   hN:T              a level-N HeadingBlock
+--   list:i1@0|i2@1    a ListBlock with items and their nesting levels
+--                     (no @ when the list is flat)
+--   section:K[N]      a SectionBlock kind K, name N when set
+--   change:T          a ChangeBlock
+--   other             anything else
+pure func docxXmlBodyView(xml: string) -> string =
+  docxXmlBodyViewWith(xml, emptyMap())
+
+pure func docxXmlBodyViewWith(xml: string, hlevels: Map[string, int]) -> string =
+  match parseLenient(xml) {
+    Ok(root) =>
+      match findFirst(root, "w:body") {
+        Some(body) =>
+          join(",", map(docxBlockView, processBodyChildren(getChildren(body), emptyMap(), emptyMap(), hlevels))),
+        None => ""
+      },
+    Err(_) => ""
+  }
+
+pure func docxBlockView(b: Block) -> string =
+  match b {
+    TextBlock(t) => "text:${t.text}",
+    HeadingBlock(h) => "h${show(h.level)}:${h.text}",
+    ListBlock(l) => docxListView(l),
+    SectionBlock(s) => docxSectionView(s),
+    ChangeBlock(c) => "change:${c.changeType}",
+    _ => "other"
+  }
+
+pure func docxListView(l: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]}) -> string =
+  "list:${join("|", map(docxItemView, docxZipItemsLevels(l.items, l.itemLevels)))}"
+
+-- Items paired with their levels; a flat list has no levels to pair.
+pure func docxZipItemsLevels(items: [string], levels: [int]) -> [(string, int)] =
+  match (items, levels) {
+    (i :: ir, l :: lr) => (i, l) :: docxZipItemsLevels(ir, lr),
+    (i :: ir, _) => (i, 0) :: docxZipItemsLevels(ir, []),
+    _ => []
+  }
+
+pure func docxItemView(p: (string, int)) -> string =
+  match p {
+    (item, lvl) => if lvl == 0 then item else "${item}@${show(lvl)}"
+  }
+
+pure func docxSectionView(s: {kind: string, name: string, blocks: [Block]}) -> string =
+  if length(s.name) > 0 then "section:${s.kind}[${s.name}]" else "section:${s.kind}"
+
+-- P1: custom styles resolve through basedOn to a heading level; an own
+-- outlineLvl wins over the chain (9 = body text); a cycle resolves to 0.
+pure func docxStyleLevelsView(stylesXml: string) -> string
+  tests [
+    -- ChapterTitle/SectionHeader are basedOn Heading1/Heading2
+    ("<w:styles xmlns:w=\"x\"><w:style w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:pPr><w:outlineLvl w:val=\"0\"/></w:pPr></w:style><w:style w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:pPr><w:outlineLvl w:val=\"1\"/></w:pPr></w:style><w:style w:styleId=\"ChapterTitle\"><w:basedOn w:val=\"Heading1\"/></w:style><w:style w:styleId=\"SectionHeader\"><w:basedOn w:val=\"Heading2\"/></w:style></w:styles>",
+     "Heading1=1,Heading2=2,ChapterTitle=1,SectionHeader=2"),
+    -- an own outlineLvl wins over the chain; 9 means body text; a two-hop
+    -- basedOn chain resolves through the middle style
+    ("<w:styles xmlns:w=\"x\"><w:style w:styleId=\"Heading1\"><w:pPr><w:outlineLvl w:val=\"0\"/></w:pPr></w:style><w:style w:styleId=\"TOCHeading\"><w:basedOn w:val=\"Heading1\"/><w:pPr><w:outlineLvl w:val=\"9\"/></w:pPr></w:style><w:style w:styleId=\"Deep\"><w:basedOn w:val=\"Middle\"/></w:style><w:style w:styleId=\"Middle\"><w:basedOn w:val=\"Heading1\"/></w:style></w:styles>",
+     "Heading1=1,TOCHeading=0,Deep=1,Middle=1"),
+    -- a basedOn cycle resolves to 0, not a hang
+    ("<w:styles xmlns:w=\"x\"><w:style w:styleId=\"A\"><w:basedOn w:val=\"B\"/></w:style><w:style w:styleId=\"B\"><w:basedOn w:val=\"A\"/></w:style></w:styles>",
+     "A=0,B=0"),
+    -- no styles part: nothing resolves
+    ("", "")
+  ]
+{
+  let levels = docxStyleHeadingLevels(stylesXml);
+  join(",", map(\sid. docxLevelPairView((sid, getOrElse(mapLookup(levels, sid), 0))),
+                docxStyleIdsOf(stylesXml)))
+}
+
+pure func docxStyleIdsOf(stylesXml: string) -> [string] =
+  match parseLenient(stylesXml) {
+    Ok(r) => docxDefinedStyleIds(findAll(r, "w:style")),
+    Err(_) => []
+  }
+
+pure func docxLevelPairView(p: (string, int)) -> string =
+  match p { (k, v) => "${k}=${show(v)}" }
+
+-- P1: a ChapterTitle paragraph IS a heading, and a paragraph's own outlineLvl
+-- makes one too.
+pure func docxCustomHeadingView() -> string
+  tests [((), "h1:Annual Report")]
+{
+  docxXmlBodyViewWith(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:pStyle w:val=\"ChapterTitle\"/></w:pPr><w:r><w:t>Annual Report</w:t></w:r></w:p></w:body></w:document>",
+    docxStyleHeadingLevels(docxShapeStylesXml()))
+}
+
+pure func docxShapeStylesXml() -> string =
+  "<w:styles xmlns:w=\"x\"><w:style w:styleId=\"Heading1\"><w:pPr><w:outlineLvl w:val=\"0\"/></w:pPr></w:style><w:style w:styleId=\"ChapterTitle\"><w:basedOn w:val=\"Heading1\"/></w:style></w:styles>"
+
+-- A paragraph's own w:outlineLvl makes it a heading even with no pStyle
+pure func docxDirectOutlineView() -> string
+  tests [((), "h3:outlined")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:outlineLvl w:val=\"2\"/></w:pPr><w:r><w:t>outlined</w:t></w:r></w:p></w:body></w:document>")
+}
+
+-- P3: a paragraph that holds nothing but a break is a break MARKER, not an
+-- empty text block indistinguishable from a blank line.
+pure func docxPageBreakOnlyView() -> string
+  tests [((), "section:page-break")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:br w:type=\"page\"/></w:r></w:p></w:body></w:document>")
+}
+
+-- Text followed by a break keeps both, in order
+pure func docxPageBreakAfterTextView() -> string
+  tests [((), "text:before,section:page-break")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>before</w:t></w:r><w:r><w:br w:type=\"page\"/></w:r></w:p></w:body></w:document>")
+}
+
+pure func docxColumnBreakView() -> string
+  tests [((), "text:one,section:column-break")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>one</w:t></w:r><w:r><w:br w:type=\"column\"/></w:r></w:p></w:body></w:document>")
+}
+
+-- A mid-document pPr/sectPr is a section break (the body-level one already was)
+pure func docxMidSectionBreakView() -> string
+  tests [((), "section:section-break")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:sectPr/></w:pPr><w:r><w:t/></w:r></w:p></w:body></w:document>")
+}
+
+-- P6: bookmark anchors carry their names
+pure func docxBookmarkView() -> string
+  tests [((), "section:bookmark[sec1],text:hi")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:bookmarkStart w:id=\"1\" w:name=\"sec1\"/><w:r><w:t>hi</w:t></w:r></w:p></w:body></w:document>")
+}
+
+-- P2: consecutive list paragraphs merge into ONE block, with per-item levels;
+-- a flat list stays flat (no itemLevels), and a text block between lists
+-- keeps them separate.
+pure func docxFlatListMergeView() -> string
+  tests [((), "list:first|second|third")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/></w:numPr></w:pPr><w:r><w:t>first</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/></w:numPr></w:pPr><w:r><w:t>second</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/></w:numPr></w:pPr><w:r><w:t>third</w:t></w:r></w:p></w:body></w:document>")
+}
+
+pure func docxNestedListMergeView() -> string
+  tests [((), "list:top|sub@1")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/><w:ilvl w:val=\"0\"/></w:numPr></w:pPr><w:r><w:t>top</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/><w:ilvl w:val=\"1\"/></w:numPr></w:pPr><w:r><w:t>sub</w:t></w:r></w:p></w:body></w:document>")
+}
+
+pure func docxListSplitByTextView() -> string
+  tests [((), "list:a,text:mid,list:b")]
+{
+  docxXmlBodyView(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/></w:numPr></w:pPr><w:r><w:t>a</w:t></w:r></w:p><w:p><w:r><w:t>mid</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:numId w:val=\"5\"/></w:numPr></w:pPr><w:r><w:t>b</w:t></w:r></w:p></w:body></w:document>")
+}
+
+-- P2b: footnote text survives; separator/continuation notes are furniture,
+-- and the same unwrapping covers endnotes.
+pure func docxFootnotesView() -> string
+  tests [((), "text:note text")]
+{
+  join(",", map(docxBlockView, parseSectionXml(
+    "<w:footnotes xmlns:w=\"x\"><w:footnote w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:id=\"1\"><w:p><w:r><w:t>note text</w:t></w:r></w:p></w:footnote></w:footnotes>")))
+}
+
+pure func docxEndnotesView() -> string
+  tests [((), "text:end note")]
+{
+  join(",", map(docxBlockView, parseSectionXml(
+    "<w:endnotes xmlns:w=\"x\"><w:endnote w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:endnote><w:endnote w:id=\"2\"><w:p><w:r><w:t>end note</w:t></w:r></w:p></w:endnote></w:endnotes>")))
+}
+
+-- P4: the warning MESSAGES fire only when the source approximates.
+pure func docxWarningTexts(xml: string, stylesXml: string, hasFootnotesPart: bool) -> [string] =
+  match parseLenient(xml) {
+    Ok(root) => concat(docxUndefinedStyleWarnings(root, stylesXml),
+                       concat(docxFieldWarning(root),
+                              concat(docxFootnoteWarning(root, hasFootnotesPart),
+                                     docxUnterminatedRangeWarning(root)))),
+    Err(_) => []
+  }
+
+pure func docxUndefinedStyleWarningMsg() -> string
+  tests [((), "Warning: 1 paragraph style(s) are not defined in styles.xml and were rendered as plain text: Mystery")]
+{
+  join(" | ", docxWarningTexts(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Mystery\"/></w:pPr><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>",
+    "<w:styles xmlns:w=\"x\"/>", true))
+}
+
+pure func docxFieldWarningMsg() -> string
+  tests [((), "Warning: field results are returned as the values last cached in the document; field codes are not evaluated")]
+{
+  join(" | ", docxWarningTexts(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:fldSimple w:instr=\"FILENAME\"><w:t>cached</w:t></w:fldSimple></w:r></w:p></w:body></w:document>",
+    "", true))
+}
+
+pure func docxFootnoteWarningMsg() -> string
+  tests [((), "Warning: the document references footnote(s) but contains no word/footnotes.xml part; the note text is not available")]
+{
+  join(" | ", docxWarningTexts(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:footnoteReference w:id=\"1\"/></w:r></w:p></w:body></w:document>",
+    "", false))
+}
+
+pure func docxUnterminatedRangeWarningMsg() -> string
+  tests [((), "Warning: 1 comment range(s) start but never end; their comments are unanchored")]
+{
+  join(" | ", docxWarningTexts(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:commentRangeStart w:id=\"1\"/><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>",
+    "", true))
+}
+
+-- A clean document warns about nothing at all
+pure func docxNoWarnings() -> string
+  tests [((), "")]
+{
+  join(" | ", docxWarningTexts(
+    "<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>plain</w:t></w:r></w:p></w:body></w:document>",
+    "", true))
+}
 
