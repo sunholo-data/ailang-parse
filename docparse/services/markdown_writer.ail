@@ -2,7 +2,7 @@ module docparse/services/markdown_writer
 
 import std/string (length, replaceMany, startsWith, substring, repeat, join, split)
 import std/list (map, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText, cellDisplayText)
 
 -- Markdown writer — renders a ParsedDocument to markdown for LLM consumption.
 --
@@ -206,7 +206,9 @@ pure func cellTextMd(cell: TableCell) -> string {
     then " {colspan=${show(cell.colSpan)}}"
     else if cell.merged then " {merged}"
     else "";
-  "${mdEscapeCell(cell.text)}${suffix}"
+  -- cellDisplayText: a formula cell saved without a value shows "=formula".
+  -- Only a formula cell can differ, so the common case skips the call.
+  "${mdEscapeCell(if cell.formula == "" then cell.text else cellDisplayText(cell))}${suffix}"
 }
 
 -- A markdown table row is one line, with cells separated by pipes. Cell text

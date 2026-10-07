@@ -4,7 +4,7 @@ import std/string (length, join, intToStr, startsWith, contains, find, substring
 import std/fs (readFile)
 import std/result (Result, Ok, Err)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
+import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef, cellDisplayText)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
@@ -263,7 +263,7 @@ pure func htmlHeaderCell(cell: TableCell) -> string {
   if cell.merged then ""
   else {
     let span = if cell.colSpan > 1 then " colspan=\"${intToStr(cell.colSpan)}\"" else "";
-    "<th${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cell.text)}</th>"
+    "<th${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cellDisplayText(cell))}</th>"
   }
 }
 
@@ -280,7 +280,7 @@ pure func htmlDataCell(cell: TableCell) -> string {
   if cell.merged then ""
   else {
     let span = if cell.colSpan > 1 then " colspan=\"${intToStr(cell.colSpan)}\"" else "";
-    "<td${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cell.text)}</td>"
+    "<td${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cellDisplayText(cell))}</td>"
   }
 }
 

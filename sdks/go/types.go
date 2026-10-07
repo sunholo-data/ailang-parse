@@ -92,6 +92,9 @@ type Cell struct {
 	// (not white). Fill is the background, Color the cell-level font colour.
 	Fill  string `json:"fill,omitempty"`
 	Color string `json:"color,omitempty"`
+	// Spreadsheet formula without the leading "=" ("B2-C2"); empty for a
+	// cell that is not a formula. Text stays the cached value.
+	Formula string `json:"formula,omitempty"`
 }
 
 // UnmarshalJSON handles both string ("A") and object ({"text":"A","colSpan":2}) forms.

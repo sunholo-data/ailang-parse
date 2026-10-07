@@ -37,7 +37,14 @@ export type TableCell = {
   -- conditional formatting) or inherits from a table style is not here, and
   -- the parser says so in the outcome's warnings instead.
   fill: string,
-  color: string
+  color: string,
+  -- Spreadsheet formula as the file stores it, without the leading "="
+  -- ("B2-C2", "SUM(B2:B3)"), or "" for a cell that is not a formula. `text`
+  -- stays the cell's VALUE (the cached result the file saved); a formula cell
+  -- saved without one has text "" and the parser warns. Shared-formula
+  -- dependents carry their own formula, translated from the master's. Only
+  -- XLSX fills it today.
+  formula: string
 }
 
 -- A span of text within a paragraph carrying character formatting.
@@ -259,7 +266,7 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
@@ -268,21 +275,21 @@ export pure func simpleCell(text: string) -> TableCell
 export pure func scopedCell(text: string, scope: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Same as simpleCell/spanCell, plus the tokenized inline runs (markdown_parser
@@ -290,13 +297,13 @@ export pure func spanCell(text: string, cs: int) -> TableCell
 export pure func simpleCellRuns(text: string, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: "", formula: ""}
 }
 
 export pure func spanCellRuns(text: string, cs: int, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: "", formula: ""}
 }
 
 -- The same cell carrying a direct fill and font colour (both already
@@ -306,6 +313,19 @@ export pure func withCellColours(cell: TableCell, fill: string, color: string) -
 {
   { cell | fill: fill, color: color }
 }
+
+-- The same cell carrying a spreadsheet formula (no leading "=").
+export pure func withCellFormula(cell: TableCell, formula: string) -> TableCell
+  ensures { result.formula == formula && result.text == cell.text }
+{
+  { cell | formula: formula }
+}
+
+-- What a reader sees in a rendered table (Markdown, HTML): the value, or, for
+-- a formula cell saved without a cached value, the formula itself as a
+-- spreadsheet shows it ("=B2-C2") rather than an empty cell.
+export pure func cellDisplayText(cell: TableCell) -> string =
+  if length(cell.text) == 0 && length(cell.formula) > 0 then "=${cell.formula}" else cell.text
 
 -- Construct a TableBlock with no caption (most non-HTML parsers).
 -- HTML parser uses mkTableFull when <caption> is present.

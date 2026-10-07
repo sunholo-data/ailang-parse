@@ -123,6 +123,10 @@ def cell_text(c) -> str:
     # A pipe table pads its cells with spaces, so a reader must trim them and
     # leading/trailing whitespace inside a cell is not representable. Compare
     # trimmed; everything else about the cell must survive exactly.
+    # A formula cell saved without a cached value renders as "=formula"
+    # (document.ail cellDisplayText); that is the cell's markdown form.
+    if isinstance(c, dict) and not c.get("text") and c.get("formula"):
+        return "=" + c["formula"]
     return (c if isinstance(c, str) else c.get("text", "")).strip()
 
 

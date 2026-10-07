@@ -33,7 +33,8 @@ NULL
       merged   = .b(raw$merged),
       align    = .s(raw$align),
       fill     = .s(raw$fill),
-      color    = .s(raw$color)
+      color    = .s(raw$color),
+      formula  = .s(raw$formula)
     ))
   }
   list(text = as.character(raw), col_span = 1L, merged = FALSE)

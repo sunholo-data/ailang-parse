@@ -141,6 +141,9 @@ class Cell:
     # (not white). fill is the background, color the cell-level font colour.
     fill: str = ""
     color: str = ""
+    # Spreadsheet formula without the leading "=" ("B2-C2"); empty for a cell
+    # that is not a formula. text stays the cached value.
+    formula: str = ""
 
     @classmethod
     def from_raw(cls, raw: Any) -> "Cell":
@@ -154,6 +157,7 @@ class Cell:
                 align=raw.get("align", ""),
                 fill=raw.get("fill", ""),
                 color=raw.get("color", ""),
+                formula=raw.get("formula", ""),
             )
         return cls(text=str(raw))
 
