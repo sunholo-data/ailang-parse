@@ -136,9 +136,31 @@ pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
 
 -- Lists as real Word list paragraphs referencing word/numbering.xml
 -- (numBase = bullet, numBase + 1 = decimal, matching docxNumberingDefs).
+-- itemOrdered (parallel, usually empty) picks the numbering per item, so a
+-- numbered outline with bulleted sub-points keeps both; Word continues each
+-- numId's counter independently, so the top-level numbering is not reset by
+-- the bulleted items between.
 export pure func docxListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]],
-                        itemLevels: [int], numBase: int) -> string =
-  docxListItemsToXml(items, itemRuns, itemLevels, if ordered then numBase + 1 else numBase)
+                        itemLevels: [int], itemOrdered: [bool], numBase: int) -> string =
+  match itemOrdered {
+    [] => docxListItemsToXml(items, itemRuns, itemLevels, if ordered then numBase + 1 else numBase),
+    _ => docxListMixedToXml(items, itemRuns, itemLevels, itemOrdered, numBase)
+  }
+
+pure func docxListMixedToXml(items: [string], itemRuns: [[InlineRun]], itemLevels: [int],
+                             itemOrdered: [bool], numBase: int) -> string =
+  match items {
+    [] => "",
+    item :: rest => {
+      let o = match itemOrdered { [] => false, x :: _ => x };
+      let runs = match itemRuns { [] => [], r :: _ => [r] };
+      let one = docxListItemsToXml([item], runs, [docxHeadLevel(itemLevels)],
+                                   if o then numBase + 1 else numBase);
+      let restRuns = match itemRuns { [] => [], _ :: t => t };
+      let restOrd = match itemOrdered { [] => [], _ :: t => t };
+      "${one}${docxListMixedToXml(rest, restRuns, docxTailLevels(itemLevels), restOrd, numBase)}"
+    }
+  }
 
 -- itemRuns is parallel to items but may be empty entirely (nothing formatted).
 -- Both lists are walked together so a short or absent itemRuns simply falls

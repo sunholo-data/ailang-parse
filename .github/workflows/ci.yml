@@ -132,6 +132,13 @@ jobs:
       # never fires all score 100% in the office suite.
       - name: DOCX run colour, notes, bookmarks and warnings (exact)
         run: python3 benchmarks/check_docx_runs.py
+      # Same rationale: custom heading styles, nested lists and page/section
+      # breaks each sat in a golden as the defect (body text, one-item lists,
+      # empty paragraphs) at 100%. Expectations come from how the fixtures
+      # were built; docx -> md and docx -> docx round trips must not crash and
+      # docx -> docx must keep headings and list nesting.
+      - name: DOCX headings, nested lists and breaks (exact)
+        run: python3 benchmarks/check_docx_structure.py
 
   floor-check:
     # Guards against the manifest advertising a lower AILANG floor than the code

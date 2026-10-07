@@ -111,7 +111,7 @@ export type Block = TextBlock({text: string, style: string, level: int, runs: [I
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
                   | VideoBlock({data: string, description: string, mime: string})
-                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]})
+                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int], itemOrdered: [bool]})
                   | HeadingBlock({text: string, level: int, runs: [InlineRun], bookmarks: [string]})
                   | SectionBlock({kind: string, name: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
@@ -429,7 +429,7 @@ export pure func blockBookmarks(block: Block) -> [string] =
 
 -- Construct a ListBlock.
 export pure func mkList(items: [string], ordered: bool) -> Block =
-  ListBlock({items: items, ordered: ordered, itemRuns: [], itemLevels: []})
+  ListBlock({items: items, ordered: ordered, itemRuns: [], itemLevels: [], itemOrdered: []})
 
 -- ListBlock with per-item formatting.
 --
@@ -441,7 +441,7 @@ export pure func mkList(items: [string], ordered: bool) -> Block =
 -- parallel field is additive. Consumers must tolerate an empty itemRuns and
 -- should not assume alignment without checking length.
 export pure func mkListRuns(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> Block =
-  ListBlock({items: items, ordered: ordered, itemRuns: map(coalesceRuns, itemRuns), itemLevels: []})
+  ListBlock({items: items, ordered: ordered, itemRuns: map(coalesceRuns, itemRuns), itemLevels: [], itemOrdered: []})
 
 -- A nested list. `itemLevels` is parallel to `items`, 0 for a top-level item.
 -- Empty when the list is flat, so an ordinary list serialises exactly as it
@@ -449,7 +449,20 @@ export pure func mkListRuns(items: [string], ordered: bool, itemRuns: [[InlineRu
 export pure func mkListNested(items: [string], ordered: bool,
                               itemRuns: [[InlineRun]], itemLevels: [int]) -> Block =
   ListBlock({items: items, ordered: ordered,
-             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels})
+             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels, itemOrdered: []})
+
+-- A nested list whose levels do not all share one marker kind — a numbered
+-- outline with bulleted sub-points, say. `itemOrdered` is parallel to `items`
+-- and overrides `ordered` per item; `ordered` stays the marker of the first
+-- item so a consumer that reads only `ordered` still gets the top level right.
+-- Empty when every item agrees with `ordered`, which keeps the JSON for every
+-- uniform list byte-identical to before the field existed (DOCX numbering is
+-- the only source of mixed lists today: numbering.xml sets numFmt per level).
+export pure func mkListFull(items: [string], ordered: bool, itemRuns: [[InlineRun]],
+                            itemLevels: [int], itemOrdered: [bool]) -> Block =
+  ListBlock({items: items, ordered: ordered,
+             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels,
+             itemOrdered: itemOrdered})
 
 -- Construct a plain body paragraph — the overwhelmingly common case
 -- (style "normal", level 0).

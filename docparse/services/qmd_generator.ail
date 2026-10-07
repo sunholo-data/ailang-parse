@@ -188,7 +188,10 @@ pure func qmdImageTarget(target: string) -> string =
 
 -- Section blocks → Quarto divs
 pure func qmdSectionToStr(kind: string, blocks: [Block]) -> string =
-  if kind == "slide" then "---\n\n${qmdBlocksToStr(blocks)}"
+  -- Quarto's own shortcode, which every output format honours (a page break
+  -- in docx/pdf, nothing in html).
+  if kind == "page-break" then "{{< pagebreak >}}\n\n"
+  else if kind == "slide" then "---\n\n${qmdBlocksToStr(blocks)}"
   else if kind == "sheet" then "::: {.panel-tabset}\n## Sheet\n\n${qmdBlocksToStr(blocks)}:::\n\n"
   else if kind == "header" then "::: {.callout-tip appearance=\"minimal\"}\n**Header:** ${qmdBlocksToStr(blocks)}:::\n\n"
   else if kind == "footer" then "::: {.callout-tip appearance=\"minimal\"}\n**Footer:** ${qmdBlocksToStr(blocks)}:::\n\n"

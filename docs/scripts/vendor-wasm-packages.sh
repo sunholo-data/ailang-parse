@@ -105,6 +105,7 @@ MODULES=(
   "services/omml.ail"
   "services/docx_inline.ail"
   "services/docx_warnings.ail"
+  "services/docx_structure.ail"
   "services/docx_parser.ail"
   "services/pptx_parser.ail"
   "services/xlsx_parser.ail"

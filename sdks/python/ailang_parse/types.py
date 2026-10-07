@@ -183,6 +183,9 @@ class Block:
     item_runs: List[List[InlineRun]] = field(default_factory=list)
     # Nesting depth per list item, parallel to `items`; empty for a flat list.
     item_levels: List[int] = field(default_factory=list)
+    # Marker kind per list item, parallel to `items`, overriding `ordered`;
+    # empty unless the list mixes numbered and bulleted levels.
+    item_ordered: List[bool] = field(default_factory=list)
     # ImageBlock / AudioBlock / VideoBlock
     description: str = ""
     transcription: str = ""
@@ -236,6 +239,7 @@ class Block:
 
         b.runs = [InlineRun.from_raw(r) for r in d.get("runs", [])]
         b.item_levels = d.get("itemLevels", [])
+        b.item_ordered = d.get("itemOrdered", [])
         b.item_runs = [[InlineRun.from_raw(r) for r in item]
                        for item in d.get("itemRuns", [])]
 

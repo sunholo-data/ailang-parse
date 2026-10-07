@@ -3,14 +3,15 @@ module docparse/services/docx_parser
 import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, charCode, chars, startsWith, substring)
+import std/string (contains, length, trim, stringToInt, join, charCode, chars, startsWith, substring, split)
 import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withBookmarks)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListFull, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withBookmarks)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
 import docparse/services/docx_inline (docxRunColor, docxRunHighlight, docxNoteRefText, docxNoteRefHref, docxBookmarkNames, docxHyperlinkAnchorHref, docxFieldHyperlinkHref, docxIsContentNote, docxContentNoteIds)
 import docparse/services/docx_warnings (docxParseWarnings)
+import docparse/services/docx_structure (docxStyleContextEntries, docxParaHeadingLevel, docxParaListDepth, docxParagraphBlocks, docxGroupLists, docxGroupListsIndexed, docxRemapIndex, docxStructureView)
 
 -- DOCX Parser
 -- Parses Word document XML into a list of content Blocks.
@@ -262,21 +263,99 @@ export pure func extractBodyBlocksWithNums(root: XmlNode, rels: Map[string, stri
   }
 }
 
+-- === Structure tests (docx_structure) =====================================
+--
+-- The whole anchored parse the CLI runs (parseDocxWithCommentsXmlRelsNum),
+-- over hand-built parts, rendered by docxStructureView. One input string
+-- carries styles.xml @@@ numbering.xml @@@ document.xml @@@ comments.xml,
+-- because the inline-test harness takes a single scalar argument.
+--   1. custom heading styles through basedOn chains, outlineLvl in a style and
+--      in a paragraph, outlineLvl 9 demoting a heading, a basedOn cycle,
+--      a localised styleId whose NAME is "heading 1", an undefined style
+--   2. numPr/ilvl nesting with per-level numFmt (decimal outline with a bullet
+--      level), a new list when a top-level item switches kind, numId 0 and a
+--      numId-less numPr are not list items
+--   3. depth from the built-in list style family, numbering inherited
+--      through basedOn and switched off by a style's numId 0
+--   4. page/column breaks, a break inside a run, mid-document sectPr with and
+--      without text, pageBreakBefore, a soft line break left alone
+--   5. a comment on a grouped list item follows the grouped list
+--   6. no styles.xml: only the built-in names are headings (the browser build)
+--   7. a deeper item may use another numId (List Bullet 2 style), a top-level
+--      item naming a new numId starts a new list, and a tracked change inside
+--      an item is held until after the list instead of splitting it
+pure func docxStructureFromParts(parts: string) -> string
+  tests [
+    ("<w:styles xmlns:w='x'><w:style w:type='paragraph' w:styleId='Normal'><w:name w:val='Normal'/></w:style><w:style w:type='paragraph' w:styleId='Heading1'><w:name w:val='heading 1'/><w:basedOn w:val='Normal'/><w:pPr><w:outlineLvl w:val='0'/></w:pPr></w:style><w:style w:type='paragraph' w:styleId='Heading2'><w:name w:val='heading 2'/><w:basedOn w:val='Normal'/><w:pPr><w:outlineLvl w:val='1'/></w:pPr></w:style><w:style w:type='paragraph' w:styleId='ChapterTitle'><w:name w:val='ChapterTitle'/><w:basedOn w:val='Heading1'/></w:style><w:style w:type='paragraph' w:styleId='Mid'><w:name w:val='Mid'/><w:basedOn w:val='Heading2'/></w:style><w:style w:type='paragraph' w:styleId='Deep'><w:name w:val='Deep'/><w:basedOn w:val='Mid'/></w:style><w:style w:type='paragraph' w:styleId='CycA'><w:name w:val='CycA'/><w:basedOn w:val='CycB'/></w:style><w:style w:type='paragraph' w:styleId='CycB'><w:name w:val='CycB'/><w:basedOn w:val='CycA'/></w:style><w:style w:type='paragraph' w:styleId='TOCHeading'><w:name w:val='TOC Heading'/><w:basedOn w:val='Heading1'/><w:pPr><w:outlineLvl w:val='9'/></w:pPr></w:style><w:style w:type='paragraph' w:styleId='Kop1'><w:name w:val='heading 1'/></w:style><w:style w:type='paragraph' w:styleId='Title'><w:name w:val='Title'/></w:style><w:style w:type='paragraph' w:styleId='ListBullet'><w:name w:val='List Bullet'/><w:pPr><w:numPr><w:numId w:val='2'/></w:numPr></w:pPr></w:style><w:style w:type='paragraph' w:styleId='ListBullet2'><w:name w:val='List Bullet 2'/><w:pPr><w:numPr><w:numId w:val='3'/></w:numPr></w:pPr></w:style><w:style w:type='paragraph' w:styleId='MyBullet'><w:name w:val='MyBullet'/><w:basedOn w:val='ListBullet'/></w:style><w:style w:type='paragraph' w:styleId='NoNum'><w:name w:val='NoNum'/><w:basedOn w:val='ListBullet'/><w:pPr><w:numPr><w:numId w:val='0'/></w:numPr></w:pPr></w:style></w:styles>@@@<w:numbering xmlns:w='x'><w:abstractNum w:abstractNumId='0'><w:lvl w:ilvl='0'><w:numFmt w:val='decimal'/></w:lvl><w:lvl w:ilvl='1'><w:numFmt w:val='bullet'/></w:lvl><w:lvl w:ilvl='2'><w:numFmt w:val='lowerLetter'/></w:lvl></w:abstractNum><w:abstractNum w:abstractNumId='1'><w:lvl w:ilvl='0'><w:numFmt w:val='bullet'/></w:lvl></w:abstractNum><w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num><w:num w:numId='2'><w:abstractNumId w:val='1'/></w:num><w:num w:numId='3'><w:abstractNumId w:val='1'/></w:num></w:numbering>@@@<w:document xmlns:w='x'><w:body><w:p><w:pPr><w:pStyle w:val='ChapterTitle'/></w:pPr><w:r><w:t>A</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Deep'/></w:pPr><w:r><w:t>B</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='CycA'/></w:pPr><w:r><w:t>C</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='TOCHeading'/></w:pPr><w:r><w:t>D</w:t></w:r></w:p><w:p><w:pPr><w:outlineLvl w:val='2'/></w:pPr><w:r><w:t>E</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Heading1'/><w:outlineLvl w:val='9'/></w:pPr><w:r><w:t>F</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Kop1'/></w:pPr><w:r><w:t>G</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Title'/></w:pPr><w:r><w:t>H</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Undefined'/></w:pPr><w:r><w:t>I</w:t></w:r></w:p></w:body></w:document>@@@",
+     "h1:A | h2:B | p:C | p:D | h3:E | p:F | h1:G | h1:H | p:I"),
+    ("@@@<w:numbering xmlns:w='x'><w:abstractNum w:abstractNumId='0'><w:lvl w:ilvl='0'><w:numFmt w:val='decimal'/></w:lvl><w:lvl w:ilvl='1'><w:numFmt w:val='bullet'/></w:lvl><w:lvl w:ilvl='2'><w:numFmt w:val='lowerLetter'/></w:lvl></w:abstractNum><w:abstractNum w:abstractNumId='1'><w:lvl w:ilvl='0'><w:numFmt w:val='bullet'/></w:lvl></w:abstractNum><w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num><w:num w:numId='2'><w:abstractNumId w:val='1'/></w:num><w:num w:numId='3'><w:abstractNumId w:val='1'/></w:num></w:numbering>@@@<w:document xmlns:w='x'><w:body><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>One</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='1'/><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>sub</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='2'/><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>subsub</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>Two</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='2'/></w:numPr></w:pPr><w:r><w:t>Bullet A</w:t></w:r></w:p><w:p></w:p><w:p><w:pPr><w:numPr><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>Three</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:numId w:val='0'/></w:numPr></w:pPr><w:r><w:t>Off</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='1'/></w:numPr></w:pPr><w:r><w:t>NoId</w:t></w:r></w:p></w:body></w:document>@@@",
+     "list(o):0.One,1-.sub,2.subsub,0.Two | list(u):0.Bullet A | p: | list(o):0.Three | p:Off | p:NoId"),
+    ("<w:styles xmlns:w='x'><w:style w:type='paragraph' w:styleId='ListBullet'><w:name w:val='List Bullet'/><w:pPr><w:numPr><w:numId w:val='2'/></w:numPr></w:pPr></w:style><w:style w:type='paragraph' w:styleId='ListBullet2'><w:name w:val='List Bullet 2'/><w:pPr><w:numPr><w:numId w:val='3'/></w:numPr></w:pPr></w:style><w:style w:type='paragraph' w:styleId='MyBullet'><w:name w:val='MyBullet'/><w:basedOn w:val='ListBullet'/></w:style><w:style w:type='paragraph' w:styleId='NoNum'><w:name w:val='NoNum'/><w:basedOn w:val='ListBullet'/><w:pPr><w:numPr><w:numId w:val='0'/></w:numPr></w:pPr></w:style></w:styles>@@@<w:numbering xmlns:w='x'><w:abstractNum w:abstractNumId='0'><w:lvl w:ilvl='0'><w:numFmt w:val='decimal'/></w:lvl><w:lvl w:ilvl='1'><w:numFmt w:val='bullet'/></w:lvl><w:lvl w:ilvl='2'><w:numFmt w:val='lowerLetter'/></w:lvl></w:abstractNum><w:abstractNum w:abstractNumId='1'><w:lvl w:ilvl='0'><w:numFmt w:val='bullet'/></w:lvl></w:abstractNum><w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num><w:num w:numId='2'><w:abstractNumId w:val='1'/></w:num><w:num w:numId='3'><w:abstractNumId w:val='1'/></w:num></w:numbering>@@@<w:document xmlns:w='x'><w:body><w:p><w:pPr><w:pStyle w:val='ListBullet'/></w:pPr><w:r><w:t>a</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='ListBullet2'/></w:pPr><w:r><w:t>b</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='MyBullet'/></w:pPr><w:r><w:t>c</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='NoNum'/></w:pPr><w:r><w:t>d</w:t></w:r></w:p></w:body></w:document>@@@",
+     "list(u):0.a,1.b,0.c | p:d"),
+    ("@@@@@@<w:document xmlns:w='x'><w:body><w:p><w:r><w:t>Before</w:t></w:r></w:p><w:p><w:r><w:br w:type='page'/></w:r></w:p><w:p><w:r><w:t xml:space='preserve'>X </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>tail</w:t><w:br w:type='page'/><w:t>Next</w:t></w:r></w:p><w:p><w:pPr><w:sectPr><w:pgSz w:w='12240'/></w:sectPr></w:pPr></w:p><w:p><w:pPr><w:sectPr/></w:pPr><w:r><w:t>End of sect</w:t></w:r></w:p><w:p><w:r><w:br w:type='column'/></w:r></w:p><w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>PB</w:t></w:r></w:p><w:p><w:r><w:t>soft</w:t><w:br/><w:t>line</w:t></w:r></w:p><w:sectPr/></w:body></w:document>@@@",
+     "p:Before | brk:page-break | p:X tail | brk:page-break | p:Next | sec:section-break | p:End of sect | sec:section-break | brk:column-break | brk:page-break | p:PB | p:soft\nline | sec:section-break"),
+    ("@@@<w:numbering xmlns:w='x'><w:abstractNum w:abstractNumId='0'><w:lvl w:ilvl='0'><w:numFmt w:val='decimal'/></w:lvl><w:lvl w:ilvl='1'><w:numFmt w:val='bullet'/></w:lvl><w:lvl w:ilvl='2'><w:numFmt w:val='lowerLetter'/></w:lvl></w:abstractNum><w:abstractNum w:abstractNumId='1'><w:lvl w:ilvl='0'><w:numFmt w:val='bullet'/></w:lvl></w:abstractNum><w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num><w:num w:numId='2'><w:abstractNumId w:val='1'/></w:num><w:num w:numId='3'><w:abstractNumId w:val='1'/></w:num></w:numbering>@@@<w:document xmlns:w='x'><w:body><w:p><w:r><w:t>intro</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='2'/></w:numPr></w:pPr><w:r><w:t>first</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='2'/></w:numPr></w:pPr><w:commentRangeStart w:id='0'/><w:r><w:t>second</w:t></w:r><w:commentRangeEnd w:id='0'/><w:r><w:commentReference w:id='0'/></w:r></w:p><w:p><w:r><w:t>after</w:t></w:r></w:p></w:body></w:document>@@@<w:comments xmlns:w='x'><w:comment w:id='0' w:author='Reviewer'><w:p><w:r><w:t>check this</w:t></w:r></w:p></w:comment></w:comments>",
+     "p:intro | list(u):0.first,0.second | sec:comment | p:after"),
+    ("@@@@@@<w:document xmlns:w='x'><w:body><w:p><w:pPr><w:pStyle w:val='ChapterTitle'/></w:pPr><w:r><w:t>A</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Deep'/></w:pPr><w:r><w:t>B</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='CycA'/></w:pPr><w:r><w:t>C</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='TOCHeading'/></w:pPr><w:r><w:t>D</w:t></w:r></w:p><w:p><w:pPr><w:outlineLvl w:val='2'/></w:pPr><w:r><w:t>E</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Heading1'/><w:outlineLvl w:val='9'/></w:pPr><w:r><w:t>F</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Kop1'/></w:pPr><w:r><w:t>G</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Title'/></w:pPr><w:r><w:t>H</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val='Undefined'/></w:pPr><w:r><w:t>I</w:t></w:r></w:p></w:body></w:document>@@@",
+     "p:A | p:B | p:C | p:D | h3:E | p:F | p:G | h1:H | p:I"),
+    ("@@@<w:numbering xmlns:w='x'><w:abstractNum w:abstractNumId='0'><w:lvl w:ilvl='0'><w:numFmt w:val='decimal'/></w:lvl><w:lvl w:ilvl='1'><w:numFmt w:val='bullet'/></w:lvl><w:lvl w:ilvl='2'><w:numFmt w:val='lowerLetter'/></w:lvl></w:abstractNum><w:abstractNum w:abstractNumId='1'><w:lvl w:ilvl='0'><w:numFmt w:val='bullet'/></w:lvl></w:abstractNum><w:num w:numId='1'><w:abstractNumId w:val='0'/></w:num><w:num w:numId='3'><w:abstractNumId w:val='1'/></w:num><w:num w:numId='4'><w:abstractNumId w:val='0'/></w:num></w:numbering>@@@<w:document xmlns:w='x'><w:body><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>A</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='1'/><w:numId w:val='3'/></w:numPr></w:pPr><w:r><w:t>a1</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='1'/></w:numPr></w:pPr><w:ins w:id='1' w:author='Ed' w:date='2026-01-01T00:00:00Z'><w:r><w:t>B</w:t></w:r></w:ins></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='1'/></w:numPr></w:pPr><w:r><w:t>C</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val='0'/><w:numId w:val='4'/></w:numPr></w:pPr><w:r><w:t>D</w:t></w:r></w:p></w:body></w:document>@@@",
+     "list(o):0.A,1-.a1,0.B,0.C | chg:insert | list(o):0.D")
+  ]
+{
+  match split(parts, "@@@") {
+    [stylesXml, numberingXml, documentXml, commentsXml] =>
+      docxStructureView(parseDocxWithCommentsXmlRelsNum(documentXml, commentsXml, "", emptyMap(),
+                        docxNumberingContext(numberingXml, stylesXml))),
+    _ => "bad test input"
+  }
+}
+
 -- Process children of w:body (paragraphs and tables)
+-- Consecutive list paragraphs are coalesced into one nested ListBlock
+-- (docx_structure); every caller of this sees grouped lists.
 pure func processBodyChildren(nodes: [XmlNode], rels: Map[string, string], nums: Map[string, string]) -> [Block] =
-  flatMap(\n. processBodyNode(n, rels, nums), nodes)
+  docxGroupLists(flatMap(\n. docxKeyBlocks(n, processBodyNode(n, rels, nums), nums), nodes))
+
+-- Pair each block with its node's list identity (the effective numId of a
+-- list paragraph, "" otherwise). The grouping pass starts a new list when a
+-- top-level item names a different numId: Word ends one list and starts
+-- another exactly that way. numId is DOCX-internal, so it rides beside the
+-- block here rather than in the shared ADT.
+pure func docxKeyBlocks(node: XmlNode, blocks: [Block], nums: Map[string, string]) -> [(Block, string)] {
+  let key = if getTag(node) == "w:p" then getOrElse(docxParaNumId(node, nums), "") else "";
+  map(\b. (b, key), blocks)
+}
+
+-- Put a paragraph's bookmark names on the first of its blocks that can carry
+-- them (a text or heading block; break markers cannot).
+pure func docxAttachBookmarks(blocks: [Block], names: [string]) -> [Block] =
+  match names {
+    [] => blocks,
+    _ => match blocks {
+      [] => [],
+      [b, ...rest] => match b {
+        TextBlock(_) => concat([withBookmarks(b, names)], rest),
+        HeadingBlock(_) => concat([withBookmarks(b, names)], rest),
+        _ => concat([b], docxAttachBookmarks(rest, names))
+      }
+    }
+  }
 
 -- Process a single body-level node
 pure func processBodyNode(node: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
   let tag = getTag(node);
   if tag == "w:p" then {
-    -- Bookmarks starting in the paragraph ride on its block, so "#name"
-    -- links resolve (§17.13.6). Kinds with nowhere to hold them are reported
-    -- by docx_warnings rather than silently dropped.
-    let mainBlock = withBookmarks(parseParagraph(node, rels, nums), docxBookmarkNames(node));
+    -- A paragraph can yield more than one block: page/column breaks and a
+    -- section-ending pPr/sectPr become their own markers (docx_structure).
+    -- Bookmarks starting in the paragraph ride on its first block that can
+    -- hold them, so "#name" links resolve (§17.13.6). Kinds with nowhere to
+    -- hold them are reported by docx_warnings rather than silently dropped.
+    let mainBlocks = docxAttachBookmarks(
+      docxParagraphBlocks(node, \q. [parseParagraph(q, rels, nums)]),
+      docxBookmarkNames(node));
     let changeBlocks = extractParagraphChanges(node);
     let textBoxBlocks = extractTextBoxes(node, rels, nums);
-    mainBlock :: concat(changeBlocks, textBoxBlocks)
+    concat(mainBlocks, concat(changeBlocks, textBoxBlocks))
   }
   else if tag == "w:tbl" then [parseTable(node, rels)]
   else if tag == "w:sdt" then extractSdtBodyBlocks(node, rels, nums)
@@ -313,15 +392,20 @@ pure func extractTextBoxContent(nodes: [XmlNode], rels: Map[string, string], num
 pure func parseParagraph(p: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> Block {
   let text = extractParagraphText(p, rels);
   let style = extractParagraphStyle(p);
-  let headingLevel = headingLevelFromStyle(style);
+  -- Resolved through styles.xml basedOn chains and outlineLvl (a custom
+  -- "ChapterTitle" based on Heading 1 is a level-1 heading); the built-in
+  -- name rule is the fallback when no styles part was read.
+  let headingLevel = docxParaHeadingLevel(p, style, nums, headingLevelFromStyle(style));
   let runs = extractParagraphRuns(p, rels);
   if headingLevel > 0
   then mkHeadingRuns(text, headingLevel, runs)
   else if isListParagraph(p, nums)
-  -- One DOCX list paragraph is one item, so itemRuns is parallel with a single
-  -- entry. Kept empty when the item has no formatting, so the field only
-  -- appears where it carries information.
-  then mkListRuns([text], isOrderedList(p, nums), if listLength(runs) > 0 then [runs] else [])
+  -- One DOCX list paragraph is one item, carrying its own depth; consecutive
+  -- items are grouped into one nested list by processBodyChildren. itemRuns
+  -- is kept empty when the item has no formatting, so the field only appears
+  -- where it carries information.
+  then mkListFull([text], isOrderedList(p, nums), if listLength(runs) > 0 then [runs] else [],
+                  [docxParaListDepth(docxParaIlvl(p, nums), style, nums)], [])
   else mkTextRuns(text, style, 0, runs)
 }
 
@@ -649,13 +733,13 @@ pure func headingLevelFromStyle(style: string) -> int
 -- its pStyle (the style carries numPr in styles.xml — python-docx's List
 -- Bullet / List Number do exactly this, and before style resolution those
 -- paragraphs were invisible to the list reader entirely).
+-- numId 0 is the spec's way of switching numbering OFF (§17.9.18), directly
+-- or in a style, so it is not a list item; nor is a numPr that names no numId
+-- anywhere along the paragraph's style chain.
 pure func isListParagraph(p: XmlNode, nums: Map[string, string]) -> bool =
-  match docxParaNumPr(p) {
-    Some(_) => true,
-    None => match docxParaStyleId(p) {
-      Some(sid) => mapMember(nums, "s:${sid}"),
-      None => false
-    }
+  match docxParaNumId(p, nums) {
+    Some(numId) => length(numId) > 0 && numId != "0",
+    None => false
   }
 
 -- Check if a list paragraph is ordered (numbered) vs unordered (bullet).
@@ -764,37 +848,7 @@ export pure func docxNumberingMaps(numberingXml: string) -> Map[string, string] 
 -- map. Style entries never collide with n:/a: keys, so concatenating the
 -- entry lists before mapFromList is safe.
 export pure func docxNumberingContext(numberingXml: string, stylesXml: string) -> Map[string, string] =
-  mapFromList(concat(docxNumberingEntries(numberingXml), docxStyleNumEntries(stylesXml)))
-
-pure func docxStyleNumEntries(stylesXml: string) -> [(string, string)] =
-  if length(stylesXml) == 0 then []
-  else match parseLenient(stylesXml) {
-    Err(_) => [],
-    Ok(root) => flatMap(docxStyleNumEntry, findAll(root, "w:style"))
-  }
-
-pure func docxStyleNumEntry(style: XmlNode) -> [(string, string)] =
-  match getAttr(style, "w:styleId") {
-    Some(sid) =>
-      match docxStyleNumPr(style) {
-        Some(numId) => [("s:${sid}", numId), ("s:${sid}:ilvl", docxStyleIlvl(style))],
-        None => []
-      },
-    None => []
-  }
-
--- numId declared by a style's own pPr/numPr, if any
-pure func docxStyleNumPr(style: XmlNode) -> Option[string] =
-  optFlatMap(\numPr.
-    optFlatMap(\numId. getAttr(numId, "w:val"), findFirst(numPr, "w:numId")),
-    findFirst(style, "w:pPr"))
-
-pure func docxStyleIlvl(style: XmlNode) -> string =
-  getOrElse(
-    optFlatMap(\numPr.
-      optFlatMap(\ilvl. getAttr(ilvl, "w:val"), findFirst(numPr, "w:ilvl")),
-      findFirst(style, "w:pPr")),
-    "0")
+  mapFromList(concat(docxNumberingEntries(numberingXml), docxStyleContextEntries(stylesXml)))
 
 pure func docxNumEntries(num: XmlNode) -> [(string, string)] =
   match getAttr(num, "w:numId") {
@@ -968,32 +1022,47 @@ type DocxAnchor = {
   endIndex: int
 }
 
--- Body walk state. blocks and anchors accumulate REVERSED.
+-- Body walk state. blocks and anchors accumulate REVERSED. Each block rides
+-- with its list identity (docxKeyBlocks) until the grouping pass.
 type DocxWalk = {
-  blocks: [Block],
+  blocks: [(Block, string)],
   anchors: [DocxAnchor],
   open: [DocxOpenRange],
   count: int
+}
+
+-- The walk's result: body blocks (lists grouped), comment anchors indexed
+-- into them, and comment ranges opened but never closed (docx_warnings).
+type DocxBodyWalk = {
+  blocks: [Block],
+  anchors: [DocxAnchor],
+  open: [DocxOpenRange]
 }
 
 -- Walk the body once, producing content blocks and comment anchors together.
 -- Doing both in one pass keeps the block indices honest (an anchor's index is
 -- the position of its paragraph in the emitted block list, which only this
 -- walk knows) and avoids parsing document.xml twice.
-export pure func docxWalkBodyRoot(root: XmlNode) -> DocxWalk =
+export pure func docxWalkBodyRoot(root: XmlNode) -> DocxBodyWalk =
   docxWalkBodyRootWithRels(root, emptyMap())
 
-export pure func docxWalkBodyRootWithRels(root: XmlNode, rels: Map[string, string]) -> DocxWalk =
+export pure func docxWalkBodyRootWithRels(root: XmlNode, rels: Map[string, string]) -> DocxBodyWalk =
   docxWalkBodyRootFull(root, rels, emptyMap())
 
-export pure func docxWalkBodyRootFull(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk =
+export pure func docxWalkBodyRootFull(root: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> DocxBodyWalk =
   match findFirst(root, "w:body") {
     Some(body) => {
       let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels, nums);
-      { blocks: reverse(st.blocks), anchors: reverse(st.anchors),
-        open: st.open, count: st.count }
+      -- List paragraphs are grouped AFTER the walk, so anchor indices (taken
+      -- per paragraph during it) are moved to the grouped block positions.
+      let g = docxGroupListsIndexed(reverse(st.blocks));
+      { blocks: g.blocks,
+        anchors: map(\a. { id: a.id, text: a.text, kind: a.kind,
+                           startIndex: docxRemapIndex(g, a.startIndex),
+                           endIndex: docxRemapIndex(g, a.endIndex) }, reverse(st.anchors)),
+        open: st.open }
     },
-    None => docxEmptyWalk()
+    None => { blocks: [], anchors: [], open: [] }
   }
 
 pure func docxEmptyWalk() -> DocxWalk =
@@ -1022,7 +1091,7 @@ pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string], n
       if tag == "w:p" then docxScanParagraph(node, st)
       else if tag == "w:tbl" then docxScanParagraphs(findAll(node, "w:p"), st)
       else st;
-    { blocks: docxPrependAll(emitted, scanned.blocks),
+    { blocks: docxPrependAll(docxKeyBlocks(node, emitted, nums), scanned.blocks),
       anchors: scanned.anchors,
       open: scanned.open,
       count: scanned.count + listLength(emitted) }
@@ -1030,7 +1099,7 @@ pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string], n
 }
 
 -- Prepend a list onto a reversed accumulator
-pure func docxPrependAll(xs: [Block], acc: [Block]) -> [Block] =
+pure func docxPrependAll[a](xs: [a], acc: [a]) -> [a] =
   match xs {
     [] => acc,
     x :: rest => docxPrependAll(rest, x :: acc)

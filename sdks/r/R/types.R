@@ -129,6 +129,7 @@ convert_save <- function(x, path = NULL) {
     kind          = .s(d$kind),
     name          = .s(d$name),
     item_levels   = if (is.null(d$itemLevels)) integer(0) else as.integer(unlist(d$itemLevels)),
+    item_ordered  = if (is.null(d$itemOrdered)) logical(0) else as.logical(unlist(d$itemOrdered)),
     id            = .s(d$id),
     anchor_text   = .s(d$anchorText),
     anchor_kind   = .s(d$anchorKind),

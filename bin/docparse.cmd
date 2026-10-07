@@ -248,6 +248,7 @@ for %%m in (
     docparse\types\document.ail
     docparse\services\format_router.ail
     docparse\services\zip_extract.ail
+    docparse\services\docx_structure.ail
     docparse\services\docx_parser.ail
     docparse\services\docx_inline.ail
     docparse\services\docx_warnings.ail
@@ -316,6 +317,7 @@ echo Running inline tests...
 for %%m in (
     docparse\services\format_router.ail
     docparse\services\zip_extract.ail
+    docparse\services\docx_structure.ail
     docparse\services\docx_parser.ail
     docparse\services\odt_parser.ail
     docparse\services\odp_parser.ail
@@ -336,6 +338,7 @@ for %%m in (
     docparse\types\document.ail
     docparse\services\format_router.ail
     docparse\services\zip_extract.ail
+    docparse\services\docx_structure.ail
     docparse\services\docx_parser.ail
     docparse\services\pptx_parser.ail
     docparse\services\xlsx_parser.ail

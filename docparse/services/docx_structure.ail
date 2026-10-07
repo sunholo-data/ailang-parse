@@ -1,0 +1,583 @@
+module docparse/services/docx_structure
+
+import std/xml (parseLenient, findAll, getAttr, getChildren, getTag, getText, xmlElement)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/string (length, toLower, startsWith, substring, stringToInt, intToStr, trim, join)
+import std/map (fromList as mapFromList, lookup as mapLookup)
+import std/list (map, flatMap, filter, reverse, any, concat, contains as listContains, length as listLength)
+import docparse/types/document (Block, ListBlock, SectionBlock, HeadingBlock, TextBlock, ChangeBlock, InlineRun, mkListFull, mkSection)
+
+-- DOCX document structure that the paragraph-at-a-time walk in docx_parser
+-- cannot see on its own:
+--
+--   * style inheritance (ECMA-376 §17.7.4.3 basedOn, §17.3.1.20 outlineLvl) —
+--     a custom "ChapterTitle" based on Heading 1 IS a level-1 heading, and a
+--     "List Bullet 2" paragraph is a second-level list item;
+--   * list grouping — Word stores one list item per paragraph, so consecutive
+--     list paragraphs are coalesced here into one nested ListBlock;
+--   * explicit breaks — w:br w:type="page"/"column" and a mid-document
+--     pPr/sectPr become their own marker blocks instead of empty paragraphs.
+--
+-- Split out of docx_parser to keep that module inside the browser
+-- type-checker's per-module step budget, and so the paragraph classification
+-- lives in one place. Everything here is pure.
+
+-- === Style resolution ======================================================
+--
+-- Adds three key spaces to docx_parser's numbering context map (which already
+-- holds n:/a: from numbering.xml), one entry per paragraph style:
+--   "h:<styleId>"        -> heading level, "0" for a body style. Always present
+--                           for a defined style, so an undefined styleId (no
+--                           styles.xml, the browser build) falls back to the
+--                           built-in name rules in docx_parser.
+--   "s:<styleId>"        -> effective numId, through basedOn ("0" = numbering
+--                           explicitly removed)
+--   "s:<styleId>:ilvl"   -> effective ilvl for that numbering
+--   "d:<styleId>"        -> list depth implied by the built-in list style
+--                           family ("List Bullet 3" -> 2); absent when 0
+--
+-- basedOn chains are walked with a visited list and a depth cap: styles.xml is
+-- untrusted input and a cycle (A basedOn B basedOn A) is legal XML.
+
+export pure func docxStyleContextEntries(stylesXml: string) -> [(string, string)] =
+  if length(stylesXml) == 0 then []
+  else match parseLenient(stylesXml) {
+    Err(_) => [],
+    Ok(root) => {
+      let styles = filter(docxStIsParagraphStyle, findAll(root, "w:style"));
+      let raw = mapFromList(flatMap(docxStRawEntries, styles));
+      flatMap(\st. docxStResolvedEntries(raw, getOrElse(getAttr(st, "w:styleId"), "")), styles)
+    }
+  }
+
+-- w:type defaults to paragraph when absent (§17.7.4.17)
+pure func docxStIsParagraphStyle(st: XmlNode) -> bool =
+  getOrElse(getAttr(st, "w:type"), "paragraph") == "paragraph"
+
+-- First direct child with this tag. Deliberately not findFirst, which searches
+-- every descendant: a paragraph's pPr must not be confused with the pPr of a
+-- text-box paragraph nested inside one of its runs.
+export pure func docxChild(node: XmlNode, tag: string) -> Option[XmlNode] =
+  match filter(\c. getTag(c) == tag, getChildren(node)) {
+    [] => None,
+    c :: _ => Some(c)
+  }
+
+pure func docxChildVal(node: XmlNode, tag: string) -> Option[string] =
+  match docxChild(node, tag) {
+    Some(el) => getAttr(el, "w:val"),
+    None => None
+  }
+
+-- One style's own (un-inherited) properties, keyed by kind and styleId
+pure func docxStRawEntries(st: XmlNode) -> [(string, string)] =
+  match getAttr(st, "w:styleId") {
+    None => [],
+    Some(sid) => {
+      let ppr = docxChild(st, "w:pPr");
+      let numPr = match ppr { Some(p) => docxChild(p, "w:numPr"), None => None };
+      concat(docxStOpt("b:${sid}", docxChildVal(st, "w:basedOn")),
+      concat(docxStOpt("nm:${sid}", match docxChildVal(st, "w:name") { Some(n) => Some(toLower(n)), None => None }),
+      concat(docxStOpt("o:${sid}", match ppr { Some(p) => docxChildVal(p, "w:outlineLvl"), None => None }),
+      concat(docxStOpt("num:${sid}", match numPr { Some(np) => docxChildVal(np, "w:numId"), None => None }),
+             docxStOpt("il:${sid}", match numPr { Some(np) => docxChildVal(np, "w:ilvl"), None => None })))))
+    }
+  }
+
+pure func docxStOpt(key: string, v: Option[string]) -> [(string, string)] =
+  match v { Some(x) => [(key, x)], None => [] }
+
+pure func docxStResolvedEntries(raw: Map[string, string], sid: string) -> [(string, string)] =
+  if length(sid) == 0 then []
+  else {
+    let heading = [("h:${sid}", intToStr(docxStChainHeading(raw, sid, [], 0)))];
+    let numbering = match docxStChainLookup(raw, "num:", sid, [], 0) {
+      Some(numId) =>
+        [("s:${sid}", numId),
+         ("s:${sid}:ilvl", getOrElse(docxStChainLookup(raw, "il:", sid, [], 0), "0"))],
+      None => []
+    };
+    let depth = docxStChainDepth(raw, sid, [], 0);
+    let depthEntry = if depth > 0 then [("d:${sid}", intToStr(depth))] else [];
+    concat(heading, concat(numbering, depthEntry))
+  }
+
+-- Deep enough for any real template (Word's own chains are 2-3 long), small
+-- enough that a hostile styles.xml cannot make the walk expensive.
+pure func docxStChainGuard(sid: string, visited: [string], depth: int) -> bool =
+  depth > 16 || listContains(visited, sid)
+
+-- The first value of `prefix` found walking sid -> basedOn -> ...
+pure func docxStChainLookup(raw: Map[string, string], prefix: string, sid: string,
+                            visited: [string], depth: int) -> Option[string] =
+  if docxStChainGuard(sid, visited, depth) then None
+  else match mapLookup(raw, "${prefix}${sid}") {
+    Some(v) => Some(v),
+    None => match mapLookup(raw, "b:${sid}") {
+      Some(base) => docxStChainLookup(raw, prefix, base, sid :: visited, depth + 1),
+      None => None
+    }
+  }
+
+-- Heading level of a style. At each step the style's own outlineLvl decides
+-- (0-8 = a heading, 9 = explicitly body text, which stops the walk: Word's
+-- "TOC Heading" is based on Heading 1 and resets it); else a built-in heading
+-- by name; else ask the base style.
+pure func docxStChainHeading(raw: Map[string, string], sid: string,
+                             visited: [string], depth: int) -> int =
+  if docxStChainGuard(sid, visited, depth) then 0
+  else match mapLookup(raw, "o:${sid}") {
+    Some(v) => docxOutlineToHeading(v),
+    None => {
+      let builtin = docxBuiltinHeading(sid, getOrElse(mapLookup(raw, "nm:${sid}"), ""));
+      if builtin > 0 then builtin
+      else match mapLookup(raw, "b:${sid}") {
+        Some(base) => docxStChainHeading(raw, base, sid :: visited, depth + 1),
+        None => 0
+      }
+    }
+  }
+
+pure func docxStChainDepth(raw: Map[string, string], sid: string,
+                           visited: [string], depth: int) -> int =
+  if docxStChainGuard(sid, visited, depth) then 0
+  else {
+    let own = docxListDepthFromName(getOrElse(mapLookup(raw, "nm:${sid}"), ""));
+    if own > 0 then own
+    else match mapLookup(raw, "b:${sid}") {
+      Some(base) => docxStChainDepth(raw, base, sid :: visited, depth + 1),
+      None => 0
+    }
+  }
+
+-- outlineLvl w:val is 0-based (0 = Heading 1); 9 means body text. Levels past
+-- 6 clamp to 6, the deepest heading every writer can render.
+export pure func docxOutlineToHeading(v: string) -> int
+  tests [("0", 1), ("1", 2), ("5", 6), ("8", 6), ("9", 0), ("x", 0), ("-1", 0)]
+{
+  match stringToInt(v) {
+    Some(n) => if n >= 0 && n <= 8 then docxClampHeading(n + 1) else 0,
+    None => 0
+  }
+}
+
+pure func docxClampHeading(n: int) -> int = if n > 6 then 6 else n
+
+-- A built-in heading, by the style's name (what Word matches on — styleIds are
+-- localised, "berschrift1" in a German template) or, with no name, by the
+-- conformant English styleId.
+pure func docxBuiltinHeading(sid: string, lname: string) -> int =
+  if length(lname) > 0 then docxHeadingFromName(lname)
+  else docxHeadingFromName(toLower(docxSpaceDigit(sid)))
+
+-- "Heading1" -> "Heading 1", so styleIds and names share one rule
+pure func docxSpaceDigit(sid: string) -> string =
+  if startsWith(sid, "Heading") && length(sid) > 7
+  then "Heading ${substring(sid, 7, length(sid))}"
+  else sid
+
+pure func docxHeadingFromName(lname: string) -> int
+  tests [("heading 1", 1), ("heading 3", 3), ("heading 9", 6), ("title", 1),
+         ("subtitle", 2), ("heading x", 0), ("normal", 0), ("chaptertitle", 0)]
+{
+  if lname == "title" then 1
+  else if lname == "subtitle" then 2
+  else if startsWith(lname, "heading ")
+  then match stringToInt(substring(lname, 8, length(lname))) {
+    Some(n) => if n >= 1 && n <= 9 then docxClampHeading(n) else 0,
+    None => 0
+  }
+  else 0
+}
+
+-- Word's built-in list style families number their depth in the name:
+-- "List Bullet", "List Bullet 2", "List Number 3", "List 2". Each is its own
+-- single-level list (python-docx and Word's default template both do this),
+-- so ilvl is 0 throughout and the name is the only depth signal there is.
+pure func docxListDepthFromName(lname: string) -> int
+  tests [("list bullet", 0), ("list bullet 2", 1), ("list number 3", 2),
+         ("list 2", 1), ("list paragraph", 0), ("list bullet x", 0), ("normal", 0)]
+{
+  if startsWith(lname, "list bullet ") then docxNameDepth(substring(lname, 12, length(lname)))
+  else if startsWith(lname, "list number ") then docxNameDepth(substring(lname, 12, length(lname)))
+  else if startsWith(lname, "list ") then docxNameDepth(substring(lname, 5, length(lname)))
+  else 0
+}
+
+pure func docxNameDepth(suffix: string) -> int =
+  match stringToInt(suffix) {
+    Some(n) => if n >= 2 && n <= 9 then n - 1 else 0,
+    None => 0
+  }
+
+-- === Paragraph classification ==============================================
+
+-- The paragraph's heading level: its own pPr/outlineLvl first (direct
+-- formatting beats the style, and outlineLvl 9 demotes even a Heading 1), then
+-- the resolved style, then `legacy` — the built-in-name rule, which is all
+-- there is when styles.xml was not available.
+export pure func docxParaHeadingLevel(p: XmlNode, styleId: string,
+                                      ctx: Map[string, string], legacy: int) -> int =
+  match docxParaPPrVal(p, "w:outlineLvl") {
+    Some(v) => docxOutlineToHeading(v),
+    None => match mapLookup(ctx, "h:${styleId}") {
+      Some(h) => getOrElse(stringToInt(h), 0),
+      None => legacy
+    }
+  }
+
+-- Nesting depth of a list paragraph: ilvl when the numbering says so, else
+-- the depth its built-in list style family implies.
+export pure func docxParaListDepth(ilvl: string, styleId: string, ctx: Map[string, string]) -> int {
+  let n = getOrElse(stringToInt(ilvl), 0);
+  if n > 0 then (if n > 8 then 8 else n)
+  else getOrElse(stringToInt(getOrElse(mapLookup(ctx, "d:${styleId}"), "0")), 0)
+}
+
+pure func docxParaPPrVal(p: XmlNode, tag: string) -> Option[string] =
+  match docxChild(p, "w:pPr") {
+    Some(ppr) => docxChildVal(ppr, tag),
+    None => None
+  }
+
+-- === Explicit breaks (§17.3.3.1 w:br, §17.6.17 sectPr) ======================
+--
+-- A page or column break is an instruction, not content. It used to come back
+-- as "\n" inside a text block — so a break-only paragraph was an empty text
+-- block indistinguishable from a blank line, and a break inside text vanished
+-- into a soft line break. A mid-document pPr/sectPr (the paragraph that ends a
+-- section) was dropped entirely; only the body's final sectPr was reported.
+--
+-- Breaks become empty SectionBlocks of kind "page-break" / "column-break",
+-- the same marker shape the body-level "section-break" has always used, so a
+-- consumer that ignores unknown section kinds is unaffected.
+
+type DocxSeg = DocxSegPara([XmlNode]) | DocxSegBreak(string)
+
+-- The blocks one w:p produces. `parse` turns a paragraph node into its
+-- block(s) (docx_parser's parseParagraph); it is handed the original node when
+-- the paragraph holds no hard break, so ordinary paragraphs are parsed exactly
+-- as before. Otherwise the paragraph is cut at each break — a run holding one
+-- is split around it, keeping its rPr on both halves — and each piece is
+-- parsed as a paragraph with the original pPr. Pieces with no content are
+-- dropped: a paragraph whose only content is a page break yields just the
+-- break.
+export pure func docxParagraphBlocks(p: XmlNode, parse: (XmlNode) -> [Block]) -> [Block] {
+  let children = getChildren(p);
+  let pPr = filter(\c. getTag(c) == "w:pPr", children);
+  let body = filter(\c. getTag(c) != "w:pPr", children);
+  let before = if docxPageBreakBefore(pPr) then [mkSection("page-break", [])] else [];
+  let hasSect = docxHasSectPr(pPr);
+  let main =
+    if any(docxRunHasHardBreak, body) then
+      flatMap(\seg. docxSegBlocks(seg, pPr, parse), docxSegments(body))
+    else if hasSect && docxSegEmpty(body) then []
+    else parse(p);
+  let after = if hasSect then [mkSection("section-break", [])] else [];
+  concat(before, concat(main, after))
+}
+
+pure func docxSegBlocks(seg: DocxSeg, pPr: [XmlNode], parse: (XmlNode) -> [Block]) -> [Block] =
+  match seg {
+    DocxSegBreak(kind) => [mkSection(kind, [])],
+    DocxSegPara(kids) =>
+      if docxSegEmpty(kids) then []
+      else parse(xmlElement("w:p", [], concat(pPr, kids)))
+  }
+
+-- No text, drawing, object or equation among the nodes. Bookmarks, proofing
+-- marks and comment range markers carry nothing a reader sees.
+pure func docxSegEmpty(kids: [XmlNode]) -> bool =
+  any(docxNodeHasContent, kids) == false
+
+pure func docxNodeHasContent(n: XmlNode) -> bool {
+  let tag = getTag(n);
+  if tag == "m:oMath" || tag == "m:oMathPara" then true
+  else
+    any(\t. length(trim(getText(t))) > 0, findAll(n, "w:t")) ||
+    listLength(findAll(n, "w:drawing")) > 0 ||
+    listLength(findAll(n, "w:pict")) > 0 ||
+    listLength(findAll(n, "w:object")) > 0 ||
+    listLength(findAll(n, "m:oMath")) > 0
+}
+
+pure func docxHasSectPr(pPr: [XmlNode]) -> bool =
+  any(\ppr. match docxChild(ppr, "w:sectPr") { Some(_) => true, None => false }, pPr)
+
+pure func docxPageBreakBefore(pPr: [XmlNode]) -> bool =
+  any(\ppr. match docxChild(ppr, "w:pageBreakBefore") {
+    Some(el) => docxOnOff(getOrElse(getAttr(el, "w:val"), "true")),
+    None => false
+  }, pPr)
+
+pure func docxOnOff(v: string) -> bool = v != "0" && v != "false" && v != "off"
+
+-- "page" | "column" for a hard break; "" for a line break (textWrapping or no
+-- type), which stays a "\n" inside the paragraph's text.
+pure func docxBreakKind(n: XmlNode) -> string =
+  if getTag(n) != "w:br" then ""
+  else {
+    let t = getOrElse(getAttr(n, "w:type"), "");
+    if t == "page" then "page-break"
+    else if t == "column" then "column-break"
+    else ""
+  }
+
+-- Only a direct w:r child of the paragraph is split. A break inside a
+-- hyperlink or tracked insertion is rare and keeps its old "\n" reading.
+pure func docxRunHasHardBreak(n: XmlNode) -> bool =
+  getTag(n) == "w:r" && any(\c. length(docxBreakKind(c)) > 0, getChildren(n))
+
+-- Cut the paragraph body into content pieces and breaks, in document order.
+-- `cur` and the result accumulate reversed.
+pure func docxSegments(body: [XmlNode]) -> [DocxSeg] =
+  reverse(docxSegStep(body, [], []))
+
+pure func docxSegStep(nodes: [XmlNode], cur: [XmlNode], acc: [DocxSeg]) -> [DocxSeg] =
+  match nodes {
+    [] => DocxSegPara(reverse(cur)) :: acc,
+    n :: rest =>
+      if docxRunHasHardBreak(n) then {
+        let rPr = filter(\c. getTag(c) == "w:rPr", getChildren(n));
+        let kids = filter(\c. getTag(c) != "w:rPr", getChildren(n));
+        let st = docxRunSplit(kids, rPr, [], cur, acc);
+        docxSegStep(rest, st.cur, st.acc)
+      }
+      else docxSegStep(rest, n :: cur, acc)
+  }
+
+type DocxSegState = { cur: [XmlNode], acc: [DocxSeg] }
+
+-- Walk one run's children: content collects into `piece` (reversed); a hard
+-- break closes the piece as a run (with the run's rPr) onto the current
+-- segment, then closes the segment and records the break.
+pure func docxRunSplit(kids: [XmlNode], rPr: [XmlNode], piece: [XmlNode],
+                       cur: [XmlNode], acc: [DocxSeg]) -> DocxSegState =
+  match kids {
+    [] => { cur: docxPushPiece(piece, rPr, cur), acc: acc },
+    k :: rest => {
+      let kind = docxBreakKind(k);
+      if length(kind) > 0 then {
+        let closed = docxPushPiece(piece, rPr, cur);
+        docxRunSplit(rest, rPr, [], [], DocxSegBreak(kind) :: DocxSegPara(reverse(closed)) :: acc)
+      }
+      else docxRunSplit(rest, rPr, k :: piece, cur, acc)
+    }
+  }
+
+pure func docxPushPiece(piece: [XmlNode], rPr: [XmlNode], cur: [XmlNode]) -> [XmlNode] =
+  match piece {
+    [] => cur,
+    _ => xmlElement("w:r", [], concat(rPr, reverse(piece))) :: cur
+  }
+
+-- === List grouping (§17.9) ==================================================
+--
+-- docx_parser emits each list paragraph as a one-item ListBlock carrying its
+-- own level and marker kind, paired with its list identity (effective numId).
+-- These are coalesced here: a run of consecutive list blocks becomes one
+-- ListBlock with itemLevels (and itemOrdered when the levels mix numbers and
+-- bullets) — the shape markdown_parser produces for a nested list, so every
+-- writer that renders that nests this too.
+--
+-- A new list starts when an item at the group's base level (or shallower)
+-- names a different numId or switches between numbered and bulleted: Word
+-- ends one list and starts another exactly that way. Deeper items may use any
+-- numId — Word's built-in "List Bullet 2/3" styles are separate single-level
+-- lists that render as the second and third level of the one before them.
+--
+-- A tracked change or text box found inside a list paragraph is emitted after
+-- that paragraph's block; between two items it would split the list in two
+-- (every list in a reviewed document would fragment), so it is held back and
+-- emitted directly after the list instead — the same place a comment on a
+-- list item lands. Anything else (a blank paragraph, a table, a break) ends
+-- the list.
+
+type DocxListItem = { text: string, runs: [InlineRun], level: int, ordered: bool }
+
+type DocxGroupState = {
+  acc: [Block],
+  pairs: [(int, int)],
+  cur: [DocxListItem],
+  held: [(Block, int)],
+  baseLevel: int,
+  baseOrdered: bool,
+  baseKey: string,
+  emitted: int,
+  old: int
+}
+
+-- The regrouped blocks plus where each input block went: indexMap[i] is the
+-- output index of input block i. docx_parser's comment anchoring records body
+-- block indices before grouping and needs them moved.
+export type DocxGrouped = { blocks: [Block], indexMap: Map[int, int], count: int }
+
+export pure func docxGroupLists(blocks: [(Block, string)]) -> [Block] =
+  docxGroupListsIndexed(blocks).blocks
+
+export pure func docxGroupListsIndexed(blocks: [(Block, string)]) -> DocxGrouped {
+  let st = docxGroupStep(blocks, { acc: [], pairs: [], cur: [], held: [], baseLevel: 0,
+                                   baseOrdered: false, baseKey: "", emitted: 0, old: 0 });
+  { blocks: reverse(st.acc), indexMap: mapFromList(st.pairs), count: st.emitted }
+}
+
+-- An input index's output index. An index past the end of the input (an
+-- anchor after the last block) maps past the end of the output.
+export pure func docxRemapIndex(g: DocxGrouped, i: int) -> int =
+  if i < 0 then i
+  else match mapLookup(g.indexMap, i) {
+    Some(j) => j,
+    None => g.count
+  }
+
+pure func docxGroupStep(blocks: [(Block, string)], st: DocxGroupState) -> DocxGroupState =
+  match blocks {
+    [] => docxGroupFlush(st),
+    pair :: rest => match pair { (b, key) =>
+      match b {
+        ListBlock(l) => {
+          let items = docxListItemsOf(l.items, l.itemRuns, l.itemLevels, l.itemOrdered, l.ordered);
+          match items {
+            [] => docxGroupStep(rest, docxGroupEmit(b, st)),
+            first :: _ =>
+              if docxGroupCanJoin(st, first, key)
+              then docxGroupStep(rest, { st | cur: docxRevAppend(items, st.cur),
+                                              pairs: (st.old, st.emitted) :: st.pairs,
+                                              old: st.old + 1 })
+              else {
+                let f = docxGroupFlush(st);
+                docxGroupStep(rest, { f | cur: reverse(items), baseLevel: first.level,
+                                          baseOrdered: first.ordered, baseKey: key,
+                                          pairs: (f.old, f.emitted) :: f.pairs,
+                                          old: f.old + 1 })
+              }
+          }
+        },
+        _ =>
+          if docxGroupHolds(st, b)
+          then docxGroupStep(rest, { st | held: (b, st.old) :: st.held, old: st.old + 1 })
+          else docxGroupStep(rest, docxGroupEmit(b, st))
+      }
+    }
+  }
+
+-- Blocks a list paragraph emits after its own block, held while a list is open
+pure func docxGroupHolds(st: DocxGroupState, b: Block) -> bool =
+  match st.cur {
+    [] => false,
+    _ => match b {
+      ChangeBlock(_) => true,
+      SectionBlock(s) => s.kind == "textbox",
+      _ => false
+    }
+  }
+
+pure func docxGroupEmit(b: Block, st: DocxGroupState) -> DocxGroupState {
+  let f = docxGroupFlush(st);
+  { f | acc: b :: f.acc, pairs: (f.old, f.emitted) :: f.pairs,
+        emitted: f.emitted + 1, old: f.old + 1 }
+}
+
+pure func docxGroupCanJoin(st: DocxGroupState, first: DocxListItem, key: string) -> bool =
+  match st.cur {
+    [] => false,
+    _ => (first.level <= st.baseLevel &&
+          (first.ordered != st.baseOrdered || key != st.baseKey)) == false
+  }
+
+-- Emit the open list, then whatever was held back while it was open, in
+-- document order.
+pure func docxGroupFlush(st: DocxGroupState) -> DocxGroupState =
+  match st.cur {
+    [] => st,
+    _ => docxGroupRelease(reverse(st.held),
+           { st | acc: docxBuildList(reverse(st.cur)) :: st.acc, cur: [], held: [],
+                  emitted: st.emitted + 1 })
+  }
+
+pure func docxGroupRelease(held: [(Block, int)], st: DocxGroupState) -> DocxGroupState =
+  match held {
+    [] => st,
+    h :: rest => match h { (b, oldIdx) =>
+      docxGroupRelease(rest, { st | acc: b :: st.acc, pairs: (oldIdx, st.emitted) :: st.pairs,
+                                    emitted: st.emitted + 1 })
+    }
+  }
+
+pure func docxRevAppend(xs: [DocxListItem], acc: [DocxListItem]) -> [DocxListItem] =
+  match xs {
+    [] => acc,
+    x :: rest => docxRevAppend(rest, x :: acc)
+  }
+
+-- Unpack a ListBlock's parallel arrays into items. Each optional array may be
+-- empty (meaning "default for every item") or parallel to items.
+pure func docxListItemsOf(items: [string], runs: [[InlineRun]], levels: [int],
+                          ords: [bool], ordered: bool) -> [DocxListItem] =
+  match items {
+    [] => [],
+    t :: rest => {
+      let r = match runs { [] => [], x :: _ => x };
+      let lv = match levels { [] => 0, x :: _ => x };
+      let o = match ords { [] => ordered, x :: _ => x };
+      { text: t, runs: r, level: lv, ordered: o } ::
+        docxListItemsOf(rest, docxTailOr(runs), docxTailOr(levels), docxTailOr(ords), ordered)
+    }
+  }
+
+pure func docxTailOr[a](xs: [a]) -> [a] =
+  match xs { [] => [], _ :: t => t }
+
+-- Levels are made relative to the shallowest item, so a list that happens to
+-- start at ilvl 1 is still a top-level list. Each optional array is emitted
+-- only when it carries information, so a flat, uniform, unformatted list is
+-- byte-identical to mkList's output.
+pure func docxBuildList(items: [DocxListItem]) -> Block {
+  let ordered = match items { [] => false, x :: _ => x.ordered };
+  let minLevel = docxMinLevel(items);
+  let levels = map(\it. it.level - minLevel, items);
+  let levelsOut = if any(\n. n > 0, levels) then levels else [];
+  let ordsOut = if any(\it. it.ordered != ordered, items) then map(\it. it.ordered, items) else [];
+  let runsOut = if any(\it. listLength(it.runs) > 0, items) then map(\it. it.runs, items) else [];
+  mkListFull(map(\it. it.text, items), ordered, runsOut, levelsOut, ordsOut)
+}
+
+pure func docxMinLevel(items: [DocxListItem]) -> int =
+  match items {
+    [] => 0,
+    x :: rest => match rest {
+      [] => x.level,
+      _ => { let m = docxMinLevel(rest); if x.level < m then x.level else m }
+    }
+  }
+
+-- === Test view ===============================================================
+--
+-- Compact rendering of a block list for the inline tests in docx_parser:
+-- "h2:Text", "p:Text", "list(o):0.A,1-.B" (level, "-" when the item's marker
+-- differs from the list's), "brk:page-break", "sec:section-break",
+-- "chg:insert". Blocks are joined with " | ".
+export pure func docxStructureView(blocks: [Block]) -> string =
+  join(" | ", map(docxViewBlock, blocks))
+
+pure func docxViewBlock(b: Block) -> string =
+  match b {
+    ListBlock(l) => {
+      let items = docxListItemsOf(l.items, l.itemRuns, l.itemLevels, l.itemOrdered, l.ordered);
+      let kind = if l.ordered then "o" else "u";
+      "list(${kind}):${join(",", map(\it. "${intToStr(it.level)}${if it.ordered != l.ordered then "-" else ""}.${it.text}", items))}"
+    },
+    _ => docxViewOther(b)
+  }
+
+pure func docxViewOther(b: Block) -> string =
+  match b {
+    SectionBlock(s) =>
+      if s.kind == "page-break" || s.kind == "column-break" then "brk:${s.kind}"
+      else "sec:${s.kind}",
+    HeadingBlock(h) => "h${intToStr(h.level)}:${h.text}",
+    TextBlock(t) => "p:${t.text}",
+    ChangeBlock(c) => "chg:${c.changeType}",
+    _ => "other"
+  }
