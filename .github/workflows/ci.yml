@@ -115,6 +115,13 @@ jobs:
           fi
           echo "All inline tests passed (property test failures are known AILANG bugs)"
 
+      # Through the real CLI: a Maildir-named / extensionless message parses
+      # as email (it was refused as 'unknown'), and a forwarded message
+      # (message/rfc822) carries attachment-data that decodes to its bytes.
+      # The Maildir name is made at run time — ':' breaks Windows checkout.
+      - name: EML content sniffing and message/rfc822 attachment bytes
+        run: bash tests/test_eml_maildir_rfc822.sh
+
       # Checked against the fixture builder's expectations rather than a
       # golden: a golden can carry the bug (poi_two_sheets' did).
       - name: XLSX cell positions and sheet order (exact)
