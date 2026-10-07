@@ -124,6 +124,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
           navLink('index.html', 'Home', 'index') +
           navLink('workbench.html', 'Workbench', 'workbench') +
           navLink('docs.html', 'Docs', 'docs') +
+          navLink('connect.html', 'Connect AI', 'connect') +
           navLink('api.html', 'API', 'api') +
           navLink('selfhost.html', 'Run Locally', 'selfhost') +
           navLink('pricing.html', 'Pricing', 'pricing') +

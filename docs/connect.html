@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect from Claude, ChatGPT or Codex — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<link rel="alternate" type="text/markdown" title="LLM-friendly docs (llms.txt)" href="llms.txt">
+<meta name="description" content="Add the AILANG Parse connector to Claude, Claude Code, ChatGPT or Codex: setup, sign-in, the tools it provides, revoking access and troubleshooting.">
+<meta property="og:title" content="Connect from Claude, ChatGPT or Codex — AILANG Parse">
+<meta property="og:description" content="Add the AILANG Parse connector to Claude, Claude Code, ChatGPT or Codex: setup, sign-in, the tools it provides, revoking access and troubleshooting.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page" data-no-cta>
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">Connect from <span class="dp-accent">Claude, ChatGPT</span> or Codex</h1>
+    <p class="subtitle reveal reveal-delay-1">Use AILANG Parse inside your AI assistant: paste one URL, sign in, done.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <!-- Sidebar ToC -->
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#overview" class="active">Overview</a>
+        <a href="#setup">Setup</a>
+        <a href="#claude-code" style="padding-left:24px;font-size:12px">Claude Code</a>
+        <a href="#claude" style="padding-left:24px;font-size:12px">Claude (web &amp; desktop)</a>
+        <a href="#codex" style="padding-left:24px;font-size:12px">Codex</a>
+        <a href="#chatgpt" style="padding-left:24px;font-size:12px">ChatGPT</a>
+        <a href="#sign-in">Signing in</a>
+        <a href="#tools">Tools</a>
+        <a href="#using">Using it</a>
+        <a href="#revoke">Revoking access</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+        <a href="#agents">Agents without a browser</a>
+        <a href="#privacy">Privacy &amp; support</a>
+      </nav>
+    </aside>
+
+    <!-- Content -->
+    <main class="dp-docs-content">
+
+      <h2 id="overview">Overview</h2>
+      <p>The AILANG Parse connector is a remote <a href="mcp.html">MCP server</a> that lets an AI assistant parse, convert and edit documents with your AILANG Parse account. You add one URL to the assistant and sign in once in your browser. You never copy an API key.</p>
+      <pre><code>https://docparse.ailang.sunholo.com/mcp/connect/</code></pre>
+      <ul>
+        <li><strong>Transport:</strong> Streamable HTTP.</li>
+        <li><strong>Sign-in:</strong> OAuth 2.1 with PKCE. The assistant registers itself automatically (client ID metadata documents), so there is no client ID or secret to enter: leave any OAuth client fields empty.</li>
+        <li><strong>Account:</strong> you sign in with Google or GitHub. Usage through the connector counts against your plan, like any other request.</li>
+      </ul>
+
+      <h2 id="setup">Setup</h2>
+
+      <h3 id="claude-code">Claude Code</h3>
+      <pre><code>claude mcp add --transport http docparse https://docparse.ailang.sunholo.com/mcp/connect/</code></pre>
+      <p>Then, inside Claude Code, run <code>/mcp</code>, choose <code>docparse</code> and select <em>Authenticate</em>. Your browser opens the sign-in page; when you have approved, Claude Code shows the server as connected.</p>
+
+      <h3 id="claude">Claude (claude.ai and Claude Desktop)</h3>
+      <ol>
+        <li>Open <em>Customize &rarr; Connectors</em> (on older versions: <em>Settings &rarr; Connectors</em>).</li>
+        <li>Click <em>+ Add</em>, then <em>Add custom connector</em>.</li>
+        <li>Enter a name (for example <code>AILANG Parse</code>) and paste the connector URL above. Leave the OAuth client ID and secret empty.</li>
+        <li>Click <em>Add</em>, then <em>Connect</em> to sign in.</li>
+        <li>In a conversation, use the <em>+</em> button &rarr; <em>Connectors</em> to switch it on.</li>
+      </ol>
+      <p>On Team and Enterprise plans an organisation Owner first adds the connector under <em>Organization settings &rarr; Connectors</em>; members then click <em>Connect</em>. Free plans are limited to one custom connector. See Anthropic&rsquo;s guide: <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Get started with custom connectors using remote MCP</a>. A listing in Claude&rsquo;s connector directory is coming; once it is live you will be able to add AILANG Parse from there without pasting the URL.</p>
+
+      <h3 id="codex">Codex</h3>
+      <pre><code>codex mcp add docparse --url https://docparse.ailang.sunholo.com/mcp/connect/
+codex mcp login docparse</code></pre>
+      <p><code>codex mcp login</code> opens the sign-in page in your browser and stores the result for later sessions.</p>
+
+      <h3 id="chatgpt">ChatGPT</h3>
+      <p>ChatGPT adds custom MCP servers as plugins (formerly &ldquo;apps&rdquo; or &ldquo;connectors&rdquo;). Custom MCP servers need <em>Developer mode</em>, which is available on some plans only and may have to be enabled by your workspace admin.</p>
+      <ol>
+        <li>Turn on <em>Developer mode</em> in ChatGPT&rsquo;s settings (under <em>Apps &amp; Connectors &rarr; Advanced</em> on most accounts).</li>
+        <li>Open <em>Plugins</em> in ChatGPT (<code>chatgpt.com/plugins</code>), select <em>+</em> and choose <em>Add custom MCP server</em>.</li>
+        <li>Enter a name and description, paste the connector URL above, and choose OAuth for authentication.</li>
+        <li>Review the warning, continue, and sign in when ChatGPT opens the sign-in page.</li>
+        <li>In a conversation, type <code>@</code> and select the plugin.</li>
+      </ol>
+      <p>OpenAI moves these settings from time to time; their current instructions are in <a href="https://developers.openai.com/apps-sdk/deploy/connect-chatgpt">Connect from ChatGPT</a>.</p>
+
+      <h3>Other MCP clients</h3>
+      <p>Any client that supports remote MCP servers over Streamable HTTP with OAuth can use the same URL.</p>
+
+      <h2 id="sign-in">Signing in</h2>
+      <p>When the assistant first needs your account, it opens <code>https://docparse.ailang.sunholo.com/oauth-login.html</code> in your browser:</p>
+      <ol>
+        <li>The page shows <strong>which app is asking</strong> and <strong>where it will send you back</strong>. Check both before continuing.</li>
+        <li>Sign in with Google or GitHub in the popup window.</li>
+        <li>Click <em>Allow</em>. Nothing is granted until you do; choosing not to allow leaves the app unconnected.</li>
+        <li>Your browser returns to the app, which confirms the connection.</li>
+      </ol>
+      <p><strong>What a connection is.</strong> The app receives an access key for your account, labelled <code>oauth: &lt;app host&gt;</code> (for example <code>oauth: claude.ai</code>). The key lasts 24 hours. The app renews it automatically with a refresh token valid for 30 days; each renewal replaces the old key. If the app is not used for 30 days, you sign in again.</p>
+
+      <h2 id="tools">Tools</h2>
+      <p>The connector provides these tools. None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Tool</th><th>What it does</th><th>Sign-in</th><th>Hints</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>mcpParse</code><br><small>Parse document</small></td>
+            <td>Reads a document (Office, PDF, HTML, Markdown, email, images and more) into structured blocks, Markdown or HTML, keeping tables, headings, comments and tracked changes.</td>
+            <td>Required</td>
+            <td>Read-only</td>
+          </tr>
+          <tr>
+            <td><code>mcpConvert</code><br><small>Convert document</small></td>
+            <td>Creates a document in another format (Word, PowerPoint, Excel, OpenDocument, HTML, Markdown, Quarto), either from Markdown the assistant writes or from an existing document. The result includes a private download link valid for one hour.</td>
+            <td>Required</td>
+            <td>Read-only</td>
+          </tr>
+          <tr>
+            <td><code>editDocument</code><br><small>Edit document</small></td>
+            <td>Applies structured edits to an Office document and returns the edited content. The assistant can then turn it into a file with <code>mcpConvert</code>.</td>
+            <td>Required</td>
+            <td>Read-only (returns a copy)</td>
+          </tr>
+          <tr>
+            <td><code>mcpAccount</code><br><small>Account, quota and usage</small></td>
+            <td>Shows your plan, usage this month and remaining allowance, and your keys. It can also switch request history on or off for your account.</td>
+            <td>Required</td>
+            <td>Changes a setting only when asked; not destructive</td>
+          </tr>
+          <tr>
+            <td><code>mcpFormats</code><br><small>List formats and capabilities</small></td>
+            <td>Lists what AILANG Parse can read and write, how to send it a document, and the sample documents you can try.</td>
+            <td>Not needed</td>
+            <td>Read-only</td>
+          </tr>
+          <tr>
+            <td><code>mcpEstimate</code><br><small>Estimate cost and latency</small></td>
+            <td>Predicts how long a document will take and whether it needs AI processing, before parsing it.</td>
+            <td>Not needed</td>
+            <td>Read-only</td>
+          </tr>
+          <tr>
+            <td><code>submit_feedback</code><br><small>Send feedback</small></td>
+            <td>Sends a bug report, feature request or documentation gap to the AILANG team for human review.</td>
+            <td>Not needed</td>
+            <td>Sends a message; not destructive</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>The tool list can change as the service improves; your assistant always shows the current list and descriptions.</p>
+
+      <h2 id="using">Using it</h2>
+      <p>Ask naturally, for example &ldquo;parse this contract and list the tracked changes&rdquo;, &ldquo;turn these notes into a PowerPoint&rdquo; or &ldquo;try AILANG Parse on a sample DOCX&rdquo;. The assistant can give AILANG Parse a document in three ways: the file itself, a public <code>https://</code> link, or one of the built-in sample documents. Created files come back with a download link that is valid for one hour.</p>
+
+      <h2 id="revoke">Revoking access</h2>
+      <ul>
+        <li><strong>On the dashboard:</strong> open your <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a>, go to <em>API keys</em> and revoke the key labelled <code>oauth: &lt;app host&gt;</code>. Access stops at once.</li>
+        <li><strong>In the app:</strong> remove or disconnect the connector (Claude: <em>Customize &rarr; Connectors</em>; Claude Code: <code>claude mcp remove docparse</code>; Codex: <code>codex mcp logout docparse</code>; ChatGPT: remove the plugin).</li>
+      </ul>
+
+      <h2 id="troubleshooting">Troubleshooting</h2>
+
+      <h3>After signing in, the browser shows a localhost page or &ldquo;unable to connect&rdquo;</h3>
+      <p>Desktop and command-line apps (Claude Code, Codex) receive the sign-in on a temporary local address such as <code>http://localhost:&hellip;</code>. That listener only runs while the app is waiting, so keep the app open until it confirms the connection, then try again from the app. If the app runs on a different machine from your browser (for example over SSH), copy the full <code>localhost</code> URL from the browser&rsquo;s address bar and paste it back into the app when it asks; Claude Code supports this.</p>
+
+      <h3>The sign-in popup does not appear</h3>
+      <p>Your browser is blocking popups. Allow popups for <code>docparse.ailang.sunholo.com</code> and click the sign-in button again.</p>
+
+      <h3>&ldquo;This sign-in request has expired or was already used&rdquo;</h3>
+      <p>Each sign-in request is valid for 10 minutes and can be used once. Close the tab and start the connection again from the app (Claude Code: <code>/mcp</code> &rarr; <em>Authenticate</em>; Codex: <code>codex mcp login docparse</code>; Claude and ChatGPT: <em>Connect</em> on the connector).</p>
+
+      <h3>&ldquo;Needs you to sign in again&rdquo;, &ldquo;not authenticated&rdquo; or a 401 error</h3>
+      <p>The access key expired and could not be renewed. Keys last 24 hours and are renewed only while the app is in use; refresh tokens expire after 30 days, and revoking the key on the dashboard also ends the connection. Re-authenticate from the app as above.</p>
+
+      <h3>A tool says you have reached your plan&rsquo;s limit</h3>
+      <p>Your monthly allowance is used up. It resets at the start of each month. You can see your usage, and manage your account, on the <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a>, or ask the assistant to run <code>mcpAccount</code>.</p>
+
+      <h3>A link cannot be fetched</h3>
+      <p>Links must be publicly reachable over <code>https://</code>. Pages behind a login cannot be read; give the assistant the file itself instead.</p>
+
+      <h3>The connector shows no tools, or old tools</h3>
+      <p>Reconnect or refresh the connector in the app (ChatGPT: open the plugin and select <em>Refresh</em>; Claude Code: <code>/mcp</code>).</p>
+
+      <h2 id="agents">Agents without a browser</h2>
+      <p>The connector URL above is for apps that can open a browser for you. Headless agents, scripts and CI jobs should use the agent endpoint <code>https://docparse.ailang.sunholo.com/mcp/</code> instead, with either:</p>
+      <ul>
+        <li><strong>Device sign-in:</strong> the agent calls <code>mcpAuth</code>, you approve a short code in any browser, and the agent collects its key with <code>mcpAuthPoll</code>.</li>
+        <li><strong>An API key</strong> created on the <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a>.</li>
+      </ul>
+      <p>Details are on the <a href="mcp.html">MCP server page</a>.</p>
+
+      <h2 id="privacy">Privacy &amp; support</h2>
+      <p>The assistant sends AILANG Parse only the tool call: the document and options you ask it to work on, never your conversation. How connections, keys and created files are stored is described in our <a href="privacy.html#ai-assistants">privacy policy</a>; see also the <a href="terms.html">terms</a>.</p>
+      <p>Need help? Email <a href="mailto:docparse@sunholo.com">docparse@sunholo.com</a> or open an issue at <a href="https://github.com/sunholo-data/ailang-parse/issues">github.com/sunholo-data/ailang-parse/issues</a>.</p>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
