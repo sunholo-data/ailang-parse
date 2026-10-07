@@ -5,7 +5,7 @@ module docparse/types/document
 -- All parsers (docx, pptx, xlsx) produce [Block] lists.
 
 import std/string (length, join, startsWith, contains, find, substring)
-import std/list (filter, map, reverse, length as listLength)
+import std/list (filter, map, reverse, concat, length as listLength)
 
 -- A table cell with merge span info
 -- colSpan: number of columns this cell spans (1 = normal)
@@ -37,7 +37,14 @@ export type TableCell = {
   -- conditional formatting) or inherits from a table style is not here, and
   -- the parser says so in the outcome's warnings instead.
   fill: string,
-  color: string
+  color: string,
+  -- Spreadsheet formula as the file stores it, without the leading "="
+  -- ("B2-C2", "SUM(B2:B3)"), or "" for a cell that is not a formula. `text`
+  -- stays the cell's VALUE (the cached result the file saved); a formula cell
+  -- saved without one has text "" and the parser warns. Shared-formula
+  -- dependents carry their own formula, translated from the master's. Only
+  -- XLSX fills it today.
+  formula: string
 }
 
 -- A span of text within a paragraph carrying character formatting.
@@ -68,7 +75,15 @@ export type InlineRun = {
   -- cannot carry a URL into a generator: HTML→DOCX leaked a literal
   -- "[A2UI](https://…)" into Word until this existed.
   href: string,
-  vertAlign: string   -- "" | "superscript" | "subscript"
+  vertAlign: string,  -- "" | "superscript" | "subscript"
+  -- Direct run colours, "#rrggbb" lowercase or "" when none was specified
+  -- (same convention as TableCell.fill/color, see services/colour.ail).
+  -- `color` is the font colour (DOCX w:color; "auto" reads as ""), and
+  -- `highlight` the background behind the text (DOCX w:highlight, mapped
+  -- from its named palette, or a run-level w:shd fill). Only DOCX fills them
+  -- today; every other parser leaves both "".
+  color: string,
+  highlight: string
 }
 
 -- A content block extracted from a document
@@ -92,13 +107,19 @@ export type InlineRun = {
 --                      "none"  (unresolvable; anchorText is empty)
 --   anchorBlockIndex:  index of the annotated block; -1 when unanchored
 --   parentId:          id of the comment this replies to; "" for top-level
-export type Block = TextBlock({text: string, style: string, level: int, runs: [InlineRun]})
+--
+-- `bookmarks` on TextBlock/HeadingBlock names the anchors (DOCX
+-- w:bookmarkStart, §17.13.6) that start inside that paragraph, so an internal
+-- link — a run whose href is "#name" — resolves to the block carrying "name".
+-- Empty for nearly every block and omitted from JSON when empty. Word's
+-- automatic "_GoBack" (last edit position) is never listed.
+export type Block = TextBlock({text: string, style: string, level: int, runs: [InlineRun], bookmarks: [string]})
                   | TableBlock({rows: [[TableCell]], headers: [TableCell], caption: string})
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})
                   | AudioBlock({data: string, transcription: string, mime: string})
                   | VideoBlock({data: string, description: string, mime: string})
-                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]})
-                  | HeadingBlock({text: string, level: int, runs: [InlineRun]})
+                  | ListBlock({items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int], itemOrdered: [bool]})
+                  | HeadingBlock({text: string, level: int, runs: [InlineRun], bookmarks: [string]})
                   | SectionBlock({kind: string, name: string, blocks: [Block]})
                   | ChangeBlock({changeType: string, author: string, date: string, text: string})
                   | LinkBlock({text: string, href: string, title: string})
@@ -259,7 +280,7 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
@@ -268,21 +289,21 @@ export pure func simpleCell(text: string) -> TableCell
 export pure func scopedCell(text: string, scope: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Same as simpleCell/spanCell, plus the tokenized inline runs (markdown_parser
@@ -290,13 +311,13 @@ export pure func spanCell(text: string, cs: int) -> TableCell
 export pure func simpleCellRuns(text: string, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: "", formula: ""}
 }
 
 export pure func spanCellRuns(text: string, cs: int, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: "", formula: ""}
 }
 
 -- The same cell carrying a direct fill and font colour (both already
@@ -306,6 +327,19 @@ export pure func withCellColours(cell: TableCell, fill: string, color: string) -
 {
   { cell | fill: fill, color: color }
 }
+
+-- The same cell carrying a spreadsheet formula (no leading "=").
+export pure func withCellFormula(cell: TableCell, formula: string) -> TableCell
+  ensures { result.formula == formula && result.text == cell.text }
+{
+  { cell | formula: formula }
+}
+
+-- What a reader sees in a rendered table (Markdown, HTML): the value, or, for
+-- a formula cell saved without a cached value, the formula itself as a
+-- spreadsheet shows it ("=B2-C2") rather than an empty cell.
+export pure func cellDisplayText(cell: TableCell) -> string =
+  if length(cell.text) == 0 && length(cell.formula) > 0 then "=${cell.formula}" else cell.text
 
 -- Construct a TableBlock with no caption (most non-HTML parsers).
 -- HTML parser uses mkTableFull when <caption> is present.
@@ -328,7 +362,7 @@ export pure func cellText(cell: TableCell) -> string = cell.text
 -- modules. Routing them through here keeps the next field addition to this
 -- function.
 export pure func mkText(text: string, style: string, level: int) -> Block =
-  TextBlock({text: text, style: style, level: level, runs: []})
+  TextBlock({text: text, style: style, level: level, runs: [], bookmarks: []})
 
 -- Construct a TextBlock carrying character formatting. Only for parsers that
 -- can actually resolve run properties (DOCX w:rPr, PPTX a:rPr, HTML inline
@@ -337,13 +371,13 @@ export pure func mkText(text: string, style: string, level: int) -> Block =
 -- through this constructor, and all four split runs more finely than the
 -- formatting requires.
 export pure func mkTextRuns(text: string, style: string, level: int, runs: [InlineRun]) -> Block =
-  TextBlock({text: text, style: style, level: level, runs: coalesceRuns(runs)})
+  TextBlock({text: text, style: style, level: level, runs: coalesceRuns(runs), bookmarks: []})
 
 -- A run with no formatting applied — the base to vary from, so call sites don't
 -- have to spell out every flag to set one.
 export pure func plainRun(text: string) -> InlineRun =
   {text: text, bold: false, italic: false, underline: false,
-   strike: false, code: false, href: "", vertAlign: ""}
+   strike: false, code: false, href: "", vertAlign: "", color: "", highlight: ""}
 
 -- Merge adjacent runs that carry identical formatting.
 --
@@ -367,10 +401,11 @@ pure func docCoalesceStep(runs: [InlineRun], cur: InlineRun, acc: [InlineRun]) -
     [] => cur :: acc,
     r :: rest =>
       if docRunFmtEq(cur, r)
-      then docCoalesceStep(rest, {text: "${cur.text}${r.text}", bold: cur.bold,
-                                  italic: cur.italic, underline: cur.underline,
-                                  strike: cur.strike, code: cur.code, href: "",
-                                  vertAlign: cur.vertAlign}, acc)
+      -- A record update, so every formatting field (href included) is
+      -- carried by construction. Spelling the fields out used to reset href to
+      -- "" here, dropping the target of two adjacent runs linking to the same
+      -- place.
+      then docCoalesceStep(rest, {cur | text: "${cur.text}${r.text}"}, acc)
       else docCoalesceStep(rest, r, cur :: acc)
   }
 
@@ -381,19 +416,40 @@ pure func docCoalesceStep(runs: [InlineRun], cur: InlineRun, acc: [InlineRun]) -
 pure func docRunFmtEq(a: InlineRun, b: InlineRun) -> bool =
   a.bold == b.bold && a.italic == b.italic && a.underline == b.underline &&
   a.strike == b.strike && a.code == b.code && a.vertAlign == b.vertAlign &&
-  a.href == b.href
+  a.href == b.href && a.color == b.color && a.highlight == b.highlight
 
 -- Construct a HeadingBlock. Same rationale as mkText: route constructions
 -- through one function so field additions don't touch 25 call sites.
 export pure func mkHeading(text: string, level: int) -> Block =
-  HeadingBlock({text: text, level: level, runs: []})
+  HeadingBlock({text: text, level: level, runs: [], bookmarks: []})
 
 export pure func mkHeadingRuns(text: string, level: int, runs: [InlineRun]) -> Block =
-  HeadingBlock({text: text, level: level, runs: coalesceRuns(runs)})
+  HeadingBlock({text: text, level: level, runs: coalesceRuns(runs), bookmarks: []})
+
+-- The same paragraph block carrying the bookmark names that start in it.
+-- Only TextBlock and HeadingBlock have anywhere to put them; any other block
+-- comes back unchanged (callers that care report what could not be attached).
+export pure func withBookmarks(block: Block, names: [string]) -> Block =
+  match names {
+    [] => block,
+    _ => match block {
+      TextBlock(t) => TextBlock({t | bookmarks: concat(t.bookmarks, names)}),
+      HeadingBlock(h) => HeadingBlock({h | bookmarks: concat(h.bookmarks, names)}),
+      _ => block
+    }
+  }
+
+-- Bookmark names a block carries (empty for every kind that cannot hold one).
+export pure func blockBookmarks(block: Block) -> [string] =
+  match block {
+    TextBlock(t) => t.bookmarks,
+    HeadingBlock(h) => h.bookmarks,
+    _ => []
+  }
 
 -- Construct a ListBlock.
 export pure func mkList(items: [string], ordered: bool) -> Block =
-  ListBlock({items: items, ordered: ordered, itemRuns: [], itemLevels: []})
+  ListBlock({items: items, ordered: ordered, itemRuns: [], itemLevels: [], itemOrdered: []})
 
 -- ListBlock with per-item formatting.
 --
@@ -405,7 +461,7 @@ export pure func mkList(items: [string], ordered: bool) -> Block =
 -- parallel field is additive. Consumers must tolerate an empty itemRuns and
 -- should not assume alignment without checking length.
 export pure func mkListRuns(items: [string], ordered: bool, itemRuns: [[InlineRun]]) -> Block =
-  ListBlock({items: items, ordered: ordered, itemRuns: map(coalesceRuns, itemRuns), itemLevels: []})
+  ListBlock({items: items, ordered: ordered, itemRuns: map(coalesceRuns, itemRuns), itemLevels: [], itemOrdered: []})
 
 -- A nested list. `itemLevels` is parallel to `items`, 0 for a top-level item.
 -- Empty when the list is flat, so an ordinary list serialises exactly as it
@@ -413,7 +469,20 @@ export pure func mkListRuns(items: [string], ordered: bool, itemRuns: [[InlineRu
 export pure func mkListNested(items: [string], ordered: bool,
                               itemRuns: [[InlineRun]], itemLevels: [int]) -> Block =
   ListBlock({items: items, ordered: ordered,
-             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels})
+             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels, itemOrdered: []})
+
+-- A nested list whose levels do not all share one marker kind — a numbered
+-- outline with bulleted sub-points, say. `itemOrdered` is parallel to `items`
+-- and overrides `ordered` per item; `ordered` stays the marker of the first
+-- item so a consumer that reads only `ordered` still gets the top level right.
+-- Empty when every item agrees with `ordered`, which keeps the JSON for every
+-- uniform list byte-identical to before the field existed (DOCX numbering is
+-- the only source of mixed lists today: numbering.xml sets numFmt per level).
+export pure func mkListFull(items: [string], ordered: bool, itemRuns: [[InlineRun]],
+                            itemLevels: [int], itemOrdered: [bool]) -> Block =
+  ListBlock({items: items, ordered: ordered,
+             itemRuns: map(coalesceRuns, itemRuns), itemLevels: itemLevels,
+             itemOrdered: itemOrdered})
 
 -- Construct a plain body paragraph — the overwhelmingly common case
 -- (style "normal", level 0).

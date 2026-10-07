@@ -1,0 +1,217 @@
+module docparse/services/docx_inline
+
+import std/xml (findAll, findFirst, getAttr, getTag, getChildren)
+import std/option (Some, None, getOrElse)
+import std/string (length, toLower, toUpper, trim, split, contains, startsWith, endsWith, substring)
+import std/list (flatMap, filter, length as listLength)
+import docparse/services/colour (normaliseHex)
+
+-- DOCX run- and anchor-level details that the paragraph walk in docx_parser
+-- reads but does not need to own: run colour and highlight (§17.3.2.6,
+-- §17.3.2.15, §17.3.2.32), note references (§17.11.14, §17.11.7) and
+-- bookmark names (§17.13.6.2). Kept out of docx_parser so that module stays
+-- inside the browser type-checker's per-module step budget, and so the
+-- paragraph classification there can change without touching run details.
+-- Pure throughout.
+
+-- === Colour =================================================================
+
+-- Font colour from w:rPr/w:color. "auto" (the viewer picks black or white
+-- against the background) is not a colour the document chose, so it reads as
+-- "" like an absent element. A w:themeColor is accompanied by w:val, Word's
+-- own resolved fallback, which is what this returns.
+export pure func docxRunColor(rPr: XmlNode) -> string =
+  match findFirst(rPr, "w:color") {
+    Some(el) => normaliseHex(getOrElse(getAttr(el, "w:val"), "")),
+    None => ""
+  }
+
+-- Background behind a run's text. w:highlight names one of sixteen fixed
+-- colours; failing that, a run-level w:shd fill (what Word writes for "text
+-- shading", and what LibreOffice writes for character background). w:val
+-- patterns on w:shd mix w:color into the fill; the fill alone is the
+-- dominant colour and is what this returns.
+export pure func docxRunHighlight(rPr: XmlNode) -> string {
+  let named = match findFirst(rPr, "w:highlight") {
+    Some(el) => docxHighlightHex(getOrElse(getAttr(el, "w:val"), "")),
+    None => ""
+  };
+  if length(named) > 0 then named
+  else match docxDirectShd(rPr) {
+    Some(shd) => normaliseHex(getOrElse(getAttr(shd, "w:fill"), "")),
+    None => ""
+  }
+}
+
+-- w:shd as a DIRECT child of w:rPr. findFirst searches descendants, and an
+-- rPr has no nested shading, but say what is meant.
+pure func docxDirectShd(rPr: XmlNode) -> Option[XmlNode] =
+  match filter(\c. getTag(c) == "w:shd", getChildren(rPr)) {
+    [] => None,
+    s :: _ => Some(s)
+  }
+
+-- ST_HighlightColor (§17.18.40) to "#rrggbb"; "none" and anything unknown -> "".
+export pure func docxHighlightHex(name: string) -> string
+  tests [("yellow", "#ffff00"), ("darkBlue", "#000080"), ("lightGray", "#c0c0c0"),
+         ("none", ""), ("", ""), ("chartreuse", "")]
+{
+  let n = toLower(name);
+  if n == "yellow" then "#ffff00"
+  else if n == "green" then "#00ff00"
+  else if n == "cyan" then "#00ffff"
+  else if n == "magenta" then "#ff00ff"
+  else if n == "blue" then "#0000ff"
+  else if n == "red" then "#ff0000"
+  else if n == "black" then "#000000"
+  else if n == "white" then "#ffffff"
+  else if n == "darkblue" then "#000080"
+  else if n == "darkcyan" then "#008080"
+  else if n == "darkgreen" then "#008000"
+  else if n == "darkmagenta" then "#800080"
+  else if n == "darkred" then "#800000"
+  else if n == "darkyellow" then "#808000"
+  else if n == "darkgray" then "#808080"
+  else if n == "lightgray" then "#c0c0c0"
+  else ""
+}
+
+-- === Note references ========================================================
+--
+-- A w:footnoteReference / w:endnoteReference is an empty element: Word draws
+-- the note's number in its place. The number is computed at layout time (it
+-- is the note's position, under a numbering format), so the stable thing to
+-- surface is the w:id — the key into word/footnotes.xml / endnotes.xml, and the
+-- `name` of the matching SectionBlock(kind: "footnote" | "endnote").
+--
+--   footnote 1 -> text "[1]",  href "#footnote-1"
+--   endnote 1  -> text "[e1]", href "#endnote-1"
+--
+-- The "e" keeps a footnote 1 and an endnote 1 in the same paragraph from
+-- reading as the same mark (pandoc_notes.docx has exactly that).
+
+-- Text a run child contributes when it is a note reference; "" otherwise.
+export pure func docxNoteRefText(node: XmlNode) -> string {
+  let tag = getTag(node);
+  if tag == "w:footnoteReference" then "[${docxNoteId(node)}]"
+  else if tag == "w:endnoteReference" then "[e${docxNoteId(node)}]"
+  else ""
+}
+
+-- Internal link from a run to the note it references, "" when the run holds
+-- no reference. Only the first reference counts; Word writes one per run.
+export pure func docxNoteRefHref(run: XmlNode) -> string =
+  match findFirst(run, "w:footnoteReference") {
+    Some(r) => "#footnote-${docxNoteId(r)}",
+    None => match findFirst(run, "w:endnoteReference") {
+      Some(r) => "#endnote-${docxNoteId(r)}",
+      None => ""
+    }
+  }
+
+pure func docxNoteId(node: XmlNode) -> string = getOrElse(getAttr(node, "w:id"), "")
+
+-- A w:footnote / w:endnote that carries a note's text, as opposed to the
+-- separator lines Word keeps in the same part (w:type separator,
+-- continuationSeparator, continuationNotice). Those have no text, but they are
+-- not notes either, and must not be numbered as if they were.
+export pure func docxIsContentNote(note: XmlNode) -> bool {
+  let t = getOrElse(getAttr(note, "w:type"), "normal");
+  t == "normal" || length(t) == 0
+}
+
+-- Ids of the content notes in a footnotes/endnotes part root.
+export pure func docxContentNoteIds(root: XmlNode, noteTag: string) -> [string] =
+  flatMap(\n. if docxIsContentNote(n) then [docxNoteId(n)] else [],
+          findAll(root, noteTag))
+
+-- === Bookmarks ==============================================================
+
+-- Names of the bookmarks starting anywhere inside a node (a paragraph, a run
+-- container). Word's "_GoBack" marks the last edit position, is created and
+-- moved automatically on every save, and is never a link target.
+export pure func docxBookmarkNames(node: XmlNode) -> [string] =
+  flatMap(\b. {
+    let name = getOrElse(getAttr(b, "w:name"), "");
+    if length(name) == 0 || name == "_GoBack" then [] else [name]
+  }, docxBookmarkStarts(node))
+
+-- findAll only searches descendants; a body-level w:bookmarkStart is itself
+-- the node handed in.
+pure func docxBookmarkStarts(node: XmlNode) -> [XmlNode] =
+  if getTag(node) == "w:bookmarkStart" then [node]
+  else findAll(node, "w:bookmarkStart")
+
+-- The internal-link target of a w:hyperlink (§17.16.22): w:anchor names a
+-- bookmark in this document. "" for external links (r:id) and anchor-less
+-- hyperlinks. Returned as "#name", the same form a bookmark is linked by
+-- everywhere else in the output.
+export pure func docxHyperlinkAnchorHref(link: XmlNode) -> string {
+  let anchor = getOrElse(getAttr(link, "w:anchor"), "");
+  if length(anchor) > 0 then "#${anchor}" else ""
+}
+
+-- === Field-coded hyperlinks =================================================
+--
+-- w:fldSimple w:instr=" HYPERLINK "https://…" " is a link expressed as a field
+-- (docx_generator writes links exactly this way). The cached result run is the
+-- link text; the target lives only in the instruction. \l names a bookmark
+-- instead of a URL. Returns "" for anything that is not a HYPERLINK field.
+export pure func docxFieldHyperlinkHref(instr: string) -> string
+  tests [(" HYPERLINK \"https://example.com/a\" ", "https://example.com/a"),
+         ("HYPERLINK \\l \"intro\"", "#intro"),
+         (" HYPERLINK https://example.com ", "https://example.com"),
+         (" DATE \\@ \"MMMM d\" ", ""),
+         ("", "")]
+{
+  let words = filter(\w. length(w) > 0, split(trim(instr), " "));
+  match words {
+    [] => "",
+    w :: rest =>
+      if toUpper(w) != "HYPERLINK" then ""
+      else {
+        let quoted = docxQuotedParts(instr);
+        if contains(instr, "\\l")
+        then match docxAfterSwitch(rest) {
+          "" => "",
+          a => "#${a}"
+        }
+        else match quoted {
+          q :: _ => q,
+          [] => match filter(\x. not startsWith(x, "\\"), rest) {
+            u :: _ => u,
+            [] => ""
+          }
+        }
+      }
+  }
+}
+
+-- The strings between double quotes, in order.
+pure func docxQuotedParts(s: string) -> [string] =
+  docxOddParts(split(s, "\""), 0)
+
+pure func docxOddParts(parts: [string], i: int) -> [string] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      if i % 2 == 1 && listLength(rest) > 0 then p :: docxOddParts(rest, i + 1)
+      else docxOddParts(rest, i + 1)
+  }
+
+-- The argument following a \l switch, quotes removed.
+pure func docxAfterSwitch(words: [string]) -> string =
+  match words {
+    [] => "",
+    w :: rest =>
+      if w == "\\l" then match rest {
+        a :: _ => docxUnquote(a),
+        [] => ""
+      }
+      else docxAfterSwitch(rest)
+  }
+
+pure func docxUnquote(s: string) -> string {
+  let a = if startsWith(s, "\"") then substring(s, 1, length(s)) else s;
+  if endsWith(a, "\"") then substring(a, 0, length(a) - 1) else a
+}

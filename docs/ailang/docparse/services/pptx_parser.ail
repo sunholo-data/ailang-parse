@@ -399,7 +399,8 @@ pure func extractDrawingMLRun(run: XmlNode) -> InlineRun {
       strike: pptxHasStrike(rPr),
       -- No "code" concept in DrawingML; a monospace typeface would be a guess.
       code: false, href: "",
-      vertAlign: pptxBaseline(rPr)
+      vertAlign: pptxBaseline(rPr),
+      color: "", highlight: ""
     },
     None => plainRun(text)
   }
@@ -483,8 +484,8 @@ pure func parsePptxCell(tc: XmlNode) -> TableCell {
   let hm = getPptxHMerge(tc);
   let vm = getPptxVMerge(tc);
   if hm || vm
-  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: ""}
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: ""}
+  then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: "", formula: ""}
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 pure func extractPptxCellText(tc: XmlNode) -> string {

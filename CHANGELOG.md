@@ -11,6 +11,51 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.51.0](https://github.com/sunholo-data/ailang-parse/compare/v0.50.0...v0.51.0) — 2026-10-07
+
+Closes the 2026-10-07 DOCX/XLSX fidelity head-to-head (14 files checked against the raw OOXML: 6 silently lost structure, none warned) and two EML reports from 8 Sept that two agent attempts had closed without a fix.
+
+### Fixed — DOCX structure
+
+- Custom paragraph styles based on a heading (e.g. ChapterTitle → Heading 1) now parse as headings at the inherited level. Styles resolve through the styles.xml `basedOn` chain (cycle-guarded) to `w:outlineLvl` or a built-in heading name; a paragraph's own `outlineLvl` wins, and `outlineLvl` 9 demotes.
+- Consecutive list paragraphs are grouped into one `ListBlock` with `itemLevels` (from `ilvl` or the List Bullet/Number N style family) instead of one single-item list per paragraph. Numbered vs bulleted follows numbering.xml per level. A new list starts when a top-level item changes numId or marker kind. Tracked changes inside a list no longer split it, and comment anchors follow the grouped list.
+- List numbering set in a style is inherited through `basedOn`; `numId` 0 (numbering switched off) is no longer read as a list item.
+- `w:br w:type="page"`/`"column"` become `page-break`/`column-break` blocks instead of empty text blocks. A mid-document section break (`pPr/sectPr`) is reported as `section-break`, and `pageBreakBefore` emits a page break.
+
+### Fixed — DOCX runs, notes, bookmarks
+
+- Footnote and endnote text is now returned. The notes parts were read like a header, so every note was dropped. One `footnote`/`endnote` section per note, named by its id; the body reference is a `[1]` / `[e1]` run linking `#footnote-1` / `#endnote-1`. Markdown renders `[^1]` with `[^1]: …`.
+- Run font colour (`w:color`) and highlight (`w:highlight`, or `w:shd` fill) are kept as `color` / `highlight` on runs (`"#rrggbb"`). HTML renders them, and DOCX/PPTX/ODT/ODP output writes them back.
+- Bookmarks are listed on the paragraph or heading they start in (`bookmarks`, never `_GoBack`). Internal links (`w:anchor`, `HYPERLINK \l`) carry `href "#name"`. Field-coded HYPERLINKs keep their URL, so links survive DOCX→DOCX.
+- Merging adjacent runs no longer drops a shared link.
+- `sample_docx_footnotes` (challenge_footnotes.docx) now contains real footnotes and endnotes parts.
+
+### Fixed — XLSX formula cells
+
+- Formula cells now report their value and formula (`sample_xlsx_formulas` returned empty Profit/Total cells). Cells carry a new `formula` field (no leading "=", emitted only when set); `text` stays the cached value, typed like any cell. Shared-formula dependents get the master's formula with relative references shifted, as Excel shows them; array formulas report on their anchor cell.
+- A formula saved without a cached value (openpyxl and most generators) keeps an empty value, carries its formula, renders as `=formula` in Markdown, HTML and the workbench, and adds one warning per sheet.
+- `challenge_formulas.xlsx` now stores the cached values its sample promises.
+
+### Fixed — EML
+
+- Forwarded messages can be extracted. A `message/rfc822` attachment now carries `attachment-data` (its bytes, base64) and `attachment-ext: eml` like every other kept attachment, while the forwarded message and its own attachments are still parsed inline; `--no-attachment-data` drops them as before. A forwarded message with no filename is kept as `attachment.eml` instead of a placeholder that dropped its content.
+- Maildir and extensionless messages parse as email. A file such as `1757340000.12345_1.host,U=42:2,S` was refused as an unknown format; content sniffing now recognises an RFC 5322 header block when the extension routes nowhere. The CLI no longer announces an AI strategy before refusing a format it doesn't recognise.
+
+### Added
+
+- DOCX parse warnings name what the output approximates: custom styles read as text, fields returned as their cached result, note references with no note, unclosed comment ranges, bookmarks with no block, and charts / SmartArt / OLE / altChunk not extracted.
+- ADT (all compatible; new JSON keys appear only when set): `InlineRun.color` / `highlight`, `TextBlock`/`HeadingBlock.bookmarks`, `ListBlock.itemOrdered` (per-item marker kind for lists mixing numbered and bulleted levels), `TableCell.formula`. **A consumer that builds `TableCell` or `InlineRun` records field by field must add the new fields.**
+- Page breaks are written back to DOCX output, as `break-after` in HTML and as `{{< pagebreak >}}` in Quarto.
+- SDK types (Python, JS, Go, R) carry `itemOrdered` and cell `formula`.
+- CI: exact checks `check_docx_structure.py`, `check_docx_runs.py`, `create_formula_fixtures.py --verify` and `tests/test_eml_maildir_rfc822.sh`; `xlsx_parser.ail` joins the `--test` list (its inline tests never ran in CI).
+
+### Known gaps
+
+- Heading blocks don't keep the original custom style name; the browser build resolves custom heading styles from built-in names only (no styles.xml).
+- XLSX→XLSX doesn't write `<f>` back; whole-row/column ranges aren't shifted for shared formulas.
+- Folder mode (`docparse ~/Maildir/cur/`) still selects files by extension; pass Maildir files explicitly.
+- SDK types don't yet carry run `color`/`highlight` or `bookmarks`.
+
 ## [v0.50.0](https://github.com/sunholo-data/ailang-parse/compare/v0.49.0...v0.50.0) — 2026-10-06
 
 ### Fixed — EML image attachments were dropped, bytes and all

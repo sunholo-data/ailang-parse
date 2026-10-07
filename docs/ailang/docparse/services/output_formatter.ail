@@ -144,34 +144,43 @@ pure func sectionJsonFields(b: {kind: string, name: string, blocks: [Block]}) ->
 -- today. That keeps the output for unformatted documents byte-identical to the
 -- pre-InlineRun shape, so the 93 golden files, the SDKs and the hosted API
 -- contract are all unaffected by the field existing.
-pure func textJsonFields(b: {text: string, style: string, level: int, runs: [InlineRun]}) -> [{key: string, value: Json}] {
+pure func textJsonFields(b: {text: string, style: string, level: int, runs: [InlineRun], bookmarks: [string]}) -> [{key: string, value: Json}] {
   let base = [
     kv("type", js("text")),
     kv("text", js(b.text)),
     kv("style", js(b.style)),
     kv("level", jnum(intToFloat(b.level)))
   ];
-  if listLength(b.runs) > 0
-  then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
-  else base
+  let withRuns = if listLength(b.runs) > 0
+    then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
+    else base;
+  bookmarksJsonField(withRuns, b.bookmarks)
 }
+
+-- `bookmarks` follows the same omit-when-empty rule: only a paragraph that a
+-- bookmark starts in carries the key.
+pure func bookmarksJsonField(fields: [{key: string, value: Json}], names: [string]) -> [{key: string, value: Json}] =
+  if listLength(names) > 0
+  then concat(fields, [kv("bookmarks", ja(stringsToJson(names)))])
+  else fields
 
 -- Same omit-when-empty rule as TextBlock, so headings without character
 -- formatting serialise exactly as they did before InlineRun existed.
-pure func headingJsonFields(b: {text: string, level: int, runs: [InlineRun]}) -> [{key: string, value: Json}] {
+pure func headingJsonFields(b: {text: string, level: int, runs: [InlineRun], bookmarks: [string]}) -> [{key: string, value: Json}] {
   let base = [
     kv("type", js("heading")),
     kv("text", js(b.text)),
     kv("level", jnum(intToFloat(b.level)))
   ];
-  if listLength(b.runs) > 0
-  then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
-  else base
+  let withRuns = if listLength(b.runs) > 0
+    then concat(base, [kv("runs", ja(runsToJson(b.runs)))])
+    else base;
+  bookmarksJsonField(withRuns, b.bookmarks)
 }
 
 -- itemRuns is a parallel array to items (see mkListRuns). Emitted only when
 -- some item is actually formatted, so an ordinary list is unchanged.
-pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]}) -> [{key: string, value: Json}] {
+pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int], itemOrdered: [bool]}) -> [{key: string, value: Json}] {
   let base = [
     kv("type", js("list")),
     kv("items", ja(stringsToJson(b.items))),
@@ -181,9 +190,14 @@ pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineR
     then concat(base, [kv("itemRuns", ja(map(\rs. ja(runsToJson(rs)), b.itemRuns)))])
     else base;
   -- Omitted for a flat list, so ordinary lists are byte-identical to before.
-  if listLength(b.itemLevels) > 0
-  then concat(withRuns, [kv("itemLevels", ja(map(\n. jnum(intToFloat(n)), b.itemLevels)))])
-  else withRuns
+  let withLevels = if listLength(b.itemLevels) > 0
+    then concat(withRuns, [kv("itemLevels", ja(map(\n. jnum(intToFloat(n)), b.itemLevels)))])
+    else withRuns;
+  -- Per-item marker kind, only for a list that mixes numbered and bulleted
+  -- levels; absent otherwise, so uniform lists serialise exactly as before.
+  if listLength(b.itemOrdered) > 0
+  then concat(withLevels, [kv("itemOrdered", ja(map(jb, b.itemOrdered)))])
+  else withLevels
 }
 
 -- Flags are emitted only when true, for the same reason: a run that is merely
@@ -203,9 +217,15 @@ pure func runJsonFields(r: InlineRun) -> [{key: string, value: Json}] {
     else withCode;
   -- Only when set, like every other run field: a plain run stays byte-identical
   -- to the pre-href JSON shape.
-  if length(r.href) > 0
-  then concat(withVert, [kv("href", js(r.href))])
-  else withVert
+  let withHref = if length(r.href) > 0
+    then concat(withVert, [kv("href", js(r.href))])
+    else withVert;
+  let withColor = if length(r.color) > 0
+    then concat(withHref, [kv("color", js(r.color))])
+    else withHref;
+  if length(r.highlight) > 0
+  then concat(withColor, [kv("highlight", js(r.highlight))])
+  else withColor
 }
 
 pure func tableJsonFields(b: {rows: [[TableCell]], headers: [TableCell], caption: string}) -> [{key: string, value: Json}] {
@@ -281,10 +301,12 @@ export pure func cellsToJson(cells: [TableCell]) -> [Json]
 -- Convert a single TableCell to JSON
 -- Simple cells (no merges) output as just the text string for compact JSON
 -- Merged/spanned/coloured cells use the object form. fill/color are emitted
--- only when set, so a file without colour produces byte-identical JSON.
+-- only when set, so a file without colour produces byte-identical JSON; the
+-- same holds for formula (spreadsheet formula text, no leading "=").
 export pure func cellToJson(cell: TableCell) -> Json {
   if cell.colSpan == 1 && not cell.merged && length(cell.scope) == 0
        && length(cell.align) == 0 && length(cell.fill) == 0 && length(cell.color) == 0
+       && cell.formula == ""
   then js(cell.text)
   else {
     let base = [
@@ -304,7 +326,10 @@ export pure func cellToJson(cell: TableCell) -> Json {
     let withColor = if length(cell.color) > 0
                     then concat(withFill, [kv("color", js(cell.color))])
                     else withFill;
-    jo(withColor)
+    let withFormula = if length(cell.formula) > 0
+                      then concat(withColor, [kv("formula", js(cell.formula))])
+                      else withColor;
+    jo(withFormula)
   }
 }
 

@@ -1,0 +1,211 @@
+module docparse/services/docx_warnings
+
+import std/xml (parseLenient, findAll, getAttr, getTag, getChildren, getText)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/string (length, trim, split, toUpper, join)
+import std/list (map, flatMap, filter, foldl, any, reverse, take, length as listLength)
+import docparse/types/document (Block, TextBlock, SectionBlock, blockBookmarks)
+
+-- Warnings for a DOCX parse: every place the output APPROXIMATES the source
+-- rather than representing it. Same channel as the XLSX colour warnings
+-- (ParseOutcome.warnings -> the "warnings" array in JSON output). A warning is
+-- a statement a reader can check against the document: what was found, how
+-- many, and what the output did with it.
+--
+-- Pure: the caller hands over the parsed document.xml root, the blocks that
+-- came out of it, and what the package's other parts contain.
+--
+--   root           word/document.xml, parsed
+--   blocks         the body blocks produced from it (comments spliced in)
+--   openComments   ids of w:commentRangeStart never closed by a matching End
+--   stylesXml      word/styles.xml ("" when absent)
+--   footnotes/endnotes  presence of the part, and the ids of its content notes
+export pure func docxParseWarnings(root: XmlNode, blocks: [Block], openComments: [string],
+                                   stylesXml: string,
+                                   hasFootnotes: bool, footnoteIds: [string],
+                                   hasEndnotes: bool, endnoteIds: [string]) -> [string] =
+  docxWarnCustomStyles(blocks, stylesXml)
+  ++ docxWarnFields(root)
+  ++ docxWarnNotes(root, "w:footnoteReference", "footnote", "word/footnotes.xml", hasFootnotes, footnoteIds)
+  ++ docxWarnNotes(root, "w:endnoteReference", "endnote", "word/endnotes.xml", hasEndnotes, endnoteIds)
+  ++ docxWarnOpenComments(openComments)
+  ++ docxWarnBookmarks(root, blocks)
+  ++ docxWarnDropped(root)
+
+-- === Custom paragraph styles ================================================
+--
+-- A paragraph in a style the document defines itself (w:customStyle="1") and
+-- that the parser did not map to a heading or list item comes out as plain
+-- text, whatever the style meant to its author ("Requirement", "Warning
+-- box"). Counted from the OUTPUT blocks, so whatever classification the
+-- parser applies, only the paragraphs it left as text are reported.
+pure func docxWarnCustomStyles(blocks: [Block], stylesXml: string) -> [string] {
+  let custom = docxCustomParaStyles(stylesXml);
+  match custom {
+    [] => [],
+    _ => {
+      let used = filter(\s. any(\c. c == s, custom), docxTextStyles(blocks));
+      map(\s. "Paragraph style '${s}' is a custom style with no heading or list mapping; ${show(docxCount(s, used))} paragraph(s) returned as plain text",
+          docxUniq(used))
+    }
+  }
+}
+
+-- styleIds of the paragraph styles styles.xml marks as user-defined.
+pure func docxCustomParaStyles(stylesXml: string) -> [string] =
+  if length(stylesXml) == 0 then []
+  else match parseLenient(stylesXml) {
+    Ok(root) => flatMap(\st.
+        if getOrElse(getAttr(st, "w:type"), "") == "paragraph" &&
+           docxIsOn(getOrElse(getAttr(st, "w:customStyle"), ""))
+        then [getOrElse(getAttr(st, "w:styleId"), "")]
+        else [],
+      findAll(root, "w:style")),
+    Err(_) => []
+  }
+
+pure func docxIsOn(v: string) -> bool = v == "1" || v == "true" || v == "on"
+
+-- Style of every non-empty text block, in order, through sections (text boxes).
+pure func docxTextStyles(blocks: [Block]) -> [string] =
+  flatMap(\b. match b {
+    TextBlock(t) => if length(trim(t.text)) > 0 then [t.style] else [],
+    SectionBlock(s) => docxTextStyles(s.blocks),
+    _ => []
+  }, blocks)
+
+-- === Fields =================================================================
+--
+-- A field's result in the file is whatever Word last computed (a DATE as of
+-- the last save, NUMPAGES as of the last layout, FILENAME as of the last save
+-- under some name). The parser returns that cached text; it cannot recompute
+-- it. Simple fields (w:fldSimple) and complex ones (w:fldChar begin /
+-- w:instrText / separate / end) are both counted. A HYPERLINK w:fldSimple is
+-- not reported: its target is read from the instruction onto the runs.
+pure func docxWarnFields(root: XmlNode) -> [string] {
+  let simple = flatMap(\f. {
+      let name = docxFieldName(getOrElse(getAttr(f, "w:instr"), ""));
+      if name == "HYPERLINK" then [] else [name]
+    }, findAll(root, "w:fldSimple"));
+  let complex = docxComplexFieldNames(findAll(root, "w:r"));
+  let names = simple ++ complex;
+  map(\n. "Field ${n} returned as its cached result (${show(docxCount(n, names))} occurrence(s)); the value is what Word last computed, not recomputed",
+      docxUniq(names))
+}
+
+-- First word of a field instruction, upper-cased ("" -> "UNKNOWN").
+pure func docxFieldName(instr: string) -> string =
+  match filter(\w. length(w) > 0, split(trim(instr), " ")) {
+    [] => "UNKNOWN",
+    w :: _ => toUpper(w)
+  }
+
+-- Complex fields, nested ones included. The instruction may be split over
+-- several w:instrText runs, so it is accumulated until the field's
+-- separator (or end, for a field with no result) and only then named.
+type DocxFieldFrame = { instr: string, named: bool }
+type DocxFieldScan = { stack: [DocxFieldFrame], names: [string] }
+
+pure func docxComplexFieldNames(runs: [XmlNode]) -> [string] {
+  let st = foldl(\acc r. foldl(docxFieldStep, acc, getChildren(r)),
+                 { stack: [], names: [] }, runs);
+  reverse(st.names)
+}
+
+pure func docxFieldStep(st: DocxFieldScan, node: XmlNode) -> DocxFieldScan {
+  let tag = getTag(node);
+  if tag == "w:instrText" then
+    match st.stack {
+      f :: rest => { st | stack: { f | instr: "${f.instr}${getText(node)}" } :: rest },
+      [] => st
+    }
+  else if tag == "w:fldChar" then {
+    let kind = getOrElse(getAttr(node, "w:fldCharType"), "");
+    if kind == "begin" then { st | stack: { instr: "", named: false } :: st.stack }
+    else if kind == "separate" then docxNameTop(st, false)
+    else if kind == "end" then docxNameTop(st, true)
+    else st
+  }
+  else st
+}
+
+pure func docxNameTop(st: DocxFieldScan, pop: bool) -> DocxFieldScan =
+  match st.stack {
+    [] => st,
+    f :: rest => {
+      let names = if f.named then st.names else docxFieldName(f.instr) :: st.names;
+      let stack = if pop then rest else { f | named: true } :: rest;
+      { stack: stack, names: names }
+    }
+  }
+
+-- === Notes ==================================================================
+--
+-- A reference with nowhere to find its text: the part is missing entirely,
+-- or the part has no note with that id.
+pure func docxWarnNotes(root: XmlNode, refTag: string, kind: string, part: string,
+                        hasPart: bool, ids: [string]) -> [string] {
+  let refs = map(\r. getOrElse(getAttr(r, "w:id"), ""), findAll(root, refTag));
+  match refs {
+    [] => [],
+    _ =>
+      if hasPart == false
+      then ["${show(listLength(refs))} ${kind} reference(s) but the package has no ${part} part; the ${kind} text is not available, only the reference mark"]
+      else map(\i. "The ${kind} reference w:id=${i} has no matching note in ${part}; only the reference mark is returned",
+               docxUniq(filter(\i. any(\k. k == i, ids) == false, refs)))
+  }
+}
+
+-- === Comments ===============================================================
+pure func docxWarnOpenComments(open: [string]) -> [string] =
+  map(\i. "Comment range w:id=${i} is opened (commentRangeStart) but never closed; the comment is returned unanchored",
+      docxUniq(open))
+
+-- === Bookmarks ==============================================================
+--
+-- Bookmarks ride on TextBlock/HeadingBlock. One in a table cell, a list item,
+-- or sitting between paragraphs has no block to carry it, so a "#name" link
+-- to it cannot resolve.
+pure func docxWarnBookmarks(root: XmlNode, blocks: [Block]) -> [string] {
+  let all = flatMap(\b. {
+      let n = getOrElse(getAttr(b, "w:name"), "");
+      if length(n) == 0 || n == "_GoBack" then [] else [n]
+    }, findAll(root, "w:bookmarkStart"));
+  let attached = docxAttachedBookmarks(blocks);
+  let missing = docxUniq(filter(\n. any(\a. a == n, attached) == false, all));
+  match missing {
+    [] => [],
+    _ => {
+      let shown = take(5, missing);
+      let more = if listLength(missing) > 5 then ", ..." else "";
+      ["${show(listLength(missing))} bookmark(s) are in a table cell, a list item or between paragraphs and are not attached to any block: ${join(", ", shown)}${more}"]
+    }
+  }
+}
+
+pure func docxAttachedBookmarks(blocks: [Block]) -> [string] =
+  flatMap(\b. match b {
+    SectionBlock(s) => docxAttachedBookmarks(s.blocks),
+    _ => blockBookmarks(b)
+  }, blocks)
+
+-- === Content with no representation ========================================
+pure func docxWarnDropped(root: XmlNode) -> [string] =
+  docxWarnCount(findAll(root, "c:chart"), "chart(s) not extracted (the chart's data and rendering are not parsed)")
+  ++ docxWarnCount(findAll(root, "dgm:relIds"), "SmartArt diagram(s) not extracted")
+  ++ docxWarnCount(findAll(root, "o:OLEObject"), "embedded OLE object(s) not extracted; at most the preview image is kept")
+  ++ docxWarnCount(findAll(root, "w:altChunk"), "imported alternative-format chunk(s) (w:altChunk) not extracted")
+
+pure func docxWarnCount(nodes: [XmlNode], what: string) -> [string] =
+  match nodes {
+    [] => [],
+    _ => ["${show(listLength(nodes))} ${what}"]
+  }
+
+-- === Helpers ================================================================
+pure func docxUniq(xs: [string]) -> [string] =
+  reverse(foldl(\acc x. if any(\y. y == x, acc) then acc else x :: acc, [], xs))
+
+pure func docxCount(x: string, xs: [string]) -> int =
+  listLength(filter(\y. y == x, xs))
