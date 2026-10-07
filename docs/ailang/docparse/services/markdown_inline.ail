@@ -76,7 +76,8 @@ pure func mdStyledRun(text: string, level: int) -> InlineRun =
     strike: level == 1,
     code: false,
     href: "",
-    vertAlign: "" }
+    vertAlign: "",
+    color: "" }
 
 -- One private-use character stands in for every lifted atom. The peel keeps
 -- runs in document order, so walking them left to right pairs each sentinel
@@ -152,7 +153,7 @@ pure func mdExtractCode(rest: string, at: int, acc: string, atoms: [InlineRun]) 
     let inner = substring(after, 0, close);
     let head = "${acc}${substring(rest, 0, at)}${mdAtomChar()}";
     let run = { text: inner, bold: false, italic: false, underline: false,
-                strike: false, code: true, href: "", vertAlign: "" };
+                strike: false, code: true, href: "", vertAlign: "", color: "" };
     mdExtractLoop(substring(after, close + 1, length(after)), head, run :: atoms)
   }
 }
@@ -171,7 +172,7 @@ pure func mdExtractLink(rest: string, at: int, acc: string, atoms: [InlineRun]) 
     let text = if length(label) > 0 then label else href;
     let head = "${acc}${substring(rest, 0, at)}${mdAtomChar()}";
     let run = { text: text, bold: false, italic: false, underline: false,
-                strike: false, code: false, href: href, vertAlign: "" };
+                strike: false, code: false, href: href, vertAlign: "", color: "" };
     mdExtractLoop(substring(urlPart, urlEnd + 1, length(urlPart)), head, run :: atoms)
   }
 }
