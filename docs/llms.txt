@@ -2,19 +2,20 @@
 
 > Universal document parser **and generator**. Parses 16 formats into one block schema and writes documents back out in 9 (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, QMD) — to author a document, write Markdown and convert it. Deterministic Office (DOCX/PPTX/XLSX/ODT/ODP/ODS/HTML/MD/CSV/EPUB/EML/TEX) in milliseconds. PDFs deterministically via `pdftotext` by default (v0.21+), with local Docling / LiteParse backends, or via AI for scans. Comments and PDF annotations are extracted with author attribution and anchored to the text they annotate (v0.23+). Deterministic RAG chunking, no AI (v0.27+). Images, audio, and video via AI. One block schema for every format. Available as a hosted MCP server, a local MCP stdio server, and a REST API.
 
-This file follows the [llmstxt.org](https://llmstxt.org) convention. Agents should fetch [llms-full.txt](llms-full.txt) for the complete agent-oriented reference (device auth flow, tool catalog, REST examples).
+This file follows the [llmstxt.org](https://llmstxt.org) convention. Agents should fetch [llms-full.txt](llms-full.txt) for the complete agent-oriented reference (sign-in, tool catalog, REST examples).
 
 ## Essentials
 
-- **Hosted MCP endpoint**: `https://docparse.ailang.sunholo.com/mcp/` (Streamable JSON-RPC, requires API key for parse/convert/account)
-- **Hosted REST API**: `https://docparse.ailang.sunholo.com/api/v1/*`
-- **Auth**: RFC 8628 device authorization. Call `mcpAuth` → human approves in browser → poll `mcpAuthPoll` → store the returned `dp_…` API key.
-- **Discovery**: Call `mcpFormats` (no auth) for the full service contract — formats, samples, pricing tiers, capabilities.
-- **Generating a document**: write Markdown, then `mcpConvert` (or `POST /api/v1/convert`) to any of the 9 output formats. The document comes back inline in the JSON — branch on `encoding` (`base64` for the ZIP containers, `utf8` for html/md/qmd). Prompt-based AI generation is CLI-only, not on the hosted API.
+- **Hosted MCP connector (AI clients)**: `https://docparse.ailang.sunholo.com/mcp/connect/` — signs in with **OAuth**: a call without a token gets 401, the client opens the sign-in page, the user signs in with Google or GitHub and approves, and the client keeps the token. No API key in tool arguments.
+- **Agent surface (headless agents)**: `https://docparse.ailang.sunholo.com/mcp/` — the same tools, authenticated with a `dp_` key sent as `Authorization: Bearer` or `X-API-Key` (or the `apiKey` argument). An agent without a key gets one with the RFC 8628 device flow: `mcpAuth` → the user approves in a browser → poll `mcpAuthPoll`.
+- **Hosted REST API**: `https://docparse.ailang.sunholo.com/api/v1/*` with a `dp_` key in a header.
+- **Sending a document**: `content` + `filename` (text, or base64 with `contentEncoding="base64"`), a public `https://` URL, or a sample id. The server never reads a path on the caller's machine.
+- **Discovery**: Call `mcpFormats` (no auth) for formats, samples and how to send a document.
+- **Generating a document**: write Markdown, then `mcpConvert` (send it as `content` with `filename: "notes.md"`) or `POST /api/v1/convert`, to any of the 9 output formats. Over MCP the result carries `download_url`, a one-hour link to the file; it also comes back inline — branch on `encoding` (`base64` for the ZIP containers, `utf8` for html/md/qmd). Prompt-based AI generation is CLI-only, not on the hosted API.
 
 ## Docs
 
-- [llms-full.txt](llms-full.txt): full agent reference (auth flow, all 10 MCP tools with params, REST fallback, env vars)
+- [llms-full.txt](llms-full.txt): full agent reference (sign-in, MCP tools with params, REST fallback, env vars)
 - [mcp.html](mcp.html): human-readable MCP server documentation
 - [connect.html](connect.html): connect from Claude, ChatGPT or Codex (OAuth connector `https://docparse.ailang.sunholo.com/mcp/connect/`), setup and troubleshooting
 - [api.html](api.html): REST API reference

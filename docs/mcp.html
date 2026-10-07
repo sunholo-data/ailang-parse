@@ -24,8 +24,8 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "What is the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse exposes 10 MCP tools: parse, convert and edit documents, discover capabilities, estimate costs, upload large files, authenticate via device auth, manage accounts with quota visibility, and send feedback. Local mode has 4 tools (no auth needed); the hosted server has all 10 with billing integration."}},
-    {"@type": "Question", "name": "How do AI agents discover AILANG Parse as a tool?", "acceptedAnswer": {"@type": "Answer", "text": "The /api/v1/tools endpoint returns machine-readable tool definitions for the curated tools. Call mcpFormats first to get the full service contract: formats, samples, pricing tiers, and capabilities. MCP-compatible agents discover tools automatically via tools/list."}},
+    {"@type": "Question", "name": "What is the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse exposes 7 MCP tools on its hosted connector at https://docparse.ailang.sunholo.com/mcp/connect/: parse documents (mcpParse), create or convert them (mcpConvert, with a one-hour download link), edit them (editDocument), discover formats and samples (mcpFormats), estimate cost (mcpEstimate), check the account (mcpAccount) and send feedback. You sign in with OAuth. Send a document as content, a public link or a sample id."}},
+    {"@type": "Question", "name": "How do AI agents discover AILANG Parse as a tool?", "acceptedAnswer": {"@type": "Answer", "text": "Via MCP's tools/list (automatic when connected). Agents should call mcpFormats first: it lists formats, samples and how to send a document. Non-MCP clients can fetch tool definitions from GET /api/v1/tools."}},
     {"@type": "Question", "name": "Which AI agents work with the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Any MCP-compatible agent works: Claude (via Claude Code or Claude Desktop), ChatGPT and Codex (via MCP, as a connector or plugin), custom LangChain agents, and LlamaIndex agent pipelines. The MCP server also works with Cursor, Windsurf, and other IDE-integrated AI tools that support MCP."}},
     {"@type": "Question", "name": "Why is structured document parsing better for AI agents than flat text extraction?", "acceptedAnswer": {"@type": "Answer", "text": "When an AI agent receives flat text, it loses the ability to reference specific table cells, identify which text was inserted versus deleted (track changes), or attribute comments to specific reviewers. AILANG Parse gives agents a typed Block ADT where each element has semantic meaning, enabling precise reasoning about document structure."}}
   ]
@@ -74,26 +74,28 @@
 
       <h2 id="what-is-mcp">What is MCP?</h2>
       <p>The <strong>Model Context Protocol</strong> (MCP) is an open standard for connecting AI assistants to external tools and data sources. Instead of hardcoding integrations, agents discover what tools are available, what parameters they accept, and how to call them &mdash; all at runtime.</p>
-      <p>AILANG Parse ships as a native MCP server with <strong>10 tools</strong>: 4 always available (parse, convert, formats, estimate) and 6 on the hosted API (edit, upload URL, auth, auth poll, account, feedback). Claude, Cursor, VS Code, and any MCP-compatible agent can discover and call them. Office formats are parsed deterministically; PDFs and images use pluggable AI.</p>
+      <p>AILANG Parse ships as a native MCP server. The hosted connector exposes 7 tools: parse, convert, edit, formats, estimate, account and feedback. Claude, ChatGPT, Codex, Cursor, VS Code and any MCP-compatible agent can discover and call them. Office and text formats are parsed deterministically, PDFs with <code>pdftotext</code> (AI only when you ask for it, for scans), and images with pluggable AI.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Two transports: <strong>stdio</strong> (for Claude Desktop, Cursor, VS Code) and <strong>HTTP</strong> (Streamable HTTP at <code>/mcp/</code> for hosted deployments). Local mode exposes 4 tools; hosted mode exposes all 7 including device auth and account management.</div>
+        <div>Two transports: <strong>HTTP</strong> (the hosted service, see <a href="#two-surfaces">two ways to sign in</a>) and <strong>stdio</strong> (for running the server or a bridge on your own machine).</div>
       </div>
 
       <h2 id="connect">Connect from Claude, ChatGPT or Codex</h2>
-      <p>The quickest way to use AILANG Parse from an AI assistant is the hosted connector. It signs in with OAuth, so you never copy an API key:</p>
+      <p>The quickest way to use AILANG Parse from an AI assistant is the hosted connector, which signs in with OAuth so you never copy an API key:</p>
       <pre><code>https://docparse.ailang.sunholo.com/mcp/connect/</code></pre>
-      <ul>
-        <li><strong>Claude Code:</strong> <code>claude mcp add --transport http ailang-parse https://docparse.ailang.sunholo.com/mcp/connect/</code>, then <code>/mcp</code> &rarr; <em>Authenticate</em>.</li>
-        <li><strong>Codex:</strong> <code>codex mcp add ailang-parse --url https://docparse.ailang.sunholo.com/mcp/connect/</code>; Codex opens the sign-in page.</li>
-        <li><strong>Claude (web and desktop) and ChatGPT:</strong> add the URL above as a custom connector in the app's connector settings.</li>
-        <li><strong>Plugin:</strong> the <a href="https://github.com/sunholo-data/docparse-skill">AILANG Parse plugin</a> for Claude Code and Codex installs the connector and the skill together.</li>
-      </ul>
-      <p><strong>Signing in.</strong> The first time a tool needs your account, the assistant opens a sign-in page on <code>docparse.ailang.sunholo.com</code>. Sign in with Google or GitHub and click <em>Allow</em>. The page shows which app is asking and where it will send you back. The app receives an access key for your account, labelled <code>oauth: &lt;app&gt;</code> on your <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a>, where you can revoke it at any time.</p>
-      <p><strong>Giving it your documents.</strong> Ask naturally (&ldquo;parse this file&rdquo;, &ldquo;turn these notes into a deck&rdquo;). The assistant sends the document itself (text, or base64 for binary files such as DOCX and PDF), a public <code>https://</code> link, or one of the built-in sample documents.</p>
-      <p><strong>Getting files back.</strong> When AILANG Parse creates a document, the result includes a private download link valid for one hour. The file is deleted from our storage within a day.</p>
-      <p><strong>Troubleshooting.</strong> Full setup and troubleshooting: <a href="connect.html">Connect from Claude, ChatGPT or Codex</a>. If a tool says you are not signed in, reconnect the connector (in Claude Code: <code>/mcp</code> &rarr; <em>Authenticate</em>). A link that cannot be fetched must be publicly reachable over <code>https://</code>; send the file itself instead. Problems: <a href="mailto:docparse@sunholo.com">docparse@sunholo.com</a>.</p>
+      <p>Setup for each app, signing in, sending documents, download links, revoking access and troubleshooting: <a href="connect.html">Connect from Claude, ChatGPT or Codex</a>. The <a href="claude-code.html">AILANG Parse plugin</a> installs the connector and the skill together in Claude Code and Codex.</p>
+
+      <h2 id="two-surfaces">Two ways to sign in</h2>
+      <p>The hosted server has two MCP endpoints. They run the same tools on the same account; they differ in how the client signs in.</p>
+      <table class="dp-config-table">
+        <thead><tr><th>Endpoint</th><th>Sign-in</th><th>Use it for</th></tr></thead>
+        <tbody>
+          <tr><td><code>/mcp/connect/</code></td><td><strong>OAuth.</strong> The client opens our sign-in page; you sign in with Google or GitHub and click Allow. The client holds the token and renews it.</td><td>Claude Code, Claude, ChatGPT, Codex: any client that can open a browser. This is what the plugin uses.</td></tr>
+          <tr><td><code>/mcp/</code></td><td><strong>API key.</strong> A <code>dp_</code> key sent as an <code>Authorization: Bearer</code> or <code>X-API-Key</code> header (or the <code>apiKey</code> argument). Agents without a key can get one with the device flow tools <code>mcpAuth</code> / <code>mcpAuthPoll</code>.</td><td>Headless agents, scripts and MCP clients that cannot run an OAuth sign-in.</td></tr>
+        </tbody>
+      </table>
+      <p>Either way the result is an ordinary <code>dp_</code> key on your account with the same quota. Keys created through OAuth are labelled <code>oauth: &lt;app&gt;</code> on your <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a> and expire after 24 hours (the client renews them). Outside MCP &mdash; the REST API, the SDKs, the skill's scripts &mdash; you use a <code>dp_</code> key from the dashboard or the <a href="api.html">device flow</a>.</p>
 
       <h2 id="quick-start">Quick Start</h2>
 
@@ -126,7 +128,7 @@ ailang serve-api --mcp --routes-only \
   --caps IO,FS,Env,AI,Net --ai gemini-2.5-flash docparse/</code></pre>
 
       <h2 id="available-tools">Available Tools</h2>
-      <p>The hosted server exposes <strong>10 tools</strong> via MCP. Agents discover these automatically from <code>tools/list</code>:</p>
+      <p>The hosted connector exposes <strong>7 tools</strong>; the agent surface <code>/mcp/</code> adds the two device-flow tools. Agents discover them automatically from <code>tools/list</code>. On the hosted service, give a tool your document in one of three ways: the document itself as <code>content</code> + <code>filename</code> (text, or base64 with <code>contentEncoding="base64"</code> for binary files), a public <code>https://</code> URL, or a sample id.</p>
 
       <h3>Core Tools (local + hosted)</h3>
       <table class="dp-config-table">
@@ -136,17 +138,17 @@ ailang serve-api --mcp --routes-only \
         <tbody>
           <tr>
             <td><code>mcpParse</code></td>
-            <td>Parse any document into structured blocks, Markdown, or HTML. Office formats are deterministic; PDF/images use AI. In hosted mode, pass an <code>apiKey</code>.</td>
-            <td><code>filepath</code> (path or sample_id), <code>outputFormat</code> (<code>blocks</code> | <code>markdown</code> | <code>html</code>), <code>apiKey</code> (hosted), <code>requestId</code> (replay)</td>
+            <td>Parse any document into structured blocks, Markdown, or HTML. Office and text formats are deterministic; PDFs use <code>pdftotext</code>; images use AI.</td>
+            <td><code>content</code> + <code>filename</code> (+ <code>contentEncoding</code>), or <code>filepath</code> (https URL or sample_id); <code>outputFormat</code> (<code>blocks</code> | <code>markdown</code> | <code>html</code>)</td>
           </tr>
           <tr>
             <td><code>mcpConvert</code></td>
-            <td>Convert a document from one format to another. Parses input to blocks, then generates the target format.</td>
-            <td><code>input</code> (path or sample_id), <code>outputFormat</code> (docx, pptx, xlsx, odt, odp, ods, html, md, qmd), <code>outputPath</code> (optional), <code>apiKey</code> (hosted)</td>
+            <td>Create or convert a document. To write a new one, send Markdown as <code>content</code> with <code>filename: "notes.md"</code>. The hosted result includes <code>download_url</code>, a link to the generated file valid for one hour.</td>
+            <td><code>content</code> + <code>filename</code> (+ <code>contentEncoding</code>), or <code>input</code> (https URL or sample_id); <code>outputFormat</code> (docx, pptx, xlsx, odt, odp, ods, html, md, qmd)</td>
           </tr>
           <tr>
             <td><code>mcpFormats</code></td>
-            <td>List all 17 input and 9 output formats with features, 26 test samples, pricing tiers, and full service capabilities. <strong>Call this first</strong> to discover what AILANG Parse can do.</td>
+            <td>List all 17 input and 9 output formats with features, 26 test samples, and how to send a document. <strong>Call this first</strong> to discover what AILANG Parse can do. No sign-in needed.</td>
             <td>None</td>
           </tr>
           <tr>
@@ -157,8 +159,8 @@ ailang serve-api --mcp --routes-only \
         </tbody>
       </table>
 
-      <h3>Hosted-Only Tools (API with billing)</h3>
-      <p>These tools are available when connecting to the hosted API at <code>docparse.ailang.sunholo.com</code>. They enable agents to edit documents, upload large files, manage authentication, check quotas, and advise humans on pricing.</p>
+      <h3>Hosted-Only Tools</h3>
+      <p>These tools are available when connecting to the hosted service at <code>docparse.ailang.sunholo.com</code>. They let agents edit documents, check the account, send feedback and, on the agent surface only, sign in with the device flow.</p>
       <table class="dp-config-table">
         <thead>
           <tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
@@ -167,27 +169,22 @@ ailang serve-api --mcp --routes-only \
           <tr>
             <td><code>editDocument</code></td>
             <td>Parse a document, apply JSON edit deltas, and return the modified blocks (same shape as <code>outputFormat=blocks</code>). An empty delta list round-trips the document. Deterministic Office formats only (DOCX, PPTX, XLSX, ODT, ODP, ODS). Never writes the input file.</td>
-            <td><code>filepath</code>, <code>deltas</code> (JSON array of edit operations), <code>apiKey</code></td>
-          </tr>
-          <tr>
-            <td><code>getUploadUrl</code></td>
-            <td>Request a pre-authenticated upload URL for files over the 32 MB request limit. PUT the file to it, then pass the returned <code>gs://</code> ref as <code>mcpConvert</code>'s <code>input</code>. Business tier; use a normal upload under 32 MB.</td>
-            <td><code>filename</code>, <code>mimeType</code>, <code>apiKey</code></td>
+            <td><code>content</code> + <code>filename</code> (base64 file), or <code>filepath</code> (https URL or sample_id); <code>deltas</code> (JSON array of edit operations)</td>
           </tr>
           <tr>
             <td><code>mcpAuth</code></td>
-            <td>Start <a href="https://datatracker.ietf.org/doc/html/rfc8628" target="_blank" style="color:var(--dp-blue)">RFC 8628</a> device authorization. Returns a verification URL and user code. Tell the human to open the URL and sign in, then call <code>mcpAuthPoll</code>.</td>
+            <td><strong>Agent surface <code>/mcp/</code> only.</strong> Start <a href="https://datatracker.ietf.org/doc/html/rfc8628" target="_blank" style="color:var(--dp-blue)">RFC 8628</a> device authorization. Returns a verification URL and user code. Tell the human to open the URL and sign in, then call <code>mcpAuthPoll</code>.</td>
             <td><code>label</code> (e.g. "claude-desktop")</td>
           </tr>
           <tr>
             <td><code>mcpAuthPoll</code></td>
-            <td>Poll for device auth completion. Returns <code>pending</code> (keep polling every 5s), <code>approved</code> (with API key and tier info), or <code>expired</code>.</td>
+            <td><strong>Agent surface <code>/mcp/</code> only.</strong> Poll for device auth completion. Returns <code>pending</code> (keep polling every 5s), <code>approved</code> (with API key and tier info), or <code>expired</code>.</td>
             <td><code>deviceCode</code> (from mcpAuth)</td>
           </tr>
           <tr>
             <td><code>mcpAccount</code></td>
-            <td>View account: tier, quota, usage, keys, pricing, and parse history. Pass <code>action="pricing"</code> without auth to see tiers and advise humans on signup.</td>
-            <td><code>apiKey</code>, <code>action</code> (<code>status</code> | <code>pricing</code> | <code>usage</code> | <code>history</code> | <code>keys</code>)</td>
+            <td>View the account: plan, usage and remaining allowance, keys, and whether request history is kept.</td>
+            <td><code>action</code> (<code>status</code> | <code>keys</code> | <code>usage</code> | <code>history</code> | <code>history_on</code> | <code>history_off</code>)</td>
           </tr>
           <tr>
             <td><code>submit_feedback</code></td>
@@ -199,14 +196,14 @@ ailang serve-api --mcp --routes-only \
 
       <p>Each tool has named parameters with JSON Schema types. Agents receive full schemas via <code>tools/list</code> &mdash; no hardcoding required.</p>
 
-      <h3 id="agent-auth-flow">Agent Auth Flow</h3>
-      <p>When an agent connects to the hosted MCP server and tries to parse without an API key:</p>
+      <h3 id="agent-auth-flow">Device flow on the agent surface</h3>
+      <p>Clients that can open a browser should use the OAuth connector <code>/mcp/connect/</code> (<a href="#connect">above</a>), where none of this is needed. On the agent surface <code>/mcp/</code>, an agent without a key signs in like this:</p>
       <ol style="font-size:14px;color:var(--text-secondary);line-height:1.8">
         <li>Agent calls <code>mcpParse</code> &rarr; receives <code>AUTH_REQUIRED</code> error with <code>suggested_fix</code></li>
         <li>Agent calls <code>mcpAuth(label: "claude-desktop")</code> &rarr; receives verification URL + user code</li>
         <li>Agent tells the human: "Open this URL and sign in. Your code is WXYZ-5678."</li>
         <li>Agent calls <code>mcpAuthPoll(deviceCode)</code> every 5s &rarr; receives <code>api_key</code> + <code>tier</code></li>
-        <li>Agent includes <code>apiKey</code> in all subsequent parse/convert calls</li>
+        <li>Agent sends the key as a header (preferred) or <code>apiKey</code> in subsequent calls</li>
       </ol>
       <p><strong>Prefer a header.</strong> Clients that can send a fixed header can skip the device flow. Generate a key on the <a href="api.html#api-key-panel">API page</a> and send it as <code>Authorization: Bearer dp_…</code> (or <code>X-API-Key</code>). The key then never enters the model's context, and <code>apiKey</code> can be left out of every call. An explicit <code>apiKey</code> argument still works and takes precedence.</p>
 
@@ -340,10 +337,10 @@ ailang serve-api --mcp --routes-only \
       <p>AILANG Parse follows an <strong>agent-first design</strong>. Three discovery mechanisms:</p>
 
       <h3>MCP tools/list</h3>
-      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the hosted endpoint <code>tools/list</code> returns 10: the 7 <code>mcp*</code> tools above, plus <code>submit_feedback</code>, <code>editDocument</code> (structured edits, returns blocks) and <code>getUploadUrl</code> (Business-tier GCS upload for files over 32&nbsp;MB). It previously returned 32 — every HTTP route was auto-exposed, so internals shadowed the curated tools; those are now hidden from MCP but still serve over HTTP. <code>GET /api/v1/tools</code> returns the curated 7.</p>
+      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the connector <code>/mcp/connect/</code> it returns 7 tools: <code>mcpParse</code>, <code>mcpConvert</code>, <code>editDocument</code>, <code>mcpFormats</code>, <code>mcpEstimate</code>, <code>mcpAccount</code> and <code>submit_feedback</code>; the agent surface <code>/mcp/</code> adds <code>mcpAuth</code> and <code>mcpAuthPoll</code>. Large-file uploads (<code>getUploadUrl</code>) are REST-only.</p>
 
       <h3>mcpFormats (recommended first call)</h3>
-      <p>Agents should call <code>mcpFormats</code> first. It returns the full service contract: 17 input formats, 9 output formats, 26 test samples, 3 pricing tiers, and all 7 tool names. This gives the agent everything it needs to advise the human intelligently.</p>
+      <p>Agents should call <code>mcpFormats</code> first. It returns 17 input formats, 9 output formats, 26 test samples, and how to send a document. Plans and prices are on the <a href="pricing.html">pricing page</a> and <code>GET /api/v1/pricing</code>.</p>
 
       <h3>REST /api/v1/tools</h3>
       <p>Non-MCP clients can fetch tool definitions via REST:</p>
@@ -395,7 +392,9 @@ result = client.parse("report.docx", output_format="markdown")</code></pre>
 ailang_parse = StructuredTool.from_function(
     func=lambda filepath, output_format="blocks": requests.post(
         "https://docparse.ailang.sunholo.com/api/v1/parse",
-        json={"filepath": filepath, "outputFormat": output_format, "apiKey": "dp_YOUR_KEY"}
+        headers={"X-API-Key": "dp_YOUR_KEY"},
+        files={"filepath": open(filepath, "rb")},  # upload: the API never reads a path on your disk
+        data={"outputFormat": output_format},
     ).json()["result"],
     name="ailang_parse",
     description="Parse a document into structured blocks, markdown, or HTML"
@@ -405,11 +404,11 @@ ailang_parse = StructuredTool.from_function(
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>What is the AILANG Parse MCP server?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse ships as a native MCP server with 10 tools: <code>mcpParse</code> (parse any document), <code>mcpConvert</code> (convert between formats), <code>editDocument</code> (apply structured edits), <code>mcpFormats</code> (discover formats, samples, and pricing), <code>mcpEstimate</code> (predict cost before parsing), <code>getUploadUrl</code> (large-file upload), <code>mcpAuth</code> + <code>mcpAuthPoll</code> (device auth for hosted API), <code>mcpAccount</code> (tier, quota, usage, history), and <code>submit_feedback</code>. Local mode exposes 4 tools; the hosted server exposes all 10.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse ships as a native MCP server. The hosted connector at <code>https://docparse.ailang.sunholo.com/mcp/connect/</code> exposes 7 tools: <code>mcpParse</code> (parse any document), <code>mcpConvert</code> (create or convert documents, with a one-hour download link), <code>editDocument</code> (apply structured edits), <code>mcpFormats</code> (formats, samples and how to send a document), <code>mcpEstimate</code> (predict cost before parsing), <code>mcpAccount</code> (plan, usage, keys, history setting) and <code>submit_feedback</code>. The agent surface <code>/mcp/</code> adds the device-flow tools <code>mcpAuth</code> and <code>mcpAuthPoll</code>; see <a href="#two-surfaces">two ways to sign in</a>.</p></div>
         </details>
         <details>
           <summary>How do AI agents discover AILANG Parse as a tool?</summary>
-          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code> which returns full JSON Schema definitions for the 7 curated tools. <code>tools/list</code> returns those plus <code>submit_feedback</code>, <code>editDocument</code> and <code>getUploadUrl</code>. Agents should call <code>mcpFormats</code> first &mdash; it returns the full service contract including samples, pricing tiers, and capabilities.</p></div>
+          <div class="dp-faq-answer"><p>Via MCP's <code>tools/list</code> method (automatic when connected), or via the REST endpoint <code>GET /api/v1/tools</code>. Agents should call <code>mcpFormats</code> first &mdash; it lists formats, samples and how to send a document.</p></div>
         </details>
         <details>
           <summary>Which AI agents work with the AILANG Parse MCP server?</summary>
@@ -417,15 +416,15 @@ ailang_parse = StructuredTool.from_function(
         </details>
         <details>
           <summary>Do I need an API key for local use?</summary>
-          <div class="dp-faq-answer"><p>No. Local MCP (stdio or localhost HTTP) works without authentication. The hosted version at <code>docparse.ailang.sunholo.com</code> requires a <code>dp_</code> API key. Agents can get one automatically via <code>mcpAuth</code> (RFC 8628 device authorization) &mdash; no manual signup needed. The <a href="pricing.html">free tier</a> gives 1,000 requests/month.</p></div>
+          <div class="dp-faq-answer"><p>No. Local MCP (stdio or localhost HTTP) works without authentication. On the hosted service, AI clients sign in with OAuth through the connector <code>/mcp/connect/</code> &mdash; no key to copy. Headless agents and scripts use a <code>dp_</code> key from the <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a> or the device flow. The <a href="pricing.html">free tier</a> gives 1,000 requests/month.</p></div>
         </details>
         <details>
           <summary>How does agent authentication work?</summary>
-          <div class="dp-faq-answer"><p>The agent calls <code>mcpAuth</code>, which returns a verification URL and code. The agent tells the human to open the URL and sign in. Then it polls with <code>mcpAuthPoll</code> until approved. On approval, the agent receives a <code>dp_</code> API key and tier info. The entire flow happens within MCP &mdash; no manual configuration.</p></div>
+          <div class="dp-faq-answer"><p>Two ways, on two endpoints. On the connector <code>/mcp/connect/</code> the client runs OAuth: a call without a token gets a 401, the client opens our sign-in page, you sign in with Google or GitHub and click Allow, and the client keeps (and renews) the token. On the agent surface <code>/mcp/</code>, an agent without a key calls <code>mcpAuth</code>, shows you a URL and code, and polls <code>mcpAuthPoll</code> until you approve; it then sends the <code>dp_</code> key as a header. See <a href="#two-surfaces">two ways to sign in</a>.</p></div>
         </details>
         <details>
           <summary>How can an agent advise on pricing and quotas?</summary>
-          <div class="dp-faq-answer"><p>Call <code>mcpAccount(action: "pricing")</code> without auth to get tier details. With an API key, <code>mcpAccount(action: "status")</code> shows the human's current tier, quota used, and quota remaining. <code>mcpEstimate</code> predicts whether a file needs AI (counts against AI quota) before parsing. All errors include a <code>suggested_fix</code> field the agent can act on.</p></div>
+          <div class="dp-faq-answer"><p>With a signed-in client, <code>mcpAccount(action: "status")</code> shows the current plan, usage and remaining allowance. <code>mcpEstimate</code> tells you before parsing whether a file counts as an AI request (images, and PDFs only when <code>pdfBackend="ai"</code>). Plans and prices are on the <a href="pricing.html">pricing page</a>. All errors include a <code>suggested_fix</code> field the agent can act on.</p></div>
         </details>
         <details>
           <summary>What about PDF and image parsing?</summary>
