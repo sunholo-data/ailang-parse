@@ -9,7 +9,7 @@ import std/bytes (fromBase64)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, cellText, countBlocks, filterHeadings, filterTables, filterImages, filterSections)
 import docparse/services/orchestrator (parseDocument, ParseOptions)
-import docparse/services/format_router (detectFormat, getExtension, officeType, strategyDescription, needsAI)
+import docparse/services/format_router (detectFormat, getExtension, officeType, strategyDescription, needsAI, resolveFormat)
 import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxImages, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxWithComments)
 import docparse/services/pptx_parser (parsePptx, parsePptxMetadata, parsePptxImages)
 import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
@@ -231,14 +231,28 @@ func parseOne(filepath: string, opts: ParseOptions, outDir: string, doSummarize:
   }
   else {
     let rawExt = getExtension(filepath);
-    let ext = if isTarGz(filepath) then "tar.gz" else rawExt;
-    let format = if isTarGz(filepath) then "latex" else detectFormat(rawExt);
-    let strategy = strategyDescription(format);
+    -- The banner reports what the orchestrator will actually dispatch on. An
+    -- extension that routes nowhere (a Maildir name such as
+    -- `1757340000.12345_1.studio,U=42:2,S`, or none at all) is resolved from
+    -- the content exactly as orchDispatchExt does, so an email found by
+    -- sniffing is announced as email rather than as an unknown format.
+    let sniffed = if isTarGz(filepath) || detectFormat(rawExt) != "unknown" then ""
+                  else resolveFormat(filepath).ext;
+    let ext = if isTarGz(filepath) then "tar.gz"
+              else if length(sniffed) > 0 && sniffed != "unknown" then "${sniffed}, detected from content"
+              else rawExt;
+    let format = if isTarGz(filepath) then "latex"
+                 else if length(sniffed) > 0 then detectFormat(sniffed)
+                 else detectFormat(rawExt);
     println("File:     ${filepath}");
     println("Format:   ${format} (${ext})");
-    println("Strategy: ${strategy}");
-    let aiRequired = needsAI(format);
-    if aiRequired then println("AI:       required (format needs AI extraction)")
+    -- An unrecognised format is refused without any extraction attempt, so
+    -- do not announce an AI strategy (and an AI requirement) that never runs.
+    if format == "unknown" then println("Strategy: none (format not recognised; the parse will be refused)")
+    else println("Strategy: ${strategyDescription(format)}");
+    let aiRequired = needsAI(format) && format != "unknown";
+    if format == "unknown" then ()
+    else if aiRequired then println("AI:       required (format needs AI extraction)")
     else if doSummarize then println("AI:       enabled (summarize)")
     else if opts.useAI then println("AI:       enabled (image descriptions)")
     else println("AI:       disabled (pass 'describe' or 'summarize' arg to enable)");

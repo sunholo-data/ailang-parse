@@ -1,8 +1,9 @@
 module docparse/services/format_router
 
-import std/string (length, substring, find, split, toLower, startsWith, contains)
-import std/list (last)
-import std/option (Some, None)
+import std/string (length, substring, find, split, join, toLower, startsWith, contains)
+import std/list (last, foldl, filter, reverse, length as listLength)
+import std/option (Option, Some, None)
+import std/bytes (fromBase64, toString as bytesToString, fromString as bytesFromString, toInts)
 import std/result (Ok, Err)
 import std/fs (readFileBytes, fileExists)
 import std/zip (listEntries, readEntry)
@@ -273,6 +274,144 @@ func sniffOoxmlSubtype(filepath: string) -> string ! {FS} {
   }
 }
 
+-- ============================================================
+-- Text sniffing: RFC 5322 messages
+-- ============================================================
+-- A message stored one-file-per-message has no extension worth the name.
+-- Maildir names files `<time>.<unique>.<host>:2,<flags>`, so
+-- `1757340000.12345_1.studio,U=42:2,S` yields the "extension"
+-- `studio,u=42:2,s`, and an extensionless message export yields "". Both were
+-- refused as unknown although the bytes are a perfectly ordinary email: the
+-- sniff above only knew binary magic numbers, and a text format has none.
+--
+-- So when no magic matches, decode the head of the file and look for a
+-- message header block. This only runs for files whose extension routes
+-- nowhere — a .txt/.md/.csv is never sniffed — so the alternative to a match
+-- is a refusal, not a different parser.
+
+-- How much of the file to inspect, in base64 characters (a multiple of 4, so
+-- the prefix is itself valid base64). 8192 chars = 6 KiB of raw text, enough
+-- for the header block of nearly any real message; a longer one is judged on
+-- its complete lines within the window.
+pure func sniffHeadB64Chars() -> int = 8192
+
+-- Decode the first bytes of a base64-encoded file to text. "" if undecodable.
+pure func sniffHeadText(b64: string) -> string {
+  let limit = sniffHeadB64Chars();
+  let head = if length(b64) > limit then substring(b64, 0, limit) else b64;
+  match fromBase64(head) {
+    Some(bytes) => bytesToString(bytes),
+    None => ""
+  }
+}
+
+-- Text-format sniff for content no binary signature matched.
+pure func sniffTextFormat(b64: string) -> string {
+  let truncated = length(b64) > sniffHeadB64Chars();
+  if sniffLooksLikeRfc5322(sniffHeadText(b64), truncated) then "eml"
+  else "unknown"
+}
+
+-- A header field name (RFC 5322 §2.2): one or more printable US-ASCII
+-- characters, excluding the colon. Space is excluded too, which is what keeps
+-- prose such as "Meeting notes: Thursday" from reading as a header.
+pure func sniffIsHeaderName(name: string) -> bool =
+  length(name) > 0 &&
+  foldl(\ok c. ok && c >= 33 && c <= 126 && c != 58, true, toInts(bytesFromString(name)))
+
+-- The lower-cased field name of a `Name: value` line, or "" if it is not one.
+pure func sniffHeaderLineName(line: string) -> string {
+  let colon = find(line, ":");
+  if colon <= 0 then ""
+  else {
+    let name = substring(line, 0, colon);
+    if sniffIsHeaderName(name) then toLower(name) else ""
+  }
+}
+
+-- Field names of a header block, in order; None as soon as a line is neither
+-- a field nor a folded continuation of one (RFC 5322 §2.2.3: a continuation
+-- starts with whitespace, and cannot come first).
+pure func sniffHeaderNames(lines: [string], acc: [string]) -> Option[[string]] =
+  match lines {
+    [] => Some(reverse(acc)),
+    line :: rest =>
+      if startsWith(line, " ") || startsWith(line, "\t") then {
+        if listLength(acc) == 0 then None else sniffHeaderNames(rest, acc)
+      }
+      else {
+        let name = sniffHeaderLineName(line);
+        if length(name) == 0 then None else sniffHeaderNames(rest, name :: acc)
+      }
+  }
+
+-- Fields that, between them, appear in every real message and in essentially
+-- no other text format. Subject and Date alone are weaker (a YAML front
+-- matter block can carry both names), so they count only as a pair.
+pure func sniffIsStrongMailHeader(name: string) -> bool =
+  name == "from" || name == "received" || name == "return-path" ||
+  name == "message-id" || name == "mime-version"
+
+pure func sniffHasName(names: [string], wanted: string) -> bool =
+  foldl(\found n. found || n == wanted, false, names)
+
+-- Does this text start with an RFC 5322 header block?
+--
+-- Strict on purpose: the FIRST line must be a field, every line up to the
+-- blank line that ends the block must be a field or a continuation, there
+-- must be at least two fields, and at least one must be From, Received,
+-- Return-Path, Message-ID or MIME-Version (or Subject and Date together).
+-- `truncated` says the text is only the head of the file, in which case a
+-- header block with no blank line inside the window is judged on its
+-- complete lines (the last one may be cut mid-line).
+export pure func sniffLooksLikeRfc5322(text: string, truncated: bool) -> bool {
+  let normalized = join("\n", split(text, "\r\n"));
+  let hasBlank = find(normalized, "\n\n") >= 0;
+  let block = match split(normalized, "\n\n") {
+    [] => "",
+    first :: _ => first
+  };
+  let allLines = split(block, "\n");
+  let lines = if hasBlank then allLines
+              else if truncated then reverse(match reverse(allLines) { [] => [], _ :: init => init })
+              else filter(\l. length(l) > 0, allLines);
+  match sniffHeaderNames(lines, []) {
+    None => false,
+    Some(names) =>
+      listLength(names) >= 2 &&
+      (foldl(\found n. found || sniffIsStrongMailHeader(n), false, names) ||
+       (sniffHasName(names, "subject") && sniffHasName(names, "date")))
+  }
+}
+
+-- The cases the sniff must get right, both ways. Inline so `--test` covers
+-- them in CI; the end-to-end Maildir run is tests/test_eml_maildir_rfc822.sh.
+export pure func testSniffRfc5322() -> bool
+  tests [((), true)]
+{
+  -- A Maildir-style message: Return-Path, folded Received, then the rest.
+  sniffLooksLikeRfc5322("Return-Path: <jordan@example.com>\nReceived: from mail.example.com\n\tby mx.example.org; Mon, 08 Sep 2025 14:00:00 +0000\nFrom: Jordan Example <jordan@example.com>\nSubject: Notes\n\nBody.\n", false) &&
+  -- CRLF line endings.
+  sniffLooksLikeRfc5322("From: a@example.com\r\nTo: b@example.com\r\n\r\nHi\r\n", false) &&
+  -- Subject + Date with no strong field still counts.
+  sniffLooksLikeRfc5322("Subject: Hello\nDate: Mon, 08 Sep 2025 14:00:00 +0000\n\nHi\n", false) &&
+  -- A head window cut mid-way through a long header block.
+  sniffLooksLikeRfc5322("Received: from a\nReceived: from b\nFrom: c@example.com\nX-Lon", true) &&
+  -- Prose that merely contains colons.
+  sniffLooksLikeRfc5322("Meeting notes: Thursday\nFrom: the team\n\nAgenda\n", false) == false &&
+  -- Plain text whose first line is not a header.
+  sniffLooksLikeRfc5322("Hello there.\nFrom: me\nMessage-ID: x\n\n", false) == false &&
+  -- YAML-ish key/value text without a mail field.
+  sniffLooksLikeRfc5322("title: Report\nauthor: Jordan\n\nbody\n", false) == false &&
+  -- A single header is not enough.
+  sniffLooksLikeRfc5322("From: jordan@example.com\n\nHi\n", false) == false &&
+  -- A continuation line cannot come first.
+  sniffLooksLikeRfc5322(" From: a@example.com\nTo: b@example.com\n\n", false) == false &&
+  -- A list line inside the block ends it as non-mail.
+  sniffLooksLikeRfc5322("From: a@example.com\n- item\nTo: b\n\n", false) == false &&
+  sniffLooksLikeRfc5322("", false) == false
+}
+
 -- Inspect a file's contents and return a specific format identifier.
 -- This is the extension-equivalent ("docx" not "zip-office") so callers
 -- can feed it through detectFormat / officeType the same way they would
@@ -289,7 +428,7 @@ export func sniffFormat(filepath: string) -> string ! {FS} {
         let prefix = sniffByBase64Prefix(b64);
         if prefix == "zip" then sniffZipSubtype(filepath)
         else if prefix == "riff" then sniffRiffSubtype(b64)
-        else if prefix == "unknown" then "unknown"
+        else if prefix == "unknown" then sniffTextFormat(b64)
         else prefix
       }
     }

@@ -13,7 +13,7 @@ module docparse/services/eml_parser
 import std/string (length, substring, find, split, join, trim, toLower, startsWith, endsWith, contains, chars, foldChars, charAt, intToStr, replace, decodeQuotedPrintable as builtinDecodeQP)
 import std/list (map, flatMap, filter, foldl, concat, reverse, length as listLength)
 import std/option (Option, Some, None)
-import std/bytes (fromBase64, toString as bytesToString, fromString as stringToBytes, fromInts, toInts)
+import std/bytes (fromBase64, toBase64, toString as bytesToString, fromString as stringToBytes, fromInts, toInts)
 import docparse/types/document (mkText, Block, TextBlock, HeadingBlock, SectionBlock, DocMetadata, emptyMetadata, mkSection, mkNamedSection)
 import docparse/services/html_parser (parseHtml)
 import docparse/services/csv_parser (parseCsv)
@@ -421,8 +421,39 @@ pure func emlResolvableExtension(mimeType: string) -> string {
   else if contains(mt, "wordprocessingml") then "docx"
   else if contains(mt, "spreadsheetml") then "xlsx"
   else if contains(mt, "presentationml") then "pptx"
+  else if mt == "message/rfc822" then "eml"
   else "bin"
 }
+
+-- The bytes of a message/rfc822 part, base64-encoded for attachment-data.
+--
+-- A forwarded message is parsed inline (its headers, body and nested
+-- attachments become blocks), but it is ALSO a file the reader may want back:
+-- the .eml a mail client would save. Every other kept attachment carries its
+-- bytes; this one only carried its meta line, so `--extract` had nothing to
+-- write. RFC 2046 §5.2.1 restricts message/rfc822 to 7bit/8bit/binary, where
+-- the part body IS the message; base64 is what real mailers send anyway, and
+-- its payload is already the encoding we store. Quoted-printable is decoded
+-- byte-wise first. Line endings are those of the parse (LF), since parseEml
+-- normalises CRLF before splitting.
+pure func emlRfc822DataBase64(body: string, encoding: string) -> string {
+  let enc = trim(toLower(encoding));
+  if enc == "base64" then emlStripBodyWhitespace(body)
+  else if enc == "quoted-printable" then toBase64(stringToBytes(builtinDecodeQP(body)))
+  else toBase64(stringToBytes(emlDropDelimiterNewline(body)))
+}
+
+-- The line break before a multipart delimiter belongs to the delimiter
+-- (RFC 2046 §5.1.1), not to the part. Drop exactly one trailing "\n" without
+-- substring, which is rune-indexed and would corrupt non-UTF-8 bytes (see
+-- emlSplitHeaderBody).
+pure func emlDropDelimiterNewline(body: string) -> string =
+  if endsWith(body, "\n") then
+    match reverse(split(body, "\n")) {
+      [] => body,
+      _ :: initRev => join("\n", reverse(initRev))
+    }
+  else body
 
 -- Check if a MIME type can be parsed inline (text-based attachments)
 pure func emlIsParseableMime(mimeType: string) -> bool {
@@ -461,6 +492,10 @@ pure func emlIsAttachmentPart(disposition: string, mimeType: string, filename: s
   if contains(toLower(disposition), "attachment") then true
   else if startsWith(mimeType, "multipart/") then false
   else if length(filename) > 0 then true
+  -- An encapsulated message with no disposition and no name (a client that
+  -- forwards "inline") is still a message: without this it fell through to
+  -- the binary placeholder and its whole content was dropped.
+  else if mimeType == "message/rfc822" then true
   else emlIsResolvableMime(mimeType)
 }
 
@@ -500,7 +535,15 @@ pure func emlParseMimePart(part: string) -> [Block] {
       let decoded = emlDecodeBody(splitResult.body, partEnc, partCharset);
       let parsedBlocks = emlParseAttachmentContent(decoded, mimeType);
       let metaBlock = mkText("${filename} (${mimeType})", "attachment-meta", 0);
-      [mkNamedSection("attachment", filename, metaBlock :: parsedBlocks)]
+      -- A forwarded message also keeps its bytes (data + ext, like any other
+      -- kept attachment), ahead of the parsed content so the meta/data/ext
+      -- triple reads the same as everywhere else. orchStripAttachmentData
+      -- removes them under --no-attachment-data and leaves the parse.
+      let dataBlocks = if mimeType == "message/rfc822" then
+        [mkText(emlRfc822DataBase64(splitResult.body, partEnc), "attachment-data", 0),
+         mkText(emlResolvableExtension(mimeType), "attachment-ext", 0)]
+        else [];
+      [mkNamedSection("attachment", filename, metaBlock :: concat(dataBlocks, parsedBlocks))]
     }
     else if emlIsResolvableMime(mimeType) then {
       -- Resolvable attachment (Office, PDF): preserve base64 for the second pass
@@ -1119,4 +1162,71 @@ export pure func testEmlAttachmentNameSanitisesContentId() -> bool
   emlAttachmentName("poster.png", "<ignored@example.com>", "image/png") == "poster.png" &&
   emlAttachmentName("", "<a/b\\c@example.com>", "image/png") == "a_b_c@example.com.png" &&
   emlAttachmentName("", "", "image/png") == "attachment.png"
+}
+
+-- ============================================================
+-- Tests: message/rfc822 attachments keep their bytes
+-- ============================================================
+--
+-- A forwarded message got `attachment-meta` and its parsed content but no
+-- attachment-data, while a PDF beside it got all three — so the one
+-- attachment a reader most often wants back as a file could not be extracted.
+
+-- Every text block with a given style anywhere in a block tree, in order.
+pure func emlTestAllStyle(blocks: [Block], style: string) -> [string] =
+  flatMap(\b. match b {
+    TextBlock(t) => if t.style == style then [t.text] else [],
+    SectionBlock(s) => emlTestAllStyle(s.blocks, style),
+    _ => []
+  }, blocks)
+
+-- The forwarded message used by the tests below: invented people, example
+-- domains, and an attachment of its own so nested descent stays covered.
+pure func emlTestInnerMessage() -> string =
+  "From: Jordan Example <jordan@example.com>\nTo: Casey Sample <casey@example.org>\nSubject: Original notes\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"IN1\"\n\n--IN1\nContent-Type: text/plain\n\nThe original body.\n\n--IN1\nContent-Type: text/csv; name=\"figures.csv\"\nContent-Disposition: attachment; filename=\"figures.csv\"\n\na,b\n1,2\n\n--IN1--\n"
+
+pure func emlTestForward(partHeaders: string, payload: string) -> string =
+  "From: Riley Forwarder <riley@example.com>\nSubject: Fwd: Original notes\nContent-Type: multipart/mixed; boundary=\"OUT1\"\n\n--OUT1\nContent-Type: text/plain\n\nSee below.\n\n--OUT1\n${partHeaders}\n\n${payload}\n--OUT1--\n"
+
+-- base64-encoded rfc822 (what Gmail and Outlook send): the stored data is the
+-- payload itself, and the forwarded message is still parsed, nested
+-- attachment included.
+export pure func testEmlRfc822Base64KeepsBytes() -> bool
+  tests [((), true)]
+{
+  let b64 = toBase64(stringToBytes(emlTestInnerMessage()));
+  let blocks = parseEml(emlTestForward(
+    "Content-Type: message/rfc822\nContent-Disposition: attachment; filename=\"original.eml\"\nContent-Transfer-Encoding: base64", b64));
+  emlTestFindStyle(blocks, "attachment-data") == b64 &&
+  emlTestFindStyle(blocks, "attachment-ext") == "eml" &&
+  emlTestAllStyle(blocks, "attachment-meta") == ["original.eml (message/rfc822)", "figures.csv (text/csv)"] &&
+  contains(join("|", emlTestAllStyle(blocks, "Normal")), "The original body.")
+}
+
+-- 7bit rfc822 (the RFC 2046 form): the data decodes to exactly the
+-- encapsulated message — not the delimiter's line break after it.
+export pure func testEmlRfc822SevenBitKeepsBytes() -> bool
+  tests [((), true)]
+{
+  let inner = emlTestInnerMessage();
+  let blocks = parseEml(emlTestForward(
+    "Content-Type: message/rfc822\nContent-Disposition: attachment; filename=\"original.eml\"", inner));
+  let decoded = match fromBase64(emlTestFindStyle(blocks, "attachment-data")) {
+    Some(bytes) => bytesToString(bytes),
+    None => "<undecodable>"
+  };
+  decoded == inner &&
+  emlTestFindStyle(blocks, "attachment-ext") == "eml" &&
+  listLength(emlTestAllStyle(blocks, "attachment-meta")) == 2
+}
+
+-- A forwarded message with no disposition and no name used to become a
+-- `[attachment: message/rfc822, ...]` placeholder with its content dropped.
+export pure func testEmlRfc822InlineIsAnAttachment() -> bool
+  tests [((), true)]
+{
+  let blocks = parseEml(emlTestForward("Content-Type: message/rfc822", emlTestInnerMessage()));
+  emlTestFindStyle(blocks, "attachment-meta") == "attachment.eml (message/rfc822)" &&
+  emlTestFindStyle(blocks, "attachment-ext") == "eml" &&
+  contains(join("|", emlTestAllStyle(blocks, "Normal")), "The original body.")
 }
