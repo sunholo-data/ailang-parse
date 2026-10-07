@@ -37,7 +37,13 @@ export type TableCell = {
   -- conditional formatting) or inherits from a table style is not here, and
   -- the parser says so in the outcome's warnings instead.
   fill: string,
-  color: string
+  color: string,
+  -- The cell's formula, "=A1+B1" form, or "" when the cell holds a literal
+  -- value. XLSX only: <c><f>expr</f><v>cached</v></c>. `text` carries the
+  -- CACHED value the workbook last computed (<v>) — a formula cell with no
+  -- cached value has empty text and a non-empty formula, and the parser says
+  -- so in the outcome's warnings, since the formula is never evaluated here.
+  formula: string
 }
 
 -- A span of text within a paragraph carrying character formatting.
@@ -68,7 +74,13 @@ export type InlineRun = {
   -- cannot carry a URL into a generator: HTML→DOCX leaked a literal
   -- "[A2UI](https://…)" into Word until this existed.
   href: string,
-  vertAlign: string   -- "" | "superscript" | "subscript"
+  vertAlign: string,   -- "" | "superscript" | "subscript"
+  -- Direct run colour, "#rrggbb" lowercase or "" when none was specified
+  -- (same convention as TableCell.fill/color and services/colour.ail: "" is
+  -- NOT black). Only what the run itself declares: a colour inherited from a
+  -- paragraph or character style is not extracted. Populated by docx_parser
+  -- (w:color) today; every other parser leaves it "".
+  color: string
 }
 
 -- A content block extracted from a document
@@ -259,7 +271,7 @@ export pure func filterChanges(blocks: [Block]) -> [Block]
 export pure func simpleCell(text: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a header cell with HTML5 scope (row | col | rowgroup | colgroup)
@@ -268,21 +280,21 @@ export pure func simpleCell(text: string) -> TableCell
 export pure func scopedCell(text: string, scope: string) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: scope, align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a merged continuation cell (empty, spanned from another cell)
 export pure func mergedCell() -> TableCell
   ensures { result.merged && length(result.text) == 0 }
 {
-  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: "", colSpan: 1, rowSpan: 1, merged: true, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Create a cell with column span
 export pure func spanCell(text: string, cs: int) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
 }
 
 -- Same as simpleCell/spanCell, plus the tokenized inline runs (markdown_parser
@@ -290,13 +302,13 @@ export pure func spanCell(text: string, cs: int) -> TableCell
 export pure func simpleCellRuns(text: string, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == 1 && result.rowSpan == 1 && result.merged == false }
 {
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: "", formula: ""}
 }
 
 export pure func spanCellRuns(text: string, cs: int, runs: [InlineRun]) -> TableCell
   ensures { result.colSpan == cs && result.merged == false }
 {
-  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: ""}
+  {text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "", align: "", runs: runs, fill: "", color: "", formula: ""}
 }
 
 -- The same cell carrying a direct fill and font colour (both already
@@ -343,7 +355,7 @@ export pure func mkTextRuns(text: string, style: string, level: int, runs: [Inli
 -- have to spell out every flag to set one.
 export pure func plainRun(text: string) -> InlineRun =
   {text: text, bold: false, italic: false, underline: false,
-   strike: false, code: false, href: "", vertAlign: ""}
+   strike: false, code: false, href: "", vertAlign: "", color: ""}
 
 -- Merge adjacent runs that carry identical formatting.
 --
@@ -370,18 +382,19 @@ pure func docCoalesceStep(runs: [InlineRun], cur: InlineRun, acc: [InlineRun]) -
       then docCoalesceStep(rest, {text: "${cur.text}${r.text}", bold: cur.bold,
                                   italic: cur.italic, underline: cur.underline,
                                   strike: cur.strike, code: cur.code, href: "",
-                                  vertAlign: cur.vertAlign}, acc)
+                                  vertAlign: cur.vertAlign, color: cur.color}, acc)
       else docCoalesceStep(rest, r, cur :: acc)
   }
 
 -- href is part of the identity: two runs with identical emphasis but different
 -- targets are different links, and merging them would silently drop one. This
 -- is the trap every new InlineRun field walks into — omit it here and the field
--- survives parsing but vanishes before any generator sees it.
+-- survives parsing but vanishes before any generator sees it. `color` joins for
+-- the same reason.
 pure func docRunFmtEq(a: InlineRun, b: InlineRun) -> bool =
   a.bold == b.bold && a.italic == b.italic && a.underline == b.underline &&
   a.strike == b.strike && a.code == b.code && a.vertAlign == b.vertAlign &&
-  a.href == b.href
+  a.href == b.href && a.color == b.color
 
 -- Construct a HeadingBlock. Same rationale as mkText: route constructions
 -- through one function so field additions don't touch 25 call sites.
