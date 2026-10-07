@@ -62,6 +62,17 @@ jobs:
           # ailang.lock and the vendored bundle is what check-wasm-bindings.py
           # already catches in CI on the resulting PR.
           bash docs/scripts/vendor-wasm-packages.sh
+          # Stamp the two checked-in copies of the version too (same sed as
+          # ci.yml and pages.yml). pages.yml rewrites these at deploy time, so
+          # the checked-in values exist only so local dev mirrors what CI
+          # stamps — and check-wasm-bindings.py fails the build when they drift
+          # from the pin. This step was missing, so every bump PR was born
+          # red; the comment above said CI on the PR would catch it, but a PR
+          # opened with the default GITHUB_TOKEN never triggers a workflow run,
+          # so nothing ever did.
+          RELEASE_TAG=$(head -n1 docs/wasm/.ailang-version | tr -d '[:space:]')
+          sed -i "s/ailangVersion: \".*\"/ailangVersion: \"$RELEASE_TAG\"/" docs/js/site-data.js
+          sed -i "s|wasm/ailang.wasm?v=[^'\"]*|wasm/ailang.wasm?v=$RELEASE_TAG|" docs/js/wasm-demo.js
 
       - name: Open PR
         if: steps.compare.outputs.changed == 'true'
