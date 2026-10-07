@@ -103,6 +103,8 @@ MODULES=(
   "services/format_router.ail"
   "services/zip_extract.ail"
   "services/omml.ail"
+  "services/docx_inline.ail"
+  "services/docx_warnings.ail"
   "services/docx_parser.ail"
   "services/pptx_parser.ail"
   "services/xlsx_parser.ail"

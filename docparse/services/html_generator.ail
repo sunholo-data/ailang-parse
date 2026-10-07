@@ -107,7 +107,7 @@ pure func htmlBlockToStr(block: Block) -> string =
     HeadingBlock(h) =>
       let tag = htmlHeadingTag(h.level) in
       let body = if listLength(h.runs) > 0 then htmlRunsToStr(h.runs) else xmlEscape(h.text) in
-      "<${tag}>${body}</${tag}>\n",
+      "<${tag}>${htmlAnchors(h.bookmarks)}${body}</${tag}>\n",
 
     TextBlock(t) =>
       if t.style == "hr" then "<hr>\n"
@@ -119,9 +119,9 @@ pure func htmlBlockToStr(block: Block) -> string =
         -- Prefer runs: they carry clean text plus structure, where `text` for
         -- HTML-sourced blocks holds Markdown markers that would otherwise be
         -- escaped and rendered as literal "**bold**".
-        let body = if listLength(t.runs) > 0
+        let body = "${htmlAnchors(t.bookmarks)}${if listLength(t.runs) > 0
           then htmlRunsToStr(t.runs)
-          else xmlEscape(t.text);
+          else xmlEscape(t.text)}";
         if length(t.style) > 0 && t.style != "normal" && t.style != "Normal"
         then "<p class=\"${xmlEscape(t.style)}\">${body}</p>\n"
         else "<p>${body}</p>\n"
@@ -207,8 +207,23 @@ pure func htmlRunToStr(r: InlineRun) -> string {
   let withStrike = if r.strike then "<del>${withCode}</del>" else withCode;
   let withUnder = if r.underline then "<u>${withStrike}</u>" else withStrike;
   let withItalic = if r.italic then "<em>${withUnder}</em>" else withUnder;
-  if r.bold then "<strong>${withItalic}</strong>" else withItalic
+  let withBold = if r.bold then "<strong>${withItalic}</strong>" else withItalic;
+  let withColour = htmlColourSpan(r.color, r.highlight, withBold);
+  if length(r.href) > 0 then "<a href=\"${xmlEscape(r.href)}\">${withColour}</a>" else withColour
 }
+
+-- Run colours (canonical "#rrggbb", see services/colour.ail) as inline style.
+pure func htmlColourSpan(color: string, highlight: string, inner: string) -> string {
+  let fg = if length(color) > 0 then "color:${xmlEscape(color)}" else "";
+  let bg = if length(highlight) > 0 then "background-color:${xmlEscape(highlight)}" else "";
+  let sep = if length(fg) > 0 && length(bg) > 0 then ";" else "";
+  if length(fg) + length(bg) == 0 then inner
+  else "<span style=\"${fg}${sep}${bg}\">${inner}</span>"
+}
+
+-- Link targets for the bookmarks a paragraph carries, so "#name" resolves.
+pure func htmlAnchors(names: [string]) -> string =
+  foldl(\acc n. "${acc}<a id=\"${xmlEscape(n)}\"></a>", "", names)
 
 -- List items, preferring per-item runs when present. itemRuns is parallel to
 -- items but may be empty; both are walked together so a short or absent
@@ -303,7 +318,10 @@ pure func htmlSectionToStr(kind: string, name: string, blocks: [Block]) -> strin
   -- only in the JSON — without it every sheet of a workbook renders as an
   -- anonymous <section>.
   let titleAttr = if length(name) > 0 then " title=\"${xmlEscape(name)}\"" else "";
-  "<section class=\"${cssClass}\"${titleAttr}>\n${htmlBlocksToStr(blocks)}</section>\n"
+  -- A DOCX note is named by its w:id; its reference links to "#footnote-<id>".
+  let idAttr = if (kind == "footnote" || kind == "endnote") && length(name) > 0
+    then " id=\"${kind}-${xmlEscape(name)}\"" else "";
+  "<section class=\"${cssClass}\"${titleAttr}${idAttr}>\n${htmlBlocksToStr(blocks)}</section>\n"
 }
 
 -- Render track change as <ins> or <del> with attribution

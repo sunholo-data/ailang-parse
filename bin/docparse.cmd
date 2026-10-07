@@ -249,6 +249,8 @@ for %%m in (
     docparse\services\format_router.ail
     docparse\services\zip_extract.ail
     docparse\services\docx_parser.ail
+    docparse\services\docx_inline.ail
+    docparse\services\docx_warnings.ail
     docparse\services\pptx_parser.ail
     docparse\services\xlsx_parser.ail
     docparse\services\direct_ai_parser.ail

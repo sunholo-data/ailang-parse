@@ -86,6 +86,143 @@ def create_challenge_formatting():
     print(f"  Created {path}")
 
 
+def create_challenge_run_details():
+    """DOCX with run colour, highlight, bookmarks, internal links and fields.
+
+    Tests: w:color / w:highlight / w:shd (§17.3.2), w:bookmarkStart (§17.13.6),
+    w:hyperlink w:anchor (§17.16.22), complex fields (§17.16.18), and the
+    warnings a parser owes when it approximates: a field returned as its
+    cached result, a bookmark in a table cell, a custom paragraph style read
+    as plain text. (A footnote reference with no footnotes part is in its own
+    fixture, challenge_footnote_no_part.docx: LibreOffice refuses to open
+    such a package, and this one should stay openable.)
+    All content is invented.
+    """
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    def el(tag, **attrs):
+        e = OxmlElement(tag)
+        for k, v in attrs.items():
+            e.set(qn(k), v)
+        return e
+
+    def run(text, *props):
+        r = el("w:r")
+        if props:
+            rpr = el("w:rPr")
+            for p in props:
+                rpr.append(p)
+            r.append(rpr)
+        t = el("w:t")
+        t.text = text
+        t.set(qn("xml:space"), "preserve")
+        r.append(t)
+        return r
+
+    def bookmark(paragraph, bid, name):
+        paragraph._p.insert(1 if paragraph._p.pPr is not None else 0,
+                            el("w:bookmarkStart", **{"w:id": bid, "w:name": name}))
+        paragraph._p.append(el("w:bookmarkEnd", **{"w:id": bid}))
+
+    def fld_char(kind):
+        r = el("w:r")
+        r.append(el("w:fldChar", **{"w:fldCharType": kind}))
+        return r
+
+    def instr(text):
+        r = el("w:r")
+        t = el("w:instrText")
+        t.text = text
+        t.set(qn("xml:space"), "preserve")
+        r.append(t)
+        return r
+
+    doc = Document()
+    h = doc.add_heading("Project Status Overview", level=1)
+    bookmark(h, "10", "overview")
+    # Word's last-edit marker: must never be reported as a bookmark.
+    gb = doc.add_paragraph("Statuses are colour coded below.")
+    bookmark(gb, "11", "_GoBack")
+
+    p = doc.add_paragraph()
+    p._p.append(run("Status: "))
+    p._p.append(run("ON TRACK", el("w:b"), el("w:color", **{"w:val": "00B050"})))
+    p._p.append(run(", "))
+    p._p.append(run("AT RISK", el("w:highlight", **{"w:val": "yellow"})))
+    p._p.append(run(", "))
+    p._p.append(run("BLOCKED", el("w:color", **{"w:val": "9C0006"}),
+                    el("w:shd", **{"w:val": "clear", "w:color": "auto", "w:fill": "FFC7CE"})))
+    p._p.append(run(", "))
+    p._p.append(run("PLANNED", el("w:color", **{"w:val": "1F4E79", "w:themeColor": "accent1",
+                                                "w:themeShade": "BF"})))
+    p._p.append(run(", "))
+    p._p.append(run("default", el("w:color", **{"w:val": "auto"})))
+    p._p.append(run("."))
+
+    link_p = doc.add_paragraph("Jump back to the ")
+    link = el("w:hyperlink", **{"w:anchor": "overview"})
+    link.append(run("overview", el("w:rStyle", **{"w:val": "Hyperlink"})))
+    link_p._p.append(link)
+    link_p._p.append(run("."))
+
+    fp = doc.add_paragraph("Printed from ")
+    for r in (fld_char("begin"), instr(" FILENAME "), fld_char("separate"),
+              run("status_report.docx"), fld_char("end")):
+        fp._p.append(r)
+    fp._p.append(run(", page "))
+    # An instruction split over two w:instrText runs, as Word often writes it.
+    for r in (fld_char("begin"), instr(" PAGE"), instr(" \\* MERGEFORMAT "),
+              fld_char("separate"), run("1"), fld_char("end")):
+        fp._p.append(r)
+    fp._p.append(run("."))
+
+    styles = doc.styles
+    callout = styles.add_style("Callout Note", WD_STYLE_TYPE.PARAGRAPH)
+    callout.base_style = styles["Normal"]
+    doc.add_paragraph("Review dates move to the second Tuesday of each month.", style="Callout Note")
+
+    table = doc.add_table(rows=1, cols=2)
+    table.rows[0].cells[0].text = "Milestone"
+    cell_p = table.rows[0].cells[1].paragraphs[0]
+    cell_p.add_run("Pilot launch")
+    bookmark(cell_p, "12", "milestone_pilot")
+    doc.add_paragraph("End of status report.")
+
+    path = OUTPUT_DIR / "challenge_run_details.docx"
+    doc.save(str(path))
+    print(f"  Created {path}")
+
+
+def create_challenge_footnote_no_part():
+    """DOCX whose body references footnote 7 but has no word/footnotes.xml.
+
+    A malformed package (LibreOffice will not open it; Word repairs it), and
+    exactly what challenge_footnotes.docx was until 2026-10. A parser must
+    keep the body and WARN that the note text is unavailable, rather than
+    silently dropping the reference. Content is invented.
+    """
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+    doc.add_heading("Quarterly Figures", level=1)
+    p = doc.add_paragraph("Figures are provisional")
+    r = OxmlElement("w:r")
+    ref = OxmlElement("w:footnoteReference")
+    ref.set(qn("w:id"), "7")
+    r.append(ref)
+    p._p.append(r)
+    p.add_run(" until the audit closes.")
+
+    path = OUTPUT_DIR / "challenge_footnote_no_part.docx"
+    doc.save(str(path))
+    print(f"  Created {path}")
+
+
 def create_challenge_numbering():
     """DOCX with multi-level numbered outline.
 
@@ -845,12 +982,20 @@ def create_challenge_equations():
 
 
 def main():
+    import sys
+
+    # Optional filter: `create_challenge_files.py run_details` builds only the
+    # generators whose function name contains one of the given words, so one
+    # fixture can be (re)built without rewriting every other one's bytes.
+    only = sys.argv[1:]
     print("Creating challenge benchmark files...")
     print(f"Output directory: {OUTPUT_DIR}")
     print()
 
     generators = [
         ("Formatting (bold/italic semantics)", create_challenge_formatting),
+        ("Run colour, bookmarks, internal links, field warnings", create_challenge_run_details),
+        ("Footnote reference with no footnotes part", create_challenge_footnote_no_part),
         ("Numbering (multi-level lists)", create_challenge_numbering),
         ("Custom styles", create_challenge_styles),
         ("Field codes (TOC, dates, page numbers)", create_challenge_fields),
@@ -863,6 +1008,8 @@ def main():
     ]
 
     for name, gen_func in generators:
+        if only and not any(w in gen_func.__name__ for w in only):
+            continue
         print(f"  [{name}]")
         try:
             gen_func()

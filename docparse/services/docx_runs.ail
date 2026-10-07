@@ -1,6 +1,6 @@
 module docparse/services/docx_runs
 
-import std/string (length, intToStr, split, startsWith, contains)
+import std/string (length, intToStr, split, startsWith, contains, substring)
 import std/list (foldl, length as listLength)
 import docparse/types/document (InlineRun)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, docxRun, docxParagraph)
@@ -74,8 +74,16 @@ export pure func docxRunsToXml(runs: [InlineRun]) -> string =
 --
 -- Without this, HTML→DOCX put the literal Markdown "[text](url)" into Word:
 -- the URL only ever lived in the marker text, and runs had nowhere to keep it.
+--
+-- "#name" is a link inside the document (a bookmark) and takes the \l switch.
+-- A parsed DOCX note reference ("#footnote-1") is written as its plain mark:
+-- this generator writes no notes part, so there is nothing for it to link to.
 pure func docxRunMaybeLinked(r: InlineRun) -> string =
-  if length(r.href) > 0
+  if startsWith(r.href, "#footnote-") || startsWith(r.href, "#endnote-")
+  then docxFormattedRun(r)
+  else if startsWith(r.href, "#") && length(r.href) > 1
+  then "<w:fldSimple w:instr=\" HYPERLINK \\l &quot;${xmlAttrEscape(substring(r.href, 1, length(r.href)))}&quot; \">${docxLinkedRun(r)}</w:fldSimple>"
+  else if length(r.href) > 0
   then "<w:fldSimple w:instr=\" HYPERLINK &quot;${xmlAttrEscape(r.href)}&quot; \">${docxLinkedRun(r)}</w:fldSimple>"
   else docxFormattedRun(r)
 
@@ -87,18 +95,9 @@ pure func docxFormattedRun(r: InlineRun) -> string =
   "<w:r>${docxRunProps(r)}<w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
 
 -- Child order matters: CT_RPr is a sequence in the schema, not a choice, and
--- rFonts/b/i/strike/u/vertAlign must appear in that order. Emitting w:u before
--- w:strike produces a document Word may reject or silently repair.
+-- rFonts/b/i/strike/color/u/shd/vertAlign must appear in that order. Emitting
+-- w:u before w:strike produces a document Word may reject or silently repair.
 pure func docxRunProps(r: InlineRun) -> string {
-  -- DOCX has no "code" run property; a monospace font is its honest equivalent.
-  let fonts = if r.code then "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>" else "";
-  let bold = if r.bold then "<w:b/>" else "";
-  let italic = if r.italic then "<w:i/>" else "";
-  let strike = if r.strike then "<w:strike/>" else "";
-  let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
-  let vert = if length(r.vertAlign) > 0
-    then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
-    else "";
   let inner = docxRunPropsInner(r);
   if length(inner) > 0 then "<w:rPr>${inner}</w:rPr>" else ""
 }
@@ -113,8 +112,19 @@ pure func docxRunPropsInner(r: InlineRun) -> string {
   let vert = if length(r.vertAlign) > 0
     then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
     else "";
-  "${fonts}${bold}${italic}${strike}${under}${vert}"
+  -- Colours are canonical "#rrggbb"; OOXML wants the six digits alone. A
+  -- highlight goes back as run shading (w:shd fill), which takes any colour,
+  -- where w:highlight only takes its sixteen names; docx_parser reads either.
+  let color = docxHexAttr(r.color);
+  let colorEl = if length(color) > 0 then "<w:color w:val=\"${color}\"/>" else "";
+  let fill = docxHexAttr(r.highlight);
+  let shd = if length(fill) > 0 then "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"${fill}\"/>" else "";
+  "${fonts}${bold}${italic}${strike}${colorEl}${under}${shd}${vert}"
 }
+
+-- "#rrggbb" -> "RRGGBB"-style attribute value; anything else -> "".
+pure func docxHexAttr(c: string) -> string =
+  if length(c) == 7 && startsWith(c, "#") then xmlAttrEscape(substring(c, 1, 7)) else ""
 
 -- Build OOXML <w:drawing> for an inline image
 -- rId references word/_rels/document.xml.rels entry

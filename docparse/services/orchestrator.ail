@@ -59,7 +59,7 @@ import docparse/services/format_router (detectFormat, getExtension, officeType, 
 
 -- Deterministic parsers (all ! {FS} or pure)
 import docparse/services/docx_parser (
-  parseDocx, parseDocxWithComments, parseDocxHeaders, parseDocxFooters,
+  parseDocx, parseDocxBodyWarned, parseDocxHeaders, parseDocxFooters,
   parseDocxFootnotes, parseDocxEndnotes, parseDocxImages, parseDocxMetadata
 )
 import docparse/services/pptx_parser (parsePptx, parsePptxImages, parsePptxMetadata)
@@ -339,7 +339,10 @@ func orchOffice(filepath: string, ext: string, opts: ParseOptions)
     Some(msg) => Err(msg),
     None =>
       if kind == "word" then {
-        let body = parseDocxWithComments(filepath);
+        -- Warnings name what the blocks only approximate (cached field
+        -- results, custom styles read as text, unresolvable notes, ...).
+        let parsedBody = parseDocxBodyWarned(filepath);
+        let body = parsedBody.blocks;
         -- An unreadable word/document.xml comes back as one error-styled
         -- text block; publishing that as the document is exactly the
         -- laundering this check exists to prevent.
@@ -353,7 +356,7 @@ func orchOffice(filepath: string, ext: string, opts: ParseOptions)
                 concat(parseDocxFootnotes(filepath),
                   concat(parseDocxEndnotes(filepath), images)))));
           Ok(mkOutcome("docx", filepath, parseDocxMetadata(filepath), blocks,
-            ["Parsed DOCX: ${show(countBlocks(blocks))} blocks"], [], 0))
+            ["Parsed DOCX: ${show(countBlocks(blocks))} blocks"], parsedBody.warnings, 0))
         }
       }
       else if kind == "powerpoint" then {

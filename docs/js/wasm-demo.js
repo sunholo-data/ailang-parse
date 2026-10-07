@@ -82,6 +82,10 @@
     { name: 'docparse/services/zip_extract', path: 'docparse/services/zip_extract.ail', formats: ['docx', 'pptx', 'xlsx'] },
     // omml before docx_parser/pptx_parser — both import renderOmml from it
     { name: 'docparse/services/omml', path: 'docparse/services/omml.ail', formats: ['docx', 'pptx'] },
+    // docx_inline (run colour, notes, bookmarks) and docx_warnings before
+    // docx_parser, which imports both
+    { name: 'docparse/services/docx_inline', path: 'docparse/services/docx_inline.ail', formats: ['docx'] },
+    { name: 'docparse/services/docx_warnings', path: 'docparse/services/docx_warnings.ail', formats: ['docx'] },
     { name: 'docparse/services/docx_parser', path: 'docparse/services/docx_parser.ail', formats: ['docx'] },
     { name: 'docparse/services/browser_docx', path: 'docparse/services/browser_docx.ail', formats: ['docx'],
       binds: ['parseDocxBody', 'parseDocxSection', 'parseMetadataXml', 'parseDocxBodyWithComments', 'parseDocxComments'] },

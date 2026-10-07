@@ -5,7 +5,7 @@ import std/json (encode, ja, jo, kv, js)
 import std/string (length)
 import std/result (Ok, Err)
 import docparse/types/document (mkSection, emptyMetadata)
-import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml, hasContent, extractMetadata, parseDocxWithCommentsXml, docxCommentsOnlyXml)
+import docparse/services/docx_parser (extractBodyBlocks, parseSectionXml, hasContent, extractMetadata, parseDocxWithCommentsXml, docxCommentsOnlyXml, parseDocxNotesXml)
 import docparse/services/output_formatter (blocksToJson, metadataToJson)
 
 -- Browser (WASM) bindings for DOCX.
@@ -25,12 +25,17 @@ export pure func parseDocxBody(xml: string) -> string {
 }
 
 -- Parse DOCX section XML (header/footer/footnote/endnote) -> JSON array of blocks
-export pure func parseDocxSection(xml: string, kind: string) -> string {
-  let blocks = parseSectionXml(xml);
-  if hasContent(blocks)
-  then encode(ja(blocksToJson([mkSection(kind, blocks)])))
-  else encode(ja([]))
-}
+-- Footnotes and endnotes come back one section per note, named by w:id, the
+-- same shape the CLI produces (see parseDocxNotesXml).
+export pure func parseDocxSection(xml: string, kind: string) -> string =
+  if kind == "footnote" || kind == "endnote"
+  then encode(ja(blocksToJson(parseDocxNotesXml(xml, "w:${kind}", kind))))
+  else {
+    let blocks = parseSectionXml(xml);
+    if hasContent(blocks)
+    then encode(ja(blocksToJson([mkSection(kind, blocks)])))
+    else encode(ja([]))
+  }
 
 -- Parse metadata from core.xml -> JSON metadata object
 export pure func parseMetadataXml(coreXml: string) -> string {

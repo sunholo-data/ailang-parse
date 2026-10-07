@@ -3,12 +3,14 @@ module docparse/services/docx_parser
 import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, charCode, chars)
+import std/string (contains, length, trim, stringToInt, join, charCode, chars, startsWith, substring)
 import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withBookmarks)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
+import docparse/services/docx_inline (docxRunColor, docxRunHighlight, docxNoteRefText, docxNoteRefHref, docxBookmarkNames, docxHyperlinkAnchorHref, docxFieldHyperlinkHref, docxIsContentNote, docxContentNoteIds)
+import docparse/services/docx_warnings (docxParseWarnings)
 
 -- DOCX Parser
 -- Parses Word document XML into a list of content Blocks.
@@ -135,17 +137,63 @@ export func parseDocxFooters(filepath: string) -> [Block] ! {FS} {
   parseSectionEntries(filepath, entries, "footer")
 }
 
--- Extract footnotes from a DOCX file
-export func parseDocxFootnotes(filepath: string) -> [Block] ! {FS} {
-  let entries = findFootnoteEntries(filepath);
-  parseSectionEntries(filepath, entries, "footnote")
-}
+-- Extract footnotes from a DOCX file: one SectionBlock(kind: "footnote") per
+-- note, named by its w:id — the same id the body's reference run links to as
+-- "#footnote-<id>" (see docx_inline).
+--
+-- These used to go through parseSectionEntries like a header, which walks
+-- the part root's children as if they were body paragraphs. A footnotes
+-- part's children are w:footnote elements, not w:p, so every note was
+-- skipped and no footnote text ever reached the output.
+export func parseDocxFootnotes(filepath: string) -> [Block] ! {FS} =
+  flatMap(\e. parseDocxNotesXml(readZipEntry(filepath, e), "w:footnote", "footnote"),
+          findFootnoteEntries(filepath))
 
--- Extract endnotes from a DOCX file
-export func parseDocxEndnotes(filepath: string) -> [Block] ! {FS} {
-  let entries = findEndnoteEntries(filepath);
-  parseSectionEntries(filepath, entries, "endnote")
-}
+-- Extract endnotes from a DOCX file (as footnotes, kind "endnote").
+export func parseDocxEndnotes(filepath: string) -> [Block] ! {FS} =
+  flatMap(\e. parseDocxNotesXml(readZipEntry(filepath, e), "w:endnote", "endnote"),
+          findEndnoteEntries(filepath))
+
+-- Pure core over the part's XML, so the browser build can use it too.
+-- Separator and continuation-separator entries are layout furniture, not
+-- notes, and are skipped; a note with no text is skipped like an empty header.
+export pure func parseDocxNotesXml(xml: string, noteTag: string, kind: string) -> [Block] =
+  if length(xml) == 0 then []
+  else match parseLenient(xml) {
+    Ok(root) => flatMap(\n. docxNoteBlocks(n, kind), findAll(root, noteTag)),
+    Err(_) => []
+  }
+
+pure func docxNoteBlocks(note: XmlNode, kind: string) -> [Block] =
+  if docxIsContentNote(note) == false then []
+  else {
+    let blocks = docxTrimNoteLead(processBodyChildren(getChildren(note), emptyMap(), emptyMap()));
+    if hasContent(blocks)
+    then [mkNamedSection(kind, getOrElse(getAttr(note, "w:id"), ""), blocks)]
+    else []
+  }
+
+-- Word separates the note's own mark (w:footnoteRef) from its text with a
+-- space run; with the mark gone, that space would lead the note.
+pure func docxTrimNoteLead(blocks: [Block]) -> [Block] =
+  match blocks {
+    TextBlock(t) :: rest => TextBlock({ t | text: trim(t.text), runs: docxTrimRunsLead(t.runs) }) :: rest,
+    _ => blocks
+  }
+
+pure func docxTrimRunsLead(runs: [InlineRun]) -> [InlineRun] =
+  match runs {
+    [] => [],
+    r :: rest => {
+      let t = docxLtrim(r.text);
+      if length(t) == 0 then docxTrimRunsLead(rest) else { r | text: t } :: rest
+    }
+  }
+
+pure func docxLtrim(s: string) -> string =
+  if length(s) > 0 && (startsWith(s, " ") || startsWith(s, "\t"))
+  then docxLtrim(substring(s, 1, length(s)))
+  else s
 
 -- Parse a list of ZIP entries as section blocks
 func parseSectionEntries(filepath: string, entries: [string], kind: string) -> [Block] ! {FS} =
@@ -222,7 +270,10 @@ pure func processBodyChildren(nodes: [XmlNode], rels: Map[string, string], nums:
 pure func processBodyNode(node: XmlNode, rels: Map[string, string], nums: Map[string, string]) -> [Block] {
   let tag = getTag(node);
   if tag == "w:p" then {
-    let mainBlock = parseParagraph(node, rels, nums);
+    -- Bookmarks starting in the paragraph ride on its block, so "#name"
+    -- links resolve (§17.13.6). Kinds with nowhere to hold them are reported
+    -- by docx_warnings rather than silently dropped.
+    let mainBlock = withBookmarks(parseParagraph(node, rels, nums), docxBookmarkNames(node));
     let changeBlocks = extractParagraphChanges(node);
     let textBoxBlocks = extractTextBoxes(node, rels, nums);
     mainBlock :: concat(changeBlocks, textBoxBlocks)
@@ -303,7 +354,9 @@ pure func extractParagraphRuns(p: XmlNode, rels: Map[string, string]) -> [Inline
   -- gains no information from a single unstyled run, and suppressing it keeps
   -- the JSON for unformatted documents byte-identical to the pre-InlineRun
   -- shape — which is most documents, and all but a handful of the goldens.
-  if any(docxRunIsFormatted, runs) then runs else []
+  -- An empty run (one holding only a drawing or a field character) carries
+  -- no text for its formatting to apply to, so it does not count.
+  if any(\r. length(r.text) > 0 && docxRunIsFormatted(r), runs) then runs else []
 }
 
 pure func childNodeRuns(node: XmlNode, rels: Map[string, string]) -> [InlineRun] {
@@ -315,18 +368,28 @@ pure func childNodeRuns(node: XmlNode, rels: Map[string, string]) -> [InlineRun]
   else if tag == "w:moveTo" then map(extractRun, findAll(node, "w:r"))
   else if tag == "w:smartTag" then map(extractRun, findAll(node, "w:r"))
   -- The URL suffix is a plain run so `runs` still concatenates to `text`.
+  -- An internal link (w:anchor) has no URL suffix in `text`, so its target
+  -- can only travel on the runs, as "#bookmark".
   else if tag == "w:hyperlink" then
-    concat(map(extractRun, findAll(node, "w:r")),
+    concat(docxLinkRuns(findAll(node, "w:r"), docxHyperlinkAnchorHref(node)),
            docxHyperlinkSuffixRuns(node, rels))
   -- w:fldSimple wraps the field's cached result run (DATE, NUMPAGES, FILENAME).
   -- Deleted by e9de665; without it the result text vanishes and a paragraph
-  -- reads "Total pages in document: ".
-  else if tag == "w:fldSimple" then map(extractRun, findAll(node, "w:r"))
+  -- reads "Total pages in document: ". A HYPERLINK field keeps its target on
+  -- the runs — it is how docx_generator writes every link.
+  else if tag == "w:fldSimple" then
+    docxLinkRuns(findAll(node, "w:r"),
+                 docxFieldHyperlinkHref(getOrElse(getAttr(node, "w:instr"), "")))
   else if tag == "w:sdt" then childNodeSdtRuns(node)
   else if tag == "m:oMath" then [plainRun(renderOmml(node))]
   else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
   else []
 }
+
+-- Runs inside a link element, each carrying the link's target ("" = none).
+pure func docxLinkRuns(runs: [XmlNode], href: string) -> [InlineRun] =
+  if length(href) == 0 then map(extractRun, runs)
+  else map(\r. { extractRun(r) | href: href }, runs)
 
 pure func childNodeSdtRuns(sdt: XmlNode) -> [InlineRun] =
   match findFirst(sdt, "w:sdtContent") {
@@ -336,7 +399,11 @@ pure func childNodeSdtRuns(sdt: XmlNode) -> [InlineRun] =
 
 pure func extractRun(run: XmlNode) -> InlineRun {
   let text = extractRunText(run);
-  match findFirst(run, "w:rPr") {
+  -- A note reference links to its note and is drawn superscript (Word does
+  -- it through the FootnoteReference character style, which is not resolved
+  -- here — so say it directly).
+  let noteHref = docxNoteRefHref(run);
+  let base = match findFirst(run, "w:rPr") {
     Some(rPr) => {
       text: text,
       bold: docxToggleProp(rPr, "w:b"),
@@ -346,14 +413,19 @@ pure func extractRun(run: XmlNode) -> InlineRun {
       -- DOCX has no "code" run property. Inferring one from a monospace font
       -- would be a guess, so it stays false rather than fabricated.
       code: false, href: "",
-      vertAlign: docxVertAlign(rPr)
+      vertAlign: docxVertAlign(rPr),
+      color: docxRunColor(rPr),
+      highlight: docxRunHighlight(rPr)
     },
     None => plainRun(text)
-  }
+  };
+  if length(noteHref) > 0 then { base | href: noteHref, vertAlign: "superscript" }
+  else base
 }
 
 pure func docxRunIsFormatted(r: InlineRun) -> bool =
-  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0
+  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0 ||
+  length(r.href) > 0 || length(r.color) > 0 || length(r.highlight) > 0
 
 -- ECMA-376 toggle properties: a bare <w:b/> means ON, but <w:b w:val="0"/>
 -- means OFF. Presence alone is not the signal — a paragraph that explicitly
@@ -514,6 +586,8 @@ pure func docxRunChildText(node: XmlNode) -> string {
   else if tag == "w:br" || tag == "w:cr" then "\n"
   else if tag == "w:tab" then "\t"
   else if tag == "w:noBreakHyphen" then "-"
+  -- "[1]" / "[e1]": where Word draws the note number (see docx_inline).
+  else if tag == "w:footnoteReference" || tag == "w:endnoteReference" then docxNoteRefText(node)
   else ""
 }
 
@@ -1123,6 +1197,46 @@ export pure func parseDocxWithCommentsXmlRelsNum(documentXml: string, commentsXm
       docxSpliceComments(walk.blocks, placed)
     },
     Err(e) => [mkText("XML parse error: ${e}", "error", 0)]
+  }
+
+-- The body with comments spliced in, plus a warning for every place the
+-- output approximates the source (docx_warnings). Same single parse of
+-- document.xml as parseDocxWithComments; the orchestrator uses this one.
+export func parseDocxBodyWarned(filepath: string) -> {blocks: [Block], warnings: [string]} ! {FS} {
+  let fnEntries = findFootnoteEntries(filepath);
+  let enEntries = findEndnoteEntries(filepath);
+  parseDocxBodyWarnedXml(readDocxContent(filepath), readComments(filepath),
+                         readCommentsExtended(filepath), docxLoadRels(filepath),
+                         docxLoadNumberingContext(filepath), readDocxStyles(filepath),
+                         listLength(fnEntries) > 0,
+                         flatMap(\e. docxNoteIdsXml(readZipEntry(filepath, e), "w:footnote"), fnEntries),
+                         listLength(enEntries) > 0,
+                         flatMap(\e. docxNoteIdsXml(readZipEntry(filepath, e), "w:endnote"), enEntries))
+}
+
+-- Pure core, over the parts as strings (the browser build's shape).
+export pure func parseDocxBodyWarnedXml(documentXml: string, commentsXml: string,
+                                        extXml: string, rels: Map[string, string],
+                                        nums: Map[string, string], stylesXml: string,
+                                        hasFootnotes: bool, footnoteIds: [string],
+                                        hasEndnotes: bool, endnoteIds: [string])
+  -> {blocks: [Block], warnings: [string]} =
+  match parseLenient(documentXml) {
+    Ok(root) => {
+      let walk = docxWalkBodyRootFull(root, rels, nums);
+      let placed = docxCommentsFromXml(commentsXml, extXml, walk.anchors);
+      let blocks = docxSpliceComments(walk.blocks, placed);
+      { blocks: blocks,
+        warnings: docxParseWarnings(root, walk.blocks, map(\o. o.id, walk.open), stylesXml,
+                                    hasFootnotes, footnoteIds, hasEndnotes, endnoteIds) }
+    },
+    Err(e) => { blocks: [mkText("XML parse error: ${e}", "error", 0)], warnings: [] }
+  }
+
+pure func docxNoteIdsXml(xml: string, noteTag: string) -> [string] =
+  match parseLenient(xml) {
+    Ok(root) => docxContentNoteIds(root, noteTag),
+    Err(_) => []
   }
 
 -- Extract comments from a DOCX file (word/comments.xml), each anchored to the

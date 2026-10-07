@@ -139,7 +139,35 @@ export pure func headingPrefix(level: int) -> string
 --
 -- When the section's first block is already a heading, that heading is the
 -- label; adding another would restate it.
-pure func renderSectionMd(kind: string, name: string, blocks: [Block]) -> string {
+pure func renderSectionMd(kind: string, name: string, blocks: [Block]) -> string =
+  if (kind == "footnote" || kind == "endnote") && length(name) > 0
+  then "${mdNoteLabel(kind, name)}: ${mdNoteBody(renderBlocksMd(blocks))}"
+  else renderPlainSectionMd(kind, name, blocks)
+
+-- A DOCX note (named by its w:id) renders as a footnote definition, and the
+-- body's reference run (href "#footnote-<id>") as the matching "[^id]", so the
+-- pair is linked in any reader that knows the extension (pandoc, GFM).
+-- Endnotes get an "e" so footnote 1 and endnote 1 stay distinct.
+pure func mdNoteLabel(kind: string, id: string) -> string =
+  if kind == "endnote" then "[^e${id}]" else "[^${id}]"
+
+-- Later paragraphs of a multi-paragraph note are indented to stay inside it.
+pure func mdNoteBody(body: string) -> string =
+  join("\n", mdIndentRest(split(body, "\n"), true))
+
+pure func mdIndentRest(lines: [string], first: bool) -> [string] =
+  match lines {
+    [] => [],
+    l :: rest => (if first || length(l) == 0 then l else "    ${l}") :: mdIndentRest(rest, false)
+  }
+
+-- The "[^id]" for a run linking to a note; "" for any other run.
+pure func mdNoteRef(href: string) -> string =
+  if startsWith(href, "#footnote-") then mdNoteLabel("footnote", substring(href, 10, length(href)))
+  else if startsWith(href, "#endnote-") then mdNoteLabel("endnote", substring(href, 9, length(href)))
+  else ""
+
+pure func renderPlainSectionMd(kind: string, name: string, blocks: [Block]) -> string {
   let isDivision = kind == "slide" || kind == "sheet" || kind == "chapter";
   let rule = if isDivision then "---\n\n" else "";
   let label = if isDivision && length(name) > 0 && not startsWithHeading(blocks)
@@ -249,7 +277,9 @@ pure func mdEmitRuns(runs: [InlineRun], b: bool, i: bool, st: bool, acc: string)
       -- Code content is literal: it must not be escaped, and its own markers
       -- must not be re-wrapped.
       let body = if r.code then "`${r.text}`" else mdEscapeInline(r.text);
-      let piece = if length(r.href) > 0 then "[${body}](${r.href})" else body;
+      let noteRef = mdNoteRef(r.href);
+      let piece = if length(noteRef) > 0 then noteRef
+        else if length(r.href) > 0 then "[${body}](${r.href})" else body;
       mdEmitRuns(rest, r.bold, r.italic, r.strike, "${head}${piece}")
     }
   }

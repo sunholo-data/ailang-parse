@@ -633,7 +633,19 @@ pure func pptxParaRuns(runs: [InlineRun], text: string) -> string =
 -- DrawingML carries run properties as ATTRIBUTES on a:rPr, not as child
 -- elements the way WordprocessingML does.
 pure func pptxFormattedRun(r: InlineRun) -> string =
-  "<a:r><a:rPr lang=\"en-US\" sz=\"1800\"${pptxRunAttrs(r)}/><a:t>${xmlEscape(r.text)}</a:t></a:r>"
+  "<a:r>${pptxRPr("<a:rPr lang=\"en-US\" sz=\"1800\"${pptxRunAttrs(r)}", r)}<a:t>${xmlEscape(r.text)}</a:t></a:r>"
+
+-- Close an a:rPr opening, adding the run's colours as children when it has
+-- any: font colour as a:solidFill, background as a:highlight — in that order,
+-- which CT_TextCharacterProperties requires.
+pure func pptxRPr(open: string, r: InlineRun) -> string {
+  let fill = if length(r.color) == 7
+    then "<a:solidFill><a:srgbClr val=\"${xmlEscape(substring(r.color, 1, 7))}\"/></a:solidFill>" else "";
+  let hl = if length(r.highlight) == 7
+    then "<a:highlight><a:srgbClr val=\"${xmlEscape(substring(r.highlight, 1, 7))}\"/></a:highlight>" else "";
+  if length(fill) + length(hl) == 0 then "${open}/>"
+  else "${open}>${fill}${hl}</a:rPr>"
+}
 
 pure func pptxRunAttrs(r: InlineRun) -> string {
   let bold = if r.bold then " b=\"1\"" else "";
@@ -727,7 +739,7 @@ pure func pptxHeadingRun(r: InlineRun) -> string {
   let base = if r.vertAlign == "superscript" then " baseline=\"30000\""
     else if r.vertAlign == "subscript" then " baseline=\"-25000\""
     else "";
-  "<a:r><a:rPr lang=\"en-US\" sz=\"2800\" b=\"1\"${italic}${under}${strike}${base}/><a:t>${xmlEscape(r.text)}</a:t></a:r>"
+  "<a:r>${pptxRPr("<a:rPr lang=\"en-US\" sz=\"2800\" b=\"1\"${italic}${under}${strike}${base}", r)}<a:t>${xmlEscape(r.text)}</a:t></a:r>"
 }
 
 -- [Content_Types].xml
