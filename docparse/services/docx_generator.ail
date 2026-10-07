@@ -260,7 +260,7 @@ pure func docxBlockToXml(block: Block) -> string =
     -- entirely, so this never reaches a package whose numbering came from a
     -- template.
     ListBlock(l) =>
-      docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, 1),
+      docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, l.itemOrdered, 1),
 
     ImageBlock(i) =>
       if length(i.description) > 0
@@ -352,14 +352,14 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       let r = docxBlocksToXml(s.blocks, idx) in
       let label = docxSectionLabel(s.kind) in
       let labelXml = if length(label) > 0 then docxStyledParagraph("Heading3", label) else "" in
-      {xml: "${labelXml}${r.xml}", idx: r.idx},
+      {xml: "${docxBreakXml(s.kind)}${labelXml}${r.xml}", idx: r.idx},
 
     -- Handled here rather than falling through to docxBlockToXml so the list
     -- paragraphs pick up this document's numId base and tables bind to the
     -- template's table style. The fallthrough renders header and footer
     -- bodies, which have no counters to thread.
     ListBlock(l) =>
-      {xml: docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, idx.numBase), idx: idx},
+      {xml: docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, l.itemOrdered, idx.numBase), idx: idx},
 
     TableBlock(t) =>
       {xml: docxTableToXml(t.headers, t.rows, idx.tblStyle, idx.tableWidth), idx: idx},
@@ -392,8 +392,18 @@ pure func docxSectionToXml(kind: string, blocks: [Block]) -> string {
   let labelXml = if length(label) > 0
     then docxStyledParagraph("Heading3", label)
     else "";
-  "${labelXml}${foldl(\acc b. "${acc}${docxBlockToXml(b)}", "", blocks)}"
+  "${docxBreakXml(kind)}${labelXml}${foldl(\acc b. "${acc}${docxBlockToXml(b)}", "", blocks)}"
 }
+
+-- An explicit page or column break (docx_parser emits these as empty
+-- SectionBlocks, beside the existing "section-break" marker) goes back out as
+-- the same w:br it came from, in a paragraph of its own. "section-break" is
+-- left alone: the body's final sectPr comes from the generator's page setup,
+-- and a mid-document one would need its own w:sectPr, which nothing carries.
+pure func docxBreakXml(kind: string) -> string =
+  if kind == "page-break" then "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
+  else if kind == "column-break" then "<w:p><w:r><w:br w:type=\"column\"/></w:r></w:p>"
+  else ""
 
 -- Collect all ImageBlocks with binary data from blocks
 pure func docxCollectImages(blocks: [Block], startIdx: int) -> [DocxImage] =

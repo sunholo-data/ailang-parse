@@ -82,6 +82,8 @@
     { name: 'docparse/services/zip_extract', path: 'docparse/services/zip_extract.ail', formats: ['docx', 'pptx', 'xlsx'] },
     // omml before docx_parser/pptx_parser — both import renderOmml from it
     { name: 'docparse/services/omml', path: 'docparse/services/omml.ail', formats: ['docx', 'pptx'] },
+    // docx_structure before docx_parser — it imports the style/list/break helpers
+    { name: 'docparse/services/docx_structure', path: 'docparse/services/docx_structure.ail', formats: ['docx'] },
     { name: 'docparse/services/docx_parser', path: 'docparse/services/docx_parser.ail', formats: ['docx'] },
     { name: 'docparse/services/browser_docx', path: 'docparse/services/browser_docx.ail', formats: ['docx'],
       binds: ['parseDocxBody', 'parseDocxSection', 'parseMetadataXml', 'parseDocxBodyWithComments', 'parseDocxComments'] },

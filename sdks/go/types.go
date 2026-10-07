@@ -74,6 +74,11 @@ type Block struct {
 	// empty for a flat list.
 	ItemLevels []int `json:"itemLevels,omitempty"`
 
+	// ItemOrdered is the marker kind per list item, parallel to Items; it
+	// overrides Ordered item by item. Only present for a list that mixes
+	// numbered and bulleted levels (DOCX numbering); empty otherwise.
+	ItemOrdered []bool `json:"itemOrdered,omitempty"`
+
 	// SectionBlock (recursive). Name is the container's own identity (sheet
 	// name, slide title, chapter); empty for sections with no name of their own.
 	Kind     string  `json:"kind,omitempty"`

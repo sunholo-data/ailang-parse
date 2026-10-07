@@ -181,6 +181,9 @@ export interface Block {
   resolved?: boolean;
   /** Nesting depth per list item, parallel to `items`; absent for a flat list. */
   itemLevels?: number[];
+  /** Marker kind per list item, parallel to `items`, overriding `ordered`.
+   *  Present only for a list that mixes numbered and bulleted levels. */
+  itemOrdered?: boolean[];
   // SectionBlock. `name` is the container's own identity (sheet name, slide
   // title, chapter); absent for sections that have no name of their own.
   kind?: string;

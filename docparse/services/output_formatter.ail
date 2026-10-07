@@ -171,7 +171,7 @@ pure func headingJsonFields(b: {text: string, level: int, runs: [InlineRun]}) ->
 
 -- itemRuns is a parallel array to items (see mkListRuns). Emitted only when
 -- some item is actually formatted, so an ordinary list is unchanged.
-pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int]}) -> [{key: string, value: Json}] {
+pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineRun]], itemLevels: [int], itemOrdered: [bool]}) -> [{key: string, value: Json}] {
   let base = [
     kv("type", js("list")),
     kv("items", ja(stringsToJson(b.items))),
@@ -181,9 +181,14 @@ pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineR
     then concat(base, [kv("itemRuns", ja(map(\rs. ja(runsToJson(rs)), b.itemRuns)))])
     else base;
   -- Omitted for a flat list, so ordinary lists are byte-identical to before.
-  if listLength(b.itemLevels) > 0
-  then concat(withRuns, [kv("itemLevels", ja(map(\n. jnum(intToFloat(n)), b.itemLevels)))])
-  else withRuns
+  let withLevels = if listLength(b.itemLevels) > 0
+    then concat(withRuns, [kv("itemLevels", ja(map(\n. jnum(intToFloat(n)), b.itemLevels)))])
+    else withRuns;
+  -- Per-item marker kind, only for a list that mixes numbered and bulleted
+  -- levels; absent otherwise, so uniform lists serialise exactly as before.
+  if listLength(b.itemOrdered) > 0
+  then concat(withLevels, [kv("itemOrdered", ja(map(jb, b.itemOrdered)))])
+  else withLevels
 }
 
 -- Flags are emitted only when true, for the same reason: a run that is merely
