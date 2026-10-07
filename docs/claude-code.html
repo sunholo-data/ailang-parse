@@ -76,7 +76,7 @@
   "mainEntity": [
     {"@type": "Question", "name": "How do I install the AILANG Parse skill for Claude Code?", "acceptedAnswer": {"@type": "Answer", "text": "Inside Claude Code, run /plugin marketplace add sunholo-data/docparse-skill then /plugin install ailang-parse@ailang-parse-marketplace. Once installed, Claude Code can parse and generate documents during your coding session — extract tables, track changes and comments, or turn notes into a DOCX, PPTX or XLSX without leaving the terminal."}},
     {"@type": "Question", "name": "What can the AILANG Parse Claude Code skill do?", "acceptedAnswer": {"@type": "Answer", "text": "The skill parses and generates documents. Parsing: ask Claude to extract a specific table, list tracked changes with authors, or pull out comments from DOCX, PPTX, XLSX and other formats. Generating: ask for a Word document, a PowerPoint or a spreadsheet and Claude writes Markdown, then converts it to any of the 9 output formats. It uses the same engine as the API with full structural fidelity."}},
-    {"@type": "Question", "name": "Does the Claude Code skill send my documents to external servers?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — the Claude Code skill uses the hosted AILANG Parse cloud API, so it needs a DocParse API key and your documents are sent to the cloud service. The skill does not currently target self-hosted or local DocParse instances. For fully local, on-machine processing, use the docparse CLI directly instead — Claude Code drives it without MCP, so your documents never leave your machine."}},
+    {"@type": "Question", "name": "Does the Claude Code skill send my documents to external servers?", "acceptedAnswer": {"@type": "Answer", "text": "The plugin's MCP tools use the hosted AILANG Parse service, so documents parsed through them are sent to it; you sign in once with OAuth (Google or GitHub) and Claude Code keeps the access token. For material that must stay on your machine, the skill uses the local docparse CLI instead, which parses Office, text and PDF (pdftotext) files without uploading anything."}},
     {"@type": "Question", "name": "Can I use AILANG Parse with other AI coding assistants besides Claude Code?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse also runs as an MCP server that works with Cursor, Windsurf, and any MCP-compatible IDE tool. Additionally, the REST API can be called from any custom agent or script. See the MCP page and API documentation for integration options beyond Claude Code."}},
     {"@type": "Question", "name": "How do I report a bug or request a feature in AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Just ask Claude to report it — the skill files it for you through the submit_feedback MCP tool, routed to the AILANG Parse maintainers, so you never have to leave your session to open a GitHub issue. It sends a title, description, and category (bug, feature, docs, or limitation); add a code snippet or contact address if you want a follow-up."}}
   ]
@@ -122,7 +122,7 @@
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>The skill ships with helper scripts for health checks, parsing, cost estimation, and device auth. Claude uses these automatically &mdash; you just ask in plain English.</div>
+        <div>The plugin connects Claude Code to the hosted AILANG Parse service at <code>https://docparse.ailang.sunholo.com/mcp/connect/</code> and signs in with OAuth (see <a href="#auth">Authentication</a>). The skill also knows the local <code>docparse</code> CLI, for documents that must not leave your machine. You just ask in plain English.</div>
       </div>
 
       <h2 id="usage">Usage Examples</h2>
@@ -154,11 +154,12 @@
 
       <h2 id="capabilities">What the Skill Can Do</h2>
 
-      <h3>16 Input Formats</h3>
+      <h3>17 Input Formats</h3>
       <ul>
         <li><strong>Office:</strong> DOCX, PPTX, XLSX, ODT, ODP, ODS</li>
-        <li><strong>Text:</strong> CSV, Markdown, HTML, EPUB, EML, TEX, RTF</li>
-        <li><strong>AI-powered:</strong> PDF, PNG, JPG</li>
+        <li><strong>Text:</strong> CSV, Markdown, HTML, EPUB, EML, MBOX, TEX, RTF</li>
+        <li><strong>PDF:</strong> text-layer extraction with <code>pdftotext</code>, no AI; AI only when you ask for it (scanned PDFs)</li>
+        <li><strong>Images (AI):</strong> PNG, JPG</li>
       </ul>
 
       <h3>4 Output Formats</h3>
@@ -172,27 +173,28 @@
       <h3>Key Features</h3>
       <ul>
         <li><strong>Deterministic Office parsing</strong> &mdash; no AI needed, no network calls, no per-page billing</li>
-        <li><strong>AI-powered PDF/image parsing</strong> &mdash; pluggable models (Gemini, Claude, Ollama)</li>
+        <li><strong>AI for images and scanned PDFs</strong> &mdash; pluggable models (Gemini, Claude, Ollama)</li>
         <li><strong>Track changes, comments, merged cells</strong> &mdash; structural features from direct XML access</li>
         <li><strong>Cost estimation before parsing</strong> &mdash; check AI vs deterministic and latency before committing</li>
-        <li><strong>Device auth flow</strong> &mdash; seamless API key management from the terminal</li>
+        <li><strong>OAuth sign-in</strong> &mdash; sign in once in the browser; Claude Code holds the token, you never paste a key</li>
+        <li><strong>Download links</strong> &mdash; generated Word, PowerPoint and Excel files come back as a one-hour download link</li>
       </ul>
 
       <h2 id="auth">Authentication</h2>
-      <p>The skill uses an RFC 8628 device authorization flow &mdash; no API keys to copy-paste:</p>
+      <p>The plugin signs in with <strong>OAuth</strong> &mdash; no API keys to copy or paste:</p>
 
       <ol class="dp-steps">
-        <li>Your first parse request triggers the auth flow automatically</li>
-        <li>Claude shows you a URL and a short code</li>
-        <li>Open the URL and sign in &mdash; authorization is automatic</li>
-        <li>Your API key is stored locally &mdash; all subsequent requests are instant</li>
+        <li>Run <code>/mcp</code>, choose <strong>ailang-parse</strong> &rarr; <strong>Authenticate</strong> (or just ask for a parse; the first call that needs your account starts it)</li>
+        <li>A sign-in page opens on <code>docparse.ailang.sunholo.com</code>, showing which app is asking</li>
+        <li>Sign in with Google or GitHub and click <strong>Allow</strong></li>
+        <li>Claude Code keeps the token and renews it daily &mdash; every later request just works</li>
       </ol>
 
-      <p>Keys use the <code>dp_</code> prefix and are stored as <code>DOCPARSE_API_KEY</code> in your environment. Free tier gives you <span data-dp="pricing.tiers.free.requests_per_month">1,000</span> requests/month to start.</p>
+      <p>The token is an ordinary AILANG Parse key on your account, listed on your <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a> as <code>oauth: &lt;app&gt;</code>, where you can revoke it. Usage counts against your plan like any other key; the Free tier gives you <span data-dp="pricing.tiers.free.requests_per_month">1,000</span> requests/month to start.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Already have a key? Set <code>DOCPARSE_API_KEY</code> in your shell environment and the skill will use it directly, skipping the device flow.</div>
+        <div><strong>Scripts, SDKs and headless agents</strong> use a <code>dp_</code> API key instead: create one on the <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a> or with the device authorization flow (the skill's <code>scripts/device-auth.sh</code>, the SDKs, or the <code>mcpAuth</code> tool on the agent surface <code>/mcp/</code>), and set it as <code>DOCPARSE_API_KEY</code>. See <a href="mcp.html#two-surfaces">two ways to sign in</a>.</div>
       </div>
 
 
@@ -245,7 +247,7 @@ ailang-parse --mcp</code></pre>
         </details>
         <details>
           <summary>Does the Claude Code skill send my documents to external servers?</summary>
-          <div class="dp-faq-answer"><p>Yes &mdash; the Claude Code skill uses the hosted AILANG Parse cloud API, so it needs a DocParse API key and your documents are sent to the cloud service. The skill does <strong>not</strong> currently target self-hosted or local DocParse instances. For fully local, on-machine processing, use the <a href="selfhost.html">docparse CLI</a> directly instead &mdash; Claude Code drives it without MCP, so your documents never leave your machine. (Local use via the skill/MCP is tracked in <a href="https://github.com/sunholo-data/ailang-parse/issues/4">issue #4</a>.)</p></div>
+          <div class="dp-faq-answer"><p>The plugin's MCP tools use the hosted AILANG Parse service, so documents parsed through them are sent to it. You sign in once with OAuth (Google or GitHub) and Claude Code keeps the access token. For material that must stay on your machine, the skill uses the local <code>docparse</code> CLI instead: Office, text and PDF (<code>pdftotext</code>) files are parsed without uploading anything. See the <a href="https://github.com/sunholo-data/docparse-skill">plugin README</a> for when to use which.</p></div>
         </details>
         <details>
           <summary>Can I use AILANG Parse with other AI coding assistants besides Claude Code?</summary>
