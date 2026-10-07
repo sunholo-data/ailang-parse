@@ -323,6 +323,57 @@ def check_colours(golden_json: dict, actual_json: dict) -> dict:
     }
 
 
+def _formula_cells(doc: dict) -> dict:
+    """(table#, row#, col#) -> (text, formula) for every cell with a formula.
+
+    Keyed by position for the same reason as _coloured_cells. The text is the
+    cell's cached value, so a formula cell that loses its value (or gains one
+    the file never stored) fails here too.
+    """
+    out = {}
+    tables = []
+
+    def walk(blocks):
+        for b in blocks:
+            if b.get("type") == "table":
+                tables.append(b)
+            walk(b.get("blocks", []))
+
+    walk(doc.get("document", {}).get("blocks", []))
+    for ti, t in enumerate(tables):
+        for ri, row in enumerate([t.get("headers", [])] + t.get("rows", [])):
+            for ci, c in enumerate(row):
+                if isinstance(c, dict) and c.get("formula"):
+                    out[(ti, ri, ci)] = (c.get("text", ""), c["formula"])
+    return out
+
+
+def _formula_warnings(doc: dict) -> set:
+    return {w for w in doc.get("warnings", []) if "formula" in w.lower()}
+
+
+def check_formulas(golden_json: dict, actual_json: dict) -> dict:
+    """Spreadsheet formulas, their cached values, and the no-cached-value warning.
+
+    Before formulas were extracted a formula cell came back as "" (no value,
+    no formula) and the bag-of-words checks could not tell.
+    """
+    golden, actual = _formula_cells(golden_json), _formula_cells(actual_json)
+    gw, aw = _formula_warnings(golden_json), _formula_warnings(actual_json)
+    if not golden and not gw:
+        return {"applicable": bool(actual or aw), "formula_match": not actual and not aw,
+                "golden_cells": 0, "actual_cells": len(actual)}
+    wrong = sorted(k for k in set(golden) | set(actual) if golden.get(k) != actual.get(k))
+    return {
+        "applicable": True,
+        "formula_match": not wrong,
+        "warnings_match": gw == aw,
+        "golden_cells": len(golden),
+        "actual_cells": len(actual),
+        "mismatches": [{"at": list(k), "golden": golden.get(k), "actual": actual.get(k)} for k in wrong[:10]],
+    }
+
+
 def check_metadata(golden_json: dict, actual_json: dict) -> dict:
     """Check document metadata extraction."""
     golden_meta = golden_json.get("document", {}).get("metadata", {})
@@ -428,6 +479,7 @@ def evaluate_file(test_file: Path, golden_file: Path, output_dir: Path = OUTPUT_
         "text_similarity": check_text_jaccard(golden_els, actual_els),
         "metadata": check_metadata(golden_json, actual_json),
         "colours": check_colours(golden_json, actual_json),
+        "formulas": check_formulas(golden_json, actual_json),
         # Positional: section/sheet/slide order and notes/comment placement,
         # table cells by (row, col), block type sequence. Every check above is
         # a count or a bag of words, which is how v0.47.0's column shift,

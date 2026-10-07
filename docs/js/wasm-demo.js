@@ -1649,7 +1649,7 @@
     if (headers.length > 0) {
       html += '<thead><tr>';
       headers.forEach(function (cell) {
-        var text = typeof cell === 'string' ? cell : (cell.text || '');
+        var text = window.DocParseBlocks ? window.DocParseBlocks.cellText(cell) : (typeof cell === 'string' ? cell : (cell.text || ''));
         var colspan = (typeof cell === 'object' && cell.colSpan > 1) ? ' colspan="' + cell.colSpan + '"' : '';
         html += '<th' + colspan + '>' + escHtml(text) + '</th>';
       });
@@ -1661,7 +1661,7 @@
         var cells = Array.isArray(row) ? row : [];
         html += '<tr>';
         cells.forEach(function (cell) {
-          var text = typeof cell === 'string' ? cell : (cell.text || '');
+          var text = window.DocParseBlocks ? window.DocParseBlocks.cellText(cell) : (typeof cell === 'string' ? cell : (cell.text || ''));
           var colspan = (typeof cell === 'object' && cell.colSpan > 1) ? ' colspan="' + cell.colSpan + '"' : '';
           html += '<td' + colspan + '>' + escHtml(text) + '</td>';
         });
@@ -1856,14 +1856,14 @@
         case 'table':
           var html = '<table class="dp-block-table"><thead><tr>';
           (b.headers || []).forEach(function (h) {
-            var text = typeof h === 'string' ? h : (h.text || '');
+            var text = window.DocParseBlocks ? window.DocParseBlocks.cellText(h) : (typeof h === 'string' ? h : (h.text || ''));
             html += '<th>' + escHtml(text) + '</th>';
           });
           html += '</tr></thead><tbody>';
           (b.rows || []).forEach(function (row) {
             html += '<tr>';
             (Array.isArray(row) ? row : []).forEach(function (c) {
-              var text = typeof c === 'string' ? c : (c.text || '');
+              var text = window.DocParseBlocks ? window.DocParseBlocks.cellText(c) : (typeof c === 'string' ? c : (c.text || ''));
               html += '<td>' + escHtml(text) + '</td>';
             });
             html += '</tr>';

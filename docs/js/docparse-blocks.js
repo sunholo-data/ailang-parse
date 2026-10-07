@@ -37,11 +37,13 @@
 
   // ── Cell text extraction ────────────────────────────────────────────
   // Cells can be plain strings, {text: ...} objects, or merged cells with
-  // additional colSpan/rowSpan attributes.
+  // additional colSpan/rowSpan attributes. A spreadsheet formula cell saved
+  // without a cached value shows "=formula", as document.ail cellDisplayText
+  // renders it in Markdown/HTML.
   function cellText(c) {
     if (c == null) return '';
     if (typeof c === 'string') return c;
-    if (typeof c === 'object') return c.text || '';
+    if (typeof c === 'object') return c.text || (c.formula ? '=' + c.formula : '');
     return String(c);
   }
 

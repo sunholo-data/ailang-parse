@@ -5,10 +5,10 @@ import std/zip (scanFold, scanFoldStep)
 import std/iter (FoldStep, Continue, Stop)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, startsWith, endsWith, substring, intToStr, split, find, charAt, charCode)
-import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl, foldlE, mapE, flatMapE, any, dedup, sortBy)
+import std/string (contains, length, trim, stringToInt, join, startsWith, endsWith, substring, intToStr, split, find, charAt, charCode, chars)
+import std/list (map, flatMap, filter, nth, length as listLength, concat, take, drop, reverse, foldl, foldlE, mapE, flatMapE, any, dedup, sortBy)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList, values as mapValues)
-import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withCellColours)
+import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withCellColours, withCellFormula)
 import docparse/services/colour (normaliseHex, applyTint, parseTint, indexedColour, themeSlotName)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
@@ -792,8 +792,9 @@ func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, 
   let condFmt = xlsxConditionalFormats(filepath, entry);
   let cleanName = xlsxCleanSheetName(sheetName);
   { blocks: concat(blocks, wrapped),
-    warnings: concat(concat(xlsxCondFmtWarning(cleanName, condFmt), xlsxFlagWarnings(cleanName, streamed.flags)),
-                     map(\g. xlsxGapWarning(cleanName, g), streamed.gaps)) }
+    warnings: concat(concat(concat(xlsxCondFmtWarning(cleanName, condFmt), xlsxFlagWarnings(cleanName, streamed.flags)),
+                            map(\g. xlsxGapWarning(cleanName, g), streamed.gaps)),
+                     xlsxUncachedWarning(cleanName, streamed.uncached)) }
 }
 
 -- Fold-accumulator record for streaming one worksheet out of the ZIP.
@@ -814,7 +815,11 @@ type XlsxStreamFold = {
   -- Sheet row number of the last row placed, and the empty ranges too long
   -- to fill (see xlsxPlaceRow).
   lastRow: int,
-  gaps: [(int, int)]
+  gaps: [(int, int)],
+  -- Shared-formula masters seen so far, by si (see xlsxRowFormulas), and the
+  -- number of formula cells saved without a cached value.
+  shared: Map[int, XlsxSharedF],
+  uncached: int
 }
 
 -- Stream one worksheet straight out of the ZIP archive: one streaming pass
@@ -822,17 +827,18 @@ type XlsxStreamFold = {
 -- <row>. Returns rows in document order plus the displayed text of any cell
 -- referenced by a comment. The sheet XML string is never materialised.
 func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], styles: Map[int, XlsxXfColour], refs: [string])
-    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string], gaps: [(int, int)] } ! {FS} {
+    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string], gaps: [(int, int)], uncached: int } ! {FS} {
   let merges = match scanFoldStep(filepath, entry, "mergeCell", { merges: [], count: 0 }, xlsxFoldMerge) {
     Ok(acc) => reverse(acc.merges),
     Err(_) => []
   };
   match scanFoldStep(filepath, entry, "row",
     { rows: [], count: 0, ss: ss, styles: styles, flagged: xlsxAnyFlagged(styles), flags: [],
-      merges: merges, refs: refs, texts: [], lastRow: 0, gaps: [] },
+      merges: merges, refs: refs, texts: [], lastRow: 0, gaps: [], shared: emptyMap(), uncached: 0 },
     xlsxFoldRowStep) {
-    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps) },
-    Err(_) => { rows: [], texts: [], flags: [], gaps: [] }
+    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps),
+                 uncached: acc.uncached },
+    Err(_) => { rows: [], texts: [], flags: [], gaps: [], uncached: 0 }
   }
 }
 
@@ -854,14 +860,25 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
     (if xlsxRefsAllFound(acc.refs, acc.texts) then Stop(acc) else Continue(acc))
   else {
     let rowNum = xlsxRowNumber(rowNode);
-    let cells = xlsxBuildRowAt(rowNode, rowNum, acc.ss, acc.styles, acc.merges);
+    let built = xlsxBuildRowAt(rowNode, rowNum, acc.ss, acc.styles, acc.merges);
+    -- Formulas are laid onto the built row afterwards, and only for a row
+    -- that has one: one descendant search per row, nothing per cell, so a
+    -- sheet of plain values runs exactly the code it ran before formulas.
+    let fx = match findFirst(rowNode, "f") {
+      Some(_) => xlsxRowFormulas(findAll(rowNode, "c"), rowNum, acc.shared, acc.uncached, []),
+      None => { shared: acc.shared, uncached: acc.uncached, cols: [] }
+    };
+    let cells = match fx.cols {
+      [] => built,
+      cols => foldl(\cs cf. xlsxApplyFormula(cs, cf, acc.merges, rowNum), built, reverse(cols))
+    };
     let texts = if listLength(acc.refs) > 0
       then xlsxCollectRefTexts(findAll(rowNode, "c"), acc.ss, acc.refs, acc.texts)
       else acc.texts;
     let flags = if acc.flagged
       then xlsxCollectFlags(findAll(rowNode, "c"), acc.styles, acc.flags)
       else acc.flags;
-    let acc2 = { acc | texts: texts, flags: flags };
+    let acc2 = { acc | texts: texts, flags: flags, shared: fx.shared, uncached: fx.uncached };
     let acc3 = if xlsxRowHasCells(rowNode) then xlsxPlaceRow(acc2, cells, rowNum) else acc2;
     if acc3.count >= 5000 && xlsxRefsAllFound(acc3.refs, acc3.texts)
     then Stop(acc3)
@@ -1007,7 +1024,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
     -- carry no colour on this path.
     let foldResult = parseFoldStep(sanitizeXml(xml), "row",
       { rows: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
-        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [] },
+        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [], shared: emptyMap(), uncached: 0 },
       xlsxFoldRowStep);
     let parsedRows = match foldResult {
       Ok(acc2) => reverse(acc2.rows),
@@ -1157,6 +1174,213 @@ pure func getErrorValue(c: XmlNode) -> string =
 -- Get numeric value
 pure func getNumericValue(c: XmlNode) -> string =
   getOrElse(optMap(getText, findFirst(c, "v")), "")
+
+-- === Formulas (ECMA-376 §18.3.1.40 f, §18.17) ============================
+--
+-- A formula cell is <c r="D2"><f>B2-C2</f><v>20000</v></c>: <f> holds the
+-- formula, <v> the result the application cached when it last saved, typed by
+-- t= like any other cell (t="str" string, "b" boolean, "e" error). The cell's
+-- text is that cached value; the formula rides alongside in TableCell.formula.
+--
+-- A file written by a library that does not calculate (openpyxl, most
+-- generators) saves <v></v> or no <v> at all: there is no value to report, so
+-- the cell carries only its formula and the sheet gets a warning. A formula
+-- engine is out of scope; the numbers are never computed here.
+--
+-- Shared formulas (§18.3.1.40 t="shared"): the master cell writes the text
+-- with si= and ref=, and every other cell of the range writes only
+-- <f t="shared" si="N"/>. A dependent's formula is the master's with its
+-- relative references moved by the dependent's offset from the master, which
+-- is what Excel shows in that cell. Array formulas (t="array") write their
+-- text on the top-left cell, which reports it; the other cells of the array
+-- hold only values.
+type XlsxSharedF = { text: string, row: int, col: int }
+
+-- A shared-formula dependent (<f t="shared" si="N"/>, no text): the
+-- master's formula moved by this cell's offset from the master. "" for an
+-- unknown si or any other empty <f> (t="dataTable").
+pure func xlsxSharedFormula(f: XmlNode, row: int, col: int, shared: Map[int, XlsxSharedF]) -> string =
+  if getOrElse(getAttr(f, "t"), "") != "shared" then ""
+  else match optFlatMap(stringToInt, getAttr(f, "si")) {
+    Some(si) => match mapLookup(shared, si) {
+      Some(m) => xlsxShiftFormula(m.text, row - m.row, col - m.col),
+      None => ""
+    },
+    None => ""
+  }
+
+-- One pass over a row that has a formula: record shared-formula masters (a
+-- dependent can sit in the same row as its master, after it), collect each
+-- formula cell's (column, formula) — reversed — and count the ones saved
+-- with no cached value. A formula cell is placed by its r= (Excel and every
+-- generator write it); one without r= keeps its value but not its formula.
+pure func xlsxRowFormulas(cells: [XmlNode], rowNum: int, shared: Map[int, XlsxSharedF], uncached: int,
+                          cols: [(int, string)]) -> { shared: Map[int, XlsxSharedF], uncached: int, cols: [(int, string)] } =
+  match cells {
+    [] => { shared: shared, uncached: uncached, cols: cols },
+    c :: rest => match findFirst(c, "f") {
+      None => xlsxRowFormulas(rest, rowNum, shared, uncached, cols),
+      Some(f) => {
+        let n = if xlsxHasCachedValue(c) then uncached else uncached + 1;
+        match getAttr(c, "r") {
+          None => xlsxRowFormulas(rest, rowNum, shared, n, cols),
+          Some(r) => {
+            let col = xlsxRowRefCol(r, rowNum);
+            let text = getText(f);
+            if length(text) > 0 then {
+              let shared2 = if getOrElse(getAttr(f, "t"), "") == "shared"
+                then match optFlatMap(stringToInt, getAttr(f, "si")) {
+                  Some(si) => mapInsert(shared, si, { text: text, row: rowNum, col: col }),
+                  None => shared
+                }
+                else shared;
+              xlsxRowFormulas(rest, rowNum, shared2, n, (col, text) :: cols)
+            } else {
+              let formula = xlsxSharedFormula(f, rowNum, col, shared);
+              xlsxRowFormulas(rest, rowNum, shared, n, if length(formula) > 0 then (col, formula) :: cols else cols)
+            }
+          }
+        }
+      }
+    }
+  }
+
+-- Lay one (column, formula) onto a built row; the row index is the column
+-- (xlsxBuildRowWithMerges fills every gap). A formula cell with no cached
+-- value and nothing after it was trimmed as blank, so a column past the end
+-- is padded back out to. take/drop keep this off the per-cell path.
+pure func xlsxApplyFormula(cells: [TableCell], cf: (int, string), merges: [XlsxMerge], rowNum: int) -> [TableCell] =
+  match cf {
+    (col, f) => {
+      let n = listLength(cells);
+      if col < n then match nth(cells, col) {
+        Some(c) => concat(take(col, cells), withCellFormula(c, f) :: drop(col + 1, cells)),
+        None => cells
+      }
+      else concat(cells, concat(xlsxFillGap(merges, rowNum, n, col), [withCellFormula(simpleCell(""), f)]))
+    }
+  }
+
+-- A cached value is a non-empty <v>, or an empty one on a string-typed cell
+-- (a formula whose result is the empty string). openpyxl's <v></v> on an
+-- untyped cell is not a value: "" is not a number.
+pure func xlsxHasCachedValue(c: XmlNode) -> bool =
+  match findFirst(c, "v") {
+    None => false,
+    Some(v) => length(getText(v)) > 0 || getCellType(c) == "str"
+  }
+
+pure func xlsxUncachedWarning(sheet: string, n: int) -> [string] =
+  if n == 0 then []
+  else ["Sheet \"${sheet}\": ${show(n)} formula cell(s) have no cached value (the file was saved without calculating them); their formula is reported instead of a value"]
+
+-- Move every relative A1 reference in a formula by (dr rows, dc columns), as
+-- Excel does when a shared formula is filled across a range. $-anchored parts
+-- stay put; string literals ("…") and quoted sheet names ('…') are copied
+-- untouched. A reference moved off the sheet becomes #REF!, as in Excel.
+-- Whole-row/column ranges (A:A, 1:1) and R1C1 are not moved.
+export pure func xlsxShiftFormula(f: string, dr: int, dc: int) -> string
+  tests [
+    (("B2-C2", 1, 0), "B3-C3"),
+    (("SUM(B2:B3)", 0, 1), "SUM(C2:C3)"),
+    (("$B$2*C2", 2, 2), "$B$2*E4"),
+    (("B$2+$C2", 3, 1), "C$2+$C5"),
+    (("Sheet2!A1&\"A1\"", 1, 0), "Sheet2!A2&\"A1\""),
+    (("'Q1 Data'!B2*LOG10(A1)", 1, 0), "'Q1 Data'!B3*LOG10(A2)"),
+    (("A1-1", -1, 0), "#REF!-1"),
+    (("XFD1+Z9", 0, 0), "XFD1+Z9")
+  ]
+{
+  if dr == 0 && dc == 0 then f
+  else join("", xlsxShiftChars(chars(f), dr, dc, ""))
+}
+
+pure func xlsxShiftChars(cs: [string], dr: int, dc: int, prev: string) -> [string] =
+  match cs {
+    [] => [],
+    c :: rest =>
+      if c == "\"" || c == "'" then {
+        let q = xlsxSpanQuoted(rest, c, [c]);
+        concat(reverse(q.taken), xlsxShiftChars(q.rest, dr, dc, c))
+      }
+      else if (c == "$" || xlsxIsColLetter(c)) && xlsxIsRefBoundary(prev) then
+        match xlsxMatchRef(cs) {
+          Some(r) => xlsxMovedRef(r, dr, dc) :: xlsxShiftChars(r.rest, dr, dc, "1"),
+          None => c :: xlsxShiftChars(rest, dr, dc, c)
+        }
+      else c :: xlsxShiftChars(rest, dr, dc, c)
+  }
+
+-- Characters up to and including the closing quote (reversed in `taken`).
+pure func xlsxSpanQuoted(cs: [string], q: string, taken: [string]) -> { taken: [string], rest: [string] } =
+  match cs {
+    [] => { taken: taken, rest: [] },
+    c :: rest => if c == q then { taken: c :: taken, rest: rest } else xlsxSpanQuoted(rest, q, c :: taken)
+  }
+
+-- A reference starts only after an operator, separator or "!": never inside
+-- an identifier (SUMX2, a defined name) or a number.
+pure func xlsxIsRefBoundary(prev: string) -> bool =
+  prev == "" || (xlsxIsColLetter(prev) == false && xlsxIsDigit(prev) == false
+                 && prev != "_" && prev != "." && find("abcdefghijklmnopqrstuvwxyz", prev) < 0)
+
+pure func xlsxIsDigit(c: string) -> bool =
+  length(c) == 1 && find("0123456789", c) >= 0
+
+type XlsxRef = { colAbs: bool, col: int, rowAbs: bool, row: int, rest: [string] }
+
+-- [$]LETTERS[$]DIGITS, 1-3 letters within XFD, row 1..1048576, and not
+-- followed by anything that would make it a name or a function (LOG10( ).
+pure func xlsxMatchRef(cs: [string]) -> Option[XlsxRef] {
+  let colAbs = match cs { c :: _ => c == "$", [] => false };
+  let cs1 = if colAbs then xlsxTail(cs) else cs;
+  let letters = xlsxTakeWhile(xlsxIsColLetter, cs1, []);
+  let cs2 = xlsxDrop(cs1, listLength(letters));
+  let rowAbs = match cs2 { c :: _ => c == "$", [] => false };
+  let cs3 = if rowAbs then xlsxTail(cs2) else cs2;
+  let digits = xlsxTakeWhile(xlsxIsDigit, cs3, []);
+  let cs4 = xlsxDrop(cs3, listLength(digits));
+  let nextOk = match cs4 {
+    [] => true,
+    n :: _ => xlsxIsColLetter(n) == false && xlsxIsDigit(n) == false && n != "(" && n != "_"
+              && n != "." && n != "!" && find("abcdefghijklmnopqrstuvwxyz", n) < 0
+  };
+  let nl = listLength(letters);
+  let col = xlsxColToNumber(join("", letters), 0, 0);
+  let row = getOrElse(stringToInt(join("", digits)), 0);
+  if nl >= 1 && nl <= 3 && listLength(digits) >= 1 && nextOk && col <= 16384 && row >= 1 && row <= 1048576
+  then Some({ colAbs: colAbs, col: col, rowAbs: rowAbs, row: row, rest: cs4 })
+  else None
+}
+
+pure func xlsxMovedRef(r: XlsxRef, dr: int, dc: int) -> string {
+  let col = if r.colAbs then r.col else r.col + dc;
+  let row = if r.rowAbs then r.row else r.row + dr;
+  if col < 1 || col > 16384 || row < 1 || row > 1048576 then "#REF!"
+  else "${if r.colAbs then "$" else ""}${xlsxColLetters(col)}${if r.rowAbs then "$" else ""}${intToStr(row)}"
+}
+
+-- 1-based column number to letters: 1 -> "A", 27 -> "AA", 16384 -> "XFD".
+pure func xlsxColLetters(n: int) -> string
+  tests [(1, "A"), (26, "Z"), (27, "AA"), (702, "ZZ"), (703, "AAA"), (16384, "XFD")]
+{
+  if n <= 0 then ""
+  else {
+    let m = (n - 1) % 26;
+    "${xlsxColLetters((n - 1) / 26)}${substring("ABCDEFGHIJKLMNOPQRSTUVWXYZ", m, m + 1)}"
+  }
+}
+
+pure func xlsxTail(xs: [string]) -> [string] = match xs { [] => [], _ :: t => t }
+
+pure func xlsxDrop(xs: [string], n: int) -> [string] =
+  if n <= 0 then xs else xlsxDrop(xlsxTail(xs), n - 1)
+
+pure func xlsxTakeWhile(p: string -> bool, xs: [string], acc: [string]) -> [string] =
+  match xs {
+    [] => reverse(acc),
+    x :: rest => if p(x) then xlsxTakeWhile(p, rest, x :: acc) else reverse(acc)
+  }
 
 -- Extract metadata from core.xml
 pure func extractXlsxMeta(root: XmlNode) -> DocMetadata {

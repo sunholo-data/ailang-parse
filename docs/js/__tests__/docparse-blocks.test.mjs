@@ -77,6 +77,9 @@ test('cellText handles all the shapes parsers actually emit', () => {
   assert.equal(DPB.cellText(null), '');
   assert.equal(DPB.cellText(undefined), '');
   assert.equal(DPB.cellText({}), '');
+  // XLSX formula: the cached value wins; without one the formula shows.
+  assert.equal(DPB.cellText({ text: '20', formula: 'B2*C2' }), '20');
+  assert.equal(DPB.cellText({ text: '', formula: 'SUM(B2:B3)' }), '=SUM(B2:B3)');
 });
 
 // ── flatten ─────────────────────────────────────────────────────────────

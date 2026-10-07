@@ -254,6 +254,14 @@ def create_xlsx_formulas():
 
     path = CHALLENGE_DIR / "challenge_formulas.xlsx"
     wb.save(str(path))
+    # openpyxl cannot calculate, so it writes <v></v> on every formula cell;
+    # store the values Excel would cache (the sample promises them).
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "create_formula_fixtures", Path(__file__).parent.parent / "create_formula_fixtures.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.store_challenge_cache()
 
     return {
         "file": "challenge/challenge_formulas.xlsx",

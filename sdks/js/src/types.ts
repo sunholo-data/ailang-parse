@@ -95,6 +95,8 @@ export interface Cell {
   fill?: string;
   /** Cell-level font colour, "#rrggbb" lowercase; absent when none was specified. */
   color?: string;
+  /** Spreadsheet formula without the leading "=" ("B2-C2"); absent when the cell has none. `text` stays the cached value. */
+  formula?: string;
 }
 
 // ── Block (discriminated union via type field) ──
