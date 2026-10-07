@@ -1,10 +1,11 @@
 module docparse/services/odf_runs
 
-import std/string (length, concat as strConcat)
+import std/string (length, substring, concat as strConcat)
 import std/list (foldl, map, filter, flatMap)
 import std/map (fromList as mapFromList, values as mapValues)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, ListBlock, SectionBlock)
 import docparse/services/odf_text (odfEncodeText)
+import docparse/services/colour (isCanonicalHex)
 
 -- Inline run styling for ODF, shared by the ODT and ODP generators.
 --
@@ -33,13 +34,17 @@ pure func odfRunStyleName(r: InlineRun) -> string {
   let v = if r.vertAlign == "superscript" then "p"
     else if r.vertAlign == "subscript" then "q"
     else "";
-  "AR${b}${i}${u}${s}${c}${v}"
+  -- Colours are canonical "#rrggbb", so the hex digits are safe in a name.
+  let k = if isCanonicalHex(r.color) then "k${substring(r.color, 1, 7)}" else "";
+  let h = if isCanonicalHex(r.highlight) then "h${substring(r.highlight, 1, 7)}" else "";
+  "AR${b}${i}${u}${s}${c}${v}${k}${h}"
 }
 
 -- A run with no formatting needs no span at all, so it also needs no style.
 export pure func odfRunIsPlain(r: InlineRun) -> bool =
   r.bold == false && r.italic == false && r.underline == false &&
-  r.strike == false && r.code == false && length(r.vertAlign) == 0
+  r.strike == false && r.code == false && length(r.vertAlign) == 0 &&
+  length(r.color) == 0 && length(r.highlight) == 0
 
 pure func odfRunStyleDef(r: InlineRun) -> string {
   let bold = if r.bold then " fo:font-weight=\"bold\"" else "";
@@ -56,7 +61,9 @@ pure func odfRunStyleDef(r: InlineRun) -> string {
   let vert = if r.vertAlign == "superscript" then " style:text-position=\"super 58%\""
     else if r.vertAlign == "subscript" then " style:text-position=\"sub 58%\""
     else "";
-  "<style:style style:name=\"${odfRunStyleName(r)}\" style:family=\"text\"><style:text-properties${bold}${italic}${under}${strike}${code}${vert}/></style:style>"
+  let color = if isCanonicalHex(r.color) then " fo:color=\"${r.color}\"" else "";
+  let bg = if isCanonicalHex(r.highlight) then " fo:background-color=\"${r.highlight}\"" else "";
+  "<style:style style:name=\"${odfRunStyleName(r)}\" style:family=\"text\"><style:text-properties${bold}${italic}${under}${strike}${code}${vert}${color}${bg}/></style:style>"
 }
 
 -- One <style:style> per distinct formatting combination used anywhere in the

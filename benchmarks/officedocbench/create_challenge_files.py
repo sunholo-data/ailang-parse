@@ -17,8 +17,79 @@ CHALLENGE_DIR = Path(__file__).parent.parent.parent / "data" / "test_files" / "c
 GT_DIR = Path(__file__).parent / "ground_truth"
 
 
+FOOTNOTE_TEXT = "This is the first footnote with additional detail."
+ENDNOTE_TEXT = "This endnote provides a reference citation."
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _notes_part(kind: str, text: str) -> bytes:
+    """word/footnotes.xml or word/endnotes.xml: Word's two separator entries
+    (ids -1 and 0) plus one real note, id 1, carrying `text`."""
+    tag = kind  # "footnote" | "endnote"
+    ref = "w:footnoteRef" if kind == "footnote" else "w:endnoteRef"
+    style = "FootnoteText" if kind == "footnote" else "EndnoteText"
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<w:{tag}s xmlns:w="{_W_NS}">'
+        f'<w:{tag} w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:{tag}>'
+        f'<w:{tag} w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:{tag}>'
+        f'<w:{tag} w:id="1"><w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr>'
+        f'<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><{ref}/></w:r>'
+        f'<w:r><w:t xml:space="preserve"> {text}</w:t></w:r></w:p></w:{tag}>'
+        f'</w:{tag}s>'
+    ).encode("utf-8")
+
+
+def _add_note_parts(path: Path) -> None:
+    """python-docx cannot write notes, so add the footnotes and endnotes parts
+    to the saved package by hand: the part, its relationship from
+    document.xml, and its content-type override. Without the parts a
+    w:footnoteReference points at nothing — which is what this fixture was
+    until 2026-10 (the reference was there, the note text never was)."""
+    import zipfile
+
+    with zipfile.ZipFile(path) as zin:
+        items = [(i, zin.read(i.filename)) for i in zin.infolist()]
+    rels_name = "word/_rels/document.xml.rels"
+    out = []
+    for info, data in items:
+        if info.filename == rels_name:
+            extra = (
+                '<Relationship Id="rIdFootnotes" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" '
+                'Target="footnotes.xml"/>'
+                '<Relationship Id="rIdEndnotes" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" '
+                'Target="endnotes.xml"/>'
+            )
+            data = data.replace(b"</Relationships>", extra.encode() + b"</Relationships>")
+        elif info.filename == "[Content_Types].xml":
+            extra = (
+                '<Override PartName="/word/footnotes.xml" '
+                'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>'
+                '<Override PartName="/word/endnotes.xml" '
+                'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/>'
+            )
+            data = data.replace(b"</Types>", extra.encode() + b"</Types>")
+        out.append((info, data))
+    out.append((zipfile.ZipInfo("word/footnotes.xml", date_time=(2026, 1, 1, 0, 0, 0)),
+                _notes_part("footnote", FOOTNOTE_TEXT)))
+    out.append((zipfile.ZipInfo("word/endnotes.xml", date_time=(2026, 1, 1, 0, 0, 0)),
+                _notes_part("endnote", ENDNOTE_TEXT)))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info, data in out:
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(info, data)
+
+
 def create_docx_footnotes():
-    """DOCX with real footnote and endnote content (not just separators)."""
+    """DOCX with real footnote and endnote content (not just separators).
+
+    One footnote (w:id 1) referenced from the first paragraph and one endnote
+    (w:id 1) from the second — the same id on purpose, so a parser has to keep
+    the two note spaces apart. Content is invented.
+    """
     try:
         from docx import Document
         from docx.oxml.ns import qn
@@ -27,34 +98,37 @@ def create_docx_footnotes():
         print("  SKIP challenge_footnotes.docx (python-docx not installed)")
         return None
 
+    def note_ref(paragraph, kind):
+        r = OxmlElement("w:r")
+        rpr = OxmlElement("w:rPr")
+        style = OxmlElement("w:vertAlign")
+        style.set(qn("w:val"), "superscript")
+        rpr.append(style)
+        r.append(rpr)
+        ref = OxmlElement(f"w:{kind}Reference")
+        ref.set(qn("w:id"), "1")
+        r.append(ref)
+        paragraph._p.append(r)
+
     doc = Document()
+    doc.core_properties.author = "python-docx"
     doc.add_heading("Document with Footnotes", level=1)
     p = doc.add_paragraph("This paragraph has a footnote")
+    note_ref(p, "footnote")
 
-    # Add footnote reference
-    run = p.runs[0] if p.runs else p.add_run("")
-    footnote_ref = OxmlElement("w:r")
-    rpr = OxmlElement("w:rPr")
-    style = OxmlElement("w:rStyle")
-    style.set(qn("w:val"), "FootnoteReference")
-    rpr.append(style)
-    footnote_ref.append(rpr)
-    sup = OxmlElement("w:footnoteReference")
-    sup.set(qn("w:id"), "1")
-    footnote_ref.append(sup)
-    run._element.addnext(footnote_ref)
-
-    doc.add_paragraph("Second paragraph with an endnote reference.")
+    p2 = doc.add_paragraph("Second paragraph with an endnote reference.")
+    note_ref(p2, "endnote")
     doc.add_heading("Conclusion", level=2)
     doc.add_paragraph("Final thoughts on the topic.")
 
     path = CHALLENGE_DIR / "challenge_footnotes.docx"
     doc.save(str(path))
+    _add_note_parts(path)
 
     return {
         "file": "challenge/challenge_footnotes.docx",
         "format": "docx",
-        "source": "generated (python-docx)",
+        "source": "generated (python-docx + hand-built notes parts)",
         "verified": True,
         "features": {
             "text": {"paragraph_count": 3, "total_words": 20, "key_phrases": ["Document with Footnotes"]},
@@ -63,7 +137,8 @@ def create_docx_footnotes():
             "track_changes": {"present": False, "count": 0, "types": {}, "authors": []},
             "comments": {"present": False, "count": 0, "authors": [], "texts": []},
             "headers_footers": {"present": False, "header_count": 0, "footer_count": 0},
-            "footnotes_endnotes": {"present": True, "count": 1},
+            "footnotes_endnotes": {"present": True, "count": 2,
+                                   "texts": [FOOTNOTE_TEXT, ENDNOTE_TEXT]},
             "text_boxes": {"present": False, "count": 0},
             "images": {"present": False, "count": 0},
             "lists": {"present": False, "count": 0},
@@ -343,6 +418,13 @@ def create_html_complex_structure():
 
 
 def main():
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("only", nargs="*", help="build just these files (e.g. challenge_footnotes.docx)")
+    ap.add_argument("--no-gt", action="store_true",
+                    help="do not (over)write ground_truth/*.json — keep the enriched ones")
+    args = ap.parse_args()
     CHALLENGE_DIR.mkdir(parents=True, exist_ok=True)
 
     generators = [
@@ -355,9 +437,15 @@ def main():
 
     created = 0
     for name, gen_fn in generators:
+        if args.only and name not in args.only:
+            continue
         print(f"  Creating {name}...", end=" ")
         gt = gen_fn()
         if gt is None:
+            continue
+        if args.no_gt:
+            created += 1
+            print("OK (ground truth left as is)")
             continue
 
         # Save ground truth

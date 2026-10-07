@@ -188,6 +188,58 @@ def check_run_formatting(output: dict) -> dict:
     }
 
 
+def check_run_colour(output: dict) -> dict:
+    """Does the parser keep run colour?
+
+    File: challenge_formatting.docx
+    Expected: PASSED/FAILED/WARNING runs carry their w:color as "#rrggbb".
+    Gap: w:color dropped while bold/italic were kept (2026-10 head-to-head).
+    Spec: §17.3.2.6 (color)
+    """
+    want = {"PASSED": "#008000", "FAILED": "#ff0000", "WARNING": "#ffa500"}
+    got = {r.get("text"): r.get("color") for b in flatten_blocks(get_blocks(output))
+           for r in b.get("runs", [])}
+    hits = sum(1 for t, c in want.items() if got.get(t) == c)
+    return {
+        "name": "Run Colour",
+        "spec_ref": "§17.3.2.6",
+        "file": "challenge_formatting.docx",
+        "score": hits / len(want),
+        "detected": hits,
+        "total": len(want),
+        "detail": f"{hits}/{len(want)} coloured status runs carry their colour",
+    }
+
+
+def check_footnote_text(output: dict) -> dict:
+    """Does the parser return footnote/endnote TEXT, linked to the reference?
+
+    File: challenge_footnotes.docx
+    Expected: SectionBlock(kind footnote/endnote, name = w:id) holding the note
+    text, and a body run whose href is "#footnote-<id>" / "#endnote-<id>".
+    Gap: notes parts walked as if they were bodies, so every note was dropped.
+    Spec: §17.11 (Footnotes and Endnotes)
+    """
+    blocks = get_blocks(output)
+    notes = {(b.get("kind"), b.get("name")): " ".join(x.get("text", "") for x in b.get("blocks", []))
+             for b in blocks if b.get("type") == "section" and b.get("kind") in ("footnote", "endnote")}
+    hrefs = {r.get("href") for b in flatten_blocks(blocks) for r in b.get("runs", [])}
+    want = [
+        (("footnote", "1"), "This is the first footnote with additional detail.", "#footnote-1"),
+        (("endnote", "1"), "This endnote provides a reference citation.", "#endnote-1"),
+    ]
+    hits = sum(1 for key, text, href in want if notes.get(key) == text and href in hrefs)
+    return {
+        "name": "DOCX Footnote/Endnote Text",
+        "spec_ref": "§17.11",
+        "file": "challenge_footnotes.docx",
+        "score": hits / len(want),
+        "detected": hits,
+        "total": len(want),
+        "detail": f"{hits}/{len(want)} notes returned with their text and linked from the body",
+    }
+
+
 def check_field_text(output: dict) -> dict:
     """Does the parser extract display text from field codes?
 
@@ -1103,7 +1155,7 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         # Round 1 (all at 100%)
         "challenge_styles.docx": [check_custom_heading_styles],
         "challenge_numbering.docx": [check_list_detection],
-        "challenge_formatting.docx": [check_run_formatting],
+        "challenge_formatting.docx": [check_run_formatting, check_run_colour],
         "challenge_fields.docx": [check_field_text],
         "challenge_hyperlinks.docx": [check_hyperlink_urls],
         "challenge_equations.docx": [check_equation_text],
@@ -1128,6 +1180,8 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "challenge_pdf_highlights_objstm.pdf": [check_pdf_objstm_annotations],
         "challenge_pdf_attachment.eml": [check_eml_pdf_attachments],
         "challenge_bookmarks.docx": [check_docx_bookmarks],
+        # Round 4 (2026-10 head-to-head)
+        "challenge_footnotes.docx": [check_footnote_text],
     }
 
     results = []
