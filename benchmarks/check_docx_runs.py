@@ -37,8 +37,11 @@ def check(cond, msg):
         FAILURES.append(msg)
 
 
-def run(args):
-    subprocess.run(["./bin/docparse", *args], check=True, capture_output=True)
+BIN = str(Path("bin/docparse").resolve())
+
+
+def run(args, cwd=None):
+    subprocess.run([BIN, *args], check=True, capture_output=True, cwd=cwd)
 
 
 def parse(fixture):
@@ -52,7 +55,9 @@ def parse(fixture):
 def convert(fixture, ext):
     with tempfile.TemporaryDirectory() as out:
         target = Path(out) / f"converted.{ext}"
-        run([str(fixture), "--convert", str(target)])
+        # --convert also writes the source's parse beside the caller; keep it
+        # in the temp dir rather than the repo root.
+        run([str(fixture.resolve()), "--convert", str(target)], cwd=out)
         if ext == "html":
             return target.read_text()
         doc, _ = parse(target)
