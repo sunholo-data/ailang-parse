@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.50.1](https://github.com/sunholo-data/ailang-parse/compare/v0.50.0...v0.50.1) — 2026-10-13
+
 ### Fixed — a Google Docs comment on a table row was quoted against the next row
 
 - Google Docs wraps `w:commentRangeStart` in a run-level content control (`<w:sdt>` tagged `goog_rdk_N`) and puts `w:commentRangeEnd` and the `w:commentReference` at the start of the **next** row's first cell. The anchor walk only recognised a range start as a direct paragraph child, so the range never opened. The orphaned end was ignored, and the reference became a point anchor quoting the paragraph it sits in: a comment on row 3 printed as `> 4`. Nothing flagged it, and the comment looked confidently anchored. Reported from returned client worksheets, where one misreading reached a synthesis before an audit caught it.
