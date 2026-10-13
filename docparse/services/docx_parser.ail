@@ -874,13 +874,11 @@ func extractImages(filepath: string, entries: [string]) -> [Block] ! {FS} =
 
 -- A range opened but not yet closed. `parts` holds run text in REVERSE order
 -- (prepend during the walk, reverse at close — never concat onto the tail
--- inside a fold). openText is the text of the paragraph the range OPENED in,
--- kept for the empty-range fallback in docxCloseRange.
+-- inside a fold).
 type DocxOpenRange = {
   id: string,
   parts: [string],
-  startIndex: int,
-  openText: string
+  startIndex: int
 }
 
 -- A resolved anchor: the exact text a comment points at.
@@ -897,15 +895,11 @@ type DocxAnchor = {
 }
 
 -- Body walk state. blocks and anchors accumulate REVERSED.
--- prevText holds the last non-empty paragraph's text seen by the scan, for
--- docxCloseRange's empty-range fallback ("the previous row" for a Google
--- Docs table comment).
 type DocxWalk = {
   blocks: [Block],
   anchors: [DocxAnchor],
   open: [DocxOpenRange],
-  count: int,
-  prevText: string
+  count: int
 }
 
 -- Walk the body once, producing content blocks and comment anchors together.
@@ -923,13 +917,13 @@ export pure func docxWalkBodyRootFull(root: XmlNode, rels: Map[string, string], 
     Some(body) => {
       let st = docxWalkNodes(getChildren(body), docxEmptyWalk(), rels, nums);
       { blocks: reverse(st.blocks), anchors: reverse(st.anchors),
-        open: st.open, count: st.count, prevText: st.prevText }
+        open: st.open, count: st.count }
     },
     None => docxEmptyWalk()
   }
 
 pure func docxEmptyWalk() -> DocxWalk =
-  { blocks: [], anchors: [], open: [], count: 0, prevText: "" }
+  { blocks: [], anchors: [], open: [], count: 0 }
 
 pure func docxWalkNodes(nodes: [XmlNode], st: DocxWalk, rels: Map[string, string], nums: Map[string, string]) -> DocxWalk =
   match nodes {
@@ -957,8 +951,7 @@ pure func docxWalkNode(node: XmlNode, st: DocxWalk, rels: Map[string, string], n
     { blocks: docxPrependAll(emitted, scanned.blocks),
       anchors: scanned.anchors,
       open: scanned.open,
-      count: scanned.count + listLength(emitted),
-      prevText: scanned.prevText }
+      count: scanned.count + listLength(emitted) }
   }
 }
 
@@ -981,14 +974,8 @@ pure func docxScanParagraph(p: XmlNode, st: DocxWalk) -> DocxWalk {
   -- Anchor text is matched against comment ranges, so it deliberately stays
   -- rels-free: appending a URL here would shift every anchor that spans a link.
   let paraText = extractParagraphText(p, emptyMap());
-  let scanned = docxEndParagraph(docxScanChildren(getChildren(p), paraText, st));
-  -- Remember the last non-empty paragraph for docxCloseRange's empty-range
-  -- fallback: for a Google Docs table comment whose range collected nothing,
-  -- that paragraph is the commented row (or its nearest text).
-  let trimmed = trim(paraText);
-  if length(trimmed) == 0 then scanned
-  else { blocks: scanned.blocks, anchors: scanned.anchors,
-         open: scanned.open, count: scanned.count, prevText: trimmed }
+  let scanned = docxScanChildren(getChildren(p), paraText, st);
+  docxEndParagraph(scanned)
 }
 
 pure func docxScanChildren(nodes: [XmlNode], paraText: string, st: DocxWalk) -> DocxWalk =
@@ -1013,27 +1000,12 @@ pure func docxScanChild(node: XmlNode, paraText: string, st: DocxWalk) -> DocxWa
     }
   else if tag == "w:commentRangeStart" then
     match getAttr(node, "w:id") {
-      Some(id) => docxOpenRange(id, paraText, st),
+      Some(id) => docxOpenRange(id, st),
       None => st
     }
   else if tag == "w:commentRangeEnd" then
     match getAttr(node, "w:id") {
       Some(id) => docxCloseRange(id, st),
-      None => st
-    }
-  else if tag == "w:sdt" then
-    -- Google Docs wraps comment markers in a content control instead of
-    -- placing them directly in the paragraph: commentRangeStart sits inside
-    -- <w:sdt><w:sdtPr><w:tag w:val="goog_rdk_N"/></w:sdtPr><w:sdtContent> in
-    -- the COMMENTED table row, while commentRangeEnd and the commentReference
-    -- sit at the start of the first cell of the NEXT row. Scanning only the
-    -- paragraph's direct children missed the wrapped start marker, so the
-    -- range never opened, the close was ignored, and the reference degraded
-    -- to a point anchor on the next row — the comment quoted the row AFTER
-    -- the one commented on. Recurse into the content so markers and text are
-    -- seen in document order (nested sdts recurse the same way).
-    match findFirst(node, "w:sdtContent") {
-      Some(content) => docxScanChildren(getChildren(content), paraText, st),
       None => st
     }
   else {
@@ -1057,7 +1029,7 @@ pure func docxScanRefs(refs: [XmlNode], paraText: string, st: DocxWalk) -> DocxW
             let anchor = { id: id, text: trim(paraText), kind: "point",
                            startIndex: st.count, endIndex: st.count };
             { blocks: st.blocks, anchors: anchor :: st.anchors,
-              open: st.open, count: st.count, prevText: st.prevText }
+              open: st.open, count: st.count }
           },
         None => st
       };
@@ -1069,49 +1041,29 @@ pure func docxScanRefs(refs: [XmlNode], paraText: string, st: DocxWalk) -> DocxW
 pure func docxKnowsId(id: string, st: DocxWalk) -> bool =
   any(\r. r.id == id, st.open) || any(\a. a.id == id, st.anchors)
 
-pure func docxOpenRange(id: string, paraText: string, st: DocxWalk) -> DocxWalk =
+pure func docxOpenRange(id: string, st: DocxWalk) -> DocxWalk =
   { blocks: st.blocks, anchors: st.anchors, count: st.count,
-    prevText: st.prevText,
-    open: { id: id, parts: [], startIndex: st.count, openText: trim(paraText) } :: st.open }
+    open: { id: id, parts: [], startIndex: st.count } :: st.open }
 
 -- Close a range: reverse its collected fragments into the anchor text.
 -- A close with no matching open is ignored — it degrades to unanchored
 -- rather than anchoring to whatever text happens to be nearby.
--- A range that collected nothing (a zero-length selection, or Google Docs
--- pinning the range to a row with no intervening text) falls back to the
--- paragraph the range OPENED in — for a Google Docs table comment that is
--- the commented row. Never the closing paragraph: Google places the close at
--- the start of the NEXT row, so quoting it would read the comment against
--- the row after the one commented on. If both are empty the comment stays
--- unanchored rather than guessing.
 pure func docxCloseRange(id: string, st: DocxWalk) -> DocxWalk =
   match filter(\r. r.id == id, st.open) {
     [] => st,
     r :: _ => {
-      let collected = trim(join("", reverse(r.parts)));
-      -- Fallback chain for a range that collected nothing: the paragraph the
-      -- range OPENED in (for a Google Docs table comment, the commented row;
-      -- never the closing paragraph, which is the NEXT row), then the last
-      -- non-empty paragraph before it. Both empty -> the comment is left
-      -- unanchored rather than guessing.
-      let text = if length(collected) > 0 then collected
-                 else if length(r.openText) > 0 then r.openText
-                 else st.prevText;
-      let anchor = { id: id, text: text,
+      let anchor = { id: id, text: trim(join("", reverse(r.parts))),
                      kind: "range", startIndex: r.startIndex, endIndex: st.count };
       { blocks: st.blocks,
         anchors: anchor :: st.anchors,
         open: filter(\o. o.id != id, st.open),
-        count: st.count,
-        prevText: st.prevText }
+        count: st.count }
     }
   }
 
 pure func docxAppendOpen(text: string, st: DocxWalk) -> DocxWalk =
   { blocks: st.blocks, anchors: st.anchors, count: st.count,
-    prevText: st.prevText,
-    open: map(\r. { id: r.id, parts: text :: r.parts, startIndex: r.startIndex,
-                    openText: r.openText }, st.open) }
+    open: map(\r. { id: r.id, parts: text :: r.parts, startIndex: r.startIndex }, st.open) }
 
 -- A range still open at a paragraph break keeps collecting across it, so
 -- record the boundary rather than running the two paragraphs together.
@@ -1404,7 +1356,12 @@ pure func docxXmlAnchorSummary(xml: string) -> string
     ("<w:document xmlns:w=\"x\"><w:body><w:p><w:commentRangeStart w:id=\"1\"/><w:r><w:t>word style</w:t></w:r><w:commentRangeEnd w:id=\"1\"/><w:r><w:commentReference w:id=\"1\"/></w:r><w:r><w:t> after</w:t></w:r></w:p></w:body></w:document>",
      "1|range|word style"),
     ("<w:document xmlns:w=\"x\"><w:body><w:p><w:sdt><w:sdtContent><w:commentRangeStart w:id=\"2\"/></w:sdtContent></w:sdt><w:r><w:t>both wrapped</w:t></w:r><w:sdt><w:sdtContent><w:commentRangeEnd w:id=\"2\"/></w:sdtContent></w:sdt><w:r><w:commentReference w:id=\"2\"/></w:r></w:p></w:body></w:document>",
-     "2|range|both wrapped")
+     "2|range|both wrapped"),
+    -- A range that collects nothing keeps empty text, so docxPlaceComment
+    -- leaves the comment unanchored. It must not borrow the paragraph it opened
+    -- or closed in, nor the previous one: that is a guess presented as an anchor.
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>before</w:t></w:r></w:p><w:p><w:commentRangeStart w:id=\"3\"/><w:commentRangeEnd w:id=\"3\"/><w:r><w:commentReference w:id=\"3\"/></w:r><w:r><w:t>after</w:t></w:r></w:p></w:body></w:document>",
+     "3|range|")
   ]
 {
   match parseLenient(xml) {
@@ -1422,42 +1379,4 @@ pure func docxBlockPlainText(b: Block) -> string =
     ChangeBlock(c) => c.text,
     _ => ""
   }
-
--- === Test helper: comment anchors from raw document XML ====================
---
--- One "id:kind:text" line per resolved anchor in anchor order — the
--- multi-line string IS the assertion (the test harness compares against
--- scalar literals only), so anchor kind and anchor text are checked together.
-pure func docxXmlCommentAnchorLines(documentXml: string) -> string
-  tests [
-    -- Google Docs placement: commentRangeStart wrapped in a content control
-    -- (<w:sdt> with a goog_rdk tag) in the COMMENTED row, commentRangeEnd and
-    -- the commentReference at the start of the first cell of the NEXT row.
-    -- The quote must resolve from the range markers — row 3's text — not
-    -- from the reference's paragraph (the next row's first cell).
-    ("<w:document xmlns:w=\"x\"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>3</w:t></w:r></w:p></w:tc><w:tc><w:p><w:sdt><w:sdtPr><w:tag w:val=\"goog_rdk_1\"/></w:sdtPr><w:sdtContent><w:commentRangeStart w:id=\"0\"/></w:sdtContent></w:sdt><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>30</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r><w:r><w:t>4</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Dave</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>",
-     "0:range:Charlie\n30"),
-    -- Word placement of the same comment: both markers as direct paragraph
-    -- children inside row 3. Unchanged by the Google fix.
-    ("<w:document xmlns:w=\"x\"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>3</w:t></w:r><w:commentRangeStart w:id=\"0\"/></w:p></w:tc><w:tc><w:p><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>30</w:t></w:r><w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>",
-     "0:range:Charlie\n30"),
-    -- A range that collected nothing falls back to the paragraph it OPENED
-    -- in — never the closing paragraph, which is where a bare reference
-    -- would otherwise anchor.
-    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>before</w:t></w:r></w:p><w:p><w:commentRangeStart w:id=\"0\"/><w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r><w:r><w:t>after</w:t></w:r></w:p></w:body></w:document>",
-     "0:range:after"),
-    -- A range opening in an EMPTY paragraph (a Google Docs row pinned with
-    -- no text selection) falls back further, to the last non-empty paragraph
-    -- — the previous row's text, never the closing row's.
-    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>prev row</w:t></w:r></w:p><w:p><w:commentRangeStart w:id=\"0\"/></w:p><w:p><w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r></w:p></w:body></w:document>",
-     "0:range:prev row")
-  ]
-{
-  match parseLenient(documentXml) {
-    Ok(root) =>
-      join("\n", map(\a. "${a.id}:${a.kind}:${a.text}",
-                     docxWalkBodyRootFull(root, emptyMap(), emptyMap()).anchors)),
-    Err(_) => ""
-  }
-}
 
