@@ -754,6 +754,40 @@ def check_docx_comment_table(output: dict) -> dict:
     }
 
 
+def check_docx_comment_google_sdt(output: dict) -> dict:
+    """Is a Google Docs comment on a table row quoted against that row?
+
+    File: challenge_comment_google_sdt.docx
+    Expected: the comment on row 3 ("Charlie") anchors to row 3 as a range.
+    Gap: Google Docs wraps w:commentRangeStart in a run-level w:sdt
+    (goog_rdk_N) and puts commentRangeEnd + commentReference at the start of
+    the NEXT row's first cell. A walk that misses the sdt never opens the
+    range, so the reference becomes a point anchor quoting row 4 ("4") — a
+    confidently wrong row, which is worse than no anchor.
+    Spec: §17.13.1 (Comment Range), §17.5.2 (sdt)
+    """
+    comments = _collect_comment_blocks(output)
+    c = {x.get("id", ""): x for x in comments}.get("0", {})
+    text = c.get("anchorText", "")
+    checks = [
+        bool(c.get("anchored")),
+        c.get("anchorKind") == "range",
+        "Charlie" in text,
+        "4" not in text and "Delta" not in text,
+    ]
+    found = sum(checks)
+    total = len(checks)
+    return {
+        "name": "DOCX Google Docs Comment Anchors",
+        "spec_ref": "§17.13.1",
+        "file": "challenge_comment_google_sdt.docx",
+        "score": found / total,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} Google Docs comment anchor checks (row 3, not row 4)",
+    }
+
+
 def check_xlsx_threaded_comments(output: dict) -> dict:
     """Are modern Excel review threads read, and the legacy shim not double-counted?
 
@@ -1121,6 +1155,7 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "challenge_comment_ranges.docx": [check_docx_comment_ranges],
         "challenge_comment_orphans.docx": [check_docx_comment_orphans],
         "challenge_comment_table.docx": [check_docx_comment_table],
+        "challenge_comment_google_sdt.docx": [check_docx_comment_google_sdt],
         "challenge_threaded_comments.xlsx": [check_xlsx_threaded_comments],
         "challenge_pptx_modern_comments.pptx": [check_pptx_modern_comments],
         "poi_comment.pptx": [check_pptx_comments],

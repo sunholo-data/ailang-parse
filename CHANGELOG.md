@@ -11,6 +11,12 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed — a Google Docs comment on a table row was quoted against the next row
+
+- Google Docs wraps `w:commentRangeStart` in a run-level content control (`<w:sdt>` tagged `goog_rdk_N`) and puts `w:commentRangeEnd` and the `w:commentReference` at the start of the **next** row's first cell. The anchor walk only recognised a range start as a direct paragraph child, so the range never opened. The orphaned end was ignored, and the reference became a point anchor quoting the paragraph it sits in: a comment on row 3 printed as `> 4`. Nothing flagged it, and the comment looked confidently anchored. Reported from returned client worksheets, where one misreading reached a synthesis before an audit caught it.
+- `docxScanChild` now scans through a run-level `w:sdt` into its `w:sdtContent`, so start and end markers wrapped this way open and close ranges like Word's. The Google layout now quotes row 3 (`Charlie / 30`) as a `range` anchor, the same as the Word-built file.
+- Three inline tests (`docxXmlAnchorSummary`: Google layout, Word layout, both markers sdt-wrapped). The first and third fail without the fix. New gap fixture `challenge_comment_google_sdt.docx` with golden and `check_docx_comment_google_sdt`.
+
 ## [v0.50.0](https://github.com/sunholo-data/ailang-parse/compare/v0.49.0...v0.50.0) — 2026-10-06
 
 ### Fixed — EML image attachments were dropped, bytes and all
