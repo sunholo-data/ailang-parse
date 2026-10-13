@@ -606,10 +606,10 @@ pure func docxStyleSuffixLevel(sid: Option[string]) -> int =
 pure func docxTrailingDigits(s: string) -> string =
   if length(s) == 0 then ""
   else {
-    let last = substring(s, length(s) - 1, length(s));
-    if last == "0" || last == "1" || last == "2" || last == "3" || last == "4"
-       || last == "5" || last == "6" || last == "7" || last == "8" || last == "9"
-    then "${docxTrailingDigits(substring(s, 0, length(s) - 1))}${last}"
+    let lastCh = substring(s, length(s) - 1, length(s));
+    if lastCh == "0" || lastCh == "1" || lastCh == "2" || lastCh == "3" || lastCh == "4"
+       || lastCh == "5" || lastCh == "6" || lastCh == "7" || lastCh == "8" || lastCh == "9"
+    then "${docxTrailingDigits(substring(s, 0, length(s) - 1))}${lastCh}"
     else ""
   }
 
@@ -1354,9 +1354,19 @@ pure func docxScanChildren(nodes: [XmlNode], paraText: string, st: DocxWalk) -> 
 
 -- One paragraph child. Text is appended to EVERY currently-open range, which
 -- is what makes nested and overlapping ranges fall out for free.
+--
+-- A run-level w:sdt is scanned through rather than treated as one opaque run:
+-- Google Docs wraps commentRangeStart in a content control (goog_rdk_N), and
+-- missing it left the range unopened, so the reference became a point anchor
+-- on whatever paragraph held it — the next table row, in Google's layout.
 pure func docxScanChild(node: XmlNode, paraText: string, st: DocxWalk) -> DocxWalk {
   let tag = getTag(node);
-  if tag == "w:commentRangeStart" then
+  if tag == "w:sdt" then
+    match findFirst(node, "w:sdtContent") {
+      Some(content) => docxScanChildren(getChildren(content), paraText, st),
+      None => st
+    }
+  else if tag == "w:commentRangeStart" then
     match getAttr(node, "w:id") {
       Some(id) => docxOpenRange(id, st),
       None => st
@@ -1785,6 +1795,32 @@ pure func docxXmlBodyText(xml: string) -> string
           join("\n", map(docxBlockPlainText, processBodyChildren(getChildren(body), emptyMap(), emptyMap(), emptyMap()))),
         None => ""
       },
+    Err(_) => ""
+  }
+}
+
+-- Comment anchors of a body as "id|kind|text" lines, for inline tests. The
+-- first case is Google Docs' layout: commentRangeStart inside a run-level w:sdt
+-- on row 3, commentRangeEnd + commentReference at the start of row 4. It must
+-- resolve to row 3's text as a range, never a point anchor on row 4 ("4").
+pure func docxXmlAnchorSummary(xml: string) -> string
+  tests [
+    ("<w:document xmlns:w=\"x\"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>3</w:t></w:r></w:p></w:tc><w:tc><w:p><w:sdt><w:sdtPr><w:tag w:val=\"goog_rdk_1\"/></w:sdtPr><w:sdtContent><w:commentRangeStart w:id=\"0\"/></w:sdtContent></w:sdt><w:r><w:t>Charlie</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>30</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r><w:r><w:t>4</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>",
+     "0|range|Charlie\n30"),
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:commentRangeStart w:id=\"1\"/><w:r><w:t>word style</w:t></w:r><w:commentRangeEnd w:id=\"1\"/><w:r><w:commentReference w:id=\"1\"/></w:r><w:r><w:t> after</w:t></w:r></w:p></w:body></w:document>",
+     "1|range|word style"),
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:sdt><w:sdtContent><w:commentRangeStart w:id=\"2\"/></w:sdtContent></w:sdt><w:r><w:t>both wrapped</w:t></w:r><w:sdt><w:sdtContent><w:commentRangeEnd w:id=\"2\"/></w:sdtContent></w:sdt><w:r><w:commentReference w:id=\"2\"/></w:r></w:p></w:body></w:document>",
+     "2|range|both wrapped"),
+    -- A range that collects nothing keeps empty text, so docxPlaceComment
+    -- leaves the comment unanchored. It must not borrow the paragraph it opened
+    -- or closed in, nor the previous one: that is a guess presented as an anchor.
+    ("<w:document xmlns:w=\"x\"><w:body><w:p><w:r><w:t>before</w:t></w:r></w:p><w:p><w:commentRangeStart w:id=\"3\"/><w:commentRangeEnd w:id=\"3\"/><w:r><w:commentReference w:id=\"3\"/></w:r><w:r><w:t>after</w:t></w:r></w:p></w:body></w:document>",
+     "3|range|")
+  ]
+{
+  match parseLenient(xml) {
+    Ok(root) =>
+      join("\n", map(\a. "${a.id}|${a.kind}|${a.text}", docxWalkBodyRoot(root).anchors)),
     Err(_) => ""
   }
 }
