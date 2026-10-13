@@ -574,7 +574,8 @@ pure func xlsxDropBlankCells(cells: [XmlNode], ss: Map[int, string], styles: Map
     [] => [],
     c :: rest => {
       let cell = parseXlsxStyledCell(c, ss, styles);
-      let blank = length(cell.text) == 0 && length(cell.fill) == 0 && length(cell.color) == 0;
+      let blank = length(cell.text) == 0 && length(cell.fill) == 0 && length(cell.color) == 0
+                  && length(cell.formula) == 0;
       if blank && xlsxInAnyMerge(merges, xlsxCellRefCol(getOrElse(getAttr(c, "r"), "")), rowNum) == false
       then xlsxDropBlankCells(rest, ss, styles, merges, rowNum)
       else cells
@@ -792,9 +793,17 @@ func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, 
   let condFmt = xlsxConditionalFormats(filepath, entry);
   let cleanName = xlsxCleanSheetName(sheetName);
   { blocks: concat(blocks, wrapped),
-    warnings: concat(concat(xlsxCondFmtWarning(cleanName, condFmt), xlsxFlagWarnings(cleanName, streamed.flags)),
+    warnings: concat(concat(xlsxCondFmtWarning(cleanName, condFmt),
+                            concat(xlsxFlagWarnings(cleanName, streamed.flags),
+                                   xlsxNoValueWarning(cleanName, streamed.noValue))),
                      map(\g. xlsxGapWarning(cleanName, g), streamed.gaps)) }
 }
+
+-- A formula the workbook carries without a cached result: the cell keeps its
+-- formula, but no value can be shown because none was stored.
+pure func xlsxNoValueWarning(sheet: string, count: int) -> [string] =
+  if count == 0 then []
+  else ["Sheet \"${sheet}\": ${show(count)} formula cell(s) have no cached value; the formulas are kept but their results are not computed"]
 
 -- Fold-accumulator record for streaming one worksheet out of the ZIP.
 type XlsxStreamFold = {
@@ -814,7 +823,9 @@ type XlsxStreamFold = {
   -- Sheet row number of the last row placed, and the empty ranges too long
   -- to fill (see xlsxPlaceRow).
   lastRow: int,
-  gaps: [(int, int)]
+  gaps: [(int, int)],
+  -- Formula cells with no cached value: structure kept, results not computed
+  noValue: int
 }
 
 -- Stream one worksheet straight out of the ZIP archive: one streaming pass
@@ -822,17 +833,17 @@ type XlsxStreamFold = {
 -- <row>. Returns rows in document order plus the displayed text of any cell
 -- referenced by a comment. The sheet XML string is never materialised.
 func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], styles: Map[int, XlsxXfColour], refs: [string])
-    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string], gaps: [(int, int)] } ! {FS} {
+    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string], gaps: [(int, int)], noValue: int } ! {FS} {
   let merges = match scanFoldStep(filepath, entry, "mergeCell", { merges: [], count: 0 }, xlsxFoldMerge) {
     Ok(acc) => reverse(acc.merges),
     Err(_) => []
   };
   match scanFoldStep(filepath, entry, "row",
     { rows: [], count: 0, ss: ss, styles: styles, flagged: xlsxAnyFlagged(styles), flags: [],
-      merges: merges, refs: refs, texts: [], lastRow: 0, gaps: [] },
+      merges: merges, refs: refs, texts: [], lastRow: 0, gaps: [], noValue: 0 },
     xlsxFoldRowStep) {
-    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps) },
-    Err(_) => { rows: [], texts: [], flags: [], gaps: [] }
+    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps), noValue: acc.noValue },
+    Err(_) => { rows: [], texts: [], flags: [], gaps: [], noValue: 0 }
   }
 }
 
@@ -862,7 +873,9 @@ pure func xlsxFoldRowStep(acc: XlsxStreamFold, rowNode: XmlNode) -> FoldStep[Xls
       then xlsxCollectFlags(findAll(rowNode, "c"), acc.styles, acc.flags)
       else acc.flags;
     let acc2 = { acc | texts: texts, flags: flags };
-    let acc3 = if xlsxRowHasCells(rowNode) then xlsxPlaceRow(acc2, cells, rowNum) else acc2;
+    let noValue = acc2.noValue + listLength(filter(xlsxFormulaWithoutValue, cells));
+    let acc4 = { acc2 | noValue: noValue };
+    let acc3 = if xlsxRowHasCells(rowNode) then xlsxPlaceRow(acc4, cells, rowNum) else acc4;
     if acc3.count >= 5000 && xlsxRefsAllFound(acc3.refs, acc3.texts)
     then Stop(acc3)
     else Continue(acc3)
@@ -1007,7 +1020,7 @@ export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetNam
     -- carry no colour on this path.
     let foldResult = parseFoldStep(sanitizeXml(xml), "row",
       { rows: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
-        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [] },
+        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [], noValue: 0 },
       xlsxFoldRowStep);
     let parsedRows = match foldResult {
       Ok(acc2) => reverse(acc2.rows),
@@ -1112,6 +1125,14 @@ pure func xlsxCellXf(c: XmlNode, styles: Map[int, XlsxXfColour]) -> Option[XlsxX
 
 -- Parse a single cell
 -- Reads t= attribute for type, resolves shared strings
+--
+-- A formula cell (<c><f>expr</f><v>cached</v></c>) keeps BOTH: `text` is the
+-- CACHED value the workbook last computed (what Excel displays), and `formula`
+-- is the formula itself in "=A1+B1" form. When the workbook carries no cached
+-- value (hand-built files write an empty <v/>), text is empty and the formula
+-- stands alone — the caller warns, since the formula is never evaluated here.
+-- Shared formulas (<f t="shared" si="n"/>) carry no text of their own and are
+-- left blank rather than duplicated from the defining cell.
 pure func parseXlsxCell(c: XmlNode, sharedStrings: Map[int, string]) -> TableCell {
   let cellType = getCellType(c);
   let text = if cellType == "s" then resolveSharedString(c, sharedStrings)
@@ -1119,8 +1140,51 @@ pure func parseXlsxCell(c: XmlNode, sharedStrings: Map[int, string]) -> TableCel
     else if cellType == "b" then getBooleanValue(c)
     else if cellType == "e" then getErrorValue(c)
     else getNumericValue(c);
-  simpleCell(text)
+  { simpleCell(text) | formula: xlsxCellFormula(c) }
 }
+
+-- The cell's formula, "=expr" form, or "" when the cell holds a literal value.
+pure func xlsxCellFormula(c: XmlNode) -> string =
+  match findFirst(c, "f") {
+    Some(f) =>
+      if getOrElse(getAttr(f, "t"), "") == "shared" then ""
+      else "=${getText(f)}",
+    None => ""
+  }
+
+-- A formula cell with no cached value: structure the reader must see, so it
+-- is never dropped as a blank cell.
+pure func xlsxFormulaWithoutValue(cell: TableCell) -> bool =
+  length(cell.formula) > 0 && length(cell.text) == 0
+
+-- Flat "text=formula" view of every cell of a one-sheet parse, for inline
+-- tests (the harness compares scalar literals only). Literal cells render as
+-- their text; formula cells as "cached=formula".
+pure func xlsxFormulaCellView(xml: string) -> string
+  tests [
+    -- formula with an EMPTY cached value: formula kept, no fake value
+    ("<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>H</t></is></c></row><row r=\"2\"><c r=\"A2\"><f>B2-C2</f><v></v></c></row></sheetData></worksheet>",
+     "H|==B2-C2"),
+    -- formula WITH a cached value: the cached value is the text
+    ("<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>H</t></is></c></row><row r=\"2\"><c r=\"A2\"><f>B2-C2</f><v>20000</v></c></row></sheetData></worksheet>",
+     "H|20000==B2-C2"),
+    -- literal cells are unchanged
+    ("<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>H</t></is></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>plain</t></is></c></row></sheetData></worksheet>",
+     "H|plain")
+  ]
+{
+  join("|", flatMap(xlsxTableViews, parseSheetXml(xml, mapFromList([]), "S")))
+}
+
+pure func xlsxTableViews(b: Block) -> [string] =
+  match b {
+    TableBlock(t) => map(xlsxCellView, concat(t.headers, flatMap(\r. r, t.rows))),
+    SectionBlock(s) => flatMap(xlsxTableViews, s.blocks),
+    _ => []
+  }
+
+pure func xlsxCellView(c: TableCell) -> string =
+  if length(c.formula) > 0 then "${c.text}=${c.formula}" else c.text
 
 -- Get cell type from t= attribute (default "n" for number)
 pure func getCellType(c: XmlNode) -> string =

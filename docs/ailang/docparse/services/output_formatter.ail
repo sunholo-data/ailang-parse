@@ -203,9 +203,12 @@ pure func runJsonFields(r: InlineRun) -> [{key: string, value: Json}] {
     else withCode;
   -- Only when set, like every other run field: a plain run stays byte-identical
   -- to the pre-href JSON shape.
+  let withColor = if length(r.color) > 0
+    then concat(withVert, [kv("color", js(r.color))])
+    else withVert;
   if length(r.href) > 0
-  then concat(withVert, [kv("href", js(r.href))])
-  else withVert
+  then concat(withColor, [kv("href", js(r.href))])
+  else withColor
 }
 
 pure func tableJsonFields(b: {rows: [[TableCell]], headers: [TableCell], caption: string}) -> [{key: string, value: Json}] {
@@ -285,6 +288,7 @@ export pure func cellsToJson(cells: [TableCell]) -> [Json]
 export pure func cellToJson(cell: TableCell) -> Json {
   if cell.colSpan == 1 && not cell.merged && length(cell.scope) == 0
        && length(cell.align) == 0 && length(cell.fill) == 0 && length(cell.color) == 0
+       && length(cell.formula) == 0
   then js(cell.text)
   else {
     let base = [
@@ -304,7 +308,10 @@ export pure func cellToJson(cell: TableCell) -> Json {
     let withColor = if length(cell.color) > 0
                     then concat(withFill, [kv("color", js(cell.color))])
                     else withFill;
-    jo(withColor)
+    let withFormula = if length(cell.formula) > 0
+                    then concat(withColor, [kv("formula", js(cell.formula))])
+                    else withColor;
+    jo(withFormula)
   }
 }
 
