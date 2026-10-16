@@ -54,6 +54,26 @@ DOCPARSE_PDF_BACKEND=liteparse docparse-pdf scan.pdf --convert out.md
   carries the AI capability, so a local-policy "never send the PDF to Gemini"
   rule is enforced by the shim's own capability set.
 
+## Email attachments need the second pass: `--deep` / `deep: true`
+
+EML/MBOX parsing is deliberately two-pass. The first pass is pure and
+deterministic: it preserves PDF and Office attachment bytes as base64
+`attachment-data` blocks, but it cannot extract their text — reading a PDF
+attachment means running the PDF backend ladder, which shells out. The second
+pass does that, and it is one parameter away:
+
+- **CLI**: `docparse message.eml --deep` (batch runs: `DOCPARSE_DEEP=1`)
+- **Hosted API**: `"deep": true` on the parse request
+- **stdio MCP / `parseDocumentPure`**: not available in-process (no Process
+  capability in the embedder's caps) — use the CLI or the hosted API
+
+A shallow parse that leaves deep-parseable attachments unresolved says so in
+the outcome's `warnings` (which attachment, and how to run the second pass)
+on every output surface, so "attachments preserved and recoverable" is never
+the only signal. Image attachments are preserved as bytes but never parsed —
+`--deep` leaves their data blocks untouched — and `--no-attachment-data`
+omits the base64 entirely while keeping `attachment-meta`.
+
 ## SDKs
 
 ```bash

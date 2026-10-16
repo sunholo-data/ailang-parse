@@ -45,8 +45,8 @@
 
 module docparse/services/orchestrator
 
-import std/string (length, toLower, startsWith, endsWith, substring)
-import std/list (concat, map, filter, length as listLength)
+import std/string (length, toLower, startsWith, endsWith, substring, join, contains)
+import std/list (concat, map, filter, take, length as listLength)
 import std/fs (readFile, readFileBytes, fileExists, writeFileBytes, removeFile)
 import std/bytes (fromBase64)
 import std/option (Some, None)
@@ -63,7 +63,7 @@ import docparse/services/docx_parser (
   parseDocxFootnotes, parseDocxEndnotes, parseDocxImages, parseDocxMetadata
 )
 import docparse/services/pptx_parser (parsePptx, parsePptxImages, parsePptxMetadata)
-import docparse/services/xlsx_parser (parseXlsx, parseXlsxWithWarnings, parseXlsxMetadata)
+import docparse/services/xlsx_parser (parseXlsxWithWarnings, parseXlsxMetadata)
 import docparse/services/odt_parser (parseOdt, parseOdtMetadata, parseOdtHeadersFooters)
 import docparse/services/odp_parser (parseOdp, parseOdpMetadata)
 import docparse/services/ods_parser (parseOds, parseOdsMetadata)
@@ -529,8 +529,21 @@ func orchEmail(filepath: string, ext: string, opts: ParseOptions) -> ParseOutcom
   let blocks = if opts.noAttachmentData && not opts.deep
     then orchStripAttachmentData(parsed) else parsed;
   let meta = if isMbox then parseMboxMetadata(content) else parseEmlMetadata(content);
+  -- Discoverability (BD partner field report): a shallow EML parse preserves
+  -- PDF/Office attachment bytes as base64 but extracts no attachment text,
+  -- and nothing in the output said the second pass existed — a real user read
+  -- it as "PDF content in emails isn't accessible" when it is one parameter
+  -- away (--deep on the CLI, deep: true on the hosted API). When a shallow
+  -- parse leaves deep-parseable attachment bytes unresolved, say so in
+  -- `warnings` — the channel every surface already carries (CLI ⚠ lines, the
+  -- JSON `warnings` array, MCP, hosted API), the same pattern as the XLSX
+  -- conditional-formatting notice. Detection runs on the remaining
+  -- attachment-data block, so a --deep run (which resolves and drops the
+  -- data) and a --no-attachment-data caller (which chose to omit the bytes)
+  -- stay silent.
+  let deepHints = if opts.deep then [] else orchDeepHintWarnings(blocks);
   mkOutcome(ext, filepath, meta, blocks,
-    ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], [], 0)
+    ["Parsed ${ext}: ${show(countBlocks(blocks))} blocks"], deepHints, 0)
 }
 
 -- Drop the base64 attachment-data (and its paired attachment-ext) blocks from
@@ -555,6 +568,88 @@ pure func orchIsAttachmentDataBlock(block: Block) -> bool =
     TextBlock(t) => t.style == "attachment-data" || t.style == "attachment-ext",
     _ => false
   }
+
+-- PDF/Office attachments whose bytes a shallow EML parse preserved but no
+-- pass has parsed, named by their attachment-meta text ("report.pdf
+-- (application/pdf)"). An attachment section still holding its
+-- attachment-data block with a deep-parseable extension is exactly that:
+-- --deep resolves and DROPS the data block, images are preserved but never
+-- parsed (there is no image parser — orchEmlCanParseExt excludes them), and
+-- text attachments were parsed inline and never had a data block. Recurses
+-- through every SectionBlock because an MBOX thread or a message/rfc822
+-- attachment nests attachment sections one level down.
+pure func orchUnresolvedDeepAttachments(blocks: [Block]) -> [string] =
+  match blocks {
+    [] => [],
+    SectionBlock(s) :: rest =>
+      if s.kind == "attachment" && orchEmlHasData(s.blocks)
+         && orchEmlCanParseExt(orchEmlGetExt(s.blocks))
+        then orchEmlGetMeta(s.blocks) :: orchUnresolvedDeepAttachments(rest)
+        else concat(orchUnresolvedDeepAttachments(s.blocks),
+                    orchUnresolvedDeepAttachments(rest)),
+    _ :: rest => orchUnresolvedDeepAttachments(rest)
+  }
+
+-- The discoverability warning itself, emitted into the same channel as the
+-- XLSX conditional-formatting notice (a `warnings` entry, which the CLI
+-- prints as ⚠ lines and every JSON surface carries verbatim). Names are the
+-- attachment-meta strings, capped at five the way the conditional-formatting
+-- warning caps its range list.
+pure func orchDeepHintWarnings(blocks: [Block]) -> [string] =
+  match orchUnresolvedDeepAttachments(blocks) {
+    [] => [],
+    names => {
+      let shown = take(5, names);
+      let more = if listLength(names) > 5 then ", …" else "";
+      ["${show(listLength(names))} PDF/Office attachment(s) preserved as base64 but not parsed (${join("; ", shown)}${more}) — re-run with --deep (CLI) or deep: true (hosted API) to extract their text"]
+    }
+  }
+
+-- Pins the discoverability warning both ways: it fires for a shallow parse
+-- whose PDF attachment is still unresolved (naming the attachment and both
+-- surfaces' switch), and stays silent when there is nothing deep-parseable
+-- left unresolved — image bytes (preserved but never parsed), a resolved
+-- attachment (data block dropped by --deep), and a stripped one
+-- (--no-attachment-data) must all stay quiet. It must also reach an
+-- attachment nested inside an MBOX thread section.
+pure func orchDeepHintWarningEmittedForUnresolvedPdf() -> bool
+  tests [((), true)]
+{
+  let pdf = mkNamedSection("attachment", "report.pdf",
+    [mkText("report.pdf (application/pdf)", "attachment-meta", 0),
+     mkText("JVBERi0=", "attachment-data", 0),
+     mkText("pdf", "attachment-ext", 0)]);
+  match orchDeepHintWarnings([pdf]) {
+    [w] => contains(w, "1 PDF/Office attachment(s) preserved as base64 but not parsed")
+           && contains(w, "report.pdf (application/pdf)")
+           && contains(w, "--deep") && contains(w, "deep: true"),
+    _ => false
+  }
+}
+
+pure func orchDeepHintWarningSilentWhenNothingDeepUnresolved() -> bool
+  tests [((), true)]
+{
+  let image = mkNamedSection("attachment", "photo.png",
+    [mkText("photo.png (image/png)", "attachment-meta", 0),
+     mkText("iVBOR", "attachment-data", 0),
+     mkText("png", "attachment-ext", 0)]);
+  let pdf = mkNamedSection("attachment", "report.pdf",
+    [mkText("report.pdf (application/pdf)", "attachment-meta", 0),
+     mkText("JVBERi0=", "attachment-data", 0),
+     mkText("pdf", "attachment-ext", 0)]);
+  let noHint = \xs. match orchDeepHintWarnings(xs) { [] => true, _ => false };
+  -- image bytes are preserved but never parsed: no hint
+  noHint([image]) &&
+  -- a resolved attachment has no data block left: no hint
+  noHint([mkNamedSection("attachment", "report.pdf",
+    [mkText("report.pdf (application/pdf)", "attachment-meta", 0)])]) &&
+  -- an attachment nested inside an MBOX thread section is still found
+  match orchDeepHintWarnings([mkSection("thread-message", [pdf])]) {
+    [_] => true,
+    _ => false
+  }
+}
 
 -- parseDocumentPure cannot resolve attachments (that needs Process for the PDF
 -- ladder), so say so rather than quietly returning a shallow parse when the
@@ -910,7 +1005,17 @@ func orchEmlResolveOneBlock(block: Block, counter: int, projectRoot: string)
 func orchEmlParseAttachment(filepath: string, ext: string, projectRoot: string)
   -> [Block] ! {IO, FS, Process} {
   if ext == "docx" then parseDocx(filepath)
-  else if ext == "xlsx" then parseXlsx(filepath)
+  else if ext == "xlsx" then {
+    -- Carry the workbook's colour warnings onto the attachment path too.
+    -- parseXlsx is the warnings-free wrapper, so an attached workbook's
+    -- conditional-formatting notice (which a direct parse of the same file
+    -- puts in the outcome's `warnings`) was silently dropped here — a reader
+    -- of the attachment's blocks saw the colours missing with no explanation.
+    -- Emitted as warning-styled blocks, the same shape xlsx_parser itself
+    -- uses for its inline notices (the 50k-shared-strings warning).
+    let parsed = parseXlsxWithWarnings(filepath);
+    concat(parsed.blocks, map(\w. mkText(w, "warning", 0), parsed.warnings))
+  }
   else if ext == "pptx" then parsePptx(filepath)
   else if ext == "pdf" then {
     match parsePdfWithFallback("pdftotext", filepath, projectRoot) {
