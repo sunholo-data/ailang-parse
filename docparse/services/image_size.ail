@@ -1,0 +1,204 @@
+module docparse/services/image_size
+
+import std/bytes (fromBase64, fromString, fromInts, toBase64, byteAt, length as byteLength)
+import std/option (Some, None)
+import std/string (stringToFloat, trim)
+import std/math (floatToInt, round)
+
+-- Image pixel-size sniffing and draw-size math for the generators.
+--
+-- Pure: everything here consumes values already in hand (a base64 payload,
+-- integers) and performs no I/O. The caller holds the bytes — ImageBlock.data
+-- is the base64 the parsers stored — so reading a format header costs one
+-- decode, not a file read.
+--
+-- Why this exists: docxInlineImage drew every image at a fixed 6in × 4in,
+-- which visibly squashed anything that was not 3:2 — an 800×200 chart rendered
+-- 3:2 in the generated DOCX. The fix has two halves: read the NATURAL pixel
+-- size from the image bytes (PNG IHDR / JPEG SOF / GIF header), and size the
+-- drawing to the text column without ever upscaling past the 96 dpi natural
+-- size.
+--
+-- Requested-size encoding (ImageBlock.width/height, also populated from HTML
+-- width=/height= attributes):
+--   > 0   absolute size in pixels at 96 dpi
+--   < 0   a Pandoc-style percentage: -50 means 50% of the text-column width
+--   0     unspecified — derive from the natural size
+
+export type ImageSize = {w: int, h: int} deriving (Eq)
+
+-- Natural pixel size of a base64-encoded image; 0×0 when the payload cannot
+-- be decoded or the format is not one we can sniff. Callers treat 0×0 as
+-- "unknown" and fall back (see imageDrawExtent).
+export pure func imagePixelSize(data: string) -> ImageSize =
+  match fromBase64(data) {
+    None => {w: 0, h: 0},
+    Some(b) => sniffBytes(b)
+  }
+
+pure func sniffBytes(b: bytes) -> ImageSize =
+  if isPng(b) then pngSize(b)
+  else if isGif(b) then gifSize(b)
+  else if isJpeg(b) then jpegSize(b)
+  else {w: 0, h: 0}
+
+-- byteAt returns Option; out-of-range reads are simply 0 here, because every
+-- caller re-checks the format signature first and a truncated header is an
+-- unknown-size image, not a crash.
+pure func byteOr(b: bytes, i: int) -> int =
+  match byteAt(b, i) {
+    Some(v) => v,
+    None => 0
+  }
+
+-- === PNG =================================================================
+-- Signature 137 80 78 71; the IHDR chunk's width and height are bytes 16-23,
+-- big-endian (bytes 8-15 are the chunk length and the "IHDR" name).
+
+pure func isPng(b: bytes) -> bool =
+  byteOr(b, 0) == 137 && byteOr(b, 1) == 80 && byteOr(b, 2) == 78 && byteOr(b, 3) == 71
+
+pure func pngSize(b: bytes) -> ImageSize =
+  {w: be32(b, 16), h: be32(b, 20)}
+
+pure func be32(b: bytes, at: int) -> int =
+  byteOr(b, at) * 16777216 + byteOr(b, at + 1) * 65536 + byteOr(b, at + 2) * 256 + byteOr(b, at + 3)
+
+-- === GIF =================================================================
+-- "GIF8..." header; the logical screen width and height are bytes 6-9,
+-- little-endian.
+
+pure func isGif(b: bytes) -> bool =
+  byteOr(b, 0) == 71 && byteOr(b, 1) == 73 && byteOr(b, 2) == 70
+
+pure func gifSize(b: bytes) -> ImageSize =
+  {w: byteOr(b, 6) + byteOr(b, 7) * 256, h: byteOr(b, 8) + byteOr(b, 9) * 256}
+
+-- === JPEG ================================================================
+-- Signature FF D8 FF; then a chain of FF<marker><length> segments until a
+-- Start-Of-Frame marker, whose payload carries the frame height and width.
+-- Recursive rather than looped — AILANG has no loops, and real files hold a
+-- dozen or two segments before the SOF.
+--
+-- Segment walk, in order: 0xFF fill bytes precede a real marker; D8/SOS
+-- stand-alone markers carry no length field; EOI (D9) and SOS (DA) mean the
+-- frame dimensions are behind us; everything else is a length-prefixed
+-- segment, skipped whole, until one is an SOF.
+
+pure func isJpeg(b: bytes) -> bool =
+  byteOr(b, 0) == 255 && byteOr(b, 1) == 216 && byteOr(b, 2) == 255
+
+pure func jpegSize(b: bytes) -> ImageSize = jpegScan(b, 2)
+
+pure func jpegScan(b: bytes, pos: int) -> ImageSize =
+  if pos + 1 >= byteLength(b) then {w: 0, h: 0}
+  else if byteOr(b, pos) != 255 then {w: 0, h: 0}
+  else {
+    let marker = byteOr(b, pos + 1);
+    if marker == 255 then jpegScan(b, pos + 1)
+    else if marker == 216 || marker == 1 || (marker >= 208 && marker <= 215)
+      then jpegScan(b, pos + 2)
+    else if marker == 217 || marker == 218 then {w: 0, h: 0}
+    else {
+      let segLen = byteOr(b, pos + 2) * 256 + byteOr(b, pos + 3);
+      if segLen < 2 then {w: 0, h: 0}
+      else if isSofMarker(marker)
+        then {w: byteOr(b, pos + 7) * 256 + byteOr(b, pos + 8),
+              h: byteOr(b, pos + 5) * 256 + byteOr(b, pos + 6)}
+        else if pos + 2 + segLen >= byteLength(b) then {w: 0, h: 0}
+        else jpegScan(b, pos + 2 + segLen)
+    }
+  }
+
+-- SOF0-SOF15 carry the frame dimensions; DHT (C4), JPG (C8) and DAC (CC) sit
+-- in the same numeric range but do not.
+pure func isSofMarker(marker: int) -> bool =
+  marker >= 192 && marker <= 207 && marker != 196 && marker != 200 && marker != 204
+
+-- === Draw size ===========================================================
+
+-- Unit conversions. 1 inch = 914400 EMU = 1440 twips, and the generator draws
+-- at 96 dpi, so one pixel is exactly 9525 EMU and one twip exactly 635 EMU.
+-- Both are integral, so no rounding drift enters the geometry.
+export pure func emuFromPx(px: int) -> int = px * 9525
+
+export pure func emuFromTwips(tw: int) -> int = tw * 635
+
+-- The size an inline image should be drawn at, in EMU.
+--
+-- natW/natH    natural pixel size (0×0 = unknown)
+-- usableTwips  the section's text-column width (docx_layout.docxUsableWidth,
+--              i.e. pgSz minus margins); <= 0 falls back to the generator's
+--              Letter default, 9360 twips = 6.5in
+-- reqW/reqH    the requested size in the ImageBlock encoding above
+--
+-- Order of precedent:
+--   1. An explicit request wins outright: an author who wrote {width=16cm}
+--      asked for 16cm, and Pandoc does not second-guess that either. A
+--      percentage resolves against the text-column width (height percentages
+--      too — the text height is not threaded through the block walk).
+--   2. Otherwise the natural size, capped to the text column, aspect kept:
+--      a wide chart shrinks to fit rather than being squashed to 3:2, and a
+--      small icon is never blown up past its pixels.
+--   3. Otherwise the legacy 6in × 4in, so an image whose format cannot be
+--      sniffed renders exactly as it always did.
+export pure func imageDrawExtent(natW: int, natH: int, usableTwips: int, reqW: int, reqH: int) -> ImageSize {
+  let usable = if usableTwips > 0 then emuFromTwips(usableTwips) else 5943600;
+  let w = if reqW < 0 then (0 - reqW) * usable / 100
+          else if reqW > 0 then emuFromPx(reqW)
+          else 0;
+  let h = if reqH < 0 then (0 - reqH) * usable / 100
+          else if reqH > 0 then emuFromPx(reqH)
+          else 0;
+  if w > 0 && h > 0 then {w: w, h: h}
+  else if w > 0 then {w: w, h: heightFor(w, natW, natH)}
+  else if h > 0 then {w: widthFor(h, natW, natH), h: h}
+  else if natW > 0 && natH > 0
+  then {
+    let natural = emuFromPx(natW);
+    let drawW = if natural > usable then usable else natural;
+    {w: drawW, h: drawW * natH / natW}
+  }
+  else {w: 5486400, h: 3657600}
+}
+
+-- Height matching the natural aspect at width w; 4:3 when nothing is known
+-- (the legacy default's ratio).
+pure func heightFor(w: int, natW: int, natH: int) -> int =
+  if natW > 0 && natH > 0 then w * natH / natW else w * 3 / 4
+
+pure func widthFor(h: int, natW: int, natH: int) -> int =
+  if natW > 0 && natH > 0 then h * natW / natH else h * 4 / 3
+
+-- === Tests ===============================================================
+
+-- Hand-built format headers: a 800×200 PNG (IHDR dims big-endian at 16-23),
+-- a 400×100 JPEG whose first segment is an SOF0, and a 4×2 GIF (screen size
+-- little-endian at 6-9).
+export pure func testImageSize() -> bool
+  tests [((), true)]
+{
+  let png = toBase64(fromInts([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+                               0, 0, 3, 32, 0, 0, 0, 200, 8, 6, 0, 0, 0]));
+  let jpeg = toBase64(fromInts([255, 216, 255, 192, 0, 17, 8, 0, 100, 1, 144, 0, 0]));
+  let gif = toBase64(fromInts([71, 73, 70, 56, 55, 97, 4, 0, 2, 0, 0]));
+  let p = imagePixelSize(png);
+  let j = imagePixelSize(jpeg);
+  let g = imagePixelSize(gif);
+  let unknown = imagePixelSize(toBase64(fromString("not an image at all")));
+  -- An 800×200 chart is wider than a 6.5in text column: it shrinks to the
+  -- column and keeps its 4:1 shape instead of the old squashed 3:2.
+  let fit = imageDrawExtent(800, 200, 9360, 0, 0);
+  -- A small image is never upscaled past 96 dpi natural size.
+  let small = imageDrawExtent(400, 100, 9360, 0, 0);
+  -- {width=16cm} ≈ 605px, honoured exactly with the height derived.
+  let cm = imageDrawExtent(800, 200, 9360, 605, 0);
+  -- {width=50%} is half the text column.
+  let pct = imageDrawExtent(800, 200, 9360, 0 - 50, 0);
+  p == {w: 800, h: 200} && j == {w: 400, h: 100} && g == {w: 4, h: 2} &&
+  unknown == {w: 0, h: 0} &&
+  fit == {w: 5943600, h: 1485900} &&
+  small == {w: 3810000, h: 952500} &&
+  cm == {w: 5761275, h: 1440318} &&
+  pct == {w: 2971800, h: 742950}
+}

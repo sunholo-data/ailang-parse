@@ -11,6 +11,31 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Images in generated DOCX keep their aspect ratio, and Pandoc `{width=…}` attributes are honoured
+
+`docxInlineImage` drew every inline image at a fixed 6in × 4in, which visibly
+squashed anything that was not 3:2 — an 800×200 chart rendered 3:2 in the
+generated DOCX and in docparse-render's PDF of it (the Decision Budget
+delivery pack's generated charts were the report). Three changes:
+
+**P1 — size comes from the image, not the placeholder.** New pure module
+`docparse/services/image_size` sniffs the natural pixel size from the encoded
+bytes (PNG IHDR, JPEG SOF, GIF header) and computes the drawing extent: capped
+to the section's text column (`docx_layout.docxUsableWidth` of the sectPr — the
+reference doc's pgSz minus margins when `--reference-doc` is given), never
+upscaled past the 96 dpi natural size, aspect ratio always kept. The block walk
+calls the new `docxInlineImageSized`, which reads the payload the parser
+already carries; the old fixed 6in × 4in `docxInlineImage` export is kept for
+compatibility and falls back to it when the format cannot be sniffed.
+
+**P2 — Pandoc attribute syntax.** `![alt](x.png){width=16cm}` used to fail the
+image-only-paragraph check (the trailing `}`), so the whole line degraded to
+literal text carrying `{width=16cm}` after the picture. `markdown_inline` now
+parses the attribute block (width/height with px, cm, mm, in, pt, % units, plus
+ignored ids/classes/unknown keys) into the ImageBlock's requested size;
+percentages ride as negative pixel counts and are resolved against the text
+column by the generator.
+
 ## [v0.51.0](https://github.com/sunholo-data/ailang-parse/compare/v0.50.1...v0.51.0) — 2026-10-13
 
 ### DOCX/XLSX fidelity: custom heading styles, real lists, breaks, bookmarks, run colour, formulas — and warnings when the output approximates the source

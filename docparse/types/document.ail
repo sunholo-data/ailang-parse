@@ -104,6 +104,14 @@ export type InlineRun = {
 --                      "none"  (unresolvable; anchorText is empty)
 --   anchorBlockIndex:  index of the annotated block; -1 when unanchored
 --   parentId:          id of the comment this replies to; "" for top-level
+--
+-- ImageBlock.width/height carry the REQUESTED display size, not the natural
+-- one: pixels at 96 dpi when positive, a NEGATIVE number of percent of the
+-- text-column width when negative (the Pandoc `{width=50%}` form — the
+-- parser does not know the column, so the generator resolves it), 0 when
+-- unspecified. The natural pixel size is sniffed from the image bytes at
+-- generation time (docparse/services/image_size), so parsers should leave
+-- these 0 unless the source document itself states a size.
 export type Block = TextBlock({text: string, style: string, level: int, runs: [InlineRun]})
                   | TableBlock({rows: [[TableCell]], headers: [TableCell], caption: string})
                   | ImageBlock({data: string, description: string, mime: string, width: int, height: int, srcset: string, title: string, loading: string})

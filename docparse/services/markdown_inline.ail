@@ -1,8 +1,9 @@
 module docparse/services/markdown_inline
 
-import std/string (split, length, startsWith, endsWith, substring, find, contains, charAt, charCode, join, replaceMany)
+import std/string (split, length, startsWith, endsWith, substring, find, contains, charAt, charCode, join, replaceMany, words, stringToFloat, trim)
 import std/list (map, foldl, concat, reverse)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block)
+import std/math (floatToInt, round)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListNested, mkText, mkTextRuns, mkImageFull, plainRun, InlineRun, Block, ImageBlock)
 
 -- Markdown inline formatting and the block constructors that apply it.
 --
@@ -381,12 +382,104 @@ pure func mdAnyNested(levels: [int]) -> bool =
 -- A paragraph that is nothing but an image is an image, not a sentence about
 -- one. Inline images inside prose are left as text rather than silently
 -- dropped, since a run cannot carry image data.
+--
+-- A Pandoc-style attribute block (`![alt](src){width=16cm}`) is part of the
+-- image, not trailing prose: the closing `}` used to fail the endsWith(")")
+-- check, so the whole line degraded to literal text and the generated document
+-- carried "{width=16cm}" after the picture.
 export pure func mdIsImageOnly(raw: string) -> bool =
-  startsWith(raw, "![") && endsWith(raw, ")") && contains(raw, "](")
+  if startsWith(raw, "![") && endsWith(raw, ")") && contains(raw, "](") then true
+  else startsWith(raw, "![") && endsWith(raw, "}") && contains(raw, "){") && contains(raw, "](")
 
 export pure func mdImageBlock(raw: string) -> Block {
   let close = find(raw, "](");
   let alt = substring(raw, 2, close);
-  let src = substring(raw, close + 2, length(raw) - 1);
-  mkImage(src, alt, "image/unknown")
+  let urlPart = substring(raw, close + 2, length(raw));
+  let urlEnd = mdMatchParen(urlPart, 0, 0);
+  let src = if urlEnd >= 0
+    then substring(urlPart, 0, urlEnd)
+    else substring(urlPart, 0, length(urlPart) - 1);
+  -- Everything between the ")" and the end is the attribute block when the
+  -- line is in the `){...}` form; mdIsImageOnly has already gated this call.
+  let attrText = if urlEnd >= 0 && urlEnd + 1 < length(urlPart) && charAt(urlPart, urlEnd + 1) == "{"
+    then substring(urlPart, urlEnd + 2, length(urlPart))
+    else "";
+  let dims = mdImageAttrDims(attrText);
+  mkImageFull(src, alt, "image/unknown", dims.w, dims.h, "", "", "")
+}
+
+-- === Pandoc image attributes =============================================
+--
+-- `![alt](src){width=16cm}` — the attribute block Pandoc and Quarto write
+-- after an image. Only width/height matter to the generators; ids, classes
+-- and unknown keys are ignored rather than rejected, so a Quarto figure that
+-- also carries `{#fig-plan .wide}` still parses.
+--
+-- Dimensions land in the ImageBlock encoding: pixels at 96 dpi, or a NEGATIVE
+-- number of percent for `{width=50%}` — the parser does not know the text
+-- column, so the percentage is resolved by the generator.
+
+type MdImageDims = {w: int, h: int}
+
+pure func mdImageAttrDims(text: string) -> MdImageDims =
+  mdImageAttrLoop(words(text), {w: 0, h: 0})
+
+pure func mdImageAttrLoop(tokens: [string], acc: MdImageDims) -> MdImageDims =
+  match tokens {
+    [] => acc,
+    tok :: rest =>
+      if startsWith(tok, "width=")
+      then mdImageAttrLoop(rest, {acc | w: mdImageDimPx(substring(tok, 6, length(tok)))})
+      else if startsWith(tok, "height=")
+      then mdImageAttrLoop(rest, {acc | h: mdImageDimPx(substring(tok, 7, length(tok)))})
+      else mdImageAttrLoop(rest, acc)
+  }
+
+-- One dimension value: px, cm, mm, in, pt, or %; a bare number is pixels, the
+-- way Pandoc reads it. Pixels at 96 dpi: 1cm = 37.795…px, 1mm = 3.7795…px,
+-- 1in = 96px, 1pt = 96/72px.
+pure func mdImageDimPx(v: string) -> int =
+  if length(v) == 0 then 0
+  else if endsWith(v, "%") then 0 - mdDimRounded(substring(v, 0, length(v) - 1), 1.0)
+  else if endsWith(v, "cm") then mdDimRounded(substring(v, 0, length(v) - 2), 37.79527559055118)
+  else if endsWith(v, "mm") then mdDimRounded(substring(v, 0, length(v) - 2), 3.7795275590551185)
+  else if endsWith(v, "in") then mdDimRounded(substring(v, 0, length(v) - 2), 96.0)
+  else if endsWith(v, "pt") then mdDimRounded(substring(v, 0, length(v) - 2), 1.3333333333333333)
+  else if endsWith(v, "px") then mdDimRounded(substring(v, 0, length(v) - 2), 1.0)
+  else mdDimRounded(v, 1.0)
+
+pure func mdDimRounded(num: string, pxPerUnit: float) -> int =
+  match stringToFloat(trim(num)) {
+    Some(f) => floatToInt(round(f * pxPerUnit)),
+    None => 0
+  }
+
+-- Round-trip and behaviour checks for the attribute block. The expected pixel
+-- values mirror image_size's 96 dpi conversions (16cm ≈ 605px, 32mm ≈ 121px,
+-- 1in = 96px, 50% → -50).
+pure func mdDimsOf(b: Block) -> {src: string, w: int, h: int} =
+  match b {
+    ImageBlock(i) => {src: i.data, w: i.width, h: i.height},
+    _ => {src: "", w: 0 - 999, h: 0 - 999}
+  }
+
+export pure func testMdImageAttrs() -> bool
+  tests [((), true)]
+{
+  let plain = mdDimsOf(mdImageBlock("![The plan](t.png)"));
+  let cm = mdDimsOf(mdImageBlock("![The plan](t.png){width=16cm}"));
+  let pct = mdDimsOf(mdImageBlock("![The plan](t.png){width=50%}"));
+  let both = mdDimsOf(mdImageBlock("![alt](a.png){height=1in width=32mm}"));
+  let decorated = mdDimsOf(mdImageBlock("![alt](a.png){#fig .wide width=16cm}"));
+  mdIsImageOnly("![The plan](t.png)") &&
+  mdIsImageOnly("![The plan](t.png){width=16cm}") &&
+  mdIsImageOnly("![The plan](t.png){width=50%}") &&
+  not mdIsImageOnly("see ![fig](x.png) in the text") &&
+  not mdIsImageOnly("plain text {width=16cm}") &&
+  mdIsImageOnly("![The plan](t.png){#fig-plan .wide width=16cm}") &&
+  plain.src == "t.png" && plain.w == 0 && plain.h == 0 &&
+  cm.src == "t.png" && cm.w == 605 && cm.h == 0 &&
+  pct.w == 0 - 50 &&
+  both.w == 121 && both.h == 96 &&
+  decorated.w == 605
 }

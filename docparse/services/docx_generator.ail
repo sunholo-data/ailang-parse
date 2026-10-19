@@ -9,7 +9,7 @@ import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, ParsedDocument)
 import docparse/services/xml_helpers (xmlDecl, docxRun, docxParagraph, docxStyledParagraph)
 import docparse/services/docx_template (DocxRefDoc, docxTplNone, docxTplLoad)
-import docparse/services/docx_runs (docxBlockquote, docxIsCodeStyle, docxCodeBlock, docxHorizontalRule, docxRunsToXml, docxInlineImage, docxChangeToXml, docxHyperlinkPara, docxCommentAnchorPara, docxRevisionPara)
+import docparse/services/docx_runs (docxBlockquote, docxIsCodeStyle, docxCodeBlock, docxHorizontalRule, docxRunsToXml, docxInlineImageSized, docxChangeToXml, docxHyperlinkPara, docxCommentAnchorPara, docxRevisionPara)
 import docparse/services/docx_table (docxTableToXml, docxListToXml)
 import docparse/services/docx_package (DocxOptParts, DocxImage, DocxLink, DocxComment, DocxHdrFtr, docxMediaPrefix, docxNeedsNumbering, docxContentTypesPart, docxStylesPart, docxDocumentRelsPart, docxImageEntries, docxAppendByteEntries, docxRootRelsPart, docxCoreProps, docxNumberingPart, docxCommentsPart, docxHdrFtrPartName, docxHdrFtrRelId)
 
@@ -29,7 +29,10 @@ import docparse/services/docx_package (DocxOptParts, DocxImage, DocxLink, DocxCo
 -- Limitations:
 --   - No headers/footers (could add as word/header1.xml if SectionBlocks present)
 --   - Minimal styling (structural, not pixel-perfect)
---   - Image sizing is fixed (no aspect ratio detection from binary data)
+--   - Image sizing comes from the image itself (pixel size sniffed from the
+--     bytes by docparse/services/image_size, capped to the section's text
+--     column, never upscaled past 96 dpi natural size) with an explicit
+--     {width=…}/{height=…} request honouring Pandoc's attribute syntax
 --
 --
 -- Split by concern so no module is over the browser type-checker's 100k-step
@@ -325,7 +328,7 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
     ImageBlock(i) =>
       if docxIsBinaryPayload(i.data, i.mime)
       then {
-        xml: docxInlineImage(idx.img, i.description),
+        xml: docxInlineImageSized(idx.img, i.description, i.data, i.width, i.height, idx.tableWidth),
         idx: {img: idx.img + 1, link: idx.link, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
       }
       else {xml: docxBlockToXml(block), idx: idx},

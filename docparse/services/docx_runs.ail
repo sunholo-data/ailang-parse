@@ -4,6 +4,7 @@ import std/string (length, intToStr, split, startsWith, contains)
 import std/list (foldl, length as listLength)
 import docparse/types/document (InlineRun)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, docxRun, docxParagraph)
+import docparse/services/image_size (imagePixelSize, imageDrawExtent)
 
 -- DOCX run and paragraph XML: character formatting, inline links, code
 -- blocks, rules, inline images, revision marks and comment anchors, plus the
@@ -118,15 +119,35 @@ pure func docxRunPropsInner(r: InlineRun) -> string {
 
 -- Build OOXML <w:drawing> for an inline image
 -- rId references word/_rels/document.xml.rels entry
-export pure func docxInlineImage(imgIdx: int, description: string) -> string {
+--
+-- The unsized form keeps the historical fixed 6in × 4in extent byte-identical
+-- to what it always emitted; the sized form is what the block walk uses.
+export pure func docxInlineImage(imgIdx: int, description: string) -> string =
+  docxImageDrawing(imgIdx, description, 5486400, 3657600)
+
+-- The sized form: the drawing is measured from the image itself instead of the
+-- historical fixed 6in × 4in, which squashed every image that was not 3:2 (an
+-- 800×200 chart came out 3:2 — visibly wrong in docparse-render's PDF, the
+-- Decision Budget delivery pack's charts were the report). data is the base64
+-- payload the parser stored; reqW/reqH are the ImageBlock's requested size
+-- (see docparse/services/image_size for the encoding); usableTwips is the
+-- section's text-column width the block walk already threads as idx.tableWidth.
+export pure func docxInlineImageSized(imgIdx: int, description: string, data: string,
+                                      reqW: int, reqH: int, usableTwips: int) -> string {
+  let nat = imagePixelSize(data);
+  let ext = imageDrawExtent(nat.w, nat.h, usableTwips, reqW, reqH);
+  docxImageDrawing(imgIdx, description, ext.w, ext.h)
+}
+
+-- The <w:drawing> XML itself, at an explicit size in EMU.
+pure func docxImageDrawing(imgIdx: int, description: string, cx: int, cy: int) -> string {
   let rId = docxImageRelId(imgIdx);
   let idStr = intToStr(imgIdx);
   let desc = xmlEscape(description);
-  -- Default size: 6 inches wide × 4 inches tall (in EMUs: 1 inch = 914400 EMU)
-  let cx = "5486400";
-  let cy = "3657600";
+  let cxStr = intToStr(cx);
+  let cyStr = intToStr(cy);
   docxParagraph(
-    "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${cx}\" cy=\"${cy}\"/><wp:docPr id=\"${idStr}\" name=\"Image ${idStr}\" descr=\"${desc}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"${idStr}\" name=\"Image ${idStr}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"${rId}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${cx}\" cy=\"${cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
+    "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${cxStr}\" cy=\"${cyStr}\"/><wp:docPr id=\"${idStr}\" name=\"Image ${idStr}\" descr=\"${desc}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"${idStr}\" name=\"Image ${idStr}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"${rId}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${cxStr}\" cy=\"${cyStr}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
   )
 }
 
