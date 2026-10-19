@@ -11,6 +11,14 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed
+
+- EML markdown output no longer carries attachment bytes. The `.md` rendering
+  printed each attachment's base64 `attachment-data` block as a paragraph, so one
+  3.4 MB PNG produced a 3.28 MB line that stalled text readers. The
+  `name (mime)` line still marks the attachment; the JSON keeps the bytes for
+  `--deep` and downstream extractors. (#95)
+
 ## [v0.52.0](https://github.com/sunholo-data/ailang-parse/compare/v0.51.0...v0.52.0) — 2026-10-19
 
 ### Fixed — pictures are embedded in every office output, sized from their own pixels
