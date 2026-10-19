@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.52.0](https://github.com/sunholo-data/ailang-parse/compare/v0.51.0...v0.52.0) — 2026-10-19
+
 ### Fixed — pictures are embedded in every office output, sized from their own pixels
 
 - DOCX, PPTX, XLSX, ODT, ODP and ODS used to write `[Image: alt]` text (or a fixed placeholder box) instead of the picture. Each now embeds an image with bytes as a real media part (`word/media`, `ppt/media`, `xl/media`, `Pictures/`), wired into its relationships, content types or manifest. SVG and images that are only a path or URL keep the placeholder.
