@@ -1,8 +1,8 @@
 module docparse/services/markdown_writer
 
-import std/string (length, replaceMany, startsWith, substring, repeat, join, split)
+import std/string (length, replaceMany, startsWith, substring, repeat, join, split, find, contains)
 import std/list (map, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText, mkText, mkNamedSection)
 
 -- Markdown writer — renders a ParsedDocument to markdown for LLM consumption.
 --
@@ -153,6 +153,14 @@ pure func renderSectionMd(kind: string, name: string, blocks: [Block]) -> string
     -- read as more slide text. name is "Slide N" from pptx_parser.
     else if kind == "notes" then
       (if length(name) > 0 then "*Speaker notes (${name}):*\n" else "*Speaker notes:*\n")
+    else if kind == "attachment" then
+      -- An EML attachment renders as one summary line, never as its blocks.
+      -- The attachment-data block carries the attachment's bytes as base64 so
+      -- the JSON output (and eparse's attachments.ail) can read them; printing
+      -- those bytes here made a 3.4 MB photo into a .eml.md with a single
+      -- 3,284,504-character base64 line that stalls anything reading the file
+      -- as text. Name, MIME type and decoded size summarise the payload.
+      "${renderAttachmentMd(name, blocks)}\n\n"
     else "";
   "${rule}${label}${renderBlocksMd(blocks)}"
 }
@@ -162,6 +170,108 @@ pure func startsWithHeading(blocks: [Block]) -> bool =
     [] => false,
     b :: _ => match b { HeadingBlock(_) => true, _ => false }
   }
+
+-- One-line markdown summary of an attachment section:
+--   [attachment: image0.png, image/png, 3.4 MB]
+-- or, when the payload has been resolved away (--deep) or was never base64
+-- (a text/plain attachment parsed inline, the binary-attachment placeholder
+-- in eml_parser):
+--   [attachment: file.txt, text/plain]
+pure func renderAttachmentMd(name: string, blocks: [Block]) -> string =
+  "[attachment: ${name}, ${mdAttachmentMime(blocks)}${mdAttachmentSizeSuffix(blocks)}]"
+
+-- The MIME type lives in the attachment-meta block, rendered by eml_parser as
+-- "filename (mime)".
+pure func mdAttachmentMime(blocks: [Block]) -> string =
+  match blocks {
+    [] => "",
+    TextBlock(t) :: rest =>
+      if t.style == "attachment-meta" then mdMimeFromMeta(t.text) else mdAttachmentMime(rest),
+    _ :: rest => mdAttachmentMime(rest)
+  }
+
+pure func mdMimeFromMeta(meta: string) -> string {
+  let open = find(meta, "(");
+  let close = find(meta, ")");
+  if open >= 0 && close > open then substring(meta, open + 1, close) else meta
+}
+
+-- ", 3.4 MB" when the section still carries its attachment-data block, ""
+-- when it doesn't (the payload was resolved deep, or never existed).
+pure func mdAttachmentSizeSuffix(blocks: [Block]) -> string =
+  match blocks {
+    [] => "",
+    TextBlock(t) :: rest =>
+      if t.style == "attachment-data" then mdHumanSize(t.text) else mdAttachmentSizeSuffix(rest),
+    _ :: rest => mdAttachmentSizeSuffix(rest)
+  }
+
+-- Base64 length * 3 / 4 is the decoded byte count; one decimal place, the way
+-- mail clients report attachment sizes.
+pure func mdHumanSize(b64: string) -> string {
+  let bytes = length(b64) * 3 / 4;
+  if bytes >= 1048576 then {
+    let tenths = bytes * 10 / 1048576;
+    ", ${show(tenths / 10)}.${show(tenths % 10)} MB"
+  }
+  else if bytes >= 1024 then {
+    let tenths = bytes * 10 / 1024;
+    ", ${show(tenths / 10)}.${show(tenths % 10)} KB"
+  }
+  else ", ${show(bytes)} bytes"
+}
+
+-- An EML attachment section must render as the summary line above, with no
+-- base64 anywhere in it. The bytes belong to the JSON output (eparse's
+-- attachments.ail reads them there); they used to reach the .md too, where a
+-- single photo produced a megabyte-long line.
+export pure func testMarkdownAttachmentSummaryNoBase64() -> bool
+  tests [((), true)]
+{
+  let b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAHAwqtQAAAABJRU5ErkJggg==";
+  let section = mkNamedSection("attachment", "image0.png", [
+    mkText("image0.png (image/png)", "attachment-meta", 0),
+    mkText(b64, "attachment-data", 0),
+    mkText("png", "attachment-ext", 0)
+  ]);
+  let md = renderBlockMd(section);
+  contains(md, "iVBOR") == false &&
+  contains(md, "[attachment: image0.png, image/png,") == true
+}
+
+-- Reverting the renderSectionMd branch (letting the blocks through) makes
+-- both of these fail: the bytes reappear, and the summary line is gone.
+export pure func testMarkdownAttachmentSummaryShape() -> bool
+  tests [((), true)]
+{
+  let b64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  let section = mkNamedSection("attachment", "logo.gif", [
+    mkText("logo.gif (image/gif)", "attachment-meta", 0),
+    mkText(b64, "attachment-data", 0),
+    mkText("gif", "attachment-ext", 0)
+  ]);
+  renderBlockMd(section) == "[attachment: logo.gif, image/gif]\n\n"
+}
+
+-- Size reporting: 1366 base64 chars decode to exactly 1024 bytes (1.0 KB),
+-- 1398102 to 1048576 bytes (1.0 MB).
+export pure func testMarkdownAttachmentSummarySizes() -> bool
+  tests [((), true)]
+{
+  mdHumanSize(repeat("A", 1366)) == ", 1.0 KB" &&
+  mdHumanSize(repeat("A", 1398102)) == ", 1.0 MB"
+}
+
+-- A deep-resolved attachment (or a text/plain one parsed inline) has no data
+-- block: it still renders as one line, with no size and no placeholder.
+export pure func testMarkdownAttachmentWithoutDataBlock() -> bool
+  tests [((), true)]
+{
+  let section = mkNamedSection("attachment", "report.pdf", [
+    mkText("report.pdf (application/pdf)", "attachment-meta", 0)
+  ]);
+  renderBlockMd(section) == "[attachment: report.pdf, application/pdf]\n\n"
+}
 
 -- Render a track change annotation as markdown
 -- Uses a blockquote with an attribution prefix:
