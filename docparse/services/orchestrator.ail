@@ -54,7 +54,7 @@ import std/io (println)
 import std/result (Ok, Err)
 import std/ai (AIError)
 
-import docparse/types/document (mkText, Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterImages, mkSection, mkNamedSection, ImageBlock, mkImage)
+import docparse/types/document (mkText, Block, TextBlock, SectionBlock, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterImages, mkSection, mkNamedSection, ImageBlock, mkImage, mkImageFull)
 import docparse/services/format_router (detectFormat, getExtension, officeType, resolveFormat)
 
 -- Deterministic parsers (all ! {FS} or pure)
@@ -493,7 +493,7 @@ func orchResolveMdImage(block: Block, baseDir: string) -> Block ! {FS} =
         let path = if startsWith(i.data, "/") then i.data else "${baseDir}/${i.data}";
         if not fileExists(path) then block
         else match readFileBytes(path) {
-          Ok(b64) => mkImage(b64, i.description, orchImageMime(getExtension(i.data))),
+          Ok(b64) => mkImageFull(b64, i.description, orchImageMime(getExtension(i.data)), i.width, i.height, i.srcset, i.title, i.loading),
           Err(_) => block
         }
       },

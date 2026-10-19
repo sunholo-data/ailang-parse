@@ -1,13 +1,16 @@
 module docparse/services/xlsx_generator
 
-import std/string (length, intToStr)
+import std/string (length, intToStr, contains)
 import std/list (foldl, length as listLength)
-import std/zip (createArchive)
+import std/zip (createArchive, createArchiveWithBytes)
+import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
 import std/option (getOrElse)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
+import docparse/services/image_embed (embedIsBinaryPayload, embedExt)
+import docparse/services/image_size (imageExtentEmu)
 
 -- XLSX Generator — converts Block ADT to a valid .xlsx file.
 --
@@ -22,11 +25,22 @@ import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 --   xl/styles.xml
 --   xl/sharedStrings.xml
 --   xl/worksheets/sheet1.xml ... sheetN.xml
+--   xl/worksheets/_rels/sheetK.xml.rels     (sheets with pictures only)
+--   xl/drawings/drawingK.xml                (sheets with pictures only)
+--   xl/drawings/_rels/drawingK.xml.rels
+--   xl/media/imageK_J.ext                   (embedded pictures, binary)
+--
+-- Pictures: an embeddable ImageBlock (see image_embed) becomes a picture part
+-- anchored in its sheet, below the sheet's data, in column A, one blank row
+-- between pictures. A picture-only "Content" sheet is created when no text
+-- sheet exists. SVG (Excel needs a PNG fallback) and payloads that are not
+-- base64 bytes keep the "[Image: ...]" text placeholder.
 --
 -- Limitations:
 --   - Text-only cells (no number/date detection)
 --   - No cell formatting (bold, colors)
 --   - No merged cells in output (colspan tracking only)
+--   - Pictures are not placed beside the data, only below it
 
 -- Generate an XLSX file from ParsedDocument
 export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
@@ -41,7 +55,9 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
   -- Build O(1) string-to-index map for cell XML generation
   let stringIndex = xlsxBuildStringIndex(allStrings, 0);
 
-  let contentTypes = xlsxContentTypes(sheetCount);
+  let contentTypes = xlsxContentTypes(sheetCount,
+    xlsxPicDefaults(sheets, ["png", "jpeg", "gif", "bmp", "tiff"]),
+    xlsxDrawingOverrides(sheets, 1));
   let rootRels = xlsxRootRels();
   let workbook = xlsxWorkbook(sheets);
   let workbookRels = xlsxWorkbookRels(sheetCount);
@@ -57,17 +73,49 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
     {name: "xl/sharedStrings.xml", content: sharedStringsXml}
   ];
 
-  let allEntries = xlsxAppendList(baseEntries, sheetEntries);
+  let allEntries = xlsxAppendList(xlsxAppendList(baseEntries, sheetEntries), xlsxPicEntries(sheets, 1));
+  -- Without pictures the archive is text only, exactly as before.
+  let mediaEntries = xlsxMediaEntries(sheets, 1);
 
-  let result = createArchive(outputPath, allEntries);
+  let result = if listLength(mediaEntries) == 0
+    then createArchive(outputPath, allEntries)
+    else createArchiveWithBytes(outputPath, xlsxAppendBytes(xlsxTextToBytes(allEntries), mediaEntries));
   match result {
     Ok(_) => "Generated XLSX: ${outputPath} (${intToStr(sheetCount)} sheets)",
     Err(e) => "Error generating XLSX: ${e}"
   }
 }
 
--- A sheet with a name and rows of cells
-type XlsxSheet = { name: string, rows: [[string]] }
+-- A picture to anchor in a sheet. data is base64, cx/cy its size in EMU.
+type XlsxPic = { data: string, mime: string, ext: string, descr: string, cx: int, cy: int }
+
+-- A sheet with a name, rows of cells and the pictures anchored below them
+type XlsxSheet = { name: string, rows: [[string]], pics: [XlsxPic] }
+
+-- Pictures are at most a 6.5 inch column wide (text width of a Letter page)
+pure func xlsxMaxCx() -> int = 5943600
+
+-- Default row height (15 pt) in EMU, used to stack pictures without overlap
+pure func xlsxRowEmu() -> int = 190500
+
+-- Whether a block is written as a picture part rather than as text. This is
+-- the one predicate for both the media part and the sheet anchor. SVG is
+-- excluded: Excel needs a PNG fallback for it, so it keeps the placeholder.
+pure func xlsxIsPicture(block: Block) -> bool =
+  match block {
+    ImageBlock(i) => embedIsBinaryPayload(i.data, i.mime) && i.mime != "image/svg+xml",
+    _ => false
+  }
+
+pure func xlsxBlockPic(block: Block) -> XlsxPic =
+  match block {
+    ImageBlock(i) => xlsxPicOf(i.data, i.mime, i.description, i.width, i.height),
+    _ => {data: "", mime: "", ext: "", descr: "", cx: 0, cy: 0}
+  }
+
+pure func xlsxPicOf(data: string, mime: string, descr: string, wantW: int, wantH: int) -> XlsxPic =
+  let sz = imageExtentEmu(data, mime, xlsxMaxCx(), wantW, wantH) in
+  {data: data, mime: mime, ext: embedExt(mime), descr: descr, cx: sz.cx, cy: sz.cy}
 
 -- Collect blocks into sheets
 pure func xlsxCollectSheets(blocks: [Block]) -> [XlsxSheet] {
@@ -76,26 +124,30 @@ pure func xlsxCollectSheets(blocks: [Block]) -> [XlsxSheet] {
 
 pure func xlsxCollectSheetsAcc(blocks: [Block], acc: [XlsxSheet], sheetIdx: int) -> [XlsxSheet] =
   match blocks {
-    [] => if listLength(acc) == 0 then [{name: "Sheet1", rows: []}] else acc,
+    [] => if listLength(acc) == 0 then [{name: "Sheet1", rows: [], pics: []}] else acc,
     SectionBlock(s) :: rest =>
       if s.kind == "sheet"
       then xlsxCollectSheetsAcc(rest,
-        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxBlocksToRows(s.blocks)}),
+        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxBlocksToRows(s.blocks), pics: xlsxBlocksToPics(s.blocks)}),
         sheetIdx + 1)
       else xlsxCollectSheetsAcc(rest, acc, sheetIdx),
     TableBlock(t) :: rest =>
       xlsxCollectSheetsAcc(rest,
-        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxTableToRows(t.headers, t.rows)}),
+        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxTableToRows(t.headers, t.rows), pics: []}),
         sheetIdx + 1),
     b :: rest =>
-      -- Non-table blocks: accumulate text into a "Content" sheet
-      let textRow = [xlsxBlockToText(b)] in
-      if length(xlsxBlockToText(b)) > 0
-      then xlsxCollectSheetsAcc(rest,
-        xlsxAppendToContentSheet(acc, textRow, sheetIdx),
-        sheetIdx)
-      else xlsxCollectSheetsAcc(rest, acc, sheetIdx)
+      -- Embeddable pictures are anchored below the data; the rest is text
+      if xlsxIsPicture(b)
+      then xlsxCollectSheetsAcc(rest, xlsxAppendPicToContent(acc, xlsxBlockPic(b)), sheetIdx)
+      else xlsxCollectText(b, rest, acc, sheetIdx)
   }
+
+-- Non-table, non-picture blocks: accumulate text into a "Content" sheet
+pure func xlsxCollectText(b: Block, rest: [Block], acc: [XlsxSheet], sheetIdx: int) -> [XlsxSheet] =
+  let textRow = [xlsxBlockToText(b)] in
+  if length(xlsxBlockToText(b)) > 0
+  then xlsxCollectSheetsAcc(rest, xlsxAppendToContentSheet(acc, textRow, sheetIdx), sheetIdx)
+  else xlsxCollectSheetsAcc(rest, acc, sheetIdx)
 
 pure func xlsxBlockToText(block: Block) -> string =
   match block {
@@ -117,9 +169,19 @@ pure func xlsxBlocksToRows(blocks: [Block]) -> [[string]] =
     TableBlock(t) :: rest => xlsxTableToRowsConcat(t.headers, t.rows, xlsxBlocksToRows(rest)),
     b :: rest =>
       let text = xlsxBlockToText(b) in
-      if length(text) > 0
+      if length(text) > 0 && xlsxIsPicture(b) == false
       then [text] :: xlsxBlocksToRows(rest)
       else xlsxBlocksToRows(rest)
+  }
+
+-- Pictures of a sheet section, in order (top-level blocks, as xlsxBlocksToRows)
+pure func xlsxBlocksToPics(blocks: [Block]) -> [XlsxPic] =
+  match blocks {
+    [] => [],
+    b :: rest =>
+      if xlsxIsPicture(b)
+      then xlsxBlockPic(b) :: xlsxBlocksToPics(rest)
+      else xlsxBlocksToPics(rest)
   }
 
 pure func xlsxTableToRows(headers: [TableCell], rows: [[TableCell]]) -> [[string]] {
@@ -155,17 +217,32 @@ pure func xlsxAppendSheet(sheets: [XlsxSheet], sheet: XlsxSheet) -> [XlsxSheet] 
 pure func xlsxAppendToContentSheet(sheets: [XlsxSheet], row: [string], sheetIdx: int) -> [XlsxSheet] =
   -- If there's already a content sheet, append to it; otherwise create one
   match sheets {
-    [] => [{name: "Content", rows: [row]}],
+    [] => [{name: "Content", rows: [row], pics: []}],
     s :: rest =>
       if s.name == "Content"
-      then {name: "Content", rows: xlsxAppendRows(s.rows, [row])} :: rest
+      then {name: "Content", rows: xlsxAppendRows(s.rows, [row]), pics: s.pics} :: rest
       else s :: xlsxAppendToContentSheet(rest, row, sheetIdx)
+  }
+
+pure func xlsxAppendPicToContent(sheets: [XlsxSheet], pic: XlsxPic) -> [XlsxSheet] =
+  match sheets {
+    [] => [{name: "Content", rows: [], pics: [pic]}],
+    s :: rest =>
+      if s.name == "Content"
+      then {name: "Content", rows: s.rows, pics: xlsxAppendPicList(s.pics, [pic])} :: rest
+      else s :: xlsxAppendPicToContent(rest, pic)
   }
 
 pure func xlsxAppendRows(rows: [[string]], more: [[string]]) -> [[string]] =
   match rows {
     [] => more,
     r :: rest => r :: xlsxAppendRows(rest, more)
+  }
+
+pure func xlsxAppendPicList(a: [XlsxPic], b: [XlsxPic]) -> [XlsxPic] =
+  match a {
+    [] => b,
+    x :: rest => x :: xlsxAppendPicList(rest, b)
   }
 
 -- Collect all strings for shared strings table
@@ -205,14 +282,16 @@ pure func xlsxBuildSheetEntries(sheets: [XlsxSheet], stringIndex: Map[string, in
   match sheets {
     [] => [],
     s :: rest =>
-      let entry = {name: "xl/worksheets/sheet${intToStr(idx)}.xml", content: xlsxSheetXml(s.rows, stringIndex)} in
+      let entry = {name: "xl/worksheets/sheet${intToStr(idx)}.xml", content: xlsxSheetXml(s.rows, stringIndex, listLength(s.pics) > 0)} in
       entry :: xlsxBuildSheetEntries(rest, stringIndex, idx + 1)
   }
 
--- Build a single worksheet XML
-pure func xlsxSheetXml(rows: [[string]], stringIndex: Map[string, int]) -> string {
-  "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData></worksheet>"
-}
+-- Build a single worksheet XML. A sheet with pictures declares the relationship
+-- namespace and points at its drawing; a sheet without them is unchanged.
+pure func xlsxSheetXml(rows: [[string]], stringIndex: Map[string, int], hasPics: bool) -> string =
+  if hasPics
+  then "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetFormatPr defaultRowHeight=\"15\"/><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData><drawing r:id=\"rId1\"/></worksheet>"
+  else "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData></worksheet>"
 
 pure func xlsxRowsToXml(rows: [[string]], stringIndex: Map[string, int], rowIdx: int) -> string =
   match rows {
@@ -255,14 +334,61 @@ pure func xlsxAppendList(a: [{name: string, content: string}], b: [{name: string
     x :: rest => x :: xlsxAppendList(rest, b)
   }
 
+pure func xlsxAppendBytes(a: [{name: string, data: string}], b: [{name: string, data: string}]) -> [{name: string, data: string}] =
+  match a {
+    [] => b,
+    x :: rest => x :: xlsxAppendBytes(rest, b)
+  }
+
+-- Text parts as base64, for createArchiveWithBytes
+pure func xlsxTextToBytes(entries: [{name: string, content: string}]) -> [{name: string, data: string}] =
+  match entries {
+    [] => [],
+    e :: rest => {name: e.name, data: toBase64(fromString(e.content))} :: xlsxTextToBytes(rest)
+  }
+
 -- [Content_Types].xml
-pure func xlsxContentTypes(sheetCount: int) -> string {
-  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>${xlsxSheetContentTypes(sheetCount, 1)}</Types>"
+pure func xlsxContentTypes(sheetCount: int, picDefaults: string, drawingOverrides: string) -> string {
+  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>${picDefaults}<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>${xlsxSheetContentTypes(sheetCount, 1)}${drawingOverrides}</Types>"
 }
 
 pure func xlsxSheetContentTypes(count: int, idx: int) -> string =
   if idx > count then ""
   else "<Override PartName=\"/xl/worksheets/sheet${intToStr(idx)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>${xlsxSheetContentTypes(count, idx + 1)}"
+
+-- One <Default> per picture extension present in the workbook
+pure func xlsxPicDefaults(sheets: [XlsxSheet], exts: [string]) -> string =
+  match exts {
+    [] => "",
+    e :: rest => "${xlsxExtDefault(sheets, e)}${xlsxPicDefaults(sheets, rest)}"
+  }
+
+pure func xlsxExtDefault(sheets: [XlsxSheet], ext: string) -> string =
+  if xlsxSheetsHaveExt(sheets, ext)
+  then "<Default Extension=\"${ext}\" ContentType=\"image/${ext}\"/>"
+  else ""
+
+pure func xlsxSheetsHaveExt(sheets: [XlsxSheet], ext: string) -> bool =
+  match sheets {
+    [] => false,
+    s :: rest => xlsxPicsHaveExt(s.pics, ext) || xlsxSheetsHaveExt(rest, ext)
+  }
+
+pure func xlsxPicsHaveExt(pics: [XlsxPic], ext: string) -> bool =
+  match pics {
+    [] => false,
+    p :: rest => p.ext == ext || xlsxPicsHaveExt(rest, ext)
+  }
+
+-- Overrides for the drawing parts of sheets that carry pictures
+pure func xlsxDrawingOverrides(sheets: [XlsxSheet], k: int) -> string =
+  match sheets {
+    [] => "",
+    s :: rest =>
+      if listLength(s.pics) == 0
+      then xlsxDrawingOverrides(rest, k + 1)
+      else "<Override PartName=\"/xl/drawings/drawing${intToStr(k)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>${xlsxDrawingOverrides(rest, k + 1)}"
+  }
 
 -- Root rels
 pure func xlsxRootRels() -> string =
@@ -287,6 +413,92 @@ pure func xlsxSheetRelsEntries(count: int, idx: int) -> string =
   if idx > count then ""
   else "<Relationship Id=\"rId${intToStr(idx)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet${intToStr(idx)}.xml\"/>${xlsxSheetRelsEntries(count, idx + 1)}"
 
+-- Parts for each sheet that carries pictures: the sheet's rels, its drawing and
+-- the drawing's rels. Sheet k uses drawing k and media names imageK_J.
+pure func xlsxPicEntries(sheets: [XlsxSheet], idx: int) -> [{name: string, content: string}] =
+  match sheets {
+    [] => [],
+    s :: rest =>
+      if listLength(s.pics) == 0
+      then xlsxPicEntries(rest, idx + 1)
+      else xlsxAppendList(xlsxSheetPicParts(s, idx), xlsxPicEntries(rest, idx + 1))
+  }
+
+pure func xlsxSheetPicParts(s: XlsxSheet, k: int) -> [{name: string, content: string}] = [
+  {name: "xl/worksheets/_rels/sheet${intToStr(k)}.xml.rels", content: xlsxSheetDrawingRels(k)},
+  {name: "xl/drawings/drawing${intToStr(k)}.xml", content: xlsxDrawingXml(s.pics, listLength(s.rows) + 1)},
+  {name: "xl/drawings/_rels/drawing${intToStr(k)}.xml.rels", content: xlsxDrawingRels(s.pics, k)}
+]
+
+pure func xlsxSheetDrawingRels(k: int) -> string =
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing${intToStr(k)}.xml\"/></Relationships>"
+
+pure func xlsxDrawingRels(pics: [XlsxPic], k: int) -> string =
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${xlsxDrawingRelEntries(pics, k, 1)}</Relationships>"
+
+pure func xlsxDrawingRelEntries(pics: [XlsxPic], k: int, j: int) -> string =
+  match pics {
+    [] => "",
+    p :: rest =>
+      "<Relationship Id=\"rId${intToStr(j)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"../media/image${intToStr(k)}_${intToStr(j)}.${p.ext}\"/>${xlsxDrawingRelEntries(rest, k, j + 1)}"
+  }
+
+-- Drawing part: one oneCellAnchor per picture. row is the 0-based row of the
+-- first picture; each picture then starts after its own row span plus one blank row.
+pure func xlsxDrawingXml(pics: [XlsxPic], row: int) -> string =
+  "${xmlDecl()}<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">${xlsxDrawingAnchors(pics, row, 1)}</xdr:wsDr>"
+
+pure func xlsxDrawingAnchors(pics: [XlsxPic], row: int, j: int) -> string =
+  match pics {
+    [] => "",
+    p :: rest =>
+      let span = (p.cy + xlsxRowEmu() - 1) / xlsxRowEmu() in
+      "<xdr:oneCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${intToStr(row)}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx=\"${intToStr(p.cx)}\" cy=\"${intToStr(p.cy)}\"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"${intToStr(j)}\" name=\"Picture ${intToStr(j)}\" descr=\"${xmlEscape(p.descr)}\"/><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed=\"rId${intToStr(j)}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${intToStr(p.cx)}\" cy=\"${intToStr(p.cy)}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>${xlsxDrawingAnchors(rest, row + span + 1, j + 1)}"
+  }
+
+-- Binary media parts, base64 (the data is already base64 from the parser)
+pure func xlsxMediaEntries(sheets: [XlsxSheet], k: int) -> [{name: string, data: string}] =
+  match sheets {
+    [] => [],
+    s :: rest => xlsxAppendBytes(xlsxPicMedia(s.pics, k, 1), xlsxMediaEntries(rest, k + 1))
+  }
+
+pure func xlsxPicMedia(pics: [XlsxPic], k: int, j: int) -> [{name: string, data: string}] =
+  match pics {
+    [] => [],
+    p :: rest => {name: "xl/media/image${intToStr(k)}_${intToStr(j)}.${p.ext}", data: p.data} :: xlsxPicMedia(rest, k, j + 1)
+  }
+
 -- Minimal styles
 pure func xlsxMinimalStyles() -> string =
   "${xmlDecl()}<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>"
+
+-- The drawing of a picture-free sheet is never built, so these need no pictures.
+export pure func testXlsxSheetXmlNoPics() -> bool
+  tests [((), true)]
+{
+  let xml = xlsxSheetXml([["a"]], emptyMap(), false);
+  contains(xml, "drawing") == false && contains(xml, "xmlns:r") == false
+}
+
+export pure func testXlsxDrawingStacking() -> bool
+  tests [((), true)]
+{
+  -- 2 rows tall (380000 EMU > 190500), then the next picture starts one blank row later
+  let pics = [
+    {data: "", mime: "image/png", ext: "png", descr: "a", cx: 100, cy: 380000},
+    {data: "", mime: "image/png", ext: "png", descr: "b", cx: 100, cy: 190500}
+  ];
+  let xml = xlsxDrawingXml(pics, 3);
+  contains(xml, "<xdr:row>3</xdr:row>") && contains(xml, "<xdr:row>6</xdr:row>")
+    && contains(xml, "<xdr:row>8</xdr:row>") == false
+}
+
+export pure func testXlsxPicDefaults() -> bool
+  tests [((), true)]
+{
+  let pics = [{data: "", mime: "image/jpeg", ext: "jpeg", descr: "", cx: 1, cy: 1}];
+  let sheets = [{name: "Content", rows: [], pics: pics}];
+  let defaults = xlsxPicDefaults(sheets, ["png", "jpeg"]);
+  contains(defaults, "Extension=\"jpeg\" ContentType=\"image/jpeg\"") && contains(defaults, "png") == false
+}

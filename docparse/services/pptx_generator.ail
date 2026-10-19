@@ -1,12 +1,14 @@
 module docparse/services/pptx_generator
 
-import std/string (length, intToStr, find, substring, split)
+import std/string (length, intToStr, find, substring, split, contains)
 import std/list (foldl, length as listLength, reverse, concat, any)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
-import docparse/services/xml_helpers (xmlEscape, xmlDecl)
+import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl)
+import docparse/services/image_size (imageExtentEmu)
+import docparse/services/image_embed (embedIsBinaryPayload, embedExt)
 import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pptxTplDropSpans, pptxTplDropElems, pptxTplInsertBeforeFirst, pptxTplInsertBeforeLast, pptxTplLastIndexOf)
 
 -- PPTX Generator — converts Block ADT to a valid .pptx file.
@@ -27,7 +29,8 @@ import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pp
 --   ppt/theme/theme2.xml               master/theme only when any slide has notes)
 --
 -- Limitations:
---   - No embedded images (needs writeEntryBytes)
+--   - Pictures: PNG/JPEG/GIF/BMP/TIFF are embedded as ppt/media parts; SVG and
+--     non-embeddable images keep the "[Image: ...]" text placeholder
 --   - Single blank slide layout (no themes)
 --   - Minimal styling
 
@@ -65,13 +68,17 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
   let orphanNote = if orphans > 0
     then ", ${intToStr(orphans)} notes section(s) with no preceding slide dropped"
     else "";
+  let pics = pptxDeckPics(slideContents, 1);
+  let picNote = if listLength(pics) > 0
+    then ", ${intToStr(listLength(pics))} picture(s) embedded"
+    else "";
 
-  -- Build all ZIP entries. With no speaker notes every part below is exactly
-  -- what it was before notes were written, byte for byte.
+  -- Build all ZIP entries. With no speaker notes and no pictures every part
+  -- below is exactly what it was before either was written, byte for byte.
   let contentTypes = if hasNotes
-    then pptxTplInsertBeforeLast(pptxContentTypes(slideCount), "</Types>",
+    then pptxTplInsertBeforeLast(pptxContentTypes(slideCount, pptxMediaDefaults(pics, "", "")), "</Types>",
       "${pptxNotesMasterContentTypes("/ppt/notesMasters/notesMaster1.xml", "/ppt/theme/theme2.xml")}${pptxNotesContentTypes(slideContents, 1)}")
-    else pptxContentTypes(slideCount);
+    else pptxContentTypes(slideCount, pptxMediaDefaults(pics, "", ""));
   let rootRels = pptxRootRels();
   let presentation = if hasNotes
     then pptxTplInsertBeforeFirst(pptxPresentation(slideCount, pptxSldSzFor(slideSize)),
@@ -81,8 +88,8 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
     then pptxTplInsertBeforeLast(pptxPresentationRels(slideCount), "</Relationships>",
       pptxNotesMasterRel("rId${intToStr(slideCount + 6)}", "notesMasters/notesMaster1.xml"))
     else pptxPresentationRels(slideCount);
-  let slideEntries = pptxBuildSlideEntries(slideContents, 1);
-  let slideRelEntries = pptxBuildSlideRelEntries(slideContents, 1, "slideLayout1.xml");
+  let slideEntries = pptxBuildSlideEntries(slideContents, 1, 1);
+  let slideRelEntries = pptxBuildSlideRelEntries(slideContents, 1, "slideLayout1.xml", 1);
   let notesEntries = if hasNotes
     then concat(pptxNotesMasterEntries("ppt/notesMasters/notesMaster1.xml", "theme2.xml"),
       concat([{name: "ppt/theme/theme2.xml", content: pptxTheme()}],
@@ -119,27 +126,37 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
     -- table styles and media all arrive without being re-derived.
     let ourParts = concat(pptxAppendEntries(
       [
-        {name: "[Content_Types].xml", content: pptxRefNotesContentTypes(ref, slideContents, pptxRefContentTypes(ref, slideCount))},
+        {name: "[Content_Types].xml", content: pptxRefNotesContentTypes(ref, slideContents, pptxTplInsertBeforeLast(pptxRefContentTypes(ref, slideCount), "</Types>", pptxMediaDefaults(pics, ref.contentTypesXml, "")))},
         {name: "ppt/presentation.xml", content: pptxRefNotesPresentation(ref, hasNotes, pptxRefPresentation(ref, slideCount, slideSize))},
         {name: "ppt/_rels/presentation.xml.rels", content: pptxRefNotesPresRels(ref, hasNotes, pptxRefPresRels(ref, slideCount))}
       ],
-      pptxRefSlideEntries(slideContents, 1),
-      pptxBuildSlideRelEntries(slideContents, 1, ref.layoutTarget)),
+      pptxRefSlideEntries(slideContents, 1, 1),
+      pptxBuildSlideRelEntries(slideContents, 1, ref.layoutTarget, 1)),
       if hasNotes then pptxRefNotesEntries(ref, slideContents) else []);
     -- Carried parts are already base64, so the whole archive goes through
     -- createArchiveWithBytes whether or not the content has images.
-    let allBytes = pptxAppendByteEntries(pptxPartsToByteEntries(ourParts), ref.entries);
+    let allBytes = pptxAppendByteEntries(pptxAppendByteEntries(pptxPartsToByteEntries(ourParts), ref.entries), pptxPicEntries(pics));
     match createArchiveWithBytes(outputPath, allBytes) {
-      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s)${orphanNote})",
+      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s)${orphanNote}${picNote})",
       Err(e) => "Error generating PPTX: ${e}"
     }
   } else {
   let allEntries = concat(pptxAppendEntries(baseEntries, slideEntries, slideRelEntries), notesEntries);
 
+  -- Pictures are binary, so a deck with any goes through createArchiveWithBytes
+  -- with its text parts base64-encoded; a deck without keeps the text path.
+  if listLength(pics) > 0 then {
+    let allBytes = pptxAppendByteEntries(pptxPartsToByteEntries(allEntries), pptxPicEntries(pics));
+    match createArchiveWithBytes(outputPath, allBytes) {
+      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote}${picNote})",
+      Err(e) => "Error generating PPTX: ${e}"
+    }
+  } else {
   let result = createArchive(outputPath, allEntries);
   match result {
     Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote})",
     Err(e) => "Error generating PPTX: ${e}"
+  }
   }
   }
 }
@@ -218,25 +235,28 @@ pure func pptxHasNotes(s: PptxSlide) -> bool = listLength(s.notes) > 0
 pure func pptxAnyNotes(slides: [PptxSlide]) -> bool = any(pptxHasNotes, slides)
 
 -- Build slide XML entries
-pure func pptxBuildSlideEntries(slides: [PptxSlide], idx: int) -> [{name: string, content: string}] =
+-- pic is the deck-wide number of the first picture on this slide (see
+-- pptxPicsOf); each slide advances it by the pictures it carries.
+pure func pptxBuildSlideEntries(slides: [PptxSlide], idx: int, pic: int) -> [{name: string, content: string}] =
   match slides {
     [] => [],
     slide :: rest =>
-      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxSlideXml(slide.blocks)} in
-      entry :: pptxBuildSlideEntries(rest, idx + 1)
+      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxSlideXml(slide.blocks, pic)} in
+      entry :: pptxBuildSlideEntries(rest, idx + 1, pic + listLength(pptxPicsOf(slide.blocks, pic)))
   }
 
 -- Build slide relationship entries: the layout, plus the notes slide when this
--- slide has notes. Shared by the plain and reference-deck paths; only the
--- layout target differs.
-pure func pptxBuildSlideRelEntries(slides: [PptxSlide], idx: int, layoutTarget: string) -> [{name: string, content: string}] =
+-- slide has notes, plus one image relationship per picture on it. Shared by the
+-- plain and reference-deck paths; only the layout target differs.
+pure func pptxBuildSlideRelEntries(slides: [PptxSlide], idx: int, layoutTarget: string, pic: int) -> [{name: string, content: string}] =
   match slides {
     [] => [],
     slide :: rest =>
       let notesRel = if pptxHasNotes(slide) then pptxSlideNotesRel(idx) else "" in
+      let slidePics = pptxPicsOf(slide.blocks, pic) in
       let entry = {name: "ppt/slides/_rels/slide${intToStr(idx)}.xml.rels",
-                   content: pptxTplInsertBeforeLast(pptxRefSlideRels(layoutTarget), "</Relationships>", notesRel)} in
-      entry :: pptxBuildSlideRelEntries(rest, idx + 1, layoutTarget)
+                   content: pptxTplInsertBeforeLast(pptxRefSlideRels(layoutTarget), "</Relationships>", "${notesRel}${pptxPicRels(slidePics)}")} in
+      entry :: pptxBuildSlideRelEntries(rest, idx + 1, layoutTarget, pic + listLength(slidePics))
   }
 
 pure func pptxSlideNotesRel(idx: int) -> string =
@@ -373,9 +393,9 @@ pure func pptxAppendEntry(
   }
 
 -- Build a single slide XML
-pure func pptxSlideXml(blocks: [Block]) -> string {
+pure func pptxSlideXml(blocks: [Block], pic: int) -> string {
   let ns = "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"";
-  let shapes = pptxBlocksToShapes(blocks, 1);
+  let shapes = pptxBlocksToShapes(blocks, 1, pic);
   "${xmlDecl()}<p:sld ${ns}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>${shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
 }
 
@@ -442,12 +462,12 @@ pure func pptxRefContentTypes(ref: PptxRefDoc, slideCount: int) -> string =
 pure func pptxRefSlideRels(layoutTarget: string) -> string =
   "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/${layoutTarget}\"/></Relationships>"
 
-pure func pptxRefSlideEntries(slides: [PptxSlide], idx: int) -> [{name: string, content: string}] =
+pure func pptxRefSlideEntries(slides: [PptxSlide], idx: int, pic: int) -> [{name: string, content: string}] =
   match slides {
     [] => [],
     slide :: rest =>
-      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxStripOurTypography(pptxSlideXml(slide.blocks))} in
-      entry :: pptxRefSlideEntries(rest, idx + 1)
+      let entry = {name: "ppt/slides/slide${intToStr(idx)}.xml", content: pptxStripOurTypography(pptxSlideXml(slide.blocks, pic))} in
+      entry :: pptxRefSlideEntries(rest, idx + 1, pic + listLength(pptxPicsOf(slide.blocks, pic)))
   }
 
 -- Reference-deck notes. The template's notes master is reused when it has one
@@ -561,16 +581,144 @@ pure func pptxAppendByteEntries(a: [{name: string, data: string}], b: [{name: st
     x :: rest => x :: pptxAppendByteEntries(rest, b)
   }
 
+-- ============================================================
+-- Pictures (ECMA-376 §19.3.1.37 p:pic, §15.2.2 image parts)
+-- ============================================================
+--
+-- An embedded picture is a media part under ppt/media/ plus an image
+-- relationship from the slide that shows it. Numbering is deck-wide and follows
+-- the order the shape walk meets pictures, so a picture's media name and
+-- relationship id are the same wherever they are referenced. pptxPicsOf is the
+-- collector; pptxBlocksToShapes numbers pictures the same way, and both decide
+-- "is this a picture" with pptxIsPicture.
+--
+-- SVG is never embedded. PowerPoint accepts SVG only alongside a PNG fallback
+-- (asvg:svgBlip), which this generator does not produce, so an SVG keeps the
+-- "[Image: ...]" text placeholder.
+
+type PptxPic = { idx: int, data: string, mime: string, ext: string }
+
+-- The shared embeddability rule, minus SVG (see above).
+pure func pptxIsPicture(data: string, mime: string) -> bool =
+  embedIsBinaryPayload(data, mime) && mime != "image/svg+xml"
+
+-- Pictures in blocks, numbered from idx. SectionBlock contents are part of the
+-- slide they sit in, so they are numbered in place.
+pure func pptxPicsOf(blocks: [Block], idx: int) -> [PptxPic] =
+  match blocks {
+    [] => [],
+    ImageBlock(i) :: rest =>
+      if pptxIsPicture(i.data, i.mime)
+      then {
+        let pic = {idx: idx, data: i.data, mime: i.mime, ext: embedExt(i.mime)} in
+        pic :: pptxPicsOf(rest, idx + 1)
+      }
+      else pptxPicsOf(rest, idx),
+    SectionBlock(s) :: rest => {
+      let inner = pptxPicsOf(s.blocks, idx);
+      concat(inner, pptxPicsOf(rest, idx + listLength(inner)))
+    },
+    _ :: rest => pptxPicsOf(rest, idx)
+  }
+
+-- Every picture in the deck, numbered from idx across slides. Notes are not
+-- walked: pptxNotesBlockParas renders no pictures.
+pure func pptxDeckPics(slides: [PptxSlide], idx: int) -> [PptxPic] =
+  match slides {
+    [] => [],
+    slide :: rest => {
+      let here = pptxPicsOf(slide.blocks, idx);
+      concat(here, pptxDeckPics(rest, idx + listLength(here)))
+    }
+  }
+
+pure func pptxPicFile(p: PptxPic) -> string = "dpimage${intToStr(p.idx)}.${p.ext}"
+
+pure func pptxPicRelId(idx: int) -> string = "rIdPI${intToStr(idx)}"
+
+-- Media parts. Base64 in, as createArchiveWithBytes takes them.
+pure func pptxPicEntries(pics: [PptxPic]) -> [{name: string, data: string}] =
+  match pics {
+    [] => [],
+    p :: rest => {
+      let entry = {name: "ppt/media/${pptxPicFile(p)}", data: p.data} in
+      entry :: pptxPicEntries(rest)
+    }
+  }
+
+-- Image relationships for one slide's pictures.
+pure func pptxPicRels(pics: [PptxPic]) -> string =
+  match pics {
+    [] => "",
+    p :: rest =>
+      "<Relationship Id=\"${pptxPicRelId(p.idx)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"../media/${pptxPicFile(p)}\"/>${pptxPicRels(rest)}"
+  }
+
+-- <Default> entries for the picture MIME types, skipping extensions already
+-- emitted and extensions the template already declares (a duplicate Default
+-- for one extension makes the package invalid). seen is "|ext|ext|" so that
+-- contains can match whole extensions.
+pure func pptxMediaDefaults(pics: [PptxPic], tpl: string, seen: string) -> string =
+  match pics {
+    [] => "",
+    p :: rest =>
+      if contains(seen, "|${p.ext}|") || contains(tpl, "Extension=\"${p.ext}\"")
+      then pptxMediaDefaults(rest, tpl, seen)
+      else "<Default Extension=\"${p.ext}\" ContentType=\"${p.mime}\"/>${pptxMediaDefaults(rest, tpl, "${seen}|${p.ext}|")}"
+  }
+
+-- One block's vertical slot on a slide: the shape walk places block n at
+-- n * 1200000 EMU, so a picture taller than this overlaps the block below it.
+pure func pptxPicSlotEmu() -> int = 1100000
+
+-- A p:pic at the text column's left edge. The size is the picture's own aspect
+-- ratio scaled to the 9 in column (8229600 EMU), the width every text box on the
+-- slide uses; the author's width/height attributes win when given. A picture
+-- taller than its slot is scaled down to the slot, aspect kept.
+pure func pptxPicShape(id: string, yOff: string, pic: int, description: string, data: string, mime: string, wantW: int, wantH: int) -> string {
+  let fit = imageExtentEmu(data, mime, 8229600, wantW, wantH);
+  let ext = if fit.cy > pptxPicSlotEmu()
+    then {cx: fit.cx * pptxPicSlotEmu() / fit.cy, cy: pptxPicSlotEmu()}
+    else fit;
+  "<p:pic><p:nvPicPr><p:cNvPr id=\"${id}\" name=\"Picture ${id}\" descr=\"${xmlAttrEscape(description)}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"${pptxPicRelId(pic)}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x=\"457200\" y=\"${yOff}\"/><a:ext cx=\"${intToStr(ext.cx)}\" cy=\"${intToStr(ext.cy)}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>"
+}
+
+-- A 1x1 PNG, real bytes, so the predicate sees a genuine payload.
+pure func pptxTestPng() -> string = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+export pure func testPptxPictures() -> bool
+  tests [((), true)]
+{
+  let png = pptxTestPng();
+  let blocks = [
+    ImageBlock({data: png, description: "first", mime: "image/png", width: 0, height: 0, srcset: "", title: "", loading: ""}),
+    ImageBlock({data: "hero.png", description: "path", mime: "image/png", width: 0, height: 0, srcset: "", title: "", loading: ""}),
+    ImageBlock({data: png, description: "svg", mime: "image/svg+xml", width: 0, height: 0, srcset: "", title: "", loading: ""}),
+    ImageBlock({data: png, description: "last", mime: "image/png", width: 0, height: 0, srcset: "", title: "", loading: ""})
+  ];
+  let pics = pptxPicsOf(blocks, 1);
+  let numbered = match pics {
+    p :: q :: [] => p.idx == 1 && q.idx == 2 && p.ext == "png",
+    _ => false
+  };
+  listLength(pics) == 2 && numbered
+    && pptxIsPicture(png, "image/svg+xml") == false
+    && pptxIsPicture("hero.png", "image/png") == false
+    && pptxMediaDefaults(pics, "", "") == "<Default Extension=\"png\" ContentType=\"image/png\"/>"
+    && pptxMediaDefaults(pics, "<Default Extension=\"png\" ContentType=\"image/png\"/>", "") == ""
+}
+
 -- Convert blocks to PPTX shapes (text boxes positioned vertically)
 -- yOff tracks vertical position in EMUs (English Metric Units, 914400 per inch)
-pure func pptxBlocksToShapes(blocks: [Block], shapeId: int) -> string =
+-- pic is the deck-wide number of the next picture this walk will meet.
+pure func pptxBlocksToShapes(blocks: [Block], shapeId: int, pic: int) -> string =
   match blocks {
     [] => "",
     block :: rest =>
-      "${pptxBlockToShape(block, shapeId)}${pptxBlocksToShapes(rest, shapeId + 1)}"
+      "${pptxBlockToShape(block, shapeId, pic)}${pptxBlocksToShapes(rest, shapeId + 1, pic + listLength(pptxPicsOf([block], 0)))}"
   }
 
-pure func pptxBlockToShape(block: Block, shapeId: int) -> string {
+pure func pptxBlockToShape(block: Block, shapeId: int, pic: int) -> string {
   let idStr = intToStr(shapeId + 1);
   let yOff = intToStr(shapeId * 1200000);
   match block {
@@ -591,8 +739,12 @@ pure func pptxBlockToShape(block: Block, shapeId: int) -> string {
       pptxTextBox(idStr, "List ${idStr}", "457200", yOff, "8229600", "1000000",
         pptxListParagraphs(l.items, l.itemRuns, l.ordered, 1)),
 
+    -- Predicate MUST match pptxPicsOf: this walk names the media part and
+    -- relationship the collector emits for the same picture.
     ImageBlock(i) =>
-      pptxTextBox(idStr, "Image ${idStr}", "457200", yOff, "8229600", "400000",
+      if pptxIsPicture(i.data, i.mime)
+      then pptxPicShape(idStr, yOff, pic, i.description, i.data, i.mime, i.width, i.height)
+      else pptxTextBox(idStr, "Image ${idStr}", "457200", yOff, "8229600", "400000",
         "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"1400\" i=\"1\"/><a:t>[Image: ${xmlEscape(i.description)}]</a:t></a:r></a:p>"),
 
     AudioBlock(a) =>
@@ -604,7 +756,7 @@ pure func pptxBlockToShape(block: Block, shapeId: int) -> string {
         "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"1400\" i=\"1\"/><a:t>[Video: ${xmlEscape(v.description)}]</a:t></a:r></a:p>"),
 
     SectionBlock(s) =>
-      pptxBlocksToShapes(s.blocks, shapeId),
+      pptxBlocksToShapes(s.blocks, shapeId, pic),
 
     ChangeBlock(c) =>
       pptxTextBox(idStr, "Change ${idStr}", "457200", yOff, "8229600", "400000",
@@ -731,8 +883,8 @@ pure func pptxHeadingRun(r: InlineRun) -> string {
 }
 
 -- [Content_Types].xml
-pure func pptxContentTypes(slideCount: int) -> string {
-  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/><Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/><Override PartName=\"/ppt/presProps.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presProps+xml\"/><Override PartName=\"/ppt/viewProps.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml\"/><Override PartName=\"/ppt/tableStyles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml\"/>${pptxSlideContentTypes(slideCount, 1)}</Types>"
+pure func pptxContentTypes(slideCount: int, mediaDefaults: string) -> string {
+  "${xmlDecl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>${mediaDefaults}<Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/><Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/><Override PartName=\"/ppt/presProps.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presProps+xml\"/><Override PartName=\"/ppt/viewProps.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml\"/><Override PartName=\"/ppt/tableStyles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml\"/>${pptxSlideContentTypes(slideCount, 1)}</Types>"
 }
 
 pure func pptxSlideContentTypes(count: int, idx: int) -> string =

@@ -2,12 +2,16 @@ module docparse/services/odp_generator
 
 import std/string (length, intToStr)
 import std/list (foldl, flatMap, length as listLength)
-import std/zip (createArchive)
+import std/zip (createArchive, createArchiveWithBytes)
+import std/list (concat)
 import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
 import docparse/services/odf_runs (odfCollectRunStyles, odfRunsToXml)
+import docparse/services/image_size (imageExtentEmu, ImageExtent)
+import docparse/services/image_embed (embedIsBinaryPayload)
+import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFrame, odfImgFrameStyle, odfImgNsMissing, odfImgManifest, odfImgByteEntries, odfImgTextEntries)
 
 -- ODP Generator — converts Block ADT to a valid .odp file.
 -- ODP = OpenDocument Presentation. Uses draw:page elements for slides.
@@ -17,10 +21,12 @@ export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS
   ensures { length(result) > 0 }
 {
   let slides = odpCollectSlides(doc.blocks);
-  let contentXml = odpBuildContent(slides);
+  let body = odpSlidesAcc(slides, 1, {xml: "", pics: [], shift: 0});
+  let pics = body.pics;
+  let contentXml = odpBuildContent(slides, body);
   let stylesXml = odpMinimalStyles();
   let metaXml = odpBuildMeta(doc.metadata.title, doc.metadata.author);
-  let manifest = odpManifest();
+  let manifest = odfImgManifest(odpManifest(), pics);
   let mimetype = "application/vnd.oasis.opendocument.presentation";
 
   let entries = [
@@ -31,11 +37,84 @@ export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS
     {name: "meta.xml", content: metaXml}
   ];
 
-  let result = createArchive(outputPath, entries);
+  let result = if listLength(pics) == 0
+    then createArchive(outputPath, entries)
+    else createArchiveWithBytes(outputPath, concat(odfImgTextEntries(entries), odfImgByteEntries(pics)));
   match result {
     Ok(_) => "Generated ODP: ${outputPath} (${intToStr(listLength(slides))} slides)",
     Err(e) => "Error generating ODP: ${e}"
   }
+}
+
+-- The body XML and the picture parts it places, threaded through the walk.
+type OdpBody = {xml: string, pics: [OdfImgPart], shift: int}
+
+-- Pictures sit 2cm in from the left and are at most 22cm wide, as the text
+-- frames are; the slide is 25.4cm x 19.05cm.
+pure func odpImgX() -> int = 720000
+pure func odpImgMaxCx() -> int = 7920000
+pure func odpSlideHeight() -> int = 6858000
+
+-- Slides in order. Each slide's page XML and its pictures are threaded.
+pure func odpSlidesAcc(slides: [[Block]], idx: int, acc: OdpBody) -> OdpBody =
+  match slides {
+    [] => acc,
+    slide :: rest =>
+      let page = odpSlideAcc(slide, 1, {xml: "", pics: acc.pics, shift: 0}) in
+      let next = {xml: "${acc.xml}<draw:page draw:name=\"Slide${intToStr(idx)}\" draw:style-name=\"dp1\">${page.xml}</draw:page>", pics: page.pics, shift: 0} in
+      odpSlidesAcc(rest, idx + 1, next)
+  }
+
+-- The frames of one slide, numbered from frameIdx as the text frames are.
+pure func odpSlideAcc(blocks: [Block], frameIdx: int, acc: OdpBody) -> OdpBody =
+  match blocks {
+    [] => acc,
+    block :: rest => odpSlideAcc(rest, frameIdx + 1, odpBlockAcc(block, frameIdx, acc))
+  }
+
+-- Sections and embeddable pictures are walked here because they carry state;
+-- every other block is a text frame from odpBlockToFrame.
+pure func odpBlockAcc(block: Block, frameIdx: int, acc: OdpBody) -> OdpBody =
+  match block {
+    ImageBlock(i) =>
+      if embedIsBinaryPayload(i.data, i.mime)
+      then odpImageAcc(i.data, i.mime, i.description, i.width, i.height, frameIdx, acc)
+      else odpAppendXml(acc, odpBlockToFrame(block, frameIdx, acc.shift)),
+    SectionBlock(s) => odpSlideAcc(s.blocks, frameIdx, acc),
+    _ => odpAppendXml(acc, odpBlockToFrame(block, frameIdx, acc.shift))
+  }
+
+-- The string-only view of a slide's frames. Pictures are not carried by it, so
+-- it is only for the section arm of odpBlockToFrame, which odpBlockAcc never
+-- reaches with a section.
+pure func odpSlideContent(blocks: [Block], frameIdx: int) -> string =
+  odpSlideAcc(blocks, frameIdx, {xml: "", pics: [], shift: 0}).xml
+
+pure func odpAppendXml(acc: OdpBody, xml: string) -> OdpBody =
+  {xml: "${acc.xml}${xml}", pics: acc.pics, shift: acc.shift}
+
+-- A picture frame in the same column and row as a text frame at frameIdx. A
+-- picture too tall for the rest of the slide is scaled down, aspect kept.
+pure func odpImageAcc(data: string, mime: string, description: string, wantW: int, wantH: int, frameIdx: int, acc: OdpBody) -> OdpBody {
+  let key = intToStr(listLength(acc.pics) + 1);
+  let part = odfImgPart(key, data, mime);
+  let y = frameIdx * 1080000 + acc.shift;
+  let ext = odpImgFit(imageExtentEmu(data, mime, odpImgMaxCx(), wantW, wantH), y);
+  let attrs = "draw:style-name=\"dpImgFrame\" draw:name=\"Image${key}\" svg:x=\"${odfImgCm(odpImgX())}\" svg:y=\"${odfImgCm(y)}\" svg:width=\"${odfImgCm(ext.cx)}\" svg:height=\"${odfImgCm(ext.cy)}\"";
+  -- The text frames stay on their 3cm grid, but a picture taller than its slot
+  -- pushes the frames after it down by the excess, so nothing lands on it.
+  let overhang = ext.cy + 180000 - 1080000;
+  let grown = if overhang > 0 then acc.shift + overhang else acc.shift;
+  {xml: "${acc.xml}${odfImgFrame(attrs, part.name, description)}", pics: part :: acc.pics, shift: grown}
+}
+
+-- Keeps a picture above the bottom edge (half a centimetre kept clear), scaling
+-- it down with its aspect ratio when it would run past. At least 1cm tall.
+pure func odpImgFit(ext: ImageExtent, y: int) -> ImageExtent {
+  let room = odpSlideHeight() - y - 180000;
+  let maxCy = if room < 360000 then 360000 else room;
+  if ext.cy <= maxCy then ext
+  else {cx: ext.cx * maxCy / ext.cy, cy: maxCy}
 }
 
 -- ODF namespace declaration
@@ -70,27 +149,15 @@ pure func odpSplitBySlides(blocks: [Block]) -> [[Block]] =
   }
 
 -- Build content.xml with slides
-pure func odpBuildContent(slides: [[Block]]) -> string {
+pure func odpBuildContent(slides: [[Block]], body: OdpBody) -> string {
   -- Run styles are document-wide in ODF, so they are collected across every
   -- slide and emitted once alongside the page/frame styles.
   let runStyles = odfCollectRunStyles(flatMap(\sl. sl, slides));
-  "${xmlDecl()}<office:document-content ${odpNs()} office:version=\"1.2\"><office:automatic-styles><style:style style:name=\"dp1\" style:family=\"drawing-page\"/><style:style style:name=\"tf1\" style:family=\"graphic\"><style:graphic-properties draw:auto-grow-height=\"true\"/></style:style>${runStyles}</office:automatic-styles><office:body><office:presentation>${odpSlidesToXml(slides, 1)}</office:presentation></office:body></office:document-content>"
+  let hasPics = listLength(body.pics) > 0;
+  let ns = if hasPics then odfImgNsMissing(odpNs()) else odpNs();
+  let frameStyle = if hasPics then odfImgFrameStyle() else "";
+  "${xmlDecl()}<office:document-content ${ns} office:version=\"1.2\"><office:automatic-styles><style:style style:name=\"dp1\" style:family=\"drawing-page\"/><style:style style:name=\"tf1\" style:family=\"graphic\"><style:graphic-properties draw:auto-grow-height=\"true\"/></style:style>${runStyles}${frameStyle}</office:automatic-styles><office:body><office:presentation>${body.xml}</office:presentation></office:body></office:document-content>"
 }
-
-pure func odpSlidesToXml(slides: [[Block]], idx: int) -> string =
-  match slides {
-    [] => "",
-    slide :: rest =>
-      "<draw:page draw:name=\"Slide${intToStr(idx)}\" draw:style-name=\"dp1\">${odpSlideContent(slide, 1)}</draw:page>${odpSlidesToXml(rest, idx + 1)}"
-  }
-
--- Convert blocks to draw:frame text boxes on a slide
-pure func odpSlideContent(blocks: [Block], frameIdx: int) -> string =
-  match blocks {
-    [] => "",
-    block :: rest =>
-      "${odpBlockToFrame(block, frameIdx)}${odpSlideContent(rest, frameIdx + 1)}"
-  }
 
 -- Runs when present, plain encoded text otherwise.
 pure func odpInline(text: string, runs: [InlineRun]) -> string =
@@ -114,8 +181,8 @@ pure func odpListItems(items: [string], itemRuns: [[InlineRun]]) -> string =
     }
   }
 
-pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
-  let yPos = "${intToStr(frameIdx * 3)}cm";
+pure func odpBlockToFrame(block: Block, frameIdx: int, shift: int) -> string {
+  let yPos = if shift == 0 then "${intToStr(frameIdx * 3)}cm" else odfImgCm(frameIdx * 1080000 + shift);
   match block {
     -- Titles stay bold by default; the run spans nest inside and compose with
     -- it, which is how the ODT parser already reads nested spans.
@@ -137,6 +204,8 @@ pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
       odpTextFrame("2cm", yPos, "22cm", "3cm",
         odpListItems(l.items, l.itemRuns)),
 
+    -- Reached only for a picture with no embeddable payload; odpBlockAcc
+    -- places the embeddable ones.
     ImageBlock(i) =>
       odpTextFrame("2cm", yPos, "22cm", "2cm",
         "<text:p>[Image: ${odfEncodeText(i.description)}]</text:p>"),
@@ -149,6 +218,8 @@ pure func odpBlockToFrame(block: Block, frameIdx: int) -> string {
       odpTextFrame("2cm", yPos, "22cm", "2cm",
         "<text:p>[Video: ${odfEncodeText(v.description)}]</text:p>"),
 
+    -- Not reached from odpBlockAcc, which walks sections itself so nested
+    -- pictures are placed; kept so the match stays total.
     SectionBlock(s) =>
       odpSlideContent(s.blocks, frameIdx),
 
@@ -191,3 +262,11 @@ pure func odpBuildMeta(title: string, author: string) -> string =
 -- manifest.xml
 pure func odpManifest() -> string =
   "${xmlDecl()}<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\" manifest:version=\"1.2\"><manifest:file-entry manifest:media-type=\"application/vnd.oasis.opendocument.presentation\" manifest:full-path=\"/\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"content.xml\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"styles.xml\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"meta.xml\"/></manifest:manifest>"
+
+export pure func testOdpImgFit() -> bool
+  tests [((), true)]
+{
+  let fits = odpImgFit({cx: 7620000, cy: 1905000}, 0);
+  let scaled = odpImgFit({cx: 3000000, cy: 3000000}, 5400000);
+  fits.cx == 7620000 && fits.cy == 1905000 && scaled.cy == 1278000 && scaled.cx == 1278000
+}

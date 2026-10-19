@@ -1,15 +1,19 @@
 module docparse/services/odt_generator
 
-import std/string (length, intToStr, contains)
+import std/string (length, intToStr, contains, startsWith)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
-import std/bytes (fromString, toBase64)
+import std/bytes (fromString, toBase64, fromBase64, toString)
+import std/option (Some, None)
 import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
 import docparse/services/odf_runs (odfCollectRunStyles, odfRunsToXml)
 import docparse/services/odf_template (OdfRefDoc, odfTplNone, odfTplLoad, odfTplHeadingName, odfTplHasStyleNamed, odfTplInsertBeforeLast)
+import docparse/services/image_size (imageExtentEmu)
+import docparse/services/image_embed (embedIsBinaryPayload)
+import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFrame, odfImgFrameStyle, odfImgNsMissing, odfImgManifest, odfImgByteEntries)
 
 -- ODT Generator — converts Block ADT to a valid .odt file.
 --
@@ -52,23 +56,28 @@ export func generateOdt(doc: ParsedDocument, outputPath: string) -> string ! {FS
 }
 
 func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) -> string ! {FS} {
-  let contentXml = odtBuildContent(doc.blocks, ref);
+  let body = odtBodyAcc(doc.blocks, ref, {xml: "", pics: [], next: 1, taken: odtRefNames(ref.entries)});
+  let pics = body.pics;
+  let contentXml = odtBuildContent(doc.blocks, body);
   let stylesXml = odtStylesFor(ref);
   let metaXml = odtBuildMeta(doc.metadata.title, doc.metadata.author);
-  let manifest = odtManifest();
+  let manifest = odfImgManifest(odtManifest(), pics);
   let mimetype = "application/vnd.oasis.opendocument.text";
 
   if ref.active then {
     -- mimetype must be the FIRST entry in an ODF package, so it leads the list
     -- and the carried parts follow ours. META-INF/manifest.xml comes from the
-    -- template, which already lists the parts being carried.
+    -- template, which already lists the parts being carried; the pictures we
+    -- add are listed in it by odtRefEntries.
     let ourParts = [
       {name: "mimetype", content: mimetype},
       {name: "content.xml", content: contentXml},
       {name: "styles.xml", content: stylesXml},
       {name: "meta.xml", content: metaXml}
     ];
-    let allBytes = odtAppendByteEntries(odtPartsToByteEntries(ourParts), ref.entries);
+    let allBytes = odtAppendByteEntries(
+      odtAppendByteEntries(odtPartsToByteEntries(ourParts), odtRefEntries(ref.entries, pics)),
+      odfImgByteEntries(pics));
     match createArchiveWithBytes(outputPath, allBytes) {
       Ok(_) =>
         if ref.resolvedCount == 0
@@ -84,12 +93,100 @@ func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) ->
       {name: "styles.xml", content: stylesXml},
       {name: "meta.xml", content: metaXml}
     ];
-    match createArchive(outputPath, entries) {
-      Ok(_) => "Generated ODT: ${outputPath}",
-      Err(e) => "Error generating ODT: ${e}"
+    if listLength(pics) == 0 then {
+      match createArchive(outputPath, entries) {
+        Ok(_) => "Generated ODT: ${outputPath}",
+        Err(e) => "Error generating ODT: ${e}"
+      }
+    } else {
+      match createArchiveWithBytes(outputPath,
+          odtAppendByteEntries(odtPartsToByteEntries(entries), odfImgByteEntries(pics))) {
+        Ok(_) => "Generated ODT: ${outputPath}",
+        Err(e) => "Error generating ODT: ${e}"
+      }
     }
   }
 }
+
+-- The body XML and the picture parts it places, threaded through the walk. A
+-- picture's part name and its frame are both derived from the key chosen at the
+-- point it is placed, so they cannot disagree. next is the key to try next, and
+-- taken lists the part names a reference document already carries.
+type OdtBody = {xml: string, pics: [OdfImgPart], next: int, taken: [string]}
+
+pure func odtRefNames(entries: [{name: string, data: string}]) -> [string] =
+  match entries {
+    [] => [],
+    e :: rest => e.name :: odtRefNames(rest)
+  }
+
+-- The first key at or after n whose picture part name no carried part uses. A
+-- template's own dpimage parts (from an earlier run of this generator) are
+-- skipped rather than duplicated.
+pure func odtImgFreeKey(taken: [string], n: int) -> int =
+  if odtImgKeyTaken(taken, "Pictures/dpimage${intToStr(n)}.") then odtImgFreeKey(taken, n + 1)
+  else n
+
+pure func odtImgKeyTaken(taken: [string], prefix: string) -> bool =
+  match taken {
+    [] => false,
+    t :: rest => if startsWith(t, prefix) then true else odtImgKeyTaken(rest, prefix)
+  }
+
+-- Widest picture: the 6.5in text width of a Letter page with 1in margins.
+pure func odtImgMaxCx() -> int = 5943600
+
+pure func odtBodyAcc(blocks: [Block], ref: OdfRefDoc, acc: OdtBody) -> OdtBody =
+  match blocks {
+    [] => acc,
+    b :: rest => odtBodyAcc(rest, ref, odtBlockAcc(b, ref, acc))
+  }
+
+-- Sections and embeddable pictures are walked here because they carry state
+-- (nested blocks, the picture list); everything else is plain XML.
+pure func odtBlockAcc(block: Block, ref: OdfRefDoc, acc: OdtBody) -> OdtBody =
+  match block {
+    ImageBlock(i) =>
+      if embedIsBinaryPayload(i.data, i.mime) then odtImageAcc(i.data, i.mime, i.description, i.width, i.height, acc)
+      else {xml: "${acc.xml}${odtBlockToXml(block, ref)}", pics: acc.pics, next: acc.next, taken: acc.taken},
+    SectionBlock(s) => {
+      let inner = odtBodyAcc(s.blocks, ref, {xml: "", pics: acc.pics, next: acc.next, taken: acc.taken});
+      {xml: "${acc.xml}<text:section text:name=\"${xmlEscape(s.kind)}\">${inner.xml}</text:section>", pics: inner.pics, next: inner.next, taken: acc.taken}
+    },
+    _ => {xml: "${acc.xml}${odtBlockToXml(block, ref)}", pics: acc.pics, next: acc.next, taken: acc.taken}
+  }
+
+-- A picture in its own paragraph, anchored as a character so it stays inline,
+-- sized to the author's width/height when given, else its natural size, and
+-- scaled down to the text width.
+pure func odtImageAcc(data: string, mime: string, description: string, wantW: int, wantH: int, acc: OdtBody) -> OdtBody {
+  let n = odtImgFreeKey(acc.taken, acc.next);
+  let key = intToStr(n);
+  let part = odfImgPart(key, data, mime);
+  let ext = imageExtentEmu(data, mime, odtImgMaxCx(), wantW, wantH);
+  let attrs = "draw:style-name=\"dpImgFrame\" draw:name=\"Image${key}\" text:anchor-type=\"as-char\" svg:width=\"${odfImgCm(ext.cx)}\" svg:height=\"${odfImgCm(ext.cy)}\"";
+  let para = "<text:p text:style-name=\"Standard\">${odfImgFrame(attrs, part.name, description)}</text:p>";
+  {xml: "${acc.xml}${para}", pics: part :: acc.pics, next: n + 1, taken: acc.taken}
+}
+
+-- The template's carried parts, with the pictures added to its manifest. The
+-- manifest arrives base64 in the carried list, so it is decoded, extended and
+-- re-encoded; without pictures every entry passes through untouched.
+pure func odtRefEntries(entries: [{name: string, data: string}], pics: [OdfImgPart]) -> [{name: string, data: string}] =
+  match entries {
+    [] => [],
+    e :: rest =>
+      let here = if e.name == "META-INF/manifest.xml" && listLength(pics) > 0
+        then odtRefManifestEntry(e, pics)
+        else e in
+      here :: odtRefEntries(rest, pics)
+  }
+
+pure func odtRefManifestEntry(e: {name: string, data: string}, pics: [OdfImgPart]) -> {name: string, data: string} =
+  match fromBase64(e.data) {
+    Some(b) => {name: e.name, data: toBase64(fromString(odfImgManifest(toString(b), pics)))},
+    None => e
+  }
 
 -- styles.xml: ours outright, or the template's plus ONLY the definitions it
 -- lacks. Injecting only the missing ones is what lets the template's Heading 1
@@ -127,10 +224,12 @@ pure func odfNs() -> string =
   "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:meta=\"urn:oasis:names:tc:opendocument:xmlns:meta:1.0\""
 
 -- Build content.xml
-pure func odtBuildContent(blocks: [Block], ref: OdfRefDoc) -> string {
-  let body = foldl(\acc b. "${acc}${odtBlockToXml(b, ref)}", "", blocks);
+pure func odtBuildContent(blocks: [Block], body: OdtBody) -> string {
   let styles = odfCollectRunStyles(blocks);
-  "${xmlDecl()}<office:document-content ${odfNs()} office:version=\"1.2\"><office:automatic-styles>${styles}</office:automatic-styles><office:body><office:text>${body}</office:text></office:body></office:document-content>"
+  let hasPics = listLength(body.pics) > 0;
+  let ns = if hasPics then odfImgNsMissing(odfNs()) else odfNs();
+  let frameStyle = if hasPics then odfImgFrameStyle() else "";
+  "${xmlDecl()}<office:document-content ${ns} office:version=\"1.2\"><office:automatic-styles>${styles}${frameStyle}</office:automatic-styles><office:body><office:text>${body.xml}</office:text></office:body></office:document-content>"
 }
 
 -- Convert a Block to ODF XML
@@ -153,6 +252,8 @@ pure func odtBlockToXml(block: Block, ref: OdfRefDoc) -> string =
     ListBlock(l) =>
       odtListToXml(l.items, l.ordered, l.itemRuns, ref),
 
+    -- Reached only for a picture with no embeddable payload: odtBlockAcc
+    -- places the embeddable ones (and walks sections) itself.
     ImageBlock(i) =>
       "<text:p text:style-name=\"Standard\">[Image: ${odfEncodeText(i.description)}]</text:p>",
 
@@ -162,6 +263,8 @@ pure func odtBlockToXml(block: Block, ref: OdfRefDoc) -> string =
     VideoBlock(v) =>
       "<text:p text:style-name=\"Standard\">[Video: ${odfEncodeText(v.description)}]</text:p>",
 
+    -- Not reached from odtBlockAcc, which walks sections itself so nested
+    -- pictures are placed; kept so the match stays total.
     SectionBlock(s) =>
       "<text:section text:name=\"${xmlEscape(s.kind)}\">${foldl(\acc b. "${acc}${odtBlockToXml(b, ref)}", "", s.blocks)}</text:section>",
 
@@ -293,3 +396,12 @@ pure func odtBuildMeta(title: string, author: string) -> string {
 -- manifest.xml
 pure func odtManifest() -> string =
   "${xmlDecl()}<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\" manifest:version=\"1.2\"><manifest:file-entry manifest:media-type=\"application/vnd.oasis.opendocument.text\" manifest:full-path=\"/\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"content.xml\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"styles.xml\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"meta.xml\"/></manifest:manifest>"
+
+export pure func testOdtImgFreeKey() -> bool
+  tests [((), true)]
+{
+  odtImgFreeKey([], 3) == 3 &&
+  odtImgFreeKey(["Pictures/dpimage1.png"], 1) == 2 &&
+  odtImgFreeKey(["Pictures/dpimage10.png"], 1) == 1 &&
+  odtImgFreeKey(["Pictures/dpimage1.png", "Pictures/dpimage2.jpeg"], 1) == 3
+}

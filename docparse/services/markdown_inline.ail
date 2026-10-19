@@ -2,7 +2,8 @@ module docparse/services/markdown_inline
 
 import std/string (split, length, startsWith, endsWith, substring, find, contains, charAt, charCode, join, replaceMany)
 import std/list (map, foldl, concat, reverse)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListNested, mkText, mkTextRuns, mkImage, plainRun, InlineRun, Block)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListNested, mkText, mkTextRuns, mkImage, mkImageFull, plainRun, InlineRun, Block)
+import docparse/services/image_size (imageLengthPx)
 
 -- Markdown inline formatting and the block constructors that apply it.
 --
@@ -380,12 +381,32 @@ pure func mdAnyNested(levels: [int]) -> bool =
 -- A paragraph that is nothing but an image is an image, not a sentence about
 -- one. Inline images inside prose are left as text rather than silently
 -- dropped, since a run cannot carry image data.
+-- An image line is ![alt](src), optionally followed by a Pandoc-style attribute
+-- block: ![alt](src){width=3in height=2in}.
 export pure func mdIsImageOnly(raw: string) -> bool =
-  startsWith(raw, "![") && endsWith(raw, ")") && contains(raw, "](")
+  startsWith(raw, "![") && contains(raw, "](")
+  && (endsWith(raw, ")") || (endsWith(raw, "}") && contains(raw, "){")))
 
 export pure func mdImageBlock(raw: string) -> Block {
   let close = find(raw, "](");
   let alt = substring(raw, 2, close);
-  let src = substring(raw, close + 2, length(raw) - 1);
-  mkImage(src, alt, "image/unknown")
+  if endsWith(raw, ")")
+  then mkImage(substring(raw, close + 2, length(raw) - 1), alt, "image/unknown")
+  else {
+    let brace = find(raw, "){");
+    let attrs = substring(raw, brace + 2, length(raw) - 1);
+    mkImageFull(substring(raw, close + 2, brace), alt, "image/unknown", mdAttrPx(attrs, "width"), mdAttrPx(attrs, "height"), "", "", "")
+  }
+}
+
+-- The value of one key in an attribute block without its braces, in px. 0 when
+-- the key is absent or its value has no unit we can convert.
+pure func mdAttrPx(attrs: string, key: string) -> int {
+  let at = find(attrs, "${key}=");
+  if at < 0 then 0
+  else {
+    let rest = substring(attrs, at + length(key) + 1, length(attrs));
+    let sp = find(rest, " ");
+    imageLengthPx(if sp < 0 then rest else substring(rest, 0, sp))
+  }
 }

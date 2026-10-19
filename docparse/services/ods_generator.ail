@@ -1,12 +1,15 @@
 module docparse/services/ods_generator
 
 import std/string (length, intToStr)
-import std/list (foldl, length as listLength)
-import std/zip (createArchive)
+import std/list (foldl, length as listLength, concat)
+import std/zip (createArchive, createArchiveWithBytes)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
+import docparse/services/image_size (imageExtentEmu, ImageExtent)
+import docparse/services/image_embed (embedIsBinaryPayload)
+import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFrame, odfImgFrameStyle, odfImgNsMissing, odfImgManifest, odfImgByteEntries, odfImgTextEntries)
 
 -- ODS Generator — converts Block ADT to a valid .ods file.
 -- ODS = OpenDocument Spreadsheet. Uses table:table elements for sheets.
@@ -16,10 +19,11 @@ export func generateOds(doc: ParsedDocument, outputPath: string) -> string ! {FS
   ensures { length(result) > 0 }
 {
   let sheets = odsCollectSheets(doc.blocks);
-  let contentXml = odsBuildContent(sheets);
+  let pics = odsAllPics(sheets, 1);
+  let contentXml = odsBuildContent(sheets, pics);
   let stylesXml = odsMinimalStyles();
   let metaXml = odsBuildMeta(doc.metadata.title, doc.metadata.author);
-  let manifest = odsManifest();
+  let manifest = odfImgManifest(odsManifest(), odsPicParts(pics));
   let mimetype = "application/vnd.oasis.opendocument.spreadsheet";
 
   let entries = [
@@ -30,7 +34,9 @@ export func generateOds(doc: ParsedDocument, outputPath: string) -> string ! {FS
     {name: "meta.xml", content: metaXml}
   ];
 
-  let result = createArchive(outputPath, entries);
+  let result = if listLength(pics) == 0
+    then createArchive(outputPath, entries)
+    else createArchiveWithBytes(outputPath, concat(odfImgTextEntries(entries), odfImgByteEntries(odsPicParts(pics))));
   match result {
     Ok(_) => "Generated ODS: ${outputPath} (${intToStr(listLength(sheets))} sheets)",
     Err(e) => "Error generating ODS: ${e}"
@@ -41,8 +47,23 @@ export func generateOds(doc: ParsedDocument, outputPath: string) -> string ! {FS
 pure func odsNs() -> string =
   "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:meta=\"urn:oasis:names:tc:opendocument:xmlns:meta:1.0\""
 
+-- An embedded picture. wantW/wantH are the author's size in CSS px, 0 = unset.
+type OdsPic = {data: string, mime: string, desc: string, wantW: int, wantH: int}
+
+-- A cell holds text, or one picture (pic has at most one element). A picture
+-- cell is always the only cell of its row.
+type OdsCell = {text: string, pic: [OdsPic]}
+
+-- A picture and the key that names its part: the sheet and row it sits in.
+type OdsPicAt = {key: string, img: OdsPic}
+
 -- A sheet with name and rows
-type OdsSheet = { name: string, rows: [[string]] }
+type OdsSheet = { name: string, rows: [[OdsCell]] }
+
+-- Widest picture: a 6in column. Sheets have no page width to measure against.
+pure func odsImgMaxCx() -> int = 5486400
+
+pure func odsText(s: string) -> OdsCell = {text: s, pic: []}
 
 -- Collect blocks into sheets (same logic as xlsx_generator)
 pure func odsCollectSheets(blocks: [Block]) -> [OdsSheet] {
@@ -61,9 +82,9 @@ pure func odsCollectSheetsAcc(blocks: [Block], acc: [OdsSheet], idx: int) -> [Od
       odsCollectSheetsAcc(rest,
         odsAppendSheet(acc, {name: "Sheet${intToStr(idx)}", rows: odsTableToRows(t.headers, t.rows)}), idx + 1),
     b :: rest =>
-      let text = odsBlockToText(b) in
-      if length(text) > 0
-      then odsCollectSheetsAcc(rest, odsAppendToContentSheet(acc, [text]), idx)
+      let rows = odsBlockRow(b) in
+      if listLength(rows) > 0
+      then odsCollectSheetsAcc(rest, odsAppendToContentSheet(acc, rows), idx)
       else odsCollectSheetsAcc(rest, acc, idx)
   }
 
@@ -77,35 +98,52 @@ pure func odsBlockToText(block: Block) -> string =
     _ => ""
   }
 
-pure func odsBlocksToRows(blocks: [Block]) -> [[string]] =
+-- The picture an embeddable ImageBlock places, as a list of at most one.
+pure func odsBlockPic(block: Block) -> [OdsPic] =
+  match block {
+    ImageBlock(i) =>
+      if embedIsBinaryPayload(i.data, i.mime)
+      then [{data: i.data, mime: i.mime, desc: i.description, wantW: i.width, wantH: i.height}]
+      else [],
+    _ => []
+  }
+
+-- The rows a non-table block takes: a picture row for an embeddable image, a
+-- text row for other blocks with text, none otherwise.
+pure func odsBlockRow(block: Block) -> [[OdsCell]] {
+  let pics = odsBlockPic(block);
+  let text = odsBlockToText(block);
+  if listLength(pics) > 0 then [[{text: "", pic: pics}]]
+  else if length(text) > 0 then [[odsText(text)]]
+  else []
+}
+
+pure func odsBlocksToRows(blocks: [Block]) -> [[OdsCell]] =
   match blocks {
     [] => [],
     TableBlock(t) :: rest => odsAppendRows(odsTableToRows(t.headers, t.rows), odsBlocksToRows(rest)),
-    b :: rest =>
-      let text = odsBlockToText(b) in
-      if length(text) > 0 then [text] :: odsBlocksToRows(rest)
-      else odsBlocksToRows(rest)
+    b :: rest => odsAppendRows(odsBlockRow(b), odsBlocksToRows(rest))
   }
 
-pure func odsTableToRows(headers: [TableCell], rows: [[TableCell]]) -> [[string]] {
-  let headerRow = odsCellsToStrings(headers);
+pure func odsTableToRows(headers: [TableCell], rows: [[TableCell]]) -> [[OdsCell]] {
+  let headerRow = odsCellsOf(headers);
   let dataRows = match rows {
     [] => [],
-    _ => odsRowsToStrings(rows)
+    _ => odsRowsOf(rows)
   };
   if listLength(headerRow) > 0 then headerRow :: dataRows else dataRows
 }
 
-pure func odsCellsToStrings(cells: [TableCell]) -> [string] =
+pure func odsCellsOf(cells: [TableCell]) -> [OdsCell] =
   match cells {
     [] => [],
-    c :: rest => c.text :: odsCellsToStrings(rest)
+    c :: rest => odsText(c.text) :: odsCellsOf(rest)
   }
 
-pure func odsRowsToStrings(rows: [[TableCell]]) -> [[string]] =
+pure func odsRowsOf(rows: [[TableCell]]) -> [[OdsCell]] =
   match rows {
     [] => [],
-    row :: rest => odsCellsToStrings(row) :: odsRowsToStrings(rest)
+    row :: rest => odsCellsOf(row) :: odsRowsOf(rest)
   }
 
 pure func odsAppendSheet(sheets: [OdsSheet], sheet: OdsSheet) -> [OdsSheet] =
@@ -114,32 +152,133 @@ pure func odsAppendSheet(sheets: [OdsSheet], sheet: OdsSheet) -> [OdsSheet] =
     x :: rest => x :: odsAppendSheet(rest, sheet)
   }
 
-pure func odsAppendToContentSheet(sheets: [OdsSheet], row: [string]) -> [OdsSheet] =
+pure func odsAppendToContentSheet(sheets: [OdsSheet], rows: [[OdsCell]]) -> [OdsSheet] =
   match sheets {
-    [] => [{name: "Content", rows: [row]}],
+    [] => [{name: "Content", rows: rows}],
     s :: rest =>
       if s.name == "Content"
-      then {name: "Content", rows: odsAppendRows(s.rows, [row])} :: rest
-      else s :: odsAppendToContentSheet(rest, row)
+      then {name: "Content", rows: odsAppendRows(s.rows, rows)} :: rest
+      else s :: odsAppendToContentSheet(rest, rows)
   }
 
-pure func odsAppendRows(a: [[string]], b: [[string]]) -> [[string]] =
+pure func odsAppendRows(a: [[OdsCell]], b: [[OdsCell]]) -> [[OdsCell]] =
   match a {
     [] => b,
     x :: rest => x :: odsAppendRows(rest, b)
   }
 
--- Build content.xml with sheets
-pure func odsBuildContent(sheets: [OdsSheet]) -> string {
-  "${xmlDecl()}<office:document-content ${odsNs()} office:version=\"1.2\"><office:body><office:spreadsheet>${foldl(\acc s. "${acc}${odsSheetToXml(s)}", "", sheets)}</office:spreadsheet></office:body></office:document-content>"
+-- ============================================================
+-- Pictures
+-- ============================================================
+
+-- The key that names a row's picture part and style: its sheet and row number.
+-- Sheet and row numbers are unique, so the key is unique in the document.
+pure func odsKey(sIdx: int, rIdx: int) -> string = "${intToStr(sIdx)}_${intToStr(rIdx)}"
+
+-- Every picture in the workbook, in sheet and row order.
+pure func odsAllPics(sheets: [OdsSheet], sIdx: int) -> [OdsPicAt] =
+  match sheets {
+    [] => [],
+    s :: rest => concat(odsSheetPics(s.rows, sIdx, 1), odsAllPics(rest, sIdx + 1))
+  }
+
+pure func odsSheetPics(rows: [[OdsCell]], sIdx: int, rIdx: int) -> [OdsPicAt] =
+  match rows {
+    [] => [],
+    row :: rest => concat(odsRowPics(row, odsKey(sIdx, rIdx)), odsSheetPics(rest, sIdx, rIdx + 1))
+  }
+
+pure func odsRowPics(cells: [OdsCell], key: string) -> [OdsPicAt] =
+  match cells {
+    [] => [],
+    c :: rest => concat(odsCellPics(c.pic, key), odsRowPics(rest, key))
+  }
+
+pure func odsCellPics(pics: [OdsPic], key: string) -> [OdsPicAt] =
+  match pics {
+    [] => [],
+    p :: _ => [{key: key, img: p}]
+  }
+
+pure func odsPicParts(pics: [OdsPicAt]) -> [OdfImgPart] =
+  match pics {
+    [] => [],
+    p :: rest => odfImgPart(p.key, p.img.data, p.img.mime) :: odsPicParts(rest)
+  }
+
+-- The size a picture takes in its cell, in EMU.
+pure func odsPicExtent(p: OdsPic) -> ImageExtent =
+  imageExtentEmu(p.data, p.mime, odsImgMaxCx(), p.wantW, p.wantH)
+
+-- The graphic frame for a picture, as the cell's only paragraph content.
+pure func odsPicFrame(p: OdsPic, key: string) -> string {
+  let ext = odsPicExtent(p);
+  let part = odfImgPart(key, p.data, p.mime);
+  let attrs = "draw:style-name=\"dpImgFrame\" draw:name=\"Image${key}\" text:anchor-type=\"paragraph\" svg:x=\"0.00cm\" svg:y=\"0.00cm\" svg:width=\"${odfImgCm(ext.cx)}\" svg:height=\"${odfImgCm(ext.cy)}\"";
+  odfImgFrame(attrs, part.name, p.desc)
 }
 
-pure func odsSheetToXml(sheet: OdsSheet) -> string {
-  "<table:table table:name=\"${xmlEscape(sheet.name)}\"><table:table-column/>${foldl(\acc row. "${acc}${odsRowToXml(row)}", "", sheet.rows)}</table:table>"
+-- A row style per picture row, so the row is as tall as its picture and the
+-- rows below it do not sit under the image.
+pure func odsPicRowStyles(pics: [OdsPicAt]) -> string =
+  match pics {
+    [] => "",
+    p :: rest =>
+      let ext = odsPicExtent(p.img) in
+      "<style:style style:name=\"dpImgRow_${p.key}\" style:family=\"table-row\"><style:table-row-properties style:row-height=\"${odfImgCm(ext.cy)}\" style:use-optimal-row-height=\"false\"/></style:style>${odsPicRowStyles(rest)}"
+  }
+
+-- ============================================================
+-- XML
+-- ============================================================
+
+-- Build content.xml with sheets. The automatic styles appear only when there
+-- are pictures, so a picture-free workbook is unchanged.
+pure func odsBuildContent(sheets: [OdsSheet], pics: [OdsPicAt]) -> string {
+  let hasPics = listLength(pics) > 0;
+  let ns = if hasPics then odfImgNsMissing(odsNs()) else odsNs();
+  let auto = if hasPics then "<office:automatic-styles>${odfImgFrameStyle()}${odsPicRowStyles(pics)}</office:automatic-styles>" else "";
+  "${xmlDecl()}<office:document-content ${ns} office:version=\"1.2\">${auto}<office:body><office:spreadsheet>${odsSheetsXml(sheets, 1)}</office:spreadsheet></office:body></office:document-content>"
 }
 
-pure func odsRowToXml(row: [string]) -> string =
-  "<table:table-row>${foldl(\acc cell. "${acc}<table:table-cell><text:p>${odfEncodeText(cell)}</text:p></table:table-cell>", "", row)}</table:table-row>"
+pure func odsSheetsXml(sheets: [OdsSheet], sIdx: int) -> string =
+  match sheets {
+    [] => "",
+    s :: rest => "${odsSheetToXml(s, sIdx)}${odsSheetsXml(rest, sIdx + 1)}"
+  }
+
+pure func odsSheetToXml(sheet: OdsSheet, sIdx: int) -> string {
+  "<table:table table:name=\"${xmlEscape(sheet.name)}\"><table:table-column/>${odsRowsXml(sheet.rows, sIdx, 1)}</table:table>"
+}
+
+pure func odsRowsXml(rows: [[OdsCell]], sIdx: int, rIdx: int) -> string =
+  match rows {
+    [] => "",
+    row :: rest => "${odsRowToXml(row, odsKey(sIdx, rIdx))}${odsRowsXml(rest, sIdx, rIdx + 1)}"
+  }
+
+pure func odsRowToXml(row: [OdsCell], key: string) -> string {
+  let opening = if odsRowHasPic(row) then "<table:table-row table:style-name=\"dpImgRow_${key}\">" else "<table:table-row>";
+  "${opening}${odsCellsXml(row, key)}</table:table-row>"
+}
+
+pure func odsRowHasPic(cells: [OdsCell]) -> bool =
+  match cells {
+    [] => false,
+    c :: rest => listLength(c.pic) > 0 || odsRowHasPic(rest)
+  }
+
+pure func odsCellsXml(cells: [OdsCell], key: string) -> string =
+  match cells {
+    [] => "",
+    c :: rest => "${odsCellToXml(c, key)}${odsCellsXml(rest, key)}"
+  }
+
+pure func odsCellToXml(cell: OdsCell, key: string) -> string =
+  match cell.pic {
+    [] => "<table:table-cell><text:p>${odfEncodeText(cell.text)}</text:p></table:table-cell>",
+    p :: _ => "<table:table-cell>${odsPicFrame(p, key)}<text:p/></table:table-cell>"
+  }
 
 -- Minimal styles
 pure func odsMinimalStyles() -> string =
@@ -152,3 +291,15 @@ pure func odsBuildMeta(title: string, author: string) -> string =
 -- Manifest
 pure func odsManifest() -> string =
   "${xmlDecl()}<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\" manifest:version=\"1.2\"><manifest:file-entry manifest:media-type=\"application/vnd.oasis.opendocument.spreadsheet\" manifest:full-path=\"/\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"content.xml\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"styles.xml\"/><manifest:file-entry manifest:media-type=\"text/xml\" manifest:full-path=\"meta.xml\"/></manifest:manifest>"
+
+export pure func testOdsPictureRows() -> bool
+  tests [((), true)]
+{
+  let img = ImageBlock({data: "AAAA", description: "d", mime: "image/png", width: 0, height: 0, srcset: "", title: "", loading: ""});
+  let remote = ImageBlock({data: "a.png", description: "d", mime: "image/png", width: 0, height: 0, srcset: "", title: "", loading: ""});
+  odsKey(2, 5) == "2_5" &&
+  listLength(odsBlockPic(img)) == 1 &&
+  listLength(odsBlockPic(remote)) == 0 &&
+  listLength(odsBlockRow(img)) == 1 &&
+  listLength(odsBlockRow(remote)) == 1
+}

@@ -1,0 +1,118 @@
+module docparse/services/odf_image
+
+-- Picture support shared by the ODT, ODP and ODS generators: where a picture
+-- part lives in the package, how META-INF/manifest.xml lists it, the
+-- draw:frame that places it, and the namespace declarations that frame needs.
+-- Each generator decides where its frame goes (inline, on a slide, in a cell);
+-- everything about the package and the XML shape of the frame is here, so the
+-- three formats cannot drift apart.
+
+import std/string (length, intToStr, contains)
+import std/list (length as listLength)
+import std/bytes (fromString, toBase64)
+import docparse/services/image_embed (embedExt)
+import docparse/services/odf_text (odfEncodeText)
+import docparse/services/odf_template (odfTplInsertBeforeLast)
+
+-- A picture part to write: its package path, base64 bytes, and MIME type.
+export type OdfImgPart = {name: string, data: string, mime: string}
+
+-- The part for one picture. key must be unique within the document. Template
+-- parts are carried under their own names, so ours get a "dpimage" basename,
+-- the same reason docx_package names its media dpimage under a reference doc.
+export pure func odfImgPart(key: string, data: string, mime: string) -> OdfImgPart =
+  {name: "Pictures/dpimage${key}.${embedExt(mime)}", data: data, mime: mime}
+
+-- An EMU length as a centimetre length with two decimals ("16.51cm").
+-- 1 cm = 360000 EMU, so one hundredth of a centimetre is 3600 EMU.
+export pure func odfImgCm(emu: int) -> string {
+  let hundredths = emu / 3600;
+  let whole = hundredths / 100;
+  "${intToStr(whole)}.${odfImgPad2(hundredths - whole * 100)}cm"
+}
+
+pure func odfImgPad2(n: int) -> string =
+  if n < 10 then "0${intToStr(n)}" else intToStr(n)
+
+-- One manifest <file-entry> per picture part.
+export pure func odfImgManifestEntries(parts: [OdfImgPart]) -> string =
+  match parts {
+    [] => "",
+    p :: rest =>
+      let entry = "<manifest:file-entry manifest:media-type=\"${p.mime}\" manifest:full-path=\"${p.name}\"/>" in
+      "${entry}${odfImgManifestEntries(rest)}"
+  }
+
+-- A manifest with the picture parts listed before its closing tag. With no
+-- parts the base is returned untouched, so a picture-free document keeps its
+-- manifest byte for byte.
+export pure func odfImgManifest(base: string, parts: [OdfImgPart]) -> string =
+  if listLength(parts) == 0 then base
+  else odfTplInsertBeforeLast(base, "</manifest:manifest>", odfImgManifestEntries(parts))
+
+-- The parts as archive entries whose data is already base64.
+export pure func odfImgByteEntries(parts: [OdfImgPart]) -> [{name: string, data: string}] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      let entry = {name: p.name, data: p.data} in
+      entry :: odfImgByteEntries(rest)
+  }
+
+-- Text entries (the package's XML parts) as base64 archive entries, for the
+-- createArchiveWithBytes call that a picture-bearing package needs.
+export pure func odfImgTextEntries(parts: [{name: string, content: string}]) -> [{name: string, data: string}] =
+  match parts {
+    [] => [],
+    p :: rest =>
+      let entry = {name: p.name, data: toBase64(fromString(p.content))} in
+      entry :: odfImgTextEntries(rest)
+  }
+
+-- The alternative text of a picture, as svg:desc. Empty when there is none.
+pure func odfImgDesc(desc: string) -> string =
+  if length(desc) == 0 then "" else "<svg:desc>${odfEncodeText(desc)}</svg:desc>"
+
+-- A draw:frame holding one picture. attrs is the caller's placement (anchor or
+-- svg:x/svg:y, svg:width/svg:height, draw:name, draw:style-name); href is the
+-- part name. The picture is embedded in the package, not linked.
+export pure func odfImgFrame(attrs: string, href: string, desc: string) -> string =
+  "<draw:frame ${attrs} draw:z-index=\"0\">${odfImgDesc(desc)}<draw:image xlink:href=\"${href}\" xlink:type=\"simple\" xlink:show=\"embed\" xlink:actuate=\"onLoad\"/></draw:frame>"
+
+-- The graphic style every picture frame names. Frames are anchored as
+-- characters on the baseline, so the same style serves inline and cell frames.
+export pure func odfImgFrameStyle() -> string =
+  "<style:style style:name=\"dpImgFrame\" style:family=\"graphic\"><style:graphic-properties style:vertical-pos=\"top\" style:vertical-rel=\"baseline\"/></style:style>"
+
+-- A content.xml namespace declaration list with the ones a picture frame needs
+-- added. Declarations already present are left alone: a duplicate prefix would
+-- make the part malformed, and the three generators declare different subsets.
+export pure func odfImgNsMissing(ns: string) -> string {
+  let draw = if contains(ns, "xmlns:draw=") then "" else " xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\"";
+  let svg = if contains(ns, "xmlns:svg=") then "" else " xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\"";
+  let xlink = if contains(ns, "xmlns:xlink=") then "" else " xmlns:xlink=\"http://www.w3.org/1999/xlink\"";
+  "${ns}${draw}${svg}${xlink}"
+}
+
+export pure func testOdfImgCm() -> bool
+  tests [((), true)]
+{
+  odfImgCm(5943600) == "16.51cm" && odfImgCm(360000) == "1.00cm" &&
+  odfImgCm(3600) == "0.01cm" && odfImgCm(0) == "0.00cm"
+}
+
+export pure func testOdfImgManifest() -> bool
+  tests [((), true)]
+{
+  let base = "<manifest:manifest></manifest:manifest>";
+  let one = [odfImgPart("1", "AAAA", "image/png")];
+  odfImgManifest(base, []) == base &&
+  odfImgManifest(base, one) == "<manifest:manifest><manifest:file-entry manifest:media-type=\"image/png\" manifest:full-path=\"Pictures/dpimage1.png\"/></manifest:manifest>"
+}
+
+export pure func testOdfImgNsMissing() -> bool
+  tests [((), true)]
+{
+  odfImgNsMissing("xmlns:draw=\"d\" xmlns:svg=\"s\" xmlns:xlink=\"x\"") == "xmlns:draw=\"d\" xmlns:svg=\"s\" xmlns:xlink=\"x\"" &&
+  odfImgNsMissing("xmlns:text=\"t\"") == "xmlns:text=\"t\" xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" xmlns:xlink=\"http://www.w3.org/1999/xlink\""
+}
