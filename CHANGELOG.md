@@ -11,6 +11,21 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.52.0](https://github.com/sunholo-data/ailang-parse/compare/v0.51.0...v0.52.0) — 2026-10-19
+
+### Fixed — pictures are embedded in every office output, sized from their own pixels
+
+- DOCX, PPTX, XLSX, ODT, ODP and ODS used to write `[Image: alt]` text (or a fixed placeholder box) instead of the picture. Each now embeds an image with bytes as a real media part (`word/media`, `ppt/media`, `xl/media`, `Pictures/`), wired into its relationships, content types or manifest. SVG and images that are only a path or URL keep the placeholder.
+- Every embedded picture is sized from its own header (PNG, JPEG, GIF, BMP): its natural size at 96 dpi, scaled down to the column or slot with the aspect ratio kept, and never scaled up. Before this, DOCX drew every picture at 6 × 4 in, so a 4:1 image came out 3:2 and visibly squashed.
+- Known limit: PPTX and ODP lay blocks out on a fixed grid, so a picture is capped to its slot, and blocks past the bottom of the slide are not visible. The same overflow already affects text blocks. Flow layout across slides is a separate change.
+- Sizing and the embeddable-picture rules live in `docparse/services/image_size.ail` and `image_embed.ail`. Output with no images is byte-identical to the previous release in all six formats.
+
+### Added — Pandoc-style picture size in Markdown
+
+- `![alt](x.png){width=3in}`, `{height=…}`, or both, in `in`, `cm`, `mm`, `pt` or `px`, with whole numbers. The requested size is honoured (and clamped to the column). Percentages and decimals are not converted and fall back to the natural size.
+- Before this, an image with an attribute block was not recognised as an image at all: the whole line printed as text and nothing was embedded.
+- A local image's `width` and `height` now survive the path-to-bytes step in the orchestrator, where they were dropped before.
+
 ## [v0.51.0](https://github.com/sunholo-data/ailang-parse/compare/v0.50.1...v0.51.0) — 2026-10-13
 
 ### DOCX/XLSX fidelity: custom heading styles, real lists, breaks, bookmarks, run colour, formulas — and warnings when the output approximates the source

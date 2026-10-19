@@ -23,6 +23,7 @@ design_docs/
 │   ├── v0_11_0/             # Structured extraction (FAST-TRACK)
 │   ├── v0_12_0/             # AILANG package registry
 │   ├── v0_13_0/             # RAG pipeline (chunking, hierarchy, embeddings)
+│   ├── v0_53_0/             # Slide pagination for PPTX/ODP, SVG images in ODF
 │   └── v0_4_0_go_binary.md  # Go binary — blocked on AILANG compiler bugs
 ├── archive/                  # Superseded or abandoned designs
 │   ├── authalla_evaluation.md     # Superseded by Firebase Auth
