@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.52.1](https://github.com/sunholo-data/ailang-parse/compare/v0.52.0...v0.52.1) — 2026-10-19
+
 ### Fixed
 
 - EML markdown output no longer carries attachment bytes. The `.md` rendering
