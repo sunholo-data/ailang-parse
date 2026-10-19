@@ -99,6 +99,10 @@
     { name: 'docparse/services/csv_parser', path: 'docparse/services/csv_parser.ail', formats: ['csv', 'eml'] },
     { name: 'docparse/services/browser_csv', path: 'docparse/services/browser_csv.ail', formats: ['csv'],
       binds: ['parseCsvContent'] },
+    // image_size/image_embed before markdown_inline: it resolves Markdown
+    // picture sizes, and the generators of every office format embed pictures.
+    { name: 'docparse/services/image_size', path: 'docparse/services/image_size.ail', formats: ['md', 'eml', 'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods'] },
+    { name: 'docparse/services/image_embed', path: 'docparse/services/image_embed.ail', formats: ['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods'] },
     // markdown_inline/_quote/_table before markdown_parser — split out of it to
     // keep it inside the per-module type-check budget; it imports all three
     // (and markdown_table imports markdown_inline). eml_parser imports markdown_parser.

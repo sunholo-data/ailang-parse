@@ -108,6 +108,8 @@ MODULES=(
   "services/xlsx_parser.ail"
   "services/html_parser.ail"
   "services/csv_parser.ail"
+  "services/image_size.ail"
+  "services/image_embed.ail"
   "services/markdown_inline.ail"
   "services/markdown_quote.ail"
   "services/markdown_table.ail"
