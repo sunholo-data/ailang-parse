@@ -134,11 +134,12 @@ pure func docxDataCellToXml(cell: TableCell, colW: int) -> string {
   }
 }
 
--- Lists as real Word list paragraphs referencing word/numbering.xml
--- (numBase = bullet, numBase + 1 = decimal, matching docxNumberingDefs).
-export pure func docxListToXml(items: [string], ordered: bool, itemRuns: [[InlineRun]],
-                        itemLevels: [int], numBase: int) -> string =
-  docxListItemsToXml(items, itemRuns, itemLevels, if ordered then numBase + 1 else numBase)
+-- Lists as real Word list paragraphs referencing word/numbering.xml. The
+-- caller picks the <w:num> instance (docxNumberingDefs): ordered lists need
+-- one each to restart at 1, so this cannot be derived from `ordered` alone.
+export pure func docxListToXml(items: [string], itemRuns: [[InlineRun]],
+                        itemLevels: [int], numId: int) -> string =
+  docxListItemsToXml(items, itemRuns, itemLevels, numId)
 
 -- itemRuns is parallel to items but may be empty entirely (nothing formatted).
 -- Both lists are walked together so a short or absent itemRuns simply falls
