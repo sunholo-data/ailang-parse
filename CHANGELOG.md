@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.52.2](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.52.2) — 2026-10-22
+
 ### Fixed
 
 - DOCX: every ordered list restarts at 1. All ordered lists shared one
@@ -26,6 +28,10 @@ separately — see `sdks/` for per-SDK changelogs.
   the package XML (and from a LibreOffice render when `soffice` is installed).
 - Known limit: a list that starts at another number (`3.`) still starts at 1;
   the list block does not carry its start number yet.
+- Browser mirror (`docs/ailang/docparse/`) re-vendored. It had missed v0.52.0's
+  picture embedding (`image_embed`, `image_size`) and, after the list fix, no
+  longer type-checked against the canonical modules, which the publish
+  validator does. CI now fails when the mirror is stale.
 
 ## [v0.52.1](https://github.com/sunholo-data/ailang-parse/compare/v0.52.0...v0.52.1) — 2026-10-19
 

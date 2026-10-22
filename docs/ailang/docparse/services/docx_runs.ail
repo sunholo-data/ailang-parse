@@ -118,13 +118,19 @@ pure func docxRunPropsInner(r: InlineRun) -> string {
 
 -- Build OOXML <w:drawing> for an inline image
 -- rId references word/_rels/document.xml.rels entry
-export pure func docxInlineImage(imgIdx: int, description: string) -> string {
+-- Default size: 6 inches wide × 4 inches tall. Callers that know the picture
+-- should use docxInlineImageSized with its real extent.
+export pure func docxInlineImage(imgIdx: int, description: string) -> string =
+  docxInlineImageSized(imgIdx, description, 5486400, 3657600)
+
+-- cx and cy are the picture's size in EMU (1 inch = 914400 EMU). Use
+-- imageExtentEmu (docparse/services/image_size) to get them from the bytes.
+export pure func docxInlineImageSized(imgIdx: int, description: string, cxEmu: int, cyEmu: int) -> string {
   let rId = docxImageRelId(imgIdx);
   let idStr = intToStr(imgIdx);
   let desc = xmlEscape(description);
-  -- Default size: 6 inches wide × 4 inches tall (in EMUs: 1 inch = 914400 EMU)
-  let cx = "5486400";
-  let cy = "3657600";
+  let cx = intToStr(cxEmu);
+  let cy = intToStr(cyEmu);
   docxParagraph(
     "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${cx}\" cy=\"${cy}\"/><wp:docPr id=\"${idStr}\" name=\"Image ${idStr}\" descr=\"${desc}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"${idStr}\" name=\"Image ${idStr}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"${rId}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${cx}\" cy=\"${cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
   )

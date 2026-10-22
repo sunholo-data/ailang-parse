@@ -9,7 +9,9 @@ import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, ParsedDocument)
 import docparse/services/xml_helpers (xmlDecl, docxRun, docxParagraph, docxStyledParagraph)
 import docparse/services/docx_template (DocxRefDoc, docxTplNone, docxTplLoad)
-import docparse/services/docx_runs (docxBlockquote, docxIsCodeStyle, docxCodeBlock, docxHorizontalRule, docxRunsToXml, docxInlineImage, docxChangeToXml, docxHyperlinkPara, docxCommentAnchorPara, docxRevisionPara)
+import docparse/services/docx_runs (docxBlockquote, docxIsCodeStyle, docxCodeBlock, docxHorizontalRule, docxRunsToXml, docxInlineImageSized, docxChangeToXml, docxHyperlinkPara, docxCommentAnchorPara, docxRevisionPara)
+import docparse/services/image_size (imageExtentEmu)
+import docparse/services/image_embed (embedIsBinaryPayload, embedExt)
 import docparse/services/docx_table (docxTableToXml, docxListToXml)
 import docparse/services/docx_package (DocxOptParts, DocxImage, DocxLink, DocxComment, DocxHdrFtr, docxMediaPrefix, docxNeedsNumbering, docxContentTypesPart, docxStylesPart, docxDocumentRelsPart, docxImageEntries, docxAppendByteEntries, docxRootRelsPart, docxCoreProps, docxNumberingPart, docxCommentsPart, docxHdrFtrPartName, docxHdrFtrRelId)
 
@@ -76,17 +78,21 @@ pure func docxPlan(doc: ParsedDocument, ref: DocxRefDoc) -> {documentXml: string
   -- point at the template's header parts. Emitting our header parts alongside
   -- would leave them written but referenced by nothing, so a SectionBlock
   -- header in the source document is dropped rather than half-applied.
+  let headers = if ref.active then [] else docxHdrFtrParts(sections.headers, "header", 1);
+  let footers = if ref.active then [] else docxHdrFtrParts(sections.footers, "footer", 1);
+  let sectPr = if ref.active then ref.sectPr else docxSectPr(headers, footers);
+  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1, olist: 0, numBase: ref.numIdBase, tblStyle: ref.tableStyleId, tableWidth: docxUsableWidth(sectPr)});
+  -- orderedLists is read off the walk itself, so numbering.xml defines exactly
+  -- the instances the list paragraphs were given.
   let parts = {
     images: docxCollectImages(body, 1),
     links: docxCollectLinks(body, 1),
     comments: docxCollectComments(body, 1),
-    headers: if ref.active then [] else docxHdrFtrParts(sections.headers, "header", 1),
-    footers: if ref.active then [] else docxHdrFtrParts(sections.footers, "footer", 1),
-    hasNumbering: docxHasList(body)
+    headers: headers,
+    footers: footers,
+    hasNumbering: docxHasList(body),
+    orderedLists: bodyResult.idx.olist
   };
-
-  let sectPr = if ref.active then ref.sectPr else docxSectPr(parts.headers, parts.footers);
-  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1, numBase: ref.numIdBase, tblStyle: ref.tableStyleId, tableWidth: docxUsableWidth(sectPr)});
   { documentXml: docxBuildDocument("${bodyResult.xml}${sectPr}"), parts: parts }
 }
 
@@ -256,11 +262,11 @@ pure func docxBlockToXml(block: Block) -> string =
       docxTableToXml(t.headers, t.rows, "", 9360),
 
     -- Header and footer bodies are rendered standalone, so they use the
-    -- built-in numbering ids. Reference-doc mode drops our header parts
-    -- entirely, so this never reaches a package whose numbering came from a
-    -- template.
+    -- built-in numbering ids (1 bullets, 2 decimal). Reference-doc mode drops
+    -- our header parts entirely, so this never reaches a package whose
+    -- numbering came from a template.
     ListBlock(l) =>
-      docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, 1),
+      docxListToXml(l.items, l.itemRuns, l.itemLevels, if l.ordered then 2 else 1),
 
     ImageBlock(i) =>
       if length(i.description) > 0
@@ -304,7 +310,9 @@ pure func docxBlockToXml(block: Block) -> string =
 -- <w:tbl> elements bind to, resolved once at template load. "" = none (no
 -- reference doc, or the template defines no usable table style) and tables
 -- keep the hardcoded borders they have always had.
-type DocxIdx = { img: int, link: int, rev: int, cmt: int, numBase: int, tblStyle: string, tableWidth: int }
+-- olist counts the ordered lists already emitted: ordered list k takes numId
+-- numBase + 2 + k, its own restarting instance (docxNumberingDefs).
+type DocxIdx = { img: int, link: int, rev: int, cmt: int, olist: int, numBase: int, tblStyle: string, tableWidth: int }
 
 type DocxBlockResult = { xml: string, idx: DocxIdx }
 
@@ -317,16 +325,23 @@ pure func docxBlocksToXml(blocks: [Block], idx: DocxIdx) -> DocxBlockResult =
       {xml: "${r.xml}${restR.xml}", idx: restR.idx}
   }
 
+-- The picture is sized from its own pixels and never wider than the text column.
+-- tableWidth is in twips (1/1440 inch); 1 twip = 635 EMU.
+pure func docxImageXml(imgIdx: int, data: string, mime: string, description: string, wantW: int, wantH: int, usableTwips: int) -> string {
+  let ext = imageExtentEmu(data, mime, usableTwips * 635, wantW, wantH);
+  docxInlineImageSized(imgIdx, description, ext.cx, ext.cy)
+}
+
 pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
   match block {
     -- Predicate MUST match docxCollectImages exactly: this walk assigns the
     -- rIds that the collector's relationship entries have to line up with, so
     -- any divergence points a <w:drawing> at the wrong image (or a missing one).
     ImageBlock(i) =>
-      if docxIsBinaryPayload(i.data, i.mime)
+      if embedIsBinaryPayload(i.data, i.mime)
       then {
-        xml: docxInlineImage(idx.img, i.description),
-        idx: {img: idx.img + 1, link: idx.link, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+        xml: docxImageXml(idx.img, i.data, i.mime, i.description, i.width, i.height, idx.tableWidth),
+        idx: {idx | img: idx.img + 1}
       }
       else {xml: docxBlockToXml(block), idx: idx},
 
@@ -334,18 +349,18 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       if length(l.href) > 0
       then {
         xml: docxHyperlinkPara(idx.link, l.text, l.title),
-        idx: {img: idx.img, link: idx.link + 1, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+        idx: {idx | link: idx.link + 1}
       }
       else {xml: docxBlockToXml(block), idx: idx},
 
     ChangeBlock(c) => {
       xml: docxRevisionPara(idx.rev, c.changeType, c.author, c.date, c.text),
-      idx: {img: idx.img, link: idx.link, rev: idx.rev + 1, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+      idx: {idx | rev: idx.rev + 1}
     },
 
     CommentBlock(c) => {
       xml: docxCommentAnchorPara(idx.cmt, c.anchorText, c.anchored),
-      idx: {img: idx.img, link: idx.link, rev: idx.rev, cmt: idx.cmt + 1, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+      idx: {idx | cmt: idx.cmt + 1}
     },
 
     SectionBlock(s) =>
@@ -359,7 +374,10 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
     -- template's table style. The fallthrough renders header and footer
     -- bodies, which have no counters to thread.
     ListBlock(l) =>
-      {xml: docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, idx.numBase), idx: idx},
+      if l.ordered
+      then {xml: docxListToXml(l.items, l.itemRuns, l.itemLevels, idx.numBase + 2 + idx.olist),
+            idx: {idx | olist: idx.olist + 1}}
+      else {xml: docxListToXml(l.items, l.itemRuns, l.itemLevels, idx.numBase), idx: idx},
 
     TableBlock(t) =>
       {xml: docxTableToXml(t.headers, t.rows, idx.tblStyle, idx.tableWidth), idx: idx},
@@ -400,9 +418,9 @@ pure func docxCollectImages(blocks: [Block], startIdx: int) -> [DocxImage] =
   match blocks {
     [] => [],
     ImageBlock(i) :: rest =>
-      if docxIsBinaryPayload(i.data, i.mime)
+      if embedIsBinaryPayload(i.data, i.mime)
       then
-        let img = {idx: startIdx, data: i.data, mime: i.mime, ext: docxMimeToExt(i.mime)} in
+        let img = {idx: startIdx, data: i.data, mime: i.mime, ext: embedExt(i.mime)} in
         img :: docxCollectImages(rest, startIdx + 1)
       else docxCollectImages(rest, startIdx),
     SectionBlock(s) :: rest =>
@@ -411,53 +429,6 @@ pure func docxCollectImages(blocks: [Block], startIdx: int) -> [DocxImage] =
       docxAppendImageList(inner, docxCollectImages(rest, nextIdx)),
     _ :: rest => docxCollectImages(rest, startIdx)
   }
-
--- Whether an ImageBlock's payload can be embedded as a binary part.
---
--- ImageBlock.data is overloaded across parsers. DOCX/PPTX put base64 bytes in
--- it, but html_parser stores the <img src> URL (html_parser.ail:378) and
--- odt_parser stores the package href (odt_parser.ail:247). Embedding on
--- `length(data) > 0 && length(mime) > 0` therefore fed "hero-small.png" and
--- "Pictures/10000...svg" to the base64 decoder, and the archive writer failed
--- the ENTIRE document with "invalid base64: illegal base64 data at input byte
--- N" — every HTML file with an <img>, and two ODTs, could not be converted to
--- DOCX at all.
---
--- Mime alone cannot discriminate: odt_parser guesses a real mime
--- ("image/svg+xml") from the href's extension, so the reference looks
--- embeddable by every metadata check. The payload itself is the only reliable
--- signal, so require both a mime we can name an extension for and a payload
--- that is not obviously a path or URL.
---
--- References fall back to the "[Image: description]" text placeholder, which is
--- what external images already got.
-pure func docxIsEmbeddableMime(mime: string) -> bool =
-  mime == "image/png" || mime == "image/jpeg" || mime == "image/gif"
-  || mime == "image/bmp" || mime == "image/tiff" || mime == "image/svg+xml"
-
--- "." " " and ":" are outside both the standard and URL-safe base64 alphabets,
--- and are near-universal in paths and URLs ("hero-small.png",
--- "Pictures/x.svg", "data:image/png;base64,..."). Checked with `contains`
--- builtins rather than a per-character scan, which would walk multi-megabyte
--- payloads in the interpreter.
-pure func docxIsBinaryPayload(data: string, mime: string) -> bool {
-  if length(data) == 0 then false
-  else if docxIsEmbeddableMime(mime) == false then false
-  else if contains(data, ".") then false
-  else if contains(data, " ") then false
-  else if contains(data, ":") then false
-  else true
-}
-
--- MIME type to file extension
-pure func docxMimeToExt(mime: string) -> string =
-  if mime == "image/png" then "png"
-  else if mime == "image/jpeg" then "jpeg"
-  else if mime == "image/gif" then "gif"
-  else if mime == "image/bmp" then "bmp"
-  else if mime == "image/tiff" then "tiff"
-  else if mime == "image/svg+xml" then "svg"
-  else "png"
 
 pure func docxAppendImageList(a: [DocxImage], b: [DocxImage]) -> [DocxImage] =
   match a {
