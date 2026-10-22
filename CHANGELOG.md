@@ -11,6 +11,22 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed
+
+- DOCX: every ordered list restarts at 1. All ordered lists shared one
+  `<w:num>` instance, and instances of one list definition share a counter, so
+  the second list in a document continued from the first (`4. first`,
+  `5. second`). Each ordered list in the body now gets its own instance with a
+  `startOverride`, with or without `--reference-doc`. (sunholo-data/ailang-packages#153)
+- DOCX: nested list items keep their list's style. `numbering.xml` defined
+  level 0 only, so a nested item pointed at a level that did not exist and Word
+  and LibreOffice rendered nested bullets as `1. 2. 3.`. Both definitions now
+  carry all nine levels: bullets `•` `o` `▪`, numbers `1.` `a.` `i.`.
+- New CI gate `benchmarks/check_docx_list_numbering.py` reads both back from
+  the package XML (and from a LibreOffice render when `soffice` is installed).
+- Known limit: a list that starts at another number (`3.`) still starts at 1;
+  the list block does not carry its start number yet.
+
 ## [v0.52.1](https://github.com/sunholo-data/ailang-parse/compare/v0.52.0...v0.52.1) — 2026-10-19
 
 ### Fixed
