@@ -271,3 +271,38 @@ test("workbench PPTX: speaker notes follow their slide, resolved through its rel
     .map((b) => [b.kind ?? "", b.name ?? "", (b.blocks ?? []).map((c: any) => c.text ?? "").join("|")]);
   expect(got).toEqual(want);
 });
+
+for (const file of ["pandoc_basic.pptx", "poi_comment.pptx"]) {
+  test(`workbench PPTX: standalone spaces preserve source text in ${file}`, async ({ page }) => {
+    test.setTimeout(180_000);
+    const want = expectationsFrom("benchmarks/check_pptx_text.py")[file] as { slide: number; text: string }[];
+    expect(want.length).toBeGreaterThan(0);
+    const blocks = await parseOnWorkbench(page, `data/test_files/${file}`);
+    const slides = blocks.filter((b) => b.type === "section" && b.kind === "slide");
+    for (const item of want) {
+      const match = (slides[item.slide - 1]?.blocks ?? []).find((b: any) => b.text === item.text);
+      expect(match, `slide ${item.slide}: missing source text ${JSON.stringify(item.text)}`).toBeTruthy();
+      if (match.runs?.length) {
+        expect(match.runs.map((r: any) => r.text).join("")).toBe(item.text);
+      }
+    }
+  });
+}
+
+test("workbench DOCX: table cells retain source formatting in public JSON", async ({ page }) => {
+  test.setTimeout(180_000);
+  const want = expectationsFrom("benchmarks/check_docx_cell_runs.py").runs as Record<string, any>[];
+  const blocks = await parseOnWorkbench(page, "data/test_files/table_header_rowspan.docx");
+  const got = blocks.filter((b) => b.type === "table")
+    .flatMap((b) => [...(b.headers ?? []), ...(b.rows ?? []).flat()])
+    .flatMap((c: any) => (typeof c === "object" ? c.runs ?? [] : []))
+    .map((r: any) => ({ ...r }));
+  const text = (v: any) => String(v ?? "").replace(/\s+/g, " ").trim();
+  expect(want.length).toBeGreaterThan(0);
+  for (const item of want) {
+    const index = got.findIndex((r) => text(r.text).includes(text(item.text)) &&
+      Object.entries(item).every(([k, v]) => k === "text" || r[k] === v));
+    expect(index, `missing cell run ${JSON.stringify(item)}`).toBeGreaterThanOrEqual(0);
+    got[index].text = text(got[index].text).replace(text(item.text), "\0");
+  }
+});
