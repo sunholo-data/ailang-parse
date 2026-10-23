@@ -33,7 +33,8 @@ NULL
       merged   = .b(raw$merged),
       align    = .s(raw$align),
       fill     = .s(raw$fill),
-      color    = .s(raw$color)
+      color    = .s(raw$color),
+      runs     = lapply(if (is.null(raw$runs)) list() else raw$runs, .inline_run_from_raw)
     ))
   }
   list(text = as.character(raw), col_span = 1L, merged = FALSE)
@@ -103,7 +104,8 @@ convert_save <- function(x, path = NULL) {
     strike     = .b(raw$strike),
     code       = .b(raw$code),
     href       = .s(raw$href),
-    vert_align = .s(raw$vertAlign)
+    vert_align = .s(raw$vertAlign),
+    color      = .s(raw$color)
   )
 }
 

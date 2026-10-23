@@ -2,7 +2,7 @@ module docparse/services/pptx_parser
 
 import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr, endsWith)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
 import docparse/types/document (mkHeadingRuns, mkHeading, mkText, mkTextRuns, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, mkImage, mkTable, mkAnchoredComment, mkSection, mkNamedSection)
@@ -155,7 +155,7 @@ pure func pptxSlideAnchor(slideXml: string, slideNo: int) -> string {
 }
 
 pure func pptxFirstSlideText(slideXml: string) -> string =
-  match parseLenient(slideXml) {
+  match parsePptxContentXml(slideXml) {
     Ok(root) => match findAll(root, "a:t") {
       [] => "",
       t :: _ => trim(getText(t))
@@ -246,9 +246,24 @@ pure func pptxPairKey(p: (string, string)) -> string = match p { (k, _) => k }
 pure func pptxPairVal(p: (string, string)) -> string = match p { (_, v) => v }
 
 -- Parse a single slide's XML into blocks
+-- DrawingML a:t is string content, including standalone separator runs. The
+-- generic XML reader drops whitespace-only nodes outside a preserve scope.
+-- Supply that scope without rewriting source text, attributes or namespaces,
+-- then return the original root. Explicit xml:space settings still override it.
+-- XML declarations/processing instructions are ignored by std/xml, as usual.
+export pure func parsePptxContentXml(xml: string) -> Result[XmlNode, string] {
+  match parseLenient("<docparse-drawingml xml:space=\"preserve\">${xml}</docparse-drawingml>") {
+    Ok(wrapper) => match filter(\n. length(getTag(n)) > 0, getChildren(wrapper)) {
+      root :: [] => Ok(root),
+      _ => Err("PPTX content must contain one XML root")
+    },
+    Err(message) => Err(message)
+  }
+}
+
 export pure func parseSlideXml(xml: string) -> [Block] {
   if length(xml) == 0 then []
-  else match parseLenient(xml) {
+  else match parsePptxContentXml(xml) {
     Ok(root) => extractSlideBlocks(root),
     Err(_) => []
   }
@@ -349,13 +364,20 @@ pure func drawingMLNodeText(node: XmlNode) -> string {
 -- included) is covered by inline tests without a whole slide around it.
 pure func pptxParaText(xml: string) -> string
   tests [
+    ("<a:p xmlns:a=\"a\"><a:r><a:t>Alpha</a:t></a:r><a:r><a:t> </a:t></a:r><a:r><a:t>Beta</a:t></a:r></a:p>", "Alpha Beta"),
+    ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><a:p xmlns:a=\"a\"><a:r><a:t>Alpha</a:t></a:r><a:r><a:t>  </a:t></a:r><a:r><a:t>Beta</a:t></a:r></a:p>", "Alpha  Beta"),
+    ("<a:p xmlns:a=\"a\">\n  <a:r><a:t>Alpha</a:t></a:r>\n  <a:r><a:t><![CDATA[ ]]></a:t></a:r>\n  <a:r><a:t>Beta</a:t></a:r>\n</a:p>", "Alpha Beta"),
+    ("<a:p xmlns:a=\"a\"><a:r><a:t>Alpha</a:t></a:r><a:r><a:t>&#32;</a:t></a:r><a:r><a:t>Beta</a:t></a:r></a:p>", "Alpha Beta"),
+    ("<a:p xmlns:a=\"a\"><a:r><a:t>Alpha</a:t></a:r><a:fld><a:t> </a:t></a:fld><a:r><a:t>Beta</a:t></a:r></a:p>", "Alpha Beta"),
+    ("<a:p xmlns:a=\"a\"><a:r><a:t>Alpha</a:t></a:r><a:r><a:t/></a:r><a:r><a:t>Beta</a:t></a:r></a:p>", "AlphaBeta"),
+    ("<a:p xmlns:a=\"a\"><a:r><a:t>Alpha</a:t></a:r><a:br/><a:r><a:t>Beta</a:t></a:r></a:p>", "Alpha\nBeta"),
     ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:r><a:t>Slide </a:t></a:r><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2B}\" type=\"slidenum\"><a:rPr lang=\"en-US\"/><a:t>7</a:t></a:fld><a:r><a:t> of 20</a:t></a:r></a:p>", "Slide 7 of 20"),
     ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2C}\" type=\"datetime1\"><a:rPr lang=\"en-US\"/><a:t>9/29/2026</a:t></a:fld></a:p>", "9/29/2026"),
     ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:fld id=\"{B6F15528-21DE-4FAA-801E-634DDDAF4B2D}\" type=\"slidenum\"><a:rPr lang=\"en-US\"/></a:fld></a:p>", ""),
     ("<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:r><a:t>plain</a:t></a:r></a:p>", "plain")
   ]
 {
-  match parseLenient(xml) {
+  match parsePptxContentXml(xml) {
     Ok(root) => extractDrawingMLText(root),
     Err(_) => ""
   }
@@ -364,6 +386,16 @@ pure func pptxParaText(xml: string) -> string
 -- Extract text from a single a:r run (or a:fld field run: same shape)
 pure func extractDrawingMLRunText(run: XmlNode) -> string =
   getOrElse(optMap(getText, findFirst(run, "a:t")), "")
+
+pure func pptxSpacedRunsView() -> string
+  tests [((), "Alpha Beta|Alpha Beta")]
+{
+  let xml = "<a:p xmlns:a=\"a\"><a:r><a:rPr b=\"1\"/><a:t>Alpha</a:t></a:r><a:r><a:t> </a:t></a:r><a:r><a:rPr i=\"1\"/><a:t>Beta</a:t></a:r></a:p>";
+  match parsePptxContentXml(xml) {
+    Ok(root) => "${extractDrawingMLText(root)}|${join("", map(\r. r.text, extractDrawingMLParaRuns(root)))}",
+    Err(_) => "parse error"
+  }
+}
 
 -- === Character formatting (DrawingML §21.1.2.3) ==========================
 --
@@ -610,6 +642,7 @@ pure func pptxIsNotesRel(r: XmlNode) -> bool =
 -- Notes text lives in: p:notes/p:cSld/p:spTree/p:sp[ph@type="body"]/p:txBody
 pure func pptxExtractNoteText(xml: string) -> string
   tests [
+    ("<p:notes xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type=\"body\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Alpha</a:t></a:r><a:r><a:t> </a:t></a:r><a:r><a:t>Beta</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "Alpha Beta"),
     -- body placeholder with an idx
     ("<p:notes xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"sldNum\" idx=\"5\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>7</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"s\"/><p:cNvSpPr/><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Say hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>", "Say hello"),
     -- no body placeholder: plain text box, page number ignored
@@ -625,7 +658,7 @@ pure func pptxExtractNoteText(xml: string) -> string
   ]
 {
   if length(xml) == 0 then ""
-  else match parseLenient(xml) {
+  else match parsePptxContentXml(xml) {
     Ok(root) => pptxFindNotesBodyText(root),
     Err(_) => ""
   }

@@ -8,7 +8,7 @@ The reference adapter now preserves comment anchors and sheet attribution, logic
 
 There are **61 Office cases with source-derived structural assertions**. `build_structure_truth.py` reads the original DOCX/PPTX/XLSX XML, independently of AILANG output, and records the source SHA-256. It checks exact cell coordinates and merge anchors, sheet/slide order, notes attribution, comment targets, list levels, run formatting, formulas, colours, links, bookmarks, and section breaks where the input supplies those features.
 
-`audit_legacy_truth.py` independently audits selected legacy fields in six cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, and an extra image count. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
+`audit_legacy_truth.py` independently audits selected legacy fields in eight cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, an extra image count, and two PPTX cases with jammed words, stale reading order and unused media counted as pictures. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
 
 Assertions are selective, not an exhaustive claim about every Office feature. For example, stored numbers are not treated as display-formatted text, theme/tint colours are not yet fully annotated here, and spreadsheet row-coordinate assertions stop at row 100 to avoid conflating original rows with parsers' collapsed large gaps. Image detection remains a count metric; lossless image bytes and document generation are covered by separate regression suites.
 
@@ -80,8 +80,8 @@ Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files reta
 
 ## Recorded comparison (2026-10-23)
 
-The reference is the **PR #114 candidate**, labeled `0.52.2+pr114`, and includes
-the unreleased DOCX hyperlink fix. `DOCPARSE_BENCHMARK_LABEL=pr114` records that
+The reference is the **Office fidelity follow-up candidate**, labeled `0.52.2+office-fidelity`, and includes
+the unreleased PPTX spacing and DOCX cell-formatting fixes. `DOCPARSE_BENCHMARK_LABEL=office-fidelity` records that
 label; the exact source revision and toolchain remain in provenance. Competitor
 outputs retain their original live parse timestamps and are rescored against
 the same audited expectations without new API requests. Do not attribute this

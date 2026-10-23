@@ -20,6 +20,7 @@ import std/math (intToFloat)
 import std/option (getOrElse)
 import pkg/sunholo/a2ui/components (A2UINode, A2UIProp, prop, a2uiContainer, a2uiLabeledContainer, a2uiHeading, a2uiText, a2uiPlainText, a2uiTable, a2uiList, a2uiImageRef, a2uiMedia, a2uiCalloutMeta, a2uiKeyValue, a2uiDivider, renderA2UI, a2uiTextField, a2uiHeadingField, a2uiTableEditable, a2uiListEditable)
 import docparse/services/colour (normaliseHex)
+import docparse/services/output_formatter (runsToJson)
 import docparse/types/document (InlineRun, mkHeadingRuns, mkListRuns, mkTextRuns, mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, DocMetadata, emptyMetadata, countBlocks, filterHeadings, filterTables, filterImages, mkImage, mkTable, mkNamedSection)
 
 -- Convert a full ParsedDocument to A2UI JSON string.
@@ -151,13 +152,16 @@ pure func a2uiCellsToJsonStr(cells: [TableCell]) -> string {
 
 -- Encode a single cell, including span info if merged
 pure func a2uiCellToJson(cell: TableCell) -> Json {
-  if cell.colSpan == 1 && not cell.merged
+  if cell.colSpan == 1 && not cell.merged && listLength(cell.runs) == 0
   then js(cell.text)
-  else jo([
+  else {
+    let base = [
     kv("text", js(cell.text)),
     kv("colSpan", jnum(intToFloat(cell.colSpan))),
     kv("merged", if cell.merged then js("true") else js("false"))
-  ])
+    ];
+    jo(if listLength(cell.runs) > 0 then concat(base, [kv("runs", ja(runsToJson(cell.runs)))]) else base)
+  }
 }
 
 -- Encode table rows as a JSON array of arrays string
@@ -319,7 +323,7 @@ pure func a2ui_jsonToCell(j: Json) -> TableCell {
       merged: getOrElse(getBool(j, "merged"), false),
       scope: getOrElse(getString(j, "scope"), ""),
       align: getOrElse(getString(j, "align"), ""),
-      runs: [],
+      runs: a2ui_jsonToRuns(j, "runs"),
       -- Normalised on the way in, so hand-written JSON ("#FFFF00", ARGB)
       -- cannot put a non-canonical colour on a cell.
       fill: normaliseHex(getOrElse(getString(j, "fill"), "")),
@@ -334,3 +338,17 @@ pure func a2ui_jsonToCellRows(arr: [Json]) -> [[TableCell]] =
     Some(cells) => a2ui_jsonToCells(cells),
     None => []
   }, arr)
+
+pure func a2uiCellRunsRoundtripView() -> string
+  tests [((), "linked|true|#123456|https://example.com")]
+{
+  let source = jo([kv("text", js("linked")), kv("runs", ja([jo([
+    kv("text", js("linked")), kv("bold", jb(true)),
+    kv("color", js("#123456")), kv("href", js("https://example.com"))
+  ])]))]);
+  let cell = a2ui_jsonToCell(a2uiCellToJson(a2ui_jsonToCell(source)));
+  match cell.runs {
+    run :: [] => "${cell.text}|${show(run.bold)}|${run.color}|${run.href}",
+    _ => "runs lost"
+  }
+}

@@ -4,8 +4,9 @@ import std/string (length, join, intToStr, startsWith, contains, find, substring
 import std/fs (readFile)
 import std/result (Result, Ok, Err)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (InlineRun, plainRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
+import docparse/types/document (InlineRun, plainRun, simpleCell, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
+import docparse/services/colour (normaliseHex)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
 -- Pure string concatenation, no XML tree building needed.
@@ -208,7 +209,19 @@ pure func htmlRunToStr(r: InlineRun) -> string {
   let withUnder = if r.underline then "<u>${withStrike}</u>" else withStrike;
   let withItalic = if r.italic then "<em>${withUnder}</em>" else withUnder;
   let withBold = if r.bold then "<strong>${withItalic}</strong>" else withItalic;
-  if length(r.href) > 0 then "<a href=\"${xmlAttrEscape(r.href)}\">${withBold}</a>" else withBold
+  let color = normaliseHex(r.color);
+  let withColor = if length(color) > 0 then "<span style=\"color:${color}\">${withBold}</span>" else withBold;
+  if length(r.href) > 0 then "<a href=\"${xmlAttrEscape(r.href)}\">${withColor}</a>" else withColor
+}
+
+pure func htmlRunColourView(color: string) -> string
+  tests [
+    ("#123456", "<span style=\"color:#123456\">colour</span>"),
+    ("", "colour"),
+    ("red;bad", "colour")
+  ]
+{
+  htmlRunToStr({plainRun("colour") | color: color})
 }
 
 pure func htmlLinkRunView(mode: int) -> string
@@ -275,9 +288,12 @@ pure func htmlHeaderCell(cell: TableCell) -> string {
   if cell.merged then ""
   else {
     let span = if cell.colSpan > 1 then " colspan=\"${intToStr(cell.colSpan)}\"" else "";
-    "<th${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cell.text)}</th>"
+    "<th${span}${htmlAlignAttr(cell.align)}>${htmlCellContent(cell)}</th>"
   }
 }
+
+pure func htmlCellContent(cell: TableCell) -> string =
+  if listLength(cell.runs) > 0 then htmlRunsToStr(cell.runs) else xmlEscape(cell.text)
 
 -- Declared alignment, which the Markdown separator row carries and every
 -- previous version discarded.
@@ -292,8 +308,24 @@ pure func htmlDataCell(cell: TableCell) -> string {
   if cell.merged then ""
   else {
     let span = if cell.colSpan > 1 then " colspan=\"${intToStr(cell.colSpan)}\"" else "";
-    "<td${span}${htmlAlignAttr(cell.align)}>${xmlEscape(cell.text)}</td>"
+    "<td${span}${htmlAlignAttr(cell.align)}>${htmlCellContent(cell)}</td>"
   }
+}
+
+pure func htmlRichCellView(mode: int) -> string
+  tests [
+    (0, "<th colspan=\"2\"><a href=\"https://example.com\"><strong>rich</strong></a></th>"),
+    (1, "<td colspan=\"2\"><a href=\"https://example.com\"><strong>rich</strong></a></td>"),
+    (2, "<td>&lt;plain&gt;</td>"),
+    (3, "")
+  ]
+{
+  let base = simpleCell("rich");
+  let run = {plainRun("rich") | bold: true, href: "https://example.com"};
+  let cell = {base | runs: [run], colSpan: 2, merged: mode == 3};
+  if mode == 0 then htmlHeaderCell(cell)
+  else if mode == 2 then htmlDataCell(simpleCell("<plain>"))
+  else htmlDataCell(cell)
 }
 
 -- Render list items

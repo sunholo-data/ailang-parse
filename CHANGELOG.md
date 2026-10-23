@@ -13,6 +13,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ### Fixed
 
+- PPTX preserves standalone DrawingML space runs in slide text, speaker notes,
+  and inline formatting on native and browser paths. Exact source checks catch
+  the previous `Everworkervenn` and `Access toFinancefor` output.
+- DOCX table cells retain inline formatting, colour and link targets in public
+  JSON and generation. Plain paragraphs and blank separators remain alongside
+  formatted runs. HTML table rendering, JSON reconstruction/A2UI, and all four
+  SDKs preserve the optional cell runs; DOCX and HTML writers now honour run colour.
+- OfficeDocBench's source audit now covers selected legacy fields in eight
+  cases, including two PPTX cases with jammed words, stale reading order, and
+  unused package media incorrectly counted as slide images.
+
 - DOCX relationship-based hyperlinks preserve their targets on inline runs,
   including unformatted and mixed-format labels. Plain-text URL suffixes remain
   available to existing consumers.
@@ -22,7 +33,7 @@ separately — see `sdks/` for per-SDK changelogs.
 - HTML generation renders inline run targets as escaped clickable anchors,
   preserving the label's formatting during DOCX-to-HTML conversion.
 - OfficeDocBench v2 adds source-derived structural scoring, explicit provider
-  failures and provenance, and a fresh nine-provider comparison. Six historical
+  failures and provenance, and a fresh nine-provider comparison. Selected historical
   annotations are audited against source HTML/XML; warning blocks remain
   diagnostics, images retain reading-order evidence, and formula notation
   accepts an optional leading `=`. Both source audits run in CI.

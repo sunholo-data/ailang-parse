@@ -1,12 +1,11 @@
 module docparse/services/browser_pptx
 
-import std/xml (parseLenient)
 import std/json (encode, ja)
 import std/string (length, join, split)
 import std/list (filter)
 import std/result (Ok, Err)
 import docparse/types/document (mkSection)
-import docparse/services/pptx_parser (extractSlideBlocks, pptxNotesPart, pptxNotesSection)
+import docparse/services/pptx_parser (parsePptxContentXml, extractSlideBlocks, pptxNotesPart, pptxNotesSection)
 import docparse/services/zip_extract (pptxOrderSlideEntries)
 import docparse/services/output_formatter (blocksToJson)
 
@@ -21,7 +20,7 @@ import docparse/services/output_formatter (blocksToJson)
 -- Parse a single PPTX slide XML -> JSON array of blocks
 export pure func parsePptxSlide(slideXml: string) -> string {
   if length(slideXml) == 0 then encode(ja([]))
-  else match parseLenient(slideXml) {
+  else match parsePptxContentXml(slideXml) {
     -- An empty slide still gets its section, as in pptx_parser: dropping it
     -- shifted every later slide down one position.
     Ok(root) => encode(ja(blocksToJson([mkSection("slide", extractSlideBlocks(root))]))),

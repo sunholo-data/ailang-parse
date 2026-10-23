@@ -788,6 +788,14 @@ describe("structured dict error", () => {
 });
 
 describe("InlineRun", () => {
+  it("retains formatting and target metadata inside table cells", () => {
+    const b: Block = JSON.parse('{"type":"table","rows":[[{"text":"linked","runs":[{"text":"linked","bold":true,"color":"#123456","href":"https://example.com"}]}]]}');
+    const run = b.rows?.[0][0].runs?.[0];
+    assert.equal(run?.text, "linked");
+    assert.equal(run?.bold, true);
+    assert.equal(run?.color, "#123456");
+    assert.equal(run?.href, "https://example.com");
+  });
   it("decodes runs and itemRuns with the right flags", () => {
     const b: Block = JSON.parse(`{
       "type": "text",

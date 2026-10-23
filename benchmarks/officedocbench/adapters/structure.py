@@ -111,6 +111,9 @@ def raw_structure(raw):
             elif typ == "table":
                 rows = ([b["headers"]] if b.get("headers") else []) + b.get("rows", [])
                 out["table_cells"] += table_cells(rows, table, active)
+                for row in rows:
+                    for value in row:
+                        runs(cell(value).get("runs", []))
                 out["element_order"].append({"type": "table"})
                 table += 1
             elif typ in ("text", "heading"):

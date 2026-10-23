@@ -42,6 +42,15 @@ def words(e, ns="w"):
     return "".join(n.text or "" for n in e.iter(tag(ns + ":t")))
 
 
+def drawingml_paragraph_text(para):
+    """DrawingML string data, including literal spaces and explicit breaks."""
+    return "".join(
+        "\n" if n.tag == tag("a:br") else words(n, "a")
+        for n in para
+        if n.tag in (tag("a:r"), tag("a:fld"), tag("a:br"))
+    )
+
+
 def rels(z, part):
     root = xml(
         z,
