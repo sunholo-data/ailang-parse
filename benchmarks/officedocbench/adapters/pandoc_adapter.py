@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import pandoc_structure
 
 
 class PandocAdapter(OfficeDocBenchAdapter):
@@ -81,7 +82,11 @@ class PandocAdapter(OfficeDocBenchAdapter):
         meta = ast.get("meta", {})
         metadata_dict = self._extract_metadata(meta)
 
+        structure = pandoc_structure(ast, self._parse_table)
         return {
+            "structure": structure,
+            "hyperlinks": structure["hyperlinks"],
+            "bookmarks": structure["bookmarks"],
             "text_elements": text_elements,
             "headings": headings,
             "tables": tables,
@@ -269,6 +274,7 @@ class PandocAdapter(OfficeDocBenchAdapter):
         each cell is [attr, alignment, rowspan, colspan, [blocks]].
         """
         row_count = 0
+        grid = []
         cell_texts = []
         has_merged = False
 
@@ -278,6 +284,7 @@ class PandocAdapter(OfficeDocBenchAdapter):
                 if not isinstance(row, list) or len(row) < 2:
                     continue
                 row_count += 1
+                grid_row = []
                 cells = row[1] if isinstance(row[1], list) else []
                 for cell in cells:
                     if isinstance(cell, list) and len(cell) >= 5:
@@ -288,8 +295,10 @@ class PandocAdapter(OfficeDocBenchAdapter):
                             has_merged = True
                         cell_blocks = cell[4]
                         text = self._blocks_to_text(cell_blocks, [], [], [])
+                        grid_row.append({"text": text.strip(), "colSpan": colspan, "rowSpan": rowspan})
                         if text.strip():
                             cell_texts.append(text.strip())
+                grid.append(grid_row)
 
         try:
             # thead: [attr, [rows]]
@@ -313,6 +322,7 @@ class PandocAdapter(OfficeDocBenchAdapter):
             pass
 
         return {
+            "rows": grid,
             "row_count": row_count,
             "has_merged_cells": has_merged,
             "cell_text": " ".join(cell_texts),

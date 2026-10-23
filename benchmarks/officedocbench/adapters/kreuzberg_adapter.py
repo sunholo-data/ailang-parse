@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import kreuzberg_structure, markdown_output
 
 
 class KreuzbergAdapter(OfficeDocBenchAdapter):
@@ -63,6 +64,7 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
         # and the panic is a pyo3 BaseException that crashes the whole eval.
         config = ExtractionConfig(
             include_document_structure=True,
+            output_format="markdown",
             images=ImageExtractionConfig(extract_images=True),
         )
         result = extract_file_sync(str(filepath), config=config)
@@ -175,7 +177,14 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
         if not speaker_notes and str(filepath).endswith(".pptx"):
             self._extract_inline_notes(result.content or "", speaker_notes, text_elements)
 
+        structure = kreuzberg_structure(result)
+        markdown = markdown_output(result.content or "")
+        structure["runs"] = markdown["structure"]["runs"]
+        if not structure["list_items"]:
+            structure["list_items"] = markdown["structure"]["list_items"]
         return {
+            "structure": structure,
+            "hyperlinks": markdown["hyperlinks"],
             "text_elements": text_elements,
             "headings": headings,
             "tables": tables,
@@ -400,7 +409,7 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
         # Note: odp is excluded — Kreuzberg v4.7 raises ValidationError on ODP files.
         return {
             "docx", "pptx", "xlsx",
-            "odt", "ods",
+            "odt", "ods", "odp",
             "html", "csv", "tsv", "md",
             "epub",
         }

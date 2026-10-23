@@ -1,36 +1,9 @@
-# OfficeDocBench Results
+# OfficeDocBench results
 
-This directory contains the canonical benchmark output. **`summary.json` is the single source of truth** for the headline numbers shown across the website.
+`summary.json` is the canonical v2 comparison and is mirrored byte-for-byte to `docs/data/officedocbench-summary.json`. `<adapter>/results.json` contains every per-file score, error/unsupported status, and parse/scoring provenance. `environment.txt` pins the Python comparison environment; native tool versions are recorded in adapter results.
 
-## Files
+The summary includes composite, coverage-adjusted score, coverage, error count, eight metric aggregates, per-format scores, and per-feature structural fidelity. An unavailable or failing provider is not replaced with old results. The CLI's nonzero exit code does not discard its error report.
 
-| File | Purpose |
-|------|---------|
-| `summary.json` | Compact aggregates per adapter (composite, adjusted, coverage, per-format, per-metric). Used by the docs website. |
-| `<adapter>/results.json` | Full per-file scoring detail for each adapter. |
+Rebuild the comparison with `eval_officedocbench.py --all --output-cache DIR`. Recombine independently run adapters with `--summarize`; all must use the same v2 corpus. Only the canonical results directory updates the website mirror. See the parent README for explicit cache reuse and rescoring.
 
-## Sync workflow
-
-Whenever you re-run the full benchmark, `summary.json` is regenerated automatically and **mirrored to `docs/data/officedocbench-summary.json`**:
-
-```bash
-uv run benchmarks/officedocbench/eval_officedocbench.py --all
-```
-
-The website (`docs/index.html`, `docs/benchmarks.html`) loads the mirror via `docs/js/bench-data.js`, which resolves `data-bench="<adapter_id>.<field>"` attributes at page load. Inline values in HTML serve as static fallbacks if the fetch fails.
-
-### Adding a new score to a page
-
-1. Pick the field path, e.g. `kreuzberg.per_format.docx.composite`.
-2. Add `<span data-bench="kreuzberg.per_format.docx.composite">73.8%</span>` in HTML — the inline text is the fallback.
-3. The injector formats `[0,1]` numbers as percentages automatically.
-
-### Top-level paths
-
-- `total_files` — total files in the benchmark
-- `run_date` — UTC date of the run
-- `<adapter_id>.composite` / `.adjusted` / `.coverage`
-- `<adapter_id>.feature_detection` / `.structural_recall` / `.structural_quality` / `.content_fidelity` / `.text_jaccard` / `.element_count` / `.metadata`
-- `<adapter_id>.per_format.<fmt>.composite` / `.files`
-
-Adapter ids: `ailang_parse`, `kreuzberg`, `ooxml`, `pandoc`, `markitdown`, `unstructured`, `docling`, `llamaparse`.
+`v1/` preserves the two differing historical summaries and their original dates. Their scores use a different protocol and are not directly comparable to v2.

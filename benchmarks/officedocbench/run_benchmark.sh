@@ -2,14 +2,14 @@
 # OfficeDocBench — run the benchmark suite
 #
 # Usage:
-#   bash benchmarks/officedocbench/run_benchmark.sh              # AILANG Parse only (from golden)
+#   bash benchmarks/officedocbench/run_benchmark.sh              # AILANG Parse only (live)
 #   bash benchmarks/officedocbench/run_benchmark.sh --all        # All installed adapters
 #   bash benchmarks/officedocbench/run_benchmark.sh --live       # Re-parse files (requires AILANG)
 #   bash benchmarks/officedocbench/run_benchmark.sh --json       # JSON output
 #
 # Prerequisites:
-#   - Python 3.10+ with uv (https://github.com/astral-sh/uv)
-#   - For --all: pip install unstructured docling llama-parse markitdown
+#   - Python 3.11+ with uv (https://github.com/astral-sh/uv)
+#   - For --all: uv sync --extra competitors; native Pandoc, Node.js and LibreOffice
 #   - For --live: AILANG runtime installed (https://ailang.sunholo.com/install.sh)
 
 set -euo pipefail

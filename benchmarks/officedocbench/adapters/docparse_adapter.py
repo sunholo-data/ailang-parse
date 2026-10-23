@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "metrics"))
 from normalize import NormalizedElement, normalize_ailang
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import raw_structure
 
 
 REPO_DIR = Path(__file__).parent.parent.parent.parent
@@ -36,7 +38,7 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         return "AILANG Parse"
 
     def version(self) -> str:
-        return "0.3.0"
+        return tomllib.loads((REPO_DIR / "ailang.toml").read_text())["package"]["version"]
 
     def parse(self, filepath: Path) -> dict[str, Any]:
         """Run AILANG Parse on a single file. Uses batch cache if available."""
@@ -183,6 +185,16 @@ class DocParseAdapter(OfficeDocBenchAdapter):
             "sheet_names": sheet_names,
         }
 
+        structure = raw_structure(raw)
+        for item in text_elements:
+            item["formatting"] = [r for r in structure["runs"] if r["text"] in item["text"]
+                                  and any(r.get(k) for k in ("bold", "italic", "underline", "strike"))]
+        for item in lists_out:
+            item["depth"] = 1 + max((x["level"] for x in structure["list_items"]
+                                    if x["text"] in item["items"]), default=0)
+        for item in comments:
+            anchor = next((c for c in structure["comment_anchors"] if c["text"] == item["text"]), {})
+            item.update(anchor)
         return {
             "text_elements": text_elements,
             "headings": headings,
@@ -197,6 +209,9 @@ class DocParseAdapter(OfficeDocBenchAdapter):
             "lists": lists_out,
             "hyperlinks": self._extract_hyperlinks(blocks),
             "metadata": metadata,
+            "structure": structure,
+            "bookmarks": structure["bookmarks"],
+            "section_breaks": [b for b in structure["breaks"] if b["kind"] == "section-break"],
         }
 
     # DOCX surfaces a hyperlink inline as "anchor text (url)" rather than as a

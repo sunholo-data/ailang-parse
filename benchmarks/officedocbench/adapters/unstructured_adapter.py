@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import html_rows, table_cells
 
 
 class UnstructuredAdapter(OfficeDocBenchAdapter):
@@ -40,6 +41,7 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
         lists_out = []
         metadata_dict: dict[str, Any] = {}
 
+        structure = {k: [] for k in ("element_order", "table_cells", "list_items", "hyperlinks", "runs")}
         for el in elements:
             el_type = type(el).__name__
             text = str(el)
@@ -62,12 +64,22 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
                     if dst and md.get(src):
                         metadata_dict.setdefault(dst, md[src])
 
+            md = meta.to_dict() if meta is not None else {}
+            typ = {"Title": "heading", "Table": "table", "ListItem": "list"}.get(el_type, "text")
+            structure["element_order"].append({"type": typ, **({"text": text} if typ not in ("table", "list") else {})})
+            for value, url in zip(md.get("link_texts") or [], md.get("link_urls") or []):
+                structure["hyperlinks"].append({"text": value, "url": url})
+            for value, tags in zip(md.get("emphasized_text_contents") or [], md.get("emphasized_text_tags") or []):
+                structure["runs"].append({"text": value, "bold": "b" in tags or "strong" in tags, "italic": "i" in tags or "em" in tags})
             if el_type == "Title":
                 headings.append({"text": text, "level": 1})
             elif el_type == "Table":
                 html = getattr(meta, "text_as_html", "") if meta else ""
                 has_merges = bool(html and ("colspan" in html.lower() or "rowspan" in html.lower()))
+                rows = html_rows(html)
+                structure["table_cells"] += table_cells(rows, len(tables))
                 tables.append({
+                    "rows": rows,
                     "row_count": html.count("<tr") if html else 0,
                     "has_merged_cells": has_merges,
                     "cell_text": text,
@@ -88,6 +100,8 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
                 text_elements.append({"text": text, "style": el_type})
 
         return {
+            "structure": structure,
+            "hyperlinks": structure["hyperlinks"],
             "text_elements": text_elements,
             "headings": headings,
             "tables": tables,
@@ -103,4 +117,4 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
         }
 
     def supported_formats(self) -> set[str]:
-        return {"docx", "pptx", "xlsx"}
+        return {"docx", "pptx", "xlsx", "odt", "html", "csv", "tsv", "md", "epub"}

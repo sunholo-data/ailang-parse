@@ -1,0 +1,279 @@
+"""Corruptions that used to leave the public score unchanged."""
+
+import copy
+import json
+import sys
+import unittest
+from pathlib import Path
+
+BENCH = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BENCH))
+# ruff: noqa: E402
+from structure_v2 import score_structure
+from scoring import (
+    score_structural_quality,
+    score_metadata,
+    _score_ordering,
+)
+from adapters.docparse_adapter import DocParseAdapter
+from adapters.structure import raw_structure, markdown_output, html_rows, table_cells
+import eval_officedocbench as runner
+
+
+class StructuralTests(unittest.TestCase):
+    def assert_sensitive(self, key, want, mutation):
+        gt = {key: want}
+        output = {"structure": {key: copy.deepcopy(want)}}
+        self.assertEqual(score_structure(gt, output)["score"], 1)
+        mutation(output["structure"][key])
+        self.assertLess(score_structure(gt, output)["score"], 1)
+
+    def test_column_shift(self):
+        self.assert_sensitive(
+            "table_cells",
+            [{"table": 0, "row": 2, "col": 3, "text": "Acme"}],
+            lambda xs: xs[0].update(col=4),
+        )
+
+    def test_table_assigned_to_wrong_sheet(self):
+        self.assert_sensitive(
+            "table_cells",
+            [{"scope": "Revenue", "row": 1, "col": 1, "text": "100"}],
+            lambda xs: xs[0].update(scope="Costs"),
+        )
+
+    def test_sheet_order(self):
+        self.assert_sensitive(
+            "containers",
+            [{"kind": "sheet", "name": "A"}, {"kind": "sheet", "name": "B"}],
+            lambda xs: xs.reverse(),
+        )
+
+    def test_same_type_reading_order(self):
+        self.assert_sensitive(
+            "element_order",
+            [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}],
+            lambda xs: xs.reverse(),
+        )
+        self.assertLess(
+            _score_ordering(
+                [{"type": "text", "text": "first"}],
+                [{"type": "text", "text": "second"}],
+            ),
+            1,
+        )
+
+    def test_notes_belong_to_slide(self):
+        self.assert_sensitive(
+            "notes",
+            [{"scope": "Agenda", "text": "Ask for feedback"}],
+            lambda xs: xs[0].update(scope="Budget"),
+        )
+
+    def test_comment_target(self):
+        self.assert_sensitive(
+            "comment_anchors",
+            [{"text": "Fix", "annotated_text": "target", "anchored": True}],
+            lambda xs: xs[0].update(annotated_text="other"),
+        )
+
+    def test_legacy_comment_range_cannot_pass_by_word_presence(self):
+        f = {
+            "comments": {
+                "present": True,
+                "ranges": [{"comment_text": "Fix", "annotated_text": "target"}],
+            }
+        }
+        wrong = {
+            "comments": [{"text": "Fix", "annotated_text": "other", "anchored": True}],
+            "text_elements": [{"text": "target"}],
+        }
+        self.assertEqual(
+            score_structural_quality(f, wrong)["details"]["comment_ranges"]["score"], 0
+        )
+
+    def test_list_depth(self):
+        self.assert_sensitive(
+            "list_items",
+            [{"text": "child", "ordered": True, "level": 2}],
+            lambda xs: xs[0].update(level=0),
+        )
+
+    def test_style(self):
+        self.assert_sensitive(
+            "runs",
+            [{"text": "bold", "bold": True}],
+            lambda xs: xs[0].update(bold=False),
+        )
+
+    def test_style_coalescing(self):
+        self.assertEqual(
+            score_structure(
+                {"runs": [{"text": "bold", "bold": True}]},
+                {"structure": {"runs": [{"text": "some bold words", "bold": True}]}},
+            )["score"],
+            1,
+        )
+
+    def test_one_run_cannot_satisfy_duplicate_occurrences(self):
+        want = {"runs": [{"text": "bold", "bold": True}] * 2}
+        got = {"structure": {"runs": [{"text": "bold", "bold": True}]}}
+        self.assertEqual(score_structure(want, got)["score"], 0.5)
+
+    def test_formula(self):
+        self.assert_sensitive(
+            "table_cells",
+            [{"row": 1, "col": 2, "text": "3", "formula": "A1+1"}],
+            lambda xs: xs[0].pop("formula"),
+        )
+
+    def test_fill_on_blank_cell(self):
+        self.assert_sensitive(
+            "table_cells",
+            [{"row": 2, "col": 2, "text": "", "fill": "#ffff00"}],
+            lambda xs: xs[0].pop("fill"),
+        )
+
+    def test_bookmark_break_link(self):
+        for key, record in [
+            ("bookmarks", {"name": "target"}),
+            ("breaks", {"kind": "page-break"}),
+            ("hyperlinks", {"text": "site", "url": "https://example.org"}),
+        ]:
+            with self.subTest(key=key):
+                self.assert_sensitive(key, [record], lambda xs: xs.clear())
+
+    def test_missing_evidence_not_inferred(self):
+        self.assertEqual(
+            score_structure(
+                {"table_cells": [{"row": 1, "col": 1, "text": "yes"}]},
+                {"tables": [{"cell_text": "yes"}]},
+            )["score"],
+            0,
+        )
+
+    def test_metadata_order(self):
+        self.assertLess(
+            score_metadata({}, {"sheet_names": ["B", "A"]}, {"names": ["A", "B"]})[
+                "score"
+            ],
+            1,
+        )
+
+    def test_raw_adapter_retains_data(self):
+        raw = {
+            "document": {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "kind": "sheet",
+                        "name": "S",
+                        "blocks": [
+                            {
+                                "type": "table",
+                                "headers": ["A", "B"],
+                                "rows": [
+                                    [
+                                        "",
+                                        {
+                                            "text": "3",
+                                            "formula": "A1+1",
+                                            "fill": "#ffff00",
+                                        },
+                                    ]
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "type": "section",
+                        "kind": "comment",
+                        "blocks": [
+                            {
+                                "type": "comment",
+                                "text": "Fix",
+                                "author": "Ann",
+                                "anchorText": "B2: 3",
+                                "anchored": True,
+                            }
+                        ],
+                    },
+                ]
+            }
+        }
+        out = raw_structure(raw)
+        self.assertEqual(out["table_cells"][-1]["formula"], "A1+1")
+        self.assertEqual(out["comment_anchors"][0]["scope"], "S")
+
+    def test_markdown_adapter_keeps_empty_cells_and_styles(self):
+        out = markdown_output(
+            "**bold**\n\n| A | B | C |\n|---|---|---|\n| one | | three |\n"
+        )
+        self.assertEqual(out["structure"]["table_cells"][-2]["text"], "")
+        self.assertEqual(
+            score_structure({"runs": [{"text": "bold", "bold": True}]}, out)["score"], 1
+        )
+
+    def test_html_spans(self):
+        rows = html_rows('<table><tr><td colspan="2">wide</td><td>x</td></tr></table>')
+        self.assertEqual(table_cells(rows, 0)[-1]["col"], 3)
+
+    def test_version_is_package_version(self):
+        self.assertNotEqual(DocParseAdapter().version(), "0.3.0")
+
+    def test_source_hashes_and_schema(self):
+        import hashlib
+        import jsonschema
+
+        schema = json.loads((BENCH / "schema/ground_truth.schema.json").read_text())
+        for p in (BENCH / "ground_truth").glob("*.json"):
+            gt = json.loads(p.read_text())
+            jsonschema.validate(gt, schema)
+            if "verification" in gt:
+                src = runner._find_test_file(gt["file"])
+                self.assertEqual(
+                    hashlib.sha256(src.read_bytes()).hexdigest(),
+                    gt["verification"]["source_sha256"],
+                )
+
+    def test_failed_batch_cannot_score_stale_output(self):
+        class Empty(DocParseAdapter):
+            def parse_batch(self, paths):
+                return {}
+
+            def parse(self, path):
+                raise AssertionError("must not retry stale individual output")
+
+        result = runner.evaluate_adapter(
+            Empty(), [BENCH / "ground_truth/sample.docx.json"], use_golden=False
+        )
+        self.assertEqual(result["results"][0]["status"], "ERROR")
+
+    def test_captured_v047_defects_reduce_public_score(self):
+        prefix = BENCH.parent / "office/regressions/v0_47_0_prefix"
+        goldens = BENCH.parent / "office/golden"
+        for name in (
+            "challenge_sparse_rows.xlsx",
+            "poi_two_sheets.xlsx",
+            "pptx_slide_order_notes.pptx",
+            "poi_comment.pptx",
+        ):
+            with self.subTest(file=name):
+                gt = json.loads((BENCH / "ground_truth" / (name + ".json")).read_text())
+                old = json.loads((prefix / (name + ".json")).read_text())
+                current = json.loads((goldens / (name + ".json")).read_text())
+                a = score_structure(gt["structure"], {"structure": raw_structure(old)})[
+                    "score"
+                ]
+                b = score_structure(
+                    gt["structure"], {"structure": raw_structure(current)}
+                )["score"]
+                self.assertLess(a, b)
+
+    def test_summary_rejects_legacy_results(self):
+        with self.assertRaises(ValueError):
+            runner._write_summary([{"adapter": "old", "results": []}])
+
+
+if __name__ == "__main__":
+    unittest.main()

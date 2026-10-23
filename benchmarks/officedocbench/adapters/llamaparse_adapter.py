@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import markdown_output
 
 # llama-parse 0.6.x prints a DeprecationWarning on import recommending the
 # new unified SDK; the SDK still works fine and OfficeDocBench is pinned to
@@ -64,7 +65,7 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
             save_images=True,
             hide_headers=False,
             hide_footers=False,
-            parsing_instruction=(
+            user_prompt=(
                 "Preserve all structural elements: headings with their levels, "
                 "tables with merged cells (use HTML rowspan/colspan), headers, "
                 "footers, footnotes, list nesting, and image captions."
@@ -93,7 +94,15 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
                 )
             return self._from_markdown(documents)
 
-        return self._from_json(json_result)
+        output = self._from_json(json_result)
+        jobs = json_result if isinstance(json_result, list) else [json_result]
+        markdown = "\n\n".join(page.get("md", "") for job in jobs for page in job.get("pages", []))
+        rich = markdown_output(markdown)
+        output["structure"] = rich["structure"]
+        output["hyperlinks"] = rich["hyperlinks"]
+        if rich["tables"]:
+            output["tables"] = rich["tables"]
+        return output
 
     # ------------------------------------------------------------------ JSON
 
@@ -185,50 +194,7 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
     # -------------------------------------------------------------- Markdown
 
     def _from_markdown(self, documents: Any) -> dict[str, Any]:
-        text_elements: list[dict[str, Any]] = []
-        headings: list[dict[str, Any]] = []
-        tables: list[dict[str, Any]] = []
-        lists_out: list[dict[str, Any]] = []
-
-        for doc in documents:
-            text = doc.text if hasattr(doc, "text") else str(doc)
-            for line in text.strip().split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("#"):
-                    level = len(line) - len(line.lstrip("#"))
-                    headings.append({"text": line.lstrip("# ").strip(), "level": level})
-                elif line.startswith("<table") or line.startswith("|"):
-                    has_merged = "rowspan" in line or "colspan" in line
-                    cell_text = re.sub(r"<[^>]+>", " ", line)
-                    cell_text = " ".join(c.strip() for c in cell_text.split("|") if c.strip())
-                    tables.append({
-                        "row_count": 1,
-                        "has_merged_cells": has_merged,
-                        "cell_text": cell_text,
-                    })
-                elif line.startswith("- ") or line.startswith("* "):
-                    lists_out.append({"items": [line[2:]], "ordered": False})
-                elif re.match(r"^\d+\.\s", line):
-                    lists_out.append({"items": [re.sub(r"^\d+\.\s", "", line)], "ordered": True})
-                else:
-                    text_elements.append({"text": line, "style": "markdown"})
-
-        return {
-            "text_elements": text_elements,
-            "headings": headings,
-            "tables": tables,
-            "track_changes": [],
-            "comments": [],
-            "headers_footers": [],
-            "footnotes": [],
-            "speaker_notes": [],
-            "text_boxes": [],
-            "images": [],
-            "lists": lists_out,
-            "metadata": {},
-        }
+        return markdown_output("\n\n".join(doc.text if hasattr(doc, "text") else str(doc) for doc in documents))
 
     def supported_formats(self) -> set[str]:
         # LlamaParse Cloud accepts a broad set; list the formats present in OfficeDocBench
