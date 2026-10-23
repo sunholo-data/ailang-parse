@@ -72,6 +72,13 @@ Provider errors and unsupported formats are explicit. An empty response is an er
 
 The current comparison environment is pinned in `results/environment.txt`. Raw converted-output caches are local artifacts and are not committed. v1 repository and website summaries are retained separately in `results/v1/` because those summaries previously disagreed.
 
+Parser-specific regression gates supplement the public comparison. Run
+`python3 benchmarks/check_xlsx_hyperlinks.py` for source-derived sheet/cell
+hyperlink targets, HTML target writing, sparse rows and bounded truncation.
+Chromium shares the same expectations. Its dedicated fixture is outside the
+87-file corpus and does not contribute to published scores. XLSX generation
+and Markdown table-cell link writing remain separate roadmap items.
+
 Ground truth must be checked against the input source, not regenerated to make the reference parser pass. Run the oracle with no `--check` to rebuild source assertions, inspect the diff, and run the corruption tests. Legacy `annotate.py`/`enrich_gt.py` are v1 annotation utilities, not the v2 maintenance path.
 
 ## License

@@ -306,3 +306,29 @@ test("workbench DOCX: table cells retain source formatting in public JSON", asyn
     got[index].text = text(got[index].text).replace(text(item.text), "\0");
   }
 });
+
+// Same source-derived cell/target associations as the native streaming parser.
+test("workbench XLSX: hyperlink targets stay on their sheet and sparse source cells", async ({ page }) => {
+  test.setTimeout(180_000);
+  const want = expectationsFrom("benchmarks/check_xlsx_hyperlinks.py");
+  const blocks = await parseOnWorkbench(page, "benchmarks/fixtures/xlsx_hyperlinks.xlsx");
+  const links: any[] = [];
+  const shapes: any[] = [];
+  for (const sheet of blocks.filter((b) => b.type === "section" && b.kind === "sheet")) {
+    for (const table of sheet.blocks.filter((b: any) => b.type === "table")) {
+      const rows = [...(table.headers?.length ? [table.headers] : []), ...table.rows];
+      shapes.push([sheet.name, rows.length, Math.max(...rows.map((r: any[]) => r.length))]);
+      rows.forEach((row: any[], ri: number) => row.forEach((cell: any, ci: number) => {
+        for (const run of cell.runs ?? []) {
+          if (run.href) links.push({ sheet: sheet.name, row: ri + 1, col: ci + 1, text: run.text, href: run.href });
+        }
+      }));
+    }
+  }
+  links.sort((a, b) => a.sheet.localeCompare(b.sheet) || a.row - b.row || a.col - b.col);
+  expect(links).toEqual(want.links);
+  expect(shapes).toEqual(want.shapes);
+  const warnings = blocks.filter((b) => b.type === "text" && b.style === "warning").map((b) => b.text);
+  expect(warnings).toHaveLength(want.warnings.length);
+  for (const warning of want.warnings) expect(warnings.some((text: string) => text.includes(warning)), warning).toBe(true);
+});

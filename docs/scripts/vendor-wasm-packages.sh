@@ -105,6 +105,8 @@ MODULES=(
   "services/omml.ail"
   "services/docx_parser.ail"
   "services/pptx_parser.ail"
+  "services/xlsx_refs.ail"
+  "services/xlsx_hyperlinks.ail"
   "services/xlsx_parser.ail"
   "services/html_parser.ail"
   "services/csv_parser.ail"
