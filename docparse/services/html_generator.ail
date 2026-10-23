@@ -4,7 +4,7 @@ import std/string (length, join, intToStr, startsWith, contains, find, substring
 import std/fs (readFile)
 import std/result (Result, Ok, Err)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
+import docparse/types/document (InlineRun, plainRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
 
 -- HTML Generator — converts Block ADT to standalone HTML document.
@@ -207,7 +207,19 @@ pure func htmlRunToStr(r: InlineRun) -> string {
   let withStrike = if r.strike then "<del>${withCode}</del>" else withCode;
   let withUnder = if r.underline then "<u>${withStrike}</u>" else withStrike;
   let withItalic = if r.italic then "<em>${withUnder}</em>" else withUnder;
-  if r.bold then "<strong>${withItalic}</strong>" else withItalic
+  let withBold = if r.bold then "<strong>${withItalic}</strong>" else withItalic;
+  if length(r.href) > 0 then "<a href=\"${xmlAttrEscape(r.href)}\">${withBold}</a>" else withBold
+}
+
+pure func htmlLinkRunView(mode: int) -> string
+  tests [
+    (0, "<a href=\"https://example.com\">link</a>"),
+    (1, "<a href=\"https://example.com\"><strong>link</strong></a>"),
+    (2, "link")
+  ]
+{
+  let run = {plainRun("link") | href: if mode == 2 then "" else "https://example.com", bold: mode == 1};
+  htmlRunToStr(run)
 }
 
 -- List items, preferring per-item runs when present. itemRuns is parallel to

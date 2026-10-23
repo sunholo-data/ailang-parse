@@ -19,6 +19,8 @@ separately — see `sdks/` for per-SDK changelogs.
 - Coalescing adjacent inline runs preserves the link target. It previously
   reset `href` while joining runs for the same link, losing linked text in
   DOCX and other formats that use the shared constructors.
+- HTML generation renders inline run targets as escaped clickable anchors,
+  preserving the label's formatting during DOCX-to-HTML conversion.
 - OfficeDocBench v2 adds source-derived structural scoring, explicit provider
   failures and provenance, and a fresh nine-provider comparison. Six historical
   annotations are audited against source HTML/XML; warning blocks remain

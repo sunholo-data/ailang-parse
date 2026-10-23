@@ -12,6 +12,9 @@
   Adapter normalization joins adjacent runs for the same link label.
 - The shared run coalescer retains `href` when combining runs for the same
   target, including labels split around an inline image.
+- HTML generation renders those inline targets as clickable anchors and keeps
+  the label's formatting. DOCX field-code and internal-bookmark links, and
+  target preservation through other generation formats, need separate coverage.
 - Six legacy annotations are independently audited against source HTML/XML:
   `test_complex.html`, `challenge_complex.html`, `challenge_footnotes.docx`,
   `challenge_nested_lists.docx`, `pandoc_inline_images.docx`, and `nested_sdt.docx`.
