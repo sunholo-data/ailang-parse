@@ -2,7 +2,8 @@
 
 Validates the original adapter/version/input fingerprint. The parse timestamp
 and adapter provenance are retained; a separate scoring timestamp/revision is
-recorded. This never upgrades old converted output to a newer adapter mapping.
+recorded. Portable normalization can use evidence already present in cached output; its
+revision is recorded separately from the original provider adapter.
 """
 
 from __future__ import annotations

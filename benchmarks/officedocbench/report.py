@@ -58,7 +58,7 @@ def print_summary(all_results: list[dict]) -> None:
     """Print a comparative summary table."""
     print("\n# OfficeDocBench Results\n")
     print("| Tool | Files | Coverage | Composite | Adjusted | Feat. Det. | Struct. Recall | Struct. Quality | Content Fidelity | Text Jaccard | Elem. Count | Metadata | Structure v2 |")
-    print("|------|-------|----------|-----------|----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|")
+    print("|------|-------|----------|-----------|----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|--------------|")
 
     for ar in all_results:
         agg = _aggregate_scores(ar)

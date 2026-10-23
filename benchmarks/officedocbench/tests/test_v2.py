@@ -326,6 +326,15 @@ class StructuralTests(unittest.TestCase):
         result = docling_structure(doc)["table_cells"][0]
         self.assertEqual((result["scope"], result["row"], result["col"]), ("S", 4, 3))
 
+    def test_html_table_keeps_reading_order_and_sheet_attribution(self):
+        out = add_sheet_scopes(
+            markdown_output(
+                "## Revenue\n\n<table><tr><td>A</td><td>B</td></tr><tr><td>x</td><td>3</td></tr></table>\n"
+            )
+        )
+        self.assertEqual(out["structure"]["element_order"][-1]["type"], "table")
+        self.assertEqual(out["structure"]["table_cells"][-1]["scope"], "Revenue")
+
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):
             runner._write_summary([{"adapter": "old", "results": []}])

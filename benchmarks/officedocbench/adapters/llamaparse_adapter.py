@@ -31,13 +31,13 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"llama_pa
 
 
 class LlamaParseAdapter(OfficeDocBenchAdapter):
-
     def name(self) -> str:
         return "LlamaParse"
 
     def version(self) -> str:
         try:
             from importlib.metadata import version as pkg_version
+
             return pkg_version("llama-parse")
         except Exception:
             return "unknown"
@@ -54,7 +54,11 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         # Premium mode is 15× the standard credit cost — opt-in only.
         # Set LLAMAPARSE_PREMIUM=1 in the environment for "publication" runs;
         # default-off keeps day-to-day benchmark refreshes affordable.
-        premium = os.environ.get("LLAMAPARSE_PREMIUM", "").lower() in ("1", "true", "yes")
+        premium = os.environ.get("LLAMAPARSE_PREMIUM", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         parser = LlamaParse(
             result_type="markdown",
@@ -94,15 +98,26 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
                 )
             return self._from_markdown(documents)
 
-        output = self._from_json(json_result)
+        return self.convert_json(json_result, filepath)
+
+    def convert_json(self, json_result, filepath):
+        """Map an existing provider response; no upload or parsing request."""
         jobs = json_result if isinstance(json_result, list) else [json_result]
-        markdown = "\n\n".join(page.get("md", "") for job in jobs for page in job.get("pages", []))
+        for job in jobs:
+            if job.get("error"):
+                raise RuntimeError(str(job["error"]))
+        output = self._from_json(json_result)
+        markdown = "\n\n".join(
+            page.get("md", "") for job in jobs for page in job.get("pages", [])
+        )
         rich = markdown_output(markdown)
         output["structure"] = rich["structure"]
         output["hyperlinks"] = rich["hyperlinks"]
         if rich["tables"]:
             output["tables"] = rich["tables"]
-        return add_sheet_scopes(output) if filepath.suffix.lower() == ".xlsx" else output
+        return (
+            add_sheet_scopes(output) if filepath.suffix.lower() == ".xlsx" else output
+        )
 
     # ------------------------------------------------------------------ JSON
 
@@ -126,19 +141,24 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
                     itype = item.get("type", "")
                     md = item.get("md") or item.get("value") or ""
                     if itype == "heading":
-                        headings.append({
-                            "text": (item.get("value") or md).strip(),
-                            "level": int(item.get("lvl", 1) or 1),
-                        })
+                        headings.append(
+                            {
+                                "text": (item.get("value") or md).strip(),
+                                "level": int(item.get("lvl", 1) or 1),
+                            }
+                        )
                     elif itype == "table":
                         rows = item.get("rows") or []
                         cell_text_parts: list[str] = []
                         has_merged = False
                         for row in rows:
-                            for cell in (row or []):
+                            for cell in row or []:
                                 if isinstance(cell, dict):
                                     cell_text_parts.append(str(cell.get("value", "")))
-                                    if cell.get("rowspan", 1) > 1 or cell.get("colspan", 1) > 1:
+                                    if (
+                                        cell.get("rowspan", 1) > 1
+                                        or cell.get("colspan", 1) > 1
+                                    ):
                                         has_merged = True
                                 else:
                                     cell_text_parts.append(str(cell))
@@ -148,28 +168,46 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
                             if "rowspan" in html or "colspan" in html:
                                 has_merged = True
                             cell_text_parts.append(re.sub(r"<[^>]+>", " ", html))
-                        tables.append({
-                            "row_count": max(len(rows), 1),
-                            "has_merged_cells": has_merged,
-                            "cell_text": " ".join(p for p in cell_text_parts if p),
-                        })
+                        tables.append(
+                            {
+                                "row_count": max(len(rows), 1),
+                                "has_merged_cells": has_merged,
+                                "cell_text": " ".join(p for p in cell_text_parts if p),
+                            }
+                        )
                     elif itype in ("list", "list_item"):
                         items_in = item.get("items") or [item.get("value", "")]
-                        lists_out.append({
-                            "items": [str(x) for x in items_in if x],
-                            "ordered": bool(item.get("ordered", False)),
-                        })
+                        lists_out.append(
+                            {
+                                "items": [str(x) for x in items_in if x],
+                                "ordered": bool(item.get("ordered", False)),
+                            }
+                        )
                     elif itype == "header":
-                        headers_footers.append({"type": "header", "text": (item.get("value") or md).strip()})
+                        headers_footers.append(
+                            {
+                                "type": "header",
+                                "text": (item.get("value") or md).strip(),
+                            }
+                        )
                     elif itype == "footer":
-                        headers_footers.append({"type": "footer", "text": (item.get("value") or md).strip()})
+                        headers_footers.append(
+                            {
+                                "type": "footer",
+                                "text": (item.get("value") or md).strip(),
+                            }
+                        )
                     elif itype in ("image", "chart"):
-                        images.append({"description": (item.get("value") or md or itype).strip()})
+                        images.append(
+                            {"description": (item.get("value") or md or itype).strip()}
+                        )
                     else:
                         # text, paragraph, code, quote, anything else
                         value = (item.get("value") or md or "").strip()
                         if value:
-                            text_elements.append({"text": value, "style": itype or "text"})
+                            text_elements.append(
+                                {"text": value, "style": itype or "text"}
+                            )
 
                 # Page-level images list (separate from items)
                 for img in page.get("images", []) or []:
@@ -180,22 +218,38 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
             "text_elements": text_elements,
             "headings": headings,
             "tables": tables,
-            "track_changes": [],   # LlamaParse does not extract w:ins/w:del
-            "comments": [],        # LlamaParse does not extract w:comment
+            "track_changes": [],  # LlamaParse does not extract w:ins/w:del
+            "comments": [],  # LlamaParse does not extract w:comment
             "headers_footers": headers_footers,
-            "footnotes": [],       # not surfaced as a typed item
+            "footnotes": [],  # not surfaced as a typed item
             "speaker_notes": [],
             "text_boxes": [],
             "images": images,
             "lists": lists_out,
-            "metadata": {},        # no document-properties endpoint
+            "metadata": {},  # no document-properties endpoint
         }
 
     # -------------------------------------------------------------- Markdown
 
     def _from_markdown(self, documents: Any) -> dict[str, Any]:
-        return markdown_output("\n\n".join(doc.text if hasattr(doc, "text") else str(doc) for doc in documents))
+        return markdown_output(
+            "\n\n".join(
+                doc.text if hasattr(doc, "text") else str(doc) for doc in documents
+            )
+        )
 
     def supported_formats(self) -> set[str]:
         # LlamaParse Cloud accepts a broad set; list the formats present in OfficeDocBench
-        return {"docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "md", "epub", "csv", "tsv"}
+        return {
+            "docx",
+            "pptx",
+            "xlsx",
+            "odt",
+            "odp",
+            "ods",
+            "html",
+            "md",
+            "epub",
+            "csv",
+            "tsv",
+        }

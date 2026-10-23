@@ -228,6 +228,7 @@ def markdown_output(source):
             structure["element_order"].append({"type": "table"})
             table = None
         elif token.type == "html_block" and "<table" in token.content:
+            structure["element_order"].append({"type": "table"})
             rows = html_rows(token.content)
             idx = len(out["tables"])
             structure["table_cells"] += table_cells(rows, idx)

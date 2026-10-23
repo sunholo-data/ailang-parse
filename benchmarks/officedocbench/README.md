@@ -61,7 +61,7 @@ LlamaParse needs `LLAMA_CLOUD_API_KEY`; inject it into the process from your sec
 
 ## Reproducibility and failures
 
-Each adapter result records its installed version, adapter hash, corpus/scorer hashes, source commit, toolchain, run timestamps, and configuration. Converted-output caches are keyed by provider version, adapter revision, and input bytes. Cached reads are not reported as fresh parsing latency. A rescore has its own timestamp and revision and retains the original parse provenance.
+Each adapter result records its installed version, adapter hash, corpus/scorer hashes, source commit, toolchain, run timestamps, and configuration. Converted-output caches are keyed by provider version, adapter revision, and input bytes. Cached reads are not reported as fresh parsing latency. A rescore has its own timestamp and revision and retains the original parse provenance. Its separately hashed portable normalizer may use evidence already present in cached output, such as worksheet headings; it never reads the source to fill a provider gap.
 
 Provider errors and unsupported formats are explicit. An empty response is an error except for source-verified blank documents and slide decks. Failed runs overwrite their own result with the failure; they never substitute a historical score. The command exits nonzero on parse or missing-fixture errors while retaining the complete report. A comparison may therefore be publishable with documented provider failures even when the command exits nonzero.
 
