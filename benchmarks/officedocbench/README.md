@@ -18,7 +18,7 @@ The seven original dimensions keep their relative weights: feature detection (15
 
 The eighth dimension, **structural fidelity**, uses the source-derived assertions. On annotated legacy cases, it receives 25% of the score and the seven legacy dimensions share 75%. The 18 added cases test only independently derived assertions, so their score is structural fidelity alone. Cases without new assertions retain the legacy weights. Metric aggregates omit explicitly inapplicable dimensions.
 
-Structural assertions compare identity and position, not just word presence. Reading/container order uses a sequence alignment that penalizes missing, additional, or reordered entries. Other assertions require their declared properties to agree; missing evidence scores zero. Styled phrases can match within a coalesced run. An actual paragraph containing the target words does not establish a comment-to-target relationship.
+Structural assertions compare identity and position, not just word presence. Reading/container order uses a sequence alignment that penalizes missing, additional, or reordered entries. Other assertions require their declared properties to agree; missing evidence scores zero. Styled phrases can match within a coalesced run. Formula comparisons ignore the optional leading `=` used in spreadsheet display notation; missing or changed expressions still lose credit. An actual paragraph containing the target words does not establish a comment-to-target relationship.
 
 The legacy scorer also now checks real reading order, actual comment anchors, and ordered sheet names. It no longer reconstructs document order by concatenating feature buckets. Corrected an inconsistent legacy list count in `challenge_real_world.docx` (six list groups).
 
@@ -77,7 +77,7 @@ Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files reta
 
 | Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
 |---|---|---:|---:|---:|---:|
-| AILANG Parse | 0.52.2 | 87/87 | 95.6% | 95.6% | 0 |
+| AILANG Parse | 0.52.2 | 87/87 | 95.9% | 95.9% | 0 |
 | Kreuzberg | 4.10.4 | 82/87 | 68.0% | 64.1% | 5 |
 | Docling | 2.142.1 | 83/87 | 64.6% | 61.6% | 3 |
 | LlamaParse (standard) | 0.6.94 | 83/87 | 61.7% | 58.9% | 4 |
