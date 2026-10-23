@@ -391,7 +391,8 @@ def main():
         args.output_cache,
         args.reuse_cache,
     )
-    gt_files = sorted(GT_DIR.glob("*.json"))
+    manifest = json.loads((SCRIPT_DIR / "corpus.json").read_text())
+    gt_files = [GT_DIR / (name + ".json") for name in manifest["files"]]
     if args.summarize:
         all_results = [
             json.loads(p.read_text())

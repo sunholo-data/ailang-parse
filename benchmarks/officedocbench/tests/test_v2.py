@@ -335,6 +335,12 @@ class StructuralTests(unittest.TestCase):
         self.assertEqual(out["structure"]["element_order"][-1]["type"], "table")
         self.assertEqual(out["structure"]["table_cells"][-1]["scope"], "Revenue")
 
+    def test_declared_corpus_matches_annotations(self):
+        declared = set(json.loads((BENCH / "corpus.json").read_text())["files"])
+        actual = {p.name[:-5] for p in (BENCH / "ground_truth").glob("*.json")}
+        self.assertEqual(declared, actual)
+        self.assertEqual(len(declared), 87)
+
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):
             runner._write_summary([{"adapter": "old", "results": []}])

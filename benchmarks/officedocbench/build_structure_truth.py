@@ -470,12 +470,15 @@ def pptx(z):
 
 
 def main():
+    declared = set(json.loads((GT.parent / "corpus.json").read_text())["files"])
     count = 0
     added = 0
     errors = []
     check = "--check" in sys.argv
     for source in sorted((ROOT / "data/test_files").rglob("*")):
         if source.suffix not in (".docx", ".pptx", ".xlsx") or "stress" in source.parts:
+            continue
+        if source.name not in declared:
             continue
         dest = GT / (source.name + ".json")
         with zipfile.ZipFile(source) as z:
