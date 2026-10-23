@@ -137,6 +137,17 @@ class StructuralTests(unittest.TestCase):
             lambda xs: xs[0].pop("formula"),
         )
 
+    def test_formula_display_prefix_is_equivalent_but_expression_matters(self):
+        for expected, actual in [("A1+1", "=A1+1"), ("=A1+1", "A1+1")]:
+            want = {"table_cells": [{"row": 1, "col": 2, "formula": expected}]}
+            got = {"structure": {"table_cells": [{"row": 1, "col": 2, "formula": actual}]}}
+            with self.subTest(expected=expected, actual=actual):
+                self.assertEqual(score_structure(want, got)["score"], 1)
+                got["structure"]["table_cells"][0]["formula"] = "=A1+2"
+                self.assertEqual(score_structure(want, got)["score"], 0)
+                got["structure"]["table_cells"][0].pop("formula")
+                self.assertEqual(score_structure(want, got)["score"], 0)
+
     def test_fill_on_blank_cell(self):
         self.assert_sensitive(
             "table_cells",

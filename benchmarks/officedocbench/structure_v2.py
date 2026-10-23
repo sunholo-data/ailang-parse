@@ -21,6 +21,12 @@ def _same(expected: dict, actual: dict) -> bool:
     for key, value in expected.items():
         got = actual.get(key)
         if isinstance(value, str):
+            if key == "formula" and isinstance(got, str):
+                # OOXML stores formulas without the display prefix; providers
+                # may expose Excel's leading '='. Both represent the same expression.
+                if text(value).removeprefix("=") != text(got).removeprefix("="):
+                    return False
+                continue
             if text(value) != text(got):
                 return False
         elif got != value:
