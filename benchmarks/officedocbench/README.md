@@ -85,18 +85,18 @@ the unreleased PPTX spacing and DOCX cell-formatting fixes. `DOCPARSE_BENCHMARK_
 label; the exact source revision and toolchain remain in provenance. Competitor
 outputs retain their original live parse timestamps and are rescored against
 the same audited expectations without new API requests. Do not attribute this
-candidate's score to the unchanged v0.52.2 release.
+candidate's score to the unchanged v0.52.2 release. Under these same audited expectations, the previous PR #114 parser scores 97.55% and this candidate scores 97.7%. The earlier published 97.3% used the six-case legacy audit and is not the baseline for this comparison.
 
 | Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
 |---|---|---:|---:|---:|---:|
-| AILANG Parse | 0.52.2+pr114 | 87/87 | 97.3% | 97.3% | 0 |
-| Kreuzberg | 4.10.4 | 82/87 | 68.2% | 64.3% | 5 |
-| Docling | 2.142.1 | 83/87 | 64.9% | 61.9% | 3 |
-| LlamaParse (standard) | 0.6.94 | 83/87 | 61.8% | 59.0% | 4 |
-| Unstructured | 0.27.34 | 76/87 | 58.7% | 51.3% | 5 |
-| Raw OOXML | 2.0.0-stdlib | 60/87 | 70.3% | 48.5% | 1 |
-| MarkItDown | 0.1.5 | 69/87 | 58.4% | 46.3% | 2 |
+| AILANG Parse | 0.52.2+office-fidelity | 87/87 | 97.7% | 97.7% | 0 |
+| Kreuzberg | 4.10.4 | 82/87 | 68.5% | 64.6% | 5 |
+| Docling | 2.142.1 | 83/87 | 65.2% | 62.2% | 3 |
+| LlamaParse (standard) | 0.6.94 | 83/87 | 61.9% | 59.0% | 4 |
+| Unstructured | 0.27.34 | 76/87 | 58.9% | 51.4% | 5 |
+| Raw OOXML | 2.0.0-stdlib | 60/87 | 70.7% | 48.7% | 1 |
+| MarkItDown | 0.1.5 | 69/87 | 58.7% | 46.6% | 2 |
 | Pandoc | 3.12.1 | 49/87 | 63.1% | 35.6% | 1 |
-| LiteParse | 2.17.0 | 70/87 | 35.9% | 28.9% | 6 |
+| LiteParse | 2.17.0 | 70/87 | 36.0% | 29.0% | 6 |
 
 LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. The original provider job responses were retrieved to audit and repair the mappings; no new parsing requests were needed for that remap. Its EPUB and minimal ODS/ODT conversion failures are retained. Other model tiers require separate configured runs.

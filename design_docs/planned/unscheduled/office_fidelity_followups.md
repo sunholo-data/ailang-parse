@@ -1,6 +1,6 @@
 # Office fidelity follow-ups after the OfficeDocBench source audit
 
-**Status**: PPTX spaces and DOCX cell inline formatting implemented in the current follow-up; remaining items below are unscheduled.
+**Status**: PPTX spaces and DOCX cell inline formatting implemented in [PR #115](https://github.com/sunholo-data/ailang-parse/pull/115); remaining items below are unscheduled.
 **Date**: 2026-10-23
 **Implementation and evidence**: [PR #114](https://github.com/sunholo-data/ailang-parse/pull/114),
 `benchmarks/officedocbench/results/`, and `audit_legacy_truth.py`.
@@ -46,7 +46,7 @@ are not slide pictures.
 | Priority | Gap and reproduction | Acceptance criterion |
 |---|---|---|
 | P1 | XLSX link identity: `challenge_hyperlinks.xlsx` preserves visible URL strings but exposes no typed cell-to-target relationship. | Preserve relationship targets, including a label that differs from its URL, with sheet/cell identity; do not infer a hyperlink from URL-shaped text. |
-| P1 | Nested lists in DOCX cells: `pandoc_table_list.docx` flattens six list items into cell text. Inline run formatting is implemented in the current follow-up. | Design additive nested cell blocks; preserve item depth, order and numbering without changing current text, spans, coordinates or inline runs. Prove parse/generate/read-back behavior. |
+| P1 | Nested lists in DOCX cells: `pandoc_table_list.docx` flattens six list items into cell text. Inline run formatting is implemented in [PR #115](https://github.com/sunholo-data/ailang-parse/pull/115). | Design additive nested cell blocks; preserve item depth, order and numbering without changing current text, spans, coordinates or inline runs. Prove parse/generate/read-back behavior. |
 | P2 | Nested HTML structures: source-audited complex HTML has nested lists and tables, while native output flattens nested list type/depth and duplicates nested-table text/cells. | Preserve source item depth and ordered/unordered identity, and emit each table's own rows/cells once. Keep checks derived from source HTML. |
 
 The historical upstream whitespace report
