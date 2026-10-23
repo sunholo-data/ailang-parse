@@ -133,7 +133,7 @@ Every run produces, in the directory you ran from (`--output-dir DIR` or
 | Speaker notes | — | Yes | — | None |
 | Multi-sheet extraction | — | — | Yes | Kreuzberg |
 
-**OfficeDocBench v2** (87 files, 11 formats, 8 metrics): AILANG Parse PR #115 candidate **97.7%** composite with 100.0% coverage. Nine adapters compared, including LlamaParse in standard mode. Source-verified structural assertions now measure cell positions, comment targets, list depth, formatting, formulas, colours, and slide/notes relationships. [Methodology and results](benchmarks/officedocbench/README.md).
+**OfficeDocBench v2** (87 files, 11 formats, 8 metrics): AILANG Parse PR #116 candidate **98.1%** composite with 100.0% coverage. Nine adapters compared, including LlamaParse in standard mode. Source-verified structural assertions now measure cell positions, comment targets, list depth, formatting, formulas, colours, and slide/notes relationships. [Methodology and results](benchmarks/officedocbench/README.md).
 
 ## Supported Formats
 

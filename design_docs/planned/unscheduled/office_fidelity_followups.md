@@ -1,6 +1,6 @@
 # Office fidelity follow-ups after the OfficeDocBench source audit
 
-**Status**: PPTX spaces and DOCX cell inline formatting merged in [PR #115](https://github.com/sunholo-data/ailang-parse/pull/115). XLSX hyperlink parsing is implemented in the current follow-up; generation and the remaining items below are unscheduled.
+**Status**: PPTX spaces and DOCX cell inline formatting merged in [PR #115](https://github.com/sunholo-data/ailang-parse/pull/115). XLSX hyperlink parsing is implemented in [PR #116](https://github.com/sunholo-data/ailang-parse/pull/116); generation and the remaining items below are unscheduled.
 **Date**: 2026-10-23
 **Implementation and evidence**: [PR #114](https://github.com/sunholo-data/ailang-parse/pull/114),
 `benchmarks/officedocbench/results/`, and `audit_legacy_truth.py`.
@@ -63,7 +63,7 @@ are not slide pictures.
 
 The historical upstream whitespace report
 [AILANG #646](https://github.com/sunholo-data/ailang/issues/646) is closed.
-That fix handles explicit XML preserve scopes. The current follow-up supplies
+That fix handles explicit XML preserve scopes. PR #115 supplies
 that scope when reading DrawingML content so its string text survives the
 generic XML reader's default whitespace filtering. DrawingML text is defined
 as string content in the [Microsoft Open XML reference](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.text).
@@ -77,7 +77,7 @@ as string content in the [Microsoft Open XML reference](https://learn.microsoft.
   paragraph/table style-chain work. Custom heading inheritance already shipped
   in v0.51.0; the older design must not imply that headings remain unfixed.
 - [Colour extraction](../v0_43_0/v0_43_0_colour_extraction.md) has shipped XLSX
-  support and later planned phases. The current follow-up also writes direct
+  support and later planned phases. PR #115 also writes direct
   DOCX/HTML run colour and preserves it in SDK run types. Other formats and
   style-inherited colours remain separate work. Source assertions in OfficeDocBench are
   selective and do not establish full theme, tint, or inherited-style fidelity.
