@@ -1,0 +1,109 @@
+module docparse/services/xlsx_refs
+
+import std/string (length, find, substring, intToStr, endsWith, charCode, charAt, stringToInt, split)
+import std/option (getOrElse)
+import std/list (nth)
+
+-- Shared cell/range coordinates for streaming rows, merges and hyperlinks.
+export type XlsxMerge = {startCol: int, endCol: int, startRow: int, endRow: int}
+
+-- One lookup, not a 26-way if/else: every == there is a dictionary dispatch
+-- in the interpreter, and this now runs for every cell of every row.
+pure func xlsxSingleColIndex(c: string) -> int
+  tests [("A", 0), ("B", 1), ("D", 3), ("Z", 25), ("a", 0), ("1", 0)]
+{
+  let i = find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c);
+  if i < 0 || length(c) != 1 then 0 else i
+}
+
+-- Bijective base-26: "A" -> 0, "Z" -> 25, "AA" -> 26, "XFD" -> 16383 (Excel's
+-- last column). Anything that would land past XFD is clamped to it, so a
+-- malformed ref cannot make the gap filler below emit an unbounded row.
+pure func xlsxColToIndex(col: string) -> int
+  tests [("A", 0), ("B", 1), ("Z", 25), ("AA", 26), ("AB", 27), ("AZ", 51), ("ZZ", 701), ("AAA", 702), ("XFD", 16383)]
+{
+  let n = xlsxColToNumber(col, 0, 0);
+  if n < 1 then 0 else if n > 16384 then 16383 else n - 1
+}
+
+pure func xlsxColToNumber(col: string, i: int, acc: int) -> int =
+  if i >= length(col) || acc > 16384 then acc
+  else xlsxColToNumber(col, i + 1, acc * 26 + xlsxSingleColIndex(substring(col, i, i + 1)) + 1)
+
+pure func xlsxIsColLetter(c: string) -> bool =
+  length(c) == 1 && find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) >= 0
+
+pure func xlsxColLetterCount(ref: string, i: int) -> int =
+  if i < length(ref) && xlsxIsColLetter(substring(ref, i, i + 1))
+  then xlsxColLetterCount(ref, i + 1)
+  else i
+
+-- Split a cell ref into its column letters: "B3" -> "B", "AB12" -> "AB"
+export pure func xlsxCellRefColStr(ref: string) -> string
+  tests [("A1", "A"), ("B3", "B"), ("D12", "D"), ("AA5", "AA"), ("AAA7", "AAA"), ("", "A")]
+{
+  let n = xlsxColLetterCount(ref, 0);
+  if n == 0 then "A" else substring(ref, 0, n)
+}
+
+export pure func xlsxCellRefCol(ref: string) -> int
+  tests [("A1", 0), ("B3", 1), ("D1", 3), ("E2", 4)]
+{
+  xlsxColToIndex(xlsxCellRefColStr(ref))
+}
+
+-- Column of a cell ref on a known row, without the general letter walk:
+-- "AB12" on row 12 has length 4 - 2 digits = 2 letters, read with two
+-- charAt calls. This runs for every cell, and the general parser (a
+-- recursive walk with a substring per character) roughly doubled the time
+-- of a dense 5k-row sheet. Anything that does not check out as letters
+-- followed by exactly this row number falls back to xlsxCellRefCol.
+export pure func xlsxRowRefCol(ref: string, rowNum: int) -> int
+  tests [(("A12", 12), 0), (("T5000", 5000), 19), (("AB3", 3), 27), (("AAA7", 7), 702), (("B9", 10), 1), (("", 1), 0)]
+{
+  let n = length(ref) - length(intToStr(rowNum));
+  if rowNum > 0 && (n == 1 || n == 2) && endsWith(ref, intToStr(rowNum)) then {
+    let hi = xlsxLetterAt(ref, 0);
+    if n == 1 then hi
+    else {
+      let lo = xlsxLetterAt(ref, 1);
+      if hi < 0 || lo < 0 then xlsxCellRefCol(ref) else (hi + 1) * 26 + lo
+    }
+  }
+  else xlsxCellRefCol(ref)
+}
+
+-- 0..25 for A..Z, -1 otherwise. Caller guarantees i is in range.
+pure func xlsxLetterAt(s: string, i: int) -> int {
+  let k = charCode(charAt(s, i)) - 65;
+  if k < 0 || k > 25 then -1 else k
+}
+
+export pure func xlsxCellRefRow(ref: string) -> int
+  tests [("A1", 1), ("B3", 3), ("D12", 12)]
+{
+  let colStr = xlsxCellRefColStr(ref);
+  getOrElse(stringToInt(substring(ref, length(colStr), length(ref))), 0)
+}
+
+-- "A1:D1" -> region. A bare "A9" is a 1x1 region.
+export pure func xlsxParseMergeRef(ref: string) -> XlsxMerge {
+  let parts = split(ref, ":");
+  let startRef = getOrElse(nth(parts, 0), "A1");
+  let endRef = getOrElse(nth(parts, 1), startRef);
+  { startCol: xlsxCellRefCol(startRef), endCol: xlsxCellRefCol(endRef),
+    startRow: xlsxCellRefRow(startRef), endRow: xlsxCellRefRow(endRef) }
+}
+
+export pure func xlsxValidLinkCell(ref: string) -> bool
+  tests [("B5", true), ("XFD1048576", true), ("A0", false), ("XFE1", false), ("B5x", false), ("1", false), ("", false)]
+{
+  if length(ref) < 2 || length(ref) > 10 then false
+  else {
+    let r = xlsxCellRefRow(ref);
+    let c = xlsxColToNumber(xlsxCellRefColStr(ref), 0, 0);
+    r >= 1 && r <= 1048576 && c >= 1 && c <= 16384 &&
+      ref == "${xlsxCellRefColStr(ref)}${intToStr(r)}"
+  }
+}
+

@@ -3,11 +3,12 @@ module docparse/services/browser_xlsx
 import std/xml (parseLenient, findAll, getAttr)
 import std/json (encode, ja, jo, kv, js)
 import std/string (length, split)
-import std/list (map, filter)
+import std/list (map, filter, concat)
 import std/result (Ok, Err)
 import std/option (getOrElse)
 import std/map (empty as emptyMap, insert as mapInsert)
-import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml, xlsxResolveWorkbookSheets)
+import docparse/services/xlsx_parser (extractSharedStrings, parseSheetXml, parseSheetXmlWithRels, xlsxResolveWorkbookSheets)
+import docparse/types/document (mkText)
 import docparse/services/output_formatter (blocksToJson)
 
 -- Browser (WASM) bindings for XLSX.
@@ -60,6 +61,14 @@ pure func xlsxBrowserTail(xs: [string]) -> [string] = match xs { [] => [], _ :: 
 export pure func parseXlsxSheet(sheetXml: string, sharedStringsXml: string, sheetName: string) -> string {
   let sharedStrings = parseSharedStringsToMap(sharedStringsXml);
   let blocks = parseSheetXml(sheetXml, sharedStrings, sheetName);
+  encode(ja(blocksToJson(blocks)))
+}
+
+-- The worksheet's own .rels resolves explicit hyperlink targets. Warnings
+-- remain visible as warning blocks in the browser's existing block-array API.
+export pure func parseXlsxSheetWithRels(sheetXml: string, sharedStringsXml: string, sheetName: string, relsXml: string) -> string {
+  let parsed = parseSheetXmlWithRels(sheetXml, parseSharedStringsToMap(sharedStringsXml), sheetName, relsXml);
+  let blocks = concat(parsed.blocks, map(\w. mkText(w, "warning", 0), parsed.warnings));
   encode(ja(blocksToJson(blocks)))
 }
 

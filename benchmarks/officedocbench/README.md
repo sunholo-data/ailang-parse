@@ -72,6 +72,13 @@ Provider errors and unsupported formats are explicit. An empty response is an er
 
 The current comparison environment is pinned in `results/environment.txt`. Raw converted-output caches are local artifacts and are not committed. v1 repository and website summaries are retained separately in `results/v1/` because those summaries previously disagreed.
 
+Parser-specific regression gates supplement the public comparison. Run
+`python3 benchmarks/check_xlsx_hyperlinks.py` for source-derived sheet/cell
+hyperlink targets, HTML target writing, sparse rows and bounded truncation.
+Chromium shares the same expectations. Its dedicated fixture is outside the
+87-file corpus and does not contribute to published scores. XLSX generation
+and Markdown table-cell link writing remain separate roadmap items.
+
 Ground truth must be checked against the input source, not regenerated to make the reference parser pass. Run the oracle with no `--check` to rebuild source assertions, inspect the diff, and run the corruption tests. Legacy `annotate.py`/`enrich_gt.py` are v1 annotation utilities, not the v2 maintenance path.
 
 ## License
@@ -80,16 +87,26 @@ Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files reta
 
 ## Recorded comparison (2026-10-23)
 
-The reference is the **Office fidelity follow-up candidate**, labeled `0.52.2+office-fidelity`, and includes
-the unreleased PPTX spacing and DOCX cell-formatting fixes. `DOCPARSE_BENCHMARK_LABEL=office-fidelity` records that
-label; the exact source revision and toolchain remain in provenance. Competitor
-outputs retain their original live parse timestamps and are rescored against
-the same audited expectations without new API requests. Do not attribute this
-candidate's score to the unchanged v0.52.2 release. Under these same audited expectations, the previous PR #114 parser scores 97.55% and this candidate scores 97.7%. The earlier published 97.3% used the six-case legacy audit and is not the baseline for this comparison.
+The reference is the **[XLSX hyperlink candidate (PR #116)](https://github.com/sunholo-data/ailang-parse/pull/116)**,
+labeled `0.52.2+xlsx-hyperlinks`. It includes the PPTX spacing and DOCX cell-formatting
+fixes merged in PR #115 and explicit XLSX hyperlink target extraction.
+`DOCPARSE_BENCHMARK_LABEL=xlsx-hyperlinks` records that label; the exact clean
+source revision and toolchain remain in provenance. Competitor outputs retain
+their original live parse timestamps and are rescored against the same audited
+expectations without new API requests. Do not attribute this candidate's score
+to the unchanged v0.52.2 release.
+
+With the same 87 inputs and unchanged assertions, the previous PR #115 parser
+scores **97.70%** and this candidate scores **98.08%**. Only
+`challenge_hyperlinks.xlsx` changes (66.67% to 100%); the other 86 case scores
+are identical. Source-verified hyperlink assertion recall rises from 75% to
+100% across four cases. The earlier published 97.3% used a six-case legacy
+audit and is not the baseline for this comparison. The current legacy audit
+covers eight selected cases; unaudited historical fields remain identified.
 
 | Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
 |---|---|---:|---:|---:|---:|
-| AILANG Parse | 0.52.2+office-fidelity | 87/87 | 97.7% | 97.7% | 0 |
+| AILANG Parse | 0.52.2+xlsx-hyperlinks | 87/87 | 98.1% | 98.1% | 0 |
 | Kreuzberg | 4.10.4 | 82/87 | 68.5% | 64.6% | 5 |
 | Docling | 2.142.1 | 83/87 | 65.2% | 62.2% | 3 |
 | LlamaParse (standard) | 0.6.94 | 83/87 | 61.9% | 59.0% | 4 |
