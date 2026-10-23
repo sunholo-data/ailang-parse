@@ -9,7 +9,7 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH))
 # ruff: noqa: E402
-from structure_v2 import score_structure
+from structure_v2 import score_structure, has_extracted_content
 from scoring import (
     score_structural_quality,
     score_metadata,
@@ -269,6 +269,21 @@ class StructuralTests(unittest.TestCase):
                     gt["structure"], {"structure": raw_structure(current)}
                 )["score"]
                 self.assertLess(a, b)
+
+    def test_footer_only_and_blank_slide_results_are_valid(self):
+        self.assertTrue(
+            has_extracted_content({"headers_footers": [{"text": "footer"}]})
+        )
+        self.assertTrue(
+            has_extracted_content(
+                {"structure": {"containers": [{"kind": "slide", "name": ""}]}}
+            )
+        )
+        self.assertFalse(
+            has_extracted_content(
+                {"text_elements": [], "structure": {"table_cells": []}}
+            )
+        )
 
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):

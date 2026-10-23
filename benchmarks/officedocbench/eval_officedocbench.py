@@ -29,7 +29,7 @@ import jsonschema
 from pathlib import Path
 from typing import Any
 
-from structure_v2 import BENCHMARK_VERSION
+from structure_v2 import BENCHMARK_VERSION, has_extracted_content
 from scoring import score_file
 from report import (
     print_summary,
@@ -273,20 +273,7 @@ def evaluate_adapter(
                     (SCRIPT_DIR / "schema/adapter_output.schema.json").read_text()
                 ),
             )
-            has_content = any(
-                output.get(k)
-                for k in (
-                    "text_elements",
-                    "headings",
-                    "tables",
-                    "lists",
-                    "images",
-                    "comments",
-                    "footnotes",
-                    "speaker_notes",
-                )
-            )
-            if not has_content:
+            if not has_extracted_content(output):
                 raise RuntimeError("provider returned no extracted content")
             scores = score_file(gt, output)
             results.append(

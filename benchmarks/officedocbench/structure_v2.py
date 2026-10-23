@@ -89,3 +89,23 @@ def score_structure(expected: dict, output: dict) -> dict:
         "applicable": bool(details),
         "details": details,
     }
+
+
+def has_extracted_content(output: dict) -> bool:
+    """A footer-only document or a blank slide deck is still a valid result."""
+    buckets = (
+        "text_elements",
+        "headings",
+        "tables",
+        "lists",
+        "images",
+        "comments",
+        "footnotes",
+        "speaker_notes",
+        "headers_footers",
+        "text_boxes",
+        "track_changes",
+    )
+    return any(output.get(k) for k in buckets) or any(
+        output.get("structure", {}).values()
+    )

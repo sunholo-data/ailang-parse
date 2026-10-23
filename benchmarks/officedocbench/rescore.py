@@ -15,7 +15,7 @@ from pathlib import Path
 import jsonschema
 import eval_officedocbench as bench
 from scoring import score_file
-from structure_v2 import BENCHMARK_VERSION
+from structure_v2 import BENCHMARK_VERSION, has_extracted_content
 
 
 def rescore(result, cache_root):
@@ -29,7 +29,10 @@ def rescore(result, cache_root):
     )
     cache_dir = cache_root / result["adapter"].lower().replace(" ", "_")
     for row in result["results"]:
-        if row["status"] != "OK":
+        if (
+            row["status"] != "OK"
+            and row.get("error") != "provider returned no extracted content"
+        ):
             continue
         gt = json.loads((bench.GT_DIR / (row["file"] + ".json")).read_text())
         source = bench._find_test_file(row["file"])
@@ -44,22 +47,12 @@ def rescore(result, cache_root):
             raise ValueError("ground truth does not match source " + row["file"])
         output = cache["output"]
         jsonschema.validate(output, schema)
-        if not any(
-            output.get(k)
-            for k in (
-                "text_elements",
-                "headings",
-                "tables",
-                "lists",
-                "images",
-                "comments",
-                "footnotes",
-                "speaker_notes",
-            )
-        ):
+        if not has_extracted_content(output):
             row.update(status="ERROR", error="provider returned no extracted content")
             row.pop("scores", None)
         else:
+            row["status"] = "OK"
+            row.pop("error", None)
             row["scores"] = score_file(gt, output)
         row["parsed_at"] = cache["parsed_at"]
     provenance.update(
