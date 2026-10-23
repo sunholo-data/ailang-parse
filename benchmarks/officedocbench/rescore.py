@@ -47,7 +47,7 @@ def rescore(result, cache_root):
             raise ValueError("ground truth does not match source " + row["file"])
         output = cache["output"]
         jsonschema.validate(output, schema)
-        if not has_extracted_content(output):
+        if not has_extracted_content(output, gt):
             row.update(status="ERROR", error="provider returned no extracted content")
             row.pop("scores", None)
         else:

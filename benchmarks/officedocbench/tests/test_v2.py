@@ -279,6 +279,7 @@ class StructuralTests(unittest.TestCase):
                 {"structure": {"containers": [{"kind": "slide", "name": ""}]}}
             )
         )
+        self.assertTrue(has_extracted_content({}, {"allow_empty_output": True}))
         self.assertFalse(
             has_extracted_content(
                 {"text_elements": [], "structure": {"table_cells": []}}

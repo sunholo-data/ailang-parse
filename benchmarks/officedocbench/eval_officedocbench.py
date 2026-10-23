@@ -273,7 +273,7 @@ def evaluate_adapter(
                     (SCRIPT_DIR / "schema/adapter_output.schema.json").read_text()
                 ),
             )
-            if not has_extracted_content(output):
+            if not has_extracted_content(output, gt):
                 raise RuntimeError("provider returned no extracted content")
             scores = score_file(gt, output)
             results.append(

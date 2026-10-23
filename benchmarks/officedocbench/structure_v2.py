@@ -91,7 +91,7 @@ def score_structure(expected: dict, output: dict) -> dict:
     }
 
 
-def has_extracted_content(output: dict) -> bool:
+def has_extracted_content(output: dict, ground_truth: dict | None = None) -> bool:
     """A footer-only document or a blank slide deck is still a valid result."""
     buckets = (
         "text_elements",
@@ -106,6 +106,8 @@ def has_extracted_content(output: dict) -> bool:
         "text_boxes",
         "track_changes",
     )
-    return any(output.get(k) for k in buckets) or any(
-        output.get("structure", {}).values()
+    return (
+        bool((ground_truth or {}).get("allow_empty_output"))
+        or any(output.get(k) for k in buckets)
+        or any(output.get("structure", {}).values())
     )

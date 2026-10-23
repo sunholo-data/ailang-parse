@@ -494,6 +494,21 @@ def main():
             }
             added += 1
         gt["structure"] = expect
+        if source.suffix == ".docx":
+            with zipfile.ZipFile(source) as package:
+                if not words(xml(package, "word/document.xml")).strip():
+                    gt["allow_empty_output"] = True
+        elif source.suffix == ".pptx":
+            with zipfile.ZipFile(source) as package:
+                slides = [
+                    p
+                    for p in package.namelist()
+                    if re.fullmatch(r"ppt/slides/slide[0-9]+.xml", p)
+                ]
+                if slides and not any(
+                    words(xml(package, p), "a").strip() for p in slides
+                ):
+                    gt["allow_empty_output"] = True
         if source.name == "challenge_threaded_comments.xlsx":
             gt["input_profile"] = "recovery"
             gt["input_note"] = (
