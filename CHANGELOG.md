@@ -11,6 +11,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed
+
+- DOCX relationship-based hyperlinks preserve their targets on inline runs,
+  including unformatted and mixed-format labels. Plain-text URL suffixes remain
+  available to existing consumers.
+- OfficeDocBench v2 adds source-derived structural scoring, explicit provider
+  failures and provenance, and a fresh nine-provider comparison. Six historical
+  annotations are audited against source HTML/XML; warning blocks remain
+  diagnostics, images retain reading-order evidence, and formula notation
+  accepts an optional leading `=`. Both source audits run in CI.
+
 ## [v0.52.2](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.52.2) — 2026-10-22
 
 ### Fixed

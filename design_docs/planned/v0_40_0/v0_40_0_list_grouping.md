@@ -1,6 +1,10 @@
 # List grouping: DOCX never coalesces, ODT never reads ordered-ness
 
-**Status**: PLANNED (2026-08-31)
+**Status**: PARTIALLY SHIPPED — DOCX grouping and per-item depth shipped in v0.51.0.
+The 2026-10-23 source audit confirms one ten-item nested list in
+`challenge_nested_lists.docx`; the public benchmark's ten-list expectation was stale.
+ODT parse/generation and the other deferred items below remain separate work.
+The investigation below records the pre-v0.51.0 behavior.
 **Source**: ailang message `inbox_1788155549716_f8030598` from `aitana-platform` —
 "docx: consecutive list paragraphs never coalesced — one ListBlock per item
 (v0.39.2, repro + root cause)". Reported against `d5ec0bd` (v0.39.2, HEAD).

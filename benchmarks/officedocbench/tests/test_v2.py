@@ -28,9 +28,47 @@ from adapters.structure import (
     docling_structure,
 )
 import eval_officedocbench as runner
+from audit_legacy_truth import audited, CASES
 
 
 class StructuralTests(unittest.TestCase):
+    def test_audited_legacy_fields_are_source_derived_and_repeatable(self):
+        for name in CASES:
+            with self.subTest(file=name):
+                source = runner._find_test_file(name)
+                truth = json.loads(
+                    (BENCH / "ground_truth" / (name + ".json")).read_text()
+                )
+                self.assertEqual(audited(source, truth), truth)
+        footnotes = audited(
+            runner._find_test_file("challenge_footnotes.docx"), {"features": {}}
+        )
+        self.assertEqual(footnotes["features"]["footnotes_endnotes"]["count"], 0)
+        self.assertEqual(footnotes["input_profile"], "recovery")
+        nested = audited(
+            runner._find_test_file("challenge_nested_lists.docx"), {"features": {}}
+        )
+        self.assertEqual(nested["features"]["lists"]["count"], 1)
+        self.assertEqual(nested["features"]["lists"]["max_depth"], 3)
+
+    def test_html_audit_rejects_old_parse_error_expectations_and_counts_nesting(self):
+        truth = audited(
+            runner._find_test_file("challenge_complex.html"),
+            {
+                "features": {"text": {"key_phrases": ["HTML parse error"]}},
+                "full_text_words": ["error"],
+            },
+        )
+        self.assertNotIn("error", truth["full_text_words"])
+        self.assertIn("revenue", truth["full_text_words"])
+        self.assertEqual(truth["features"]["headings"]["count"], 4)
+        self.assertEqual(truth["features"]["lists"]["count"], 2)
+        self.assertEqual(truth["features"]["lists"]["max_depth"], 2)
+        complex_html = audited(
+            runner._find_test_file("test_complex.html"), {"features": {}}
+        )
+        self.assertEqual(complex_html["features"]["tables"]["count"], 3)
+
     def assert_sensitive(self, key, want, mutation):
         gt = {key: want}
         output = {"structure": {key: copy.deepcopy(want)}}
@@ -140,7 +178,9 @@ class StructuralTests(unittest.TestCase):
     def test_formula_display_prefix_is_equivalent_but_expression_matters(self):
         for expected, actual in [("A1+1", "=A1+1"), ("=A1+1", "A1+1")]:
             want = {"table_cells": [{"row": 1, "col": 2, "formula": expected}]}
-            got = {"structure": {"table_cells": [{"row": 1, "col": 2, "formula": actual}]}}
+            got = {
+                "structure": {"table_cells": [{"row": 1, "col": 2, "formula": actual}]}
+            }
             with self.subTest(expected=expected, actual=actual):
                 self.assertEqual(score_structure(want, got)["score"], 1)
                 got["structure"]["table_cells"][0]["formula"] = "=A1+2"
@@ -225,6 +265,57 @@ class StructuralTests(unittest.TestCase):
         out = raw_structure(raw)
         self.assertEqual(out["table_cells"][-1]["formula"], "A1+1")
         self.assertEqual(out["comment_anchors"][0]["scope"], "S")
+
+    def test_link_labels_coalesce_only_across_adjacent_target_runs(self):
+        raw = {
+            "document": {
+                "blocks": [
+                    {
+                        "type": "text",
+                        "runs": [
+                            {
+                                "text": "Our",
+                                "href": "https://example.com",
+                                "bold": True,
+                            },
+                            {"text": " site", "href": "https://example.com"},
+                            {"text": " and "},
+                            {"text": "again", "href": "https://example.com"},
+                        ],
+                    }
+                ]
+            }
+        }
+        self.assertEqual(
+            raw_structure(raw)["hyperlinks"],
+            [
+                {"text": "Our site", "url": "https://example.com"},
+                {"text": "again", "url": "https://example.com"},
+            ],
+        )
+
+    def test_warning_blocks_are_diagnostics_and_images_retain_order(self):
+        raw = {
+            "document": {
+                "metadata": {},
+                "blocks": [
+                    {"type": "text", "text": "Source prose", "style": "Normal"},
+                    {"type": "image", "description": "Logo", "mime": "image/png"},
+                    {"type": "text", "text": "Missing note part", "style": "warning"},
+                ],
+            }
+        }
+        out = DocParseAdapter()._convert(raw)
+        self.assertEqual([r["text"] for r in out["text_elements"]], ["Source prose"])
+        self.assertEqual(
+            out["structure"]["element_order"],
+            [
+                {"type": "text", "text": "Source prose"},
+                {"type": "image"},
+            ],
+        )
+        self.assertEqual(len(out["images"]), 1)
+        self.assertIn("Missing note part", out["warnings"])
 
     def test_markdown_adapter_keeps_empty_cells_and_styles(self):
         out = markdown_output(

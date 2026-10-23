@@ -6,11 +6,15 @@ OfficeDocBench evaluates document parsers on **87 files across 11 formats**. It 
 
 The reference adapter now preserves comment anchors and sheet attribution, logical table cells, formulas, colours on empty cells, list depth, inline formatting, bookmarks, breaks, and slide/notes relationships. Competitor adapters map the same evidence when their output exposes it. They never reopen the input document to fill in features missing from a provider's response. Raw OOXML is explicitly a local reference parser, not an external product.
 
-There are **61 Office cases with source-derived structural assertions**. `build_structure_truth.py` reads the original DOCX/PPTX/XLSX XML, independently of AILANG output, and records the source SHA-256. It checks exact cell coordinates and merge anchors, sheet/slide order, notes attribution, comment targets, list levels, run formatting, formulas, colours, links, bookmarks, and section breaks where the input supplies those features. The remaining cases retain the legacy annotations; these are not newly independently verified.
+There are **61 Office cases with source-derived structural assertions**. `build_structure_truth.py` reads the original DOCX/PPTX/XLSX XML, independently of AILANG output, and records the source SHA-256. It checks exact cell coordinates and merge anchors, sheet/slide order, notes attribution, comment targets, list levels, run formatting, formulas, colours, links, bookmarks, and section breaks where the input supplies those features.
+
+`audit_legacy_truth.py` independently audits selected legacy fields in six cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, and an extra image count. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
 
 Assertions are selective, not an exhaustive claim about every Office feature. For example, stored numbers are not treated as display-formatted text, theme/tint colours are not yet fully annotated here, and spreadsheet row-coordinate assertions stop at row 100 to avoid conflating original rows with parsers' collapsed large gaps. Image detection remains a count metric; lossless image bytes and document generation are covered by separate regression suites.
 
 One added fixture, `challenge_threaded_comments.xlsx`, is labeled `input_profile: recovery`: it deliberately lacks workbook relationships. Its failures test recovery from a minimal package and should not be described as failures on a fully formed standard workbook. Other known minimal-file failures remain visible by filename in the results.
+
+The legacy `challenge_footnotes.docx` is also labeled as recovery input: it references notes but contains no note-body parts. Parsers cannot recover note text that is absent. AILANG warning blocks remain in adapter diagnostics and do not count as source prose or source reading-order elements. Image blocks do contribute reading-order evidence.
 
 ## Scoring
 
@@ -33,6 +37,7 @@ uv run benchmarks/officedocbench/eval_officedocbench.py
 # Tests include saved pre-fix outputs and deliberately corrupted structures
 uv run python -m unittest discover -s benchmarks/officedocbench/tests -v
 python3 benchmarks/officedocbench/build_structure_truth.py --check
+uv run python benchmarks/officedocbench/audit_legacy_truth.py --check
 
 # Install the local comparison providers; install native pandoc separately
 uv sync --extra competitors
@@ -74,6 +79,13 @@ Ground truth must be checked against the input source, not regenerated to make t
 Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files retain their original licenses; see `benchmarks/SOURCES.md`.
 
 ## Recorded comparison (2026-10-23)
+
+The reference is the **PR #114 candidate**, labeled `0.52.2+pr114`, and includes
+the unreleased DOCX hyperlink fix. `DOCPARSE_BENCHMARK_LABEL=pr114` records that
+label; the exact source revision and toolchain remain in provenance. Competitor
+outputs retain their original live parse timestamps and are rescored against
+the same audited expectations without new API requests. Do not attribute this
+candidate's score to the unchanged v0.52.2 release.
 
 | Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
 |---|---|---:|---:|---:|---:|

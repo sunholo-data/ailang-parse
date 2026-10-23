@@ -38,7 +38,9 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         return "AILANG Parse"
 
     def version(self) -> str:
-        return tomllib.loads((REPO_DIR / "ailang.toml").read_text())["package"]["version"]
+        version = tomllib.loads((REPO_DIR / "ailang.toml").read_text())["package"]["version"]
+        label = os.environ.get("DOCPARSE_BENCHMARK_LABEL", "")
+        return version + ("+" + label if label else "")
 
     def parse(self, filepath: Path) -> dict[str, Any]:
         """Run AILANG Parse on a single file. Uses batch cache if available."""
@@ -120,8 +122,13 @@ class DocParseAdapter(OfficeDocBenchAdapter):
         text_boxes = []
         images = []
         lists_out = []
+        warnings = list(raw.get("warnings", []))
 
         for el in elements:
+            # These blocks describe extraction limitations, not source prose.
+            if el.metadata.get("source_type") == "TextBlock(warning)":
+                warnings.append(el.text)
+                continue
             section = el.metadata.get("section")
             if el.type == "text":
                 text_elements.append({"text": el.text, "style": el.metadata.get("source_type", "")})
@@ -197,6 +204,7 @@ class DocParseAdapter(OfficeDocBenchAdapter):
             item.update(anchor)
         return {
             "text_elements": text_elements,
+            "warnings": warnings,
             "headings": headings,
             "tables": tables,
             "track_changes": track_changes,
@@ -207,7 +215,7 @@ class DocParseAdapter(OfficeDocBenchAdapter):
             "text_boxes": text_boxes,
             "images": images,
             "lists": lists_out,
-            "hyperlinks": self._extract_hyperlinks(blocks),
+            "hyperlinks": structure["hyperlinks"] or self._extract_hyperlinks(blocks),
             "metadata": metadata,
             "structure": structure,
             "bookmarks": structure["bookmarks"],

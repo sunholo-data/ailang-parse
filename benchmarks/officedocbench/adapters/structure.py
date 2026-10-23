@@ -54,6 +54,7 @@ def raw_structure(raw):
     table = 0
 
     def runs(rs):
+        link = None
         for run in rs:
             flags = {
                 k: run.get(k, False)
@@ -68,15 +69,21 @@ def raw_structure(raw):
                 }
             )
             if run.get("href"):
-                out["hyperlinks"].append(
-                    {"text": run.get("text", ""), "url": run["href"]}
-                )
+                if link is not None and link["url"] == run["href"]:
+                    link["text"] += run.get("text", "")
+                else:
+                    link = {"text": run.get("text", ""), "url": run["href"]}
+                    out["hyperlinks"].append(link)
+            else:
+                link = None
 
     def walk(blocks, scope=""):
         nonlocal table
         active = scope
         for b in blocks:
             kind, typ = b.get("kind", ""), b.get("type")
+            if typ == "text" and b.get("style") == "warning":
+                continue
             if typ == "section":
                 if kind in ("sheet", "slide"):
                     name = b.get("name", "")
@@ -140,6 +147,7 @@ def raw_structure(raw):
                     {"text": b.get("text", ""), "url": b.get("href", "")}
                 )
             elif typ == "image":
+                out["element_order"].append({"type": "image"})
                 out["images"].append(
                     {
                         "mime": b.get("mime", ""),

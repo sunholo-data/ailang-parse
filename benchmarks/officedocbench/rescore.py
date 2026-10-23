@@ -45,8 +45,9 @@ def rescore(result, cache_root):
         ).hexdigest()
         if cache["fingerprint"] != fingerprint:
             raise ValueError("input or provider revision changed for " + row["file"])
-        if gt.get("verification", {}).get("source_sha256", digest) != digest:
-            raise ValueError("ground truth does not match source " + row["file"])
+        for verification in ("verification", "legacy_verification"):
+            if gt.get(verification, {}).get("source_sha256", digest) != digest:
+                raise ValueError("ground truth does not match source " + row["file"])
         output = cache["output"]
         if gt["format"] == "xlsx" and result["adapter"] in ("LlamaParse", "MarkItDown"):
             output = add_sheet_scopes(output)

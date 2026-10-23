@@ -214,12 +214,16 @@ def evaluate_adapter(
         source_file, fmt = gt["file"], gt["format"]
         before = time.monotonic()
         try:
-            expected_hash = gt.get("verification", {}).get("source_sha256")
-            if (
-                expected_hash
-                and hashlib.sha256(test_path.read_bytes()).hexdigest() != expected_hash
-            ):
-                raise ValueError("fixture SHA-256 differs from verified ground truth")
+            for verification in ("verification", "legacy_verification"):
+                expected_hash = gt.get(verification, {}).get("source_sha256")
+                if (
+                    expected_hash
+                    and hashlib.sha256(test_path.read_bytes()).hexdigest()
+                    != expected_hash
+                ):
+                    raise ValueError(
+                        "fixture SHA-256 differs from verified ground truth"
+                    )
             cache_path = None
             output = None
             cached_at = None
