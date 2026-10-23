@@ -5,7 +5,7 @@ import std/iter (FoldStep, Continue, Stop)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length, endsWith, split)
-import std/list (map, flatMap, foldl, mapAccumL, range, nth, length as listLength, concat, reverse)
+import std/list (map, flatMap, foldl, range, nth, length as listLength, concat, reverse)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
 import docparse/types/document (TableCell, plainRun, simpleCell)
 import docparse/services/xlsx_refs (XlsxMerge, xlsxParseMergeRef, xlsxValidLinkCell)
@@ -97,44 +97,48 @@ pure func xlsxRangeLink(ranges: [XlsxLink], row: int, col: int, best: Option[Xls
     }
   }
 
-type XlsxLinkedCells = { col: int, row: int,
+type XlsxLinkedCells = { cells: [TableCell], col: int, row: int,
   points: Map[int, XlsxLink], ranges: [XlsxLink], hits: Map[int, int] }
 
-pure func xlsxLinkCell(acc: XlsxLinkedCells, cell: TableCell) -> (TableCell, XlsxLinkedCells) {
+pure func xlsxLinkCell(acc: XlsxLinkedCells, cell: TableCell) -> XlsxLinkedCells {
   let link = if acc.row <= 0 || cell.merged then None
     else xlsxRangeLink(acc.ranges, acc.row, acc.col, mapLookup(acc.points, acc.col));
   match link {
-    None => (cell, { acc | col: acc.col + 1 }),
-    Some(l) => (
-      { cell | runs: [{plainRun(cell.text) | href: l.href}] },
-      { acc | col: acc.col + 1,
+    None => { acc | cells: cell :: acc.cells, col: acc.col + 1 },
+    Some(l) => {
+      let linked = { cell | runs: [{plainRun(cell.text) | href: l.href}] };
+      { acc | cells: linked :: acc.cells, col: acc.col + 1,
         hits: mapInsert(acc.hits, l.id, getOrElse(mapLookup(acc.hits, l.id), 0) + 1) }
-    )
+    }
   }
 }
 
-type XlsxLinkedRows = { positions: [int], width: int, plan: XlsxLinks, hits: Map[int, int] }
+type XlsxLinkedRows = { rows: [[TableCell]], positions: [int], width: int,
+  plan: XlsxLinks, hits: Map[int, int] }
 
-pure func xlsxLinkRow(acc: XlsxLinkedRows, cells: [TableCell]) -> ([TableCell], XlsxLinkedRows) {
+pure func xlsxLinkRow(acc: XlsxLinkedRows, cells: [TableCell]) -> XlsxLinkedRows {
   let row = getOrElse(nth(acc.positions, 0), 0);
   let positions = match acc.positions { [] => [], _ :: rest => rest };
-  match mapAccumL(xlsxLinkCell,
-    { col: 0, row: row, points: getOrElse(mapLookup(acc.plan.points, row), emptyMap()),
-      ranges: acc.plan.ranges, hits: acc.hits }, xlsxLinkPadRow(cells, acc.width)) {
-    (linked, state) => (linked, { acc | positions: positions, hits: state.hits })
-  }
+  let linked = foldl(xlsxLinkCell,
+    { cells: [], col: 0, row: row, points: getOrElse(mapLookup(acc.plan.points, row), emptyMap()),
+      ranges: acc.plan.ranges, hits: acc.hits }, xlsxLinkPadRow(cells, acc.width));
+  { acc | rows: reverse(linked.cells) :: acc.rows, positions: positions, hits: linked.hits }
 }
 
--- Pass only the hit map as state, never capture the complete sheet in a
--- closure once per hyperlink. Flatten one warning (or none) per record.
-pure func xlsxOmittedLink(hits: Map[int, int], l: XlsxLink) -> ([string], Map[int, int]) {
-  let r = l.region;
-  let expected = (r.endRow - r.startRow + 1) * (r.endCol - r.startCol + 1);
-  let found = getOrElse(mapLookup(hits, l.id), 0);
-  let warning = if found == expected then []
-    else ["hyperlink ${l.ref}: kept ${show(found)} of ${show(expected)} cell targets; remaining cells are outside retained data or covered/overridden"];
-  (warning, hits)
-}
+-- Pass the hit map explicitly: closing over the linked result would also
+-- capture the complete sheet once per hyperlink in the interpreter.
+pure func xlsxOmittedLinks(links: [XlsxLink], hits: Map[int, int]) -> [string] =
+  match links {
+    [] => [],
+    l :: rest => {
+      let r = l.region;
+      let expected = (r.endRow - r.startRow + 1) * (r.endCol - r.startCol + 1);
+      let found = getOrElse(mapLookup(hits, l.id), 0);
+      let tail = xlsxOmittedLinks(rest, hits);
+      if found == expected then tail
+      else "hyperlink ${l.ref}: kept ${show(found)} of ${show(expected)} cell targets; remaining cells are outside retained data or covered/overridden" :: tail
+    }
+  }
 
 export pure func xlsxApplyLinks(rows: [[TableCell]], positions: [int], plan: XlsxLinks, sheet: string)
     -> { rows: [[TableCell]], warnings: [string] } {
@@ -142,17 +146,11 @@ export pure func xlsxApplyLinks(rows: [[TableCell]], positions: [int], plan: Xls
   if plan.count == 0 then { rows: rows, warnings: warnings }
   else {
     let width = foldl(\w r. if listLength(r) > w then listLength(r) else w, 0, rows);
-    match mapAccumL(xlsxLinkRow, { positions: positions, width: width, plan: plan, hits: emptyMap() }, rows) {
-      (linked, state) => {
-        let omitted = match mapAccumL(xlsxOmittedLink, state.hits, reverse(plan.links)) {
-          (lists, _) => flatMap(\ws. ws, lists)
-        };
-        { rows: linked, warnings: concat(warnings, map(\w. "Sheet \"${sheet}\": ${w}", omitted)) }
-      }
-    }
+    let linked = foldl(xlsxLinkRow, { rows: [], positions: positions, width: width, plan: plan, hits: emptyMap() }, rows);
+    let omitted = map(\w. "Sheet \"${sheet}\": ${w}", xlsxOmittedLinks(reverse(plan.links), linked.hits));
+    { rows: reverse(linked.rows), warnings: concat(warnings, omitted) }
   }
 }
-
 
 pure func xlsxLinkPadRow(row: [TableCell], width: int) -> [TableCell] =
   concat(row, map(\_. simpleCell(""), range(listLength(row), width)))
