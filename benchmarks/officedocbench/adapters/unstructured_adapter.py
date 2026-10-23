@@ -41,7 +41,7 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
         lists_out = []
         metadata_dict: dict[str, Any] = {}
 
-        structure = {k: [] for k in ("element_order", "table_cells", "list_items", "hyperlinks", "runs")}
+        structure = {k: [] for k in ("element_order", "table_cells", "list_items", "hyperlinks", "runs", "containers")}
         for el in elements:
             el_type = type(el).__name__
             text = str(el)
@@ -65,6 +65,10 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
                         metadata_dict.setdefault(dst, md[src])
 
             md = meta.to_dict() if meta is not None else {}
+            sheet_name = md.get("page_name", "") if filepath.suffix.lower() == ".xlsx" else ""
+            if sheet_name and not any(c["name"] == sheet_name for c in structure["containers"]):
+                structure["containers"].append({"kind": "sheet", "name": sheet_name})
+                metadata_dict.setdefault("sheet_names", []).append(sheet_name)
             typ = {"Title": "heading", "Table": "table", "ListItem": "list"}.get(el_type, "text")
             structure["element_order"].append({"type": typ, **({"text": text} if typ not in ("table", "list") else {})})
             for value, url in zip(md.get("link_texts") or [], md.get("link_urls") or []):
@@ -77,7 +81,7 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
                 html = getattr(meta, "text_as_html", "") if meta else ""
                 has_merges = bool(html and ("colspan" in html.lower() or "rowspan" in html.lower()))
                 rows = html_rows(html)
-                structure["table_cells"] += table_cells(rows, len(tables))
+                structure["table_cells"] += table_cells(rows, md.get("page_number", len(tables)+1)-1 if sheet_name else len(tables), sheet_name)
                 tables.append({
                     "rows": rows,
                     "row_count": html.count("<tr") if html else 0,

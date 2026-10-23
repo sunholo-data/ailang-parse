@@ -16,7 +16,14 @@ from scoring import (
     _score_ordering,
 )
 from adapters.docparse_adapter import DocParseAdapter
-from adapters.structure import raw_structure, markdown_output, html_rows, table_cells
+from adapters.structure import (
+    raw_structure,
+    markdown_output,
+    html_rows,
+    table_cells,
+    add_sheet_scopes,
+    docling_structure,
+)
 import eval_officedocbench as runner
 
 
@@ -285,6 +292,39 @@ class StructuralTests(unittest.TestCase):
                 {"text_elements": [], "structure": {"table_cells": []}}
             )
         )
+
+    def test_markdown_sheet_names_are_credited(self):
+        out = add_sheet_scopes(
+            markdown_output("## Revenue\n\n| A | B |\n|---|---|\n| x | 3 |\n")
+        )
+        self.assertEqual(
+            out["structure"]["containers"], [{"kind": "sheet", "name": "Revenue"}]
+        )
+        self.assertEqual(out["structure"]["table_cells"][-1]["scope"], "Revenue")
+
+    def test_docling_worksheet_offsets_are_preserved(self):
+        doc = {
+            "groups": [
+                {"label": "sheet", "name": "S", "children": [{"$ref": "#/tables/0"}]}
+            ],
+            "tables": [
+                {
+                    "self_ref": "#/tables/0",
+                    "prov": [{"bbox": {"t": 3, "l": 2}}],
+                    "data": {
+                        "table_cells": [
+                            {
+                                "text": "x",
+                                "start_row_offset_idx": 0,
+                                "start_col_offset_idx": 0,
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+        result = docling_structure(doc)["table_cells"][0]
+        self.assertEqual((result["scope"], result["row"], result["col"]), ("S", 4, 3))
 
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):

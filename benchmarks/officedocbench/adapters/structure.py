@@ -414,13 +414,41 @@ def docling_structure(document):
             out["hyperlinks"].append(
                 {"text": item.get("text", ""), "url": item["hyperlink"]}
             )
+    sheet_groups = [g for g in document.get("groups", []) if g.get("label") == "sheet"]
+    table_sheets = {
+        r["$ref"]: (i, g.get("name", ""))
+        for i, g in enumerate(sheet_groups)
+        for r in g.get("children", [])
+    }
+    out["containers"] = [
+        {"kind": "sheet", "name": g.get("name", "")} for g in sheet_groups
+    ]
+    for group in document.get("groups", []):
+        if group.get("label") == "chapter" and group.get("name", "").startswith(
+            "slide-"
+        ):
+            title = ""
+            for ref in group.get("children", []):
+                parts = ref.get("$ref", "").split("/")
+                if len(parts) == 3 and parts[1] == "texts":
+                    item = document["texts"][int(parts[2])]
+                    if item.get("label") in ("title", "section_header"):
+                        title = item.get("text", "")
+                        break
+            out["containers"].append({"kind": "slide", "name": title})
+
     for ti, tbl in enumerate(document.get("tables", [])):
+        sheet_index, scope = table_sheets.get(tbl.get("self_ref"), (ti, ""))
+        provenance = tbl.get("prov", [])
+        bbox = provenance[0].get("bbox", {}) if provenance and scope else {}
+        row_offset, col_offset = int(bbox.get("t", 0)), int(bbox.get("l", 0))
         for c in tbl.get("data", {}).get("table_cells", []):
             out["table_cells"].append(
                 {
-                    "table": ti,
-                    "row": c.get("start_row_offset_idx", 0) + 1,
-                    "col": c.get("start_col_offset_idx", 0) + 1,
+                    "table": sheet_index,
+                    "scope": scope,
+                    "row": c.get("start_row_offset_idx", 0) + 1 + row_offset,
+                    "col": c.get("start_col_offset_idx", 0) + 1 + col_offset,
                     "text": c.get("text", ""),
                     "col_span": c.get("col_span", 1),
                     "merged": False,
@@ -487,6 +515,14 @@ def kreuzberg_structure(result):
         c = node.get("content", {})
         typ = c.get("node_type")
         value = c.get("text", "")
+        if (
+            typ == "group"
+            and isinstance(meta, dict)
+            and meta.get("format_type") == "pptx"
+        ):
+            out["containers"].append(
+                {"kind": "slide", "name": c.get("heading_text", "")}
+            )
         if typ == "group" and c.get("heading_text") in names:
             scope = c["heading_text"]
         if typ == "table":
@@ -525,3 +561,34 @@ def kreuzberg_structure(result):
                 rows, ti, names[ti] if ti < len(names) else ""
             )
     return out
+
+
+def add_sheet_scopes(output):
+    """Worksheet headings explicitly emitted by Markdown providers are names.
+
+    Uses provider reading order only. Does not consult the workbook or truth.
+    Native container mappings always take precedence.
+    """
+    structure = output.setdefault("structure", {})
+    if structure.get("containers"):
+        return output
+    scopes = {}
+    names = []
+    active = ""
+    table = 0
+    headings = output.get("headings", [])
+    minimum = min((h.get("level", 1) for h in headings), default=1)
+    eligible = {h["text"] for h in headings if h.get("level", 1) == minimum}
+    for element in structure.get("element_order", []):
+        if element.get("type") == "heading" and element.get("text") in eligible:
+            active = element["text"]
+            names.append(active)
+        elif element.get("type") == "table":
+            scopes[table] = active
+            table += 1
+    if names:
+        structure["containers"] = [{"kind": "sheet", "name": n} for n in names]
+        output.setdefault("metadata", {})["sheet_names"] = names
+        for c in structure.get("table_cells", []):
+            c["scope"] = scopes.get(c["table"], "")
+    return output

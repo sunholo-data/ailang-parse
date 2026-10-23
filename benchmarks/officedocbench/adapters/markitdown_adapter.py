@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import markdown_output
+from .structure import markdown_output, add_sheet_scopes
 
 
 class MarkItDownAdapter(OfficeDocBenchAdapter):
@@ -39,7 +39,8 @@ class MarkItDownAdapter(OfficeDocBenchAdapter):
         result = md.convert(str(filepath))
         text = result.text_content or ""
 
-        return markdown_output(text)
+        output = markdown_output(text)
+        return add_sheet_scopes(output) if filepath.suffix.lower() == ".xlsx" else output
 
     def _flush_table(self, rows: list[str]) -> dict[str, Any]:
         """Convert accumulated table rows into adapter schema."""

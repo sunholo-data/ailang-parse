@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import markdown_output
+from .structure import markdown_output, add_sheet_scopes
 
 # llama-parse 0.6.x prints a DeprecationWarning on import recommending the
 # new unified SDK; the SDK still works fine and OfficeDocBench is pinned to
@@ -102,7 +102,7 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         output["hyperlinks"] = rich["hyperlinks"]
         if rich["tables"]:
             output["tables"] = rich["tables"]
-        return output
+        return add_sheet_scopes(output) if filepath.suffix.lower() == ".xlsx" else output
 
     # ------------------------------------------------------------------ JSON
 

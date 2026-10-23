@@ -15,6 +15,7 @@ from pathlib import Path
 import jsonschema
 import eval_officedocbench as bench
 from scoring import score_file
+from adapters.structure import add_sheet_scopes
 from structure_v2 import BENCHMARK_VERSION, has_extracted_content
 
 
@@ -46,6 +47,8 @@ def rescore(result, cache_root):
         if gt.get("verification", {}).get("source_sha256", digest) != digest:
             raise ValueError("ground truth does not match source " + row["file"])
         output = cache["output"]
+        if gt["format"] == "xlsx" and result["adapter"] in ("LlamaParse", "MarkItDown"):
+            output = add_sheet_scopes(output)
         jsonschema.validate(output, schema)
         if not has_extracted_content(output, gt):
             row.update(status="ERROR", error="provider returned no extracted content")
@@ -67,6 +70,9 @@ def rescore(result, cache_root):
         ).stdout.strip(),
         corpus_sha256=hashlib.sha256(
             b"".join(p.read_bytes() for p in sorted(bench.GT_DIR.glob("*.json")))
+        ).hexdigest(),
+        normalizer_sha256=hashlib.sha256(
+            (bench.SCRIPT_DIR / "adapters/structure.py").read_bytes()
         ).hexdigest(),
         scorer_sha256=hashlib.sha256(
             (bench.SCRIPT_DIR / "scoring.py").read_bytes()

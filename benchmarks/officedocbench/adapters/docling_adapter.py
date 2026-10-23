@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import docling_structure
+from .structure import docling_structure, markdown_output
 
 
 class DoclingAdapter(OfficeDocBenchAdapter):
@@ -154,6 +154,13 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                     text_elements.append({"text": line, "style": "markdown"})
 
         structure = docling_structure(doc_dict)
+        rich = markdown_output(result.document.export_to_markdown())
+        # Docling represents formatted paragraphs as inline groups of text
+        # fragments. Its own serializer preserves those paragraph boundaries.
+        text_elements = rich["text_elements"]
+        structure["element_order"] = rich["structure"]["element_order"]
+        sheet_names = [c["name"] for c in structure["containers"] if c["kind"] == "sheet"]
+        if sheet_names: metadata["sheet_names"] = sheet_names
         return {
             "structure": structure,
             "hyperlinks": structure["hyperlinks"],
