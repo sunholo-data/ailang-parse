@@ -1,0 +1,159 @@
+module docparse/services/image_size
+
+import std/bytes (fromBase64, byteAt, length as bytesLength)
+import std/option (Some, None, getOrElse)
+import std/string (endsWith, substring, length, stringToInt)
+
+-- Pixel dimensions of a raster image, read from its header. Both are 0 when the
+-- payload is not a format we can read (SVG, TIFF, a truncated or corrupt file).
+export type ImagePixels = { w: int, h: int }
+
+-- A picture's size on the page, in EMU (914400 per inch).
+export type ImageExtent = { cx: int, cy: int }
+
+-- Byte at i, or 0 past the end. A truncated payload then reads as zeros, which
+-- fails every signature check below, so it cannot invent a size.
+pure func imgByte(b: bytes, i: int) -> int =
+  getOrElse(byteAt(b, i), 0)
+
+pure func imgBE16(b: bytes, i: int) -> int =
+  imgByte(b, i) * 256 + imgByte(b, i + 1)
+
+pure func imgBE32(b: bytes, i: int) -> int =
+  imgBE16(b, i) * 65536 + imgBE16(b, i + 2)
+
+pure func imgLE16(b: bytes, i: int) -> int =
+  imgByte(b, i + 1) * 256 + imgByte(b, i)
+
+pure func imgLE32(b: bytes, i: int) -> int =
+  imgLE16(b, i + 2) * 65536 + imgLE16(b, i)
+
+-- Start-of-frame markers C0..CF, except C4 (DHT), C8 (JPG) and CC (DAC): these
+-- are the only segments whose payload carries the frame size.
+pure func imgIsFrameMarker(m: int) -> bool =
+  m >= 192 && m <= 207 && m != 196 && m != 200 && m != 204
+
+-- Markers with no length field: TEM, RSTn, SOI and EOI.
+pure func imgIsStandaloneMarker(m: int) -> bool =
+  m == 1 || (m >= 208 && m <= 217)
+
+-- Walk JPEG segments from offset p until the frame header. The frame header is
+-- FF Cx, a 2-byte length, precision, then height and width as big-endian u16.
+-- budget caps the walk, so a corrupt file cannot loop.
+pure func imgJpegSize(b: bytes, p: int, budget: int) -> ImagePixels =
+  if budget == 0 || p + 9 > bytesLength(b) then {w: 0, h: 0}
+  else if imgByte(b, p) != 255 then {w: 0, h: 0}
+  else if imgIsFrameMarker(imgByte(b, p + 1))
+  then {w: imgBE16(b, p + 7), h: imgBE16(b, p + 5)}
+  else if imgByte(b, p + 1) == 255 then imgJpegSize(b, p + 1, budget - 1)
+  else if imgIsStandaloneMarker(imgByte(b, p + 1)) then imgJpegSize(b, p + 2, budget - 1)
+  else imgJpegSize(b, p + 2 + imgBE16(b, p + 2), budget - 1)
+
+-- Pixel size from the decoded bytes, checked against the format's signature so a
+-- mislabelled payload reads as unknown rather than as a wrong size.
+pure func imgPixelsOf(b: bytes, mime: string) -> ImagePixels =
+  if mime == "image/png" && imgByte(b, 1) == 80 && imgByte(b, 2) == 78 && imgByte(b, 3) == 71
+  then {w: imgBE32(b, 16), h: imgBE32(b, 20)}
+  else if mime == "image/gif" && imgByte(b, 0) == 71 && imgByte(b, 1) == 73
+  then {w: imgLE16(b, 6), h: imgLE16(b, 8)}
+  else if mime == "image/bmp" && imgByte(b, 0) == 66 && imgByte(b, 1) == 77
+  then {w: imgLE32(b, 18), h: imgBmpHeight(imgLE32(b, 22))}
+  else if mime == "image/jpeg" && imgByte(b, 0) == 255 && imgByte(b, 1) == 216
+  then imgJpegSize(b, 0, 1000)
+  else {w: 0, h: 0}
+
+-- A top-down BMP stores its height as a negative 32-bit value.
+pure func imgBmpHeight(raw: int) -> int =
+  if raw > 2147483647 then 4294967296 - raw else raw
+
+-- Pixel size of an embedded image. Decodes the whole payload: the header of a
+-- JPEG can sit well past the start, so a fixed prefix is not enough.
+export pure func imagePixelSize(data: string, mime: string) -> ImagePixels =
+  match fromBase64(data) {
+    Some(b) => imgPixelsOf(b, mime),
+    None => {w: 0, h: 0}
+  }
+
+-- A length as written in a Markdown attribute ("3in", "16cm", "120px", "12pt")
+-- in CSS pixels at 96 per inch. Returns 0 for anything else, including
+-- percentages (no column width is known here) and decimals.
+export pure func imageLengthPx(tok: string) -> int {
+  if endsWith(tok, "px") then imgScale(substring(tok, 0, length(tok) - 2), 1, 1)
+  else if endsWith(tok, "in") then imgScale(substring(tok, 0, length(tok) - 2), 96, 1)
+  else if endsWith(tok, "cm") then imgScale(substring(tok, 0, length(tok) - 2), 3780, 100)
+  else if endsWith(tok, "mm") then imgScale(substring(tok, 0, length(tok) - 2), 378, 100)
+  else if endsWith(tok, "pt") then imgScale(substring(tok, 0, length(tok) - 2), 4, 3)
+  else 0
+}
+
+pure func imgScale(num: string, mul: int, div: int) -> int =
+  match stringToInt(num) {
+    Some(n) => n * mul / div,
+    None => 0
+  }
+
+-- Size an image takes on the page, in EMU, inside a column maxCx wide.
+-- wantW and wantH are the author's requested size in CSS pixels, 0 when not
+-- given. Both given: that box, clamped to the column. One given: that width or
+-- height, aspect ratio kept. Neither: the natural size at 96 dpi (1 px = 9525
+-- EMU, the density Word and LibreOffice assume without a stated resolution),
+-- never scaled up. An unreadable payload is treated as 3:2, the 6 x 4 inch box
+-- that was used before sizes were read. Anything wider than the column is
+-- scaled down to it, keeping the ratio.
+export pure func imageExtentEmu(data: string, mime: string, maxCx: int, wantW: int, wantH: int) -> ImageExtent {
+  let px = imagePixelSize(data, mime);
+  let known = px.w > 0 && px.h > 0;
+  let nw = if known then px.w else 3;
+  let nh = if known then px.h else 2;
+  let askCx = if wantW > 0 then wantW * 9525
+    else if wantH > 0 then wantH * 9525 * nw / nh
+    else if known then px.w * 9525
+    else 5486400;
+  let askCy = if wantW > 0 && wantH > 0 then wantH * 9525 else askCx * nh / nw;
+  if askCx <= maxCx then {cx: askCx, cy: askCy}
+  else if wantW > 0 && wantH > 0 then {cx: maxCx, cy: askCy * maxCx / askCx}
+  else {cx: maxCx, cy: maxCx * nh / nw}
+}
+
+-- Header-only fixtures: the base64 of an 800 x 200 PNG, GIF, top-down BMP and
+-- JPEG, each cut short just past the size fields.
+pure func imgTestPng() -> string = "iVBORw0KGgoAAAANSUhEUgAAAyAAAADICAIAAAA="
+pure func imgTestGif() -> string = "R0lGODlhIAPIAA=="
+pure func imgTestBmp() -> string = "Qk0AAAAAAAAAADYAAAAoAAAAIAMAADj///8BABgA"
+pure func imgTestJpg() -> string = "/9j/4AAQSkZJRgABAQAAAQABAAD/wAARCADIAyADASIAAhEBAxEB"
+
+export pure func testImageSizeHeaders() -> bool
+  tests [((), true)]
+{
+  let png = imagePixelSize(imgTestPng(), "image/png");
+  let gif = imagePixelSize(imgTestGif(), "image/gif");
+  let bmp = imagePixelSize(imgTestBmp(), "image/bmp");
+  let jpg = imagePixelSize(imgTestJpg(), "image/jpeg");
+  png.w == 800 && png.h == 200 &&
+  gif.w == 800 && gif.h == 200 &&
+  bmp.w == 800 && bmp.h == 200 &&
+  jpg.w == 800 && jpg.h == 200 &&
+  imagePixelSize(imgTestPng(), "image/gif").w == 0 &&
+  imagePixelSize("!!not base64!!", "image/png").w == 0
+}
+
+export pure func testImageExtentFit() -> bool
+  tests [((), true)]
+{
+  let fit = imageExtentEmu(imgTestPng(), "image/png", 5943600, 0, 0);
+  let natural = imageExtentEmu(imgTestPng(), "image/png", 9000000, 0, 0);
+  let byWidth = imageExtentEmu(imgTestPng(), "image/png", 5943600, 288, 0);
+  let unknown = imageExtentEmu("", "image/png", 9000000, 0, 0);
+  fit.cx == 5943600 && fit.cy == 1485900 &&
+  natural.cx == 7620000 && natural.cy == 1905000 &&
+  byWidth.cx == 2743200 && byWidth.cy == 685800 &&
+  unknown.cx == 5486400 && unknown.cy == 3657600
+}
+
+export pure func testImageLengthPx() -> bool
+  tests [((), true)]
+{
+  imageLengthPx("3in") == 288 && imageLengthPx("16cm") == 604 &&
+  imageLengthPx("12pt") == 16 && imageLengthPx("120px") == 120 &&
+  imageLengthPx("50%") == 0 && imageLengthPx("1.5in") == 0
+}
