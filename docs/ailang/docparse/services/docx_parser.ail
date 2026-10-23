@@ -1184,15 +1184,15 @@ pure func docxCellRuns(tc: XmlNode, rels: Map[string, string]) -> [InlineRun] {
   if any(docxRunIsFormatted, runs) then coalesceRuns(runs) else []
 }
 
-pure func docxCellParagraphRuns(paras: [XmlNode], rels: Map[string, string]) -> [InlineRun] =
-  match paras {
+pure func docxCellParagraphRuns(paras: [XmlNode], rels: Map[string, string]) -> [InlineRun] {
+  -- The native flatMap builder stays linear for cells with many paragraphs.
+  -- Prefix each paragraph with a separator, then drop only the first one.
+  let runs = flatMap(\p. plainRun("\n") :: flatMap(\n. childNodeRuns(n, rels), getChildren(p)), paras);
+  match runs {
     [] => [],
-    p :: rest => {
-      let here = flatMap(\n. childNodeRuns(n, rels), getChildren(p));
-      if listLength(rest) == 0 then here
-      else concat(here, plainRun("\n") :: docxCellParagraphRuns(rest, rels))
-    }
+    _ :: rest => rest
   }
+}
 
 pure func docxCellRunsView(xml: string) -> string
   tests [
