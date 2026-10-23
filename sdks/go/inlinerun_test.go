@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestRichCellRunsAndCompactCellReset(t *testing.T) {
+	var c Cell
+	if err := json.Unmarshal([]byte(`{"text":"linked","runs":[{"text":"linked","bold":true,"color":"#123456","href":"https://example.com"}]}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Runs) != 1 || !c.Runs[0].Bold || c.Runs[0].Color != "#123456" || c.Runs[0].Href != "https://example.com" {
+		t.Fatalf("lost cell runs: %+v", c)
+	}
+	if err := json.Unmarshal([]byte(`"plain"`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Text != "plain" || c.ColSpan != 1 || len(c.Runs) != 0 {
+		t.Fatalf("stale formatting after compact cell: %+v", c)
+	}
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(encoded, &obj); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := obj["runs"]; ok {
+		t.Fatalf("empty runs should be omitted: %s", encoded)
+	}
+}
+
 // Runs and ItemRuns decode with the right flags, and stay absent when the
 // source carried no inline formatting.
 func TestInlineRunsDecode(t *testing.T) {

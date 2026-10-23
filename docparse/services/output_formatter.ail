@@ -6,7 +6,7 @@ import std/string (length, replaceMany, startsWith, substring, repeat)
 import std/math (intToFloat)
 import std/list (map, foldl, filter, length as listLength, forEachE, concat)
 import docparse/services/markdown_writer (renderMarkdown, renderBlockMd, headingPrefix)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, plainRun, simpleCell, ParsedDocument, ExtractionResult, DocMetadata, countBlocks, filterHeadings, filterTables, filterImages, filterChanges, filterSections, cellText)
 
 -- Output Formatter
 -- Converts ParsedDocument to structured JSON output with validation.
@@ -188,7 +188,7 @@ pure func listJsonFields(b: {items: [string], ordered: bool, itemRuns: [[InlineR
 
 -- Flags are emitted only when true, for the same reason: a run that is merely
 -- plain text should not cost six false booleans in every paragraph.
-pure func runsToJson(runs: [InlineRun]) -> [Json] =
+export pure func runsToJson(runs: [InlineRun]) -> [Json] =
   map(\r. jo(runJsonFields(r)), runs)
 
 pure func runJsonFields(r: InlineRun) -> [{key: string, value: Json}] {
@@ -283,12 +283,13 @@ export pure func cellsToJson(cells: [TableCell]) -> [Json]
 
 -- Convert a single TableCell to JSON
 -- Simple cells (no merges) output as just the text string for compact JSON
--- Merged/spanned/coloured cells use the object form. fill/color are emitted
+-- Merged/spanned/coloured/formatted cells use the object form. fill/color are emitted
 -- only when set, so a file without colour produces byte-identical JSON.
 export pure func cellToJson(cell: TableCell) -> Json {
   if cell.colSpan == 1 && not cell.merged && length(cell.scope) == 0
        && length(cell.align) == 0 && length(cell.fill) == 0 && length(cell.color) == 0
        && length(cell.formula) == 0
+       && listLength(cell.runs) == 0
   then js(cell.text)
   else {
     let base = [
@@ -311,8 +312,22 @@ export pure func cellToJson(cell: TableCell) -> Json {
     let withFormula = if length(cell.formula) > 0
                     then concat(withColor, [kv("formula", js(cell.formula))])
                     else withColor;
-    jo(withFormula)
+    let withRuns = if listLength(cell.runs) > 0
+                   then concat(withFormula, [kv("runs", ja(runsToJson(cell.runs)))])
+                   else withFormula;
+    jo(withRuns)
   }
+}
+
+pure func cellRunsJsonView(rich: bool) -> string
+  tests [
+    (false, "\"plain\""),
+    (true, "{\"text\":\"bold\",\"colSpan\":1,\"merged\":false,\"runs\":[{\"text\":\"bold\",\"bold\":true}]}")
+  ]
+{
+  let base = simpleCell(if rich then "bold" else "plain");
+  let cell = {base | runs: if rich then [{plainRun("bold") | bold: true}] else []};
+  encode(cellToJson(cell))
 }
 
 -- Convert a list of strings to JSON values

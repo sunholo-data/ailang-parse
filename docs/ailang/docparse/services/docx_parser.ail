@@ -6,7 +6,7 @@ import std/result (Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, charCode, chars, substring)
 import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember, insert as mapInsert)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last, dedup)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkNamedSection, plainRun, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkNamedSection, plainRun, coalesceRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
 import docparse/services/zip_extract (readDocxContent, readCoreProperties, readAppProperties, readDocxRelationships, readDocxNumbering, readDocxStyles, findMediaEntries, readEmbeddedImage, mediaMimeType, findHeaderEntries, findFooterEntries, readZipEntry, findFootnoteEntries, findEndnoteEntries, readComments, readCommentsExtended, extractMediaToFiles, imageTempDir, imageExtractErrorText)
 import docparse/services/omml (renderOmml)
 import docparse/services/colour (normaliseHex)
@@ -1173,7 +1173,42 @@ pure func parseCell(tc: XmlNode, rels: Map[string, string]) -> TableCell {
   let vm = getCellVMerge(tc);
   if vm == "continue"
   then { text: "", colSpan: cs, rowSpan: 1, merged: true, scope: "" , align: "", runs: [], fill: "", color: "", formula: ""}
-  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: [], fill: "", color: "", formula: ""}
+  else { text: text, colSpan: cs, rowSpan: 1, merged: false, scope: "" , align: "", runs: docxCellRuns(tc, rels), fill: "", color: "", formula: ""}
+}
+
+-- Keep every paragraph when a cell has formatted content, including plain
+-- paragraphs and blank separators. Taking only extractParagraphRuns would
+-- silently omit the unformatted paragraphs when a generator prefers runs.
+pure func docxCellRuns(tc: XmlNode, rels: Map[string, string]) -> [InlineRun] {
+  let runs = docxCellParagraphRuns(findAll(tc, "w:p"), rels);
+  if any(docxRunIsFormatted, runs) then coalesceRuns(runs) else []
+}
+
+pure func docxCellParagraphRuns(paras: [XmlNode], rels: Map[string, string]) -> [InlineRun] {
+  -- The native flatMap builder stays linear for cells with many paragraphs.
+  -- Prefix each paragraph with a separator, then drop only the first one.
+  let runs = flatMap(\p. plainRun("\n") :: flatMap(\n. childNodeRuns(n, rels), getChildren(p)), paras);
+  match runs {
+    [] => [],
+    _ :: rest => rest
+  }
+}
+
+pure func docxCellRunsView(xml: string) -> string
+  tests [
+    ("<w:tc xmlns:w=\"w\"><w:p><w:r><w:t>before</w:t></w:r></w:p><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>bold</w:t></w:r></w:p><w:p/><w:p><w:r><w:t>after</w:t></w:r></w:p></w:tc>",
+     "before\nbold\n\nafter|before\nbold\n\nafter|bold"),
+    ("<w:tc xmlns:w=\"w\"><w:p><w:r><w:t>plain</w:t></w:r></w:p></w:tc>", "plain||"),
+    ("<w:tc xmlns:w=\"w\"><w:tcPr><w:vMerge/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>covered</w:t></w:r></w:p></w:tc>", "||")
+  ]
+{
+  match parseLenient(xml) {
+    Ok(root) => {
+      let cell = parseCell(root, emptyMap());
+      "${cell.text}|${join("", map(\r. r.text, cell.runs))}|${join("", map(\r. r.text, filter(\r. r.bold, cell.runs)))}"
+    },
+    Err(_) => "parse error"
+  }
 }
 
 -- Get gridSpan value from w:tcPr/w:gridSpan[@w:val]

@@ -24,6 +24,7 @@ type InlineRun struct {
 	// Href is the link target; empty when the run is not a link.
 	Href      string `json:"href,omitempty"`
 	VertAlign string `json:"vertAlign,omitempty"`
+	Color     string `json:"color,omitempty"`
 }
 
 type Block struct {
@@ -90,8 +91,9 @@ type Cell struct {
 	Align string `json:"align,omitempty"`
 	// Direct cell colour, "#rrggbb" lowercase; empty means none was specified
 	// (not white). Fill is the background, Color the cell-level font colour.
-	Fill  string `json:"fill,omitempty"`
-	Color string `json:"color,omitempty"`
+	Fill  string      `json:"fill,omitempty"`
+	Color string      `json:"color,omitempty"`
+	Runs  []InlineRun `json:"runs,omitempty"`
 }
 
 // UnmarshalJSON handles both string ("A") and object ({"text":"A","colSpan":2}) forms.
@@ -99,8 +101,7 @@ func (c *Cell) UnmarshalJSON(data []byte) error {
 	// Try string first
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		c.Text = s
-		c.ColSpan = 1
+		*c = Cell{Text: s, ColSpan: 1}
 		return nil
 	}
 	// Otherwise unmarshal as struct

@@ -1,5 +1,16 @@
 block <- function(type, ...) ailangparse:::.block_from_list(list(type = type, ...))
 
+test_that("rich cells preserve run formatting and link targets", {
+  cell <- ailangparse:::.cell_from_raw(list(text = "linked", runs = list(
+    list(text = "linked", bold = TRUE, color = "#123456", href = "https://example.com")
+  )))
+  expect_equal(cell$runs[[1]]$text, "linked")
+  expect_true(cell$runs[[1]]$bold)
+  expect_equal(cell$runs[[1]]$color, "#123456")
+  expect_equal(cell$runs[[1]]$href, "https://example.com")
+  expect_null(ailangparse:::.cell_from_raw("plain")$runs)
+})
+
 test_that("text block parses", {
   b <- block("text", text = "hello world")
   expect_s3_class(b, "ailang_block_text")

@@ -95,6 +95,8 @@ export interface Cell {
   fill?: string;
   /** Cell-level font colour, "#rrggbb" lowercase; absent when none was specified. */
   color?: string;
+  /** Inline cell formatting; absent for unformatted cells. */
+  runs?: InlineRun[];
 }
 
 // ── Block (discriminated union via type field) ──
@@ -118,6 +120,7 @@ export interface InlineRun {
   strike?: boolean;
   code?: boolean;
   vertAlign?: string;
+  color?: string;
 }
 
 /**

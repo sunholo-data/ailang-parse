@@ -8,7 +8,7 @@ The reference adapter now preserves comment anchors and sheet attribution, logic
 
 There are **61 Office cases with source-derived structural assertions**. `build_structure_truth.py` reads the original DOCX/PPTX/XLSX XML, independently of AILANG output, and records the source SHA-256. It checks exact cell coordinates and merge anchors, sheet/slide order, notes attribution, comment targets, list levels, run formatting, formulas, colours, links, bookmarks, and section breaks where the input supplies those features.
 
-`audit_legacy_truth.py` independently audits selected legacy fields in six cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, and an extra image count. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
+`audit_legacy_truth.py` independently audits selected legacy fields in eight cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, an extra image count, and two PPTX cases with jammed words, stale reading order and unused media counted as pictures. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
 
 Assertions are selective, not an exhaustive claim about every Office feature. For example, stored numbers are not treated as display-formatted text, theme/tint colours are not yet fully annotated here, and spreadsheet row-coordinate assertions stop at row 100 to avoid conflating original rows with parsers' collapsed large gaps. Image detection remains a count metric; lossless image bytes and document generation are covered by separate regression suites.
 
@@ -80,23 +80,23 @@ Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files reta
 
 ## Recorded comparison (2026-10-23)
 
-The reference is the **PR #114 candidate**, labeled `0.52.2+pr114`, and includes
-the unreleased DOCX hyperlink fix. `DOCPARSE_BENCHMARK_LABEL=pr114` records that
+The reference is the **Office fidelity follow-up candidate**, labeled `0.52.2+office-fidelity`, and includes
+the unreleased PPTX spacing and DOCX cell-formatting fixes. `DOCPARSE_BENCHMARK_LABEL=office-fidelity` records that
 label; the exact source revision and toolchain remain in provenance. Competitor
 outputs retain their original live parse timestamps and are rescored against
 the same audited expectations without new API requests. Do not attribute this
-candidate's score to the unchanged v0.52.2 release.
+candidate's score to the unchanged v0.52.2 release. Under these same audited expectations, the previous PR #114 parser scores 97.55% and this candidate scores 97.7%. The earlier published 97.3% used the six-case legacy audit and is not the baseline for this comparison.
 
 | Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
 |---|---|---:|---:|---:|---:|
-| AILANG Parse | 0.52.2+pr114 | 87/87 | 97.3% | 97.3% | 0 |
-| Kreuzberg | 4.10.4 | 82/87 | 68.2% | 64.3% | 5 |
-| Docling | 2.142.1 | 83/87 | 64.9% | 61.9% | 3 |
-| LlamaParse (standard) | 0.6.94 | 83/87 | 61.8% | 59.0% | 4 |
-| Unstructured | 0.27.34 | 76/87 | 58.7% | 51.3% | 5 |
-| Raw OOXML | 2.0.0-stdlib | 60/87 | 70.3% | 48.5% | 1 |
-| MarkItDown | 0.1.5 | 69/87 | 58.4% | 46.3% | 2 |
+| AILANG Parse | 0.52.2+office-fidelity | 87/87 | 97.7% | 97.7% | 0 |
+| Kreuzberg | 4.10.4 | 82/87 | 68.5% | 64.6% | 5 |
+| Docling | 2.142.1 | 83/87 | 65.2% | 62.2% | 3 |
+| LlamaParse (standard) | 0.6.94 | 83/87 | 61.9% | 59.0% | 4 |
+| Unstructured | 0.27.34 | 76/87 | 58.9% | 51.4% | 5 |
+| Raw OOXML | 2.0.0-stdlib | 60/87 | 70.7% | 48.7% | 1 |
+| MarkItDown | 0.1.5 | 69/87 | 58.7% | 46.6% | 2 |
 | Pandoc | 3.12.1 | 49/87 | 63.1% | 35.6% | 1 |
-| LiteParse | 2.17.0 | 70/87 | 35.9% | 28.9% | 6 |
+| LiteParse | 2.17.0 | 70/87 | 36.0% | 29.0% | 6 |
 
 LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. The original provider job responses were retrieved to audit and repair the mappings; no new parsing requests were needed for that remap. Its EPUB and minimal ODS/ODT conversion failures are retained. Other model tiers require separate configured runs.

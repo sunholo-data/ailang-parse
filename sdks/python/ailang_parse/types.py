@@ -112,6 +112,7 @@ class InlineRun:
     #: Link target, "" when the run is not a link.
     href: str = ""
     vert_align: str = ""
+    color: str = ""
 
     @classmethod
     def from_raw(cls, raw: Any) -> "InlineRun":
@@ -126,6 +127,7 @@ class InlineRun:
             code=raw.get("code", False),
             href=raw.get("href", ""),
             vert_align=raw.get("vertAlign", ""),
+            color=raw.get("color", ""),
         )
 
 
@@ -141,6 +143,7 @@ class Cell:
     # (not white). fill is the background, color the cell-level font colour.
     fill: str = ""
     color: str = ""
+    runs: List[InlineRun] = field(default_factory=list)
 
     @classmethod
     def from_raw(cls, raw: Any) -> "Cell":
@@ -154,6 +157,7 @@ class Cell:
                 align=raw.get("align", ""),
                 fill=raw.get("fill", ""),
                 color=raw.get("color", ""),
+                runs=[InlineRun.from_raw(r) for r in raw.get("runs", [])],
             )
         return cls(text=str(raw))
 

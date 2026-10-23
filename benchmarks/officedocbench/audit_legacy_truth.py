@@ -17,7 +17,19 @@ from collections import Counter
 from pathlib import Path
 
 from bs4 import BeautifulSoup, NavigableString, Tag
-from build_structure_truth import ROOT, GT, NS, docx, tag, val, words, xml
+from build_structure_truth import (
+    ROOT,
+    GT,
+    NS,
+    docx,
+    drawingml_paragraph_text,
+    rels,
+    tag,
+    target,
+    val,
+    words,
+    xml,
+)
 
 CASES = (
     "test_complex.html",
@@ -26,6 +38,8 @@ CASES = (
     "challenge_nested_lists.docx",
     "pandoc_inline_images.docx",
     "nested_sdt.docx",
+    "pandoc_basic.pptx",
+    "poi_comment.pptx",
 )
 
 
@@ -139,6 +153,66 @@ def audited(source: Path, original: dict):
             put("features." + name, value)
         put("full_text_words", text_words)
         put("element_order", order)
+    elif source.suffix == ".pptx":
+        with zipfile.ZipFile(source) as z:
+            order = []
+            all_text = []
+            part = "ppt/presentation.xml"
+            relationships = rels(z, part)
+
+            def walk(node):
+                if node.tag == tag("p:sp"):
+                    ph = node.find("p:nvSpPr/p:nvPr/p:ph", NS)
+                    kind = ph.get("type", "body") if ph is not None else "none"
+                    for para in node.findall("p:txBody/a:p", NS):
+                        value = drawingml_paragraph_text(para)
+                        if not value.strip():
+                            continue
+                        record = {
+                            "type": "heading"
+                            if kind in ("title", "ctrTitle", "subTitle")
+                            else "text",
+                            "text": value,
+                        }
+                        if record["type"] == "heading":
+                            record["level"] = 2 if kind == "subTitle" else 1
+                        order.append(record)
+                elif node.tag == tag("p:pic"):
+                    order.append({"type": "image"})
+                elif node.tag == tag("p:graphicFrame"):
+                    if node.find(".//a:tbl", NS) is not None:
+                        order.append({"type": "table"})
+                else:
+                    for child in node:
+                        walk(child)
+
+            for slide in xml(z, part).findall("p:sldIdLst/p:sldId", NS):
+                root = xml(z, target(part, relationships[slide.get(tag("r:id"))]))
+                walk(root)
+                all_text += [drawingml_paragraph_text(p) for p in root.iter(tag("a:p"))]
+            headings = [r for r in order if r["type"] == "heading"]
+            paragraphs = [r for r in order if r["type"] == "text"]
+            text_words = tokens(" ".join(all_text))
+            put("full_text_words", text_words)
+            put(
+                "features.text",
+                {
+                    "paragraph_count": len(paragraphs),
+                    "total_words": len(text_words),
+                    "key_phrases": [r["text"] for r in headings + paragraphs[:3]],
+                },
+            )
+            put(
+                "features.headings",
+                {
+                    "present": bool(headings),
+                    "count": len(headings),
+                    "by_level": dict(Counter(str(r["level"]) for r in headings)),
+                },
+            )
+            images = sum(r["type"] == "image" for r in order)
+            put("features.images", {"present": bool(images), "count": images})
+            put("element_order", order)
     else:
         with zipfile.ZipFile(source) as z:
             root = xml(z, "word/document.xml")

@@ -1,8 +1,9 @@
 module docparse/services/docx_runs
 
-import std/string (length, intToStr, split, startsWith, contains)
+import std/string (length, intToStr, split, startsWith, contains, substring)
 import std/list (foldl, length as listLength)
-import docparse/types/document (InlineRun)
+import docparse/types/document (InlineRun, plainRun)
+import docparse/services/colour (normaliseHex)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, docxRun, docxParagraph)
 
 -- DOCX run and paragraph XML: character formatting, inline links, code
@@ -87,7 +88,7 @@ pure func docxFormattedRun(r: InlineRun) -> string =
   "<w:r>${docxRunProps(r)}<w:t xml:space=\"preserve\">${xmlEscape(r.text)}</w:t></w:r>"
 
 -- Child order matters: CT_RPr is a sequence in the schema, not a choice, and
--- rFonts/b/i/strike/u/vertAlign must appear in that order. Emitting w:u before
+-- rFonts/b/i/strike/color/u/vertAlign must appear in that order. Emitting w:u before
 -- w:strike produces a document Word may reject or silently repair.
 pure func docxRunProps(r: InlineRun) -> string {
   -- DOCX has no "code" run property; a monospace font is its honest equivalent.
@@ -109,11 +110,24 @@ pure func docxRunPropsInner(r: InlineRun) -> string {
   let bold = if r.bold then "<w:b/>" else "";
   let italic = if r.italic then "<w:i/>" else "";
   let strike = if r.strike then "<w:strike/>" else "";
+  let hex = normaliseHex(r.color);
+  let color = if length(hex) > 0 then "<w:color w:val=\"${substring(hex, 1, length(hex))}\"/>" else "";
   let under = if r.underline then "<w:u w:val=\"single\"/>" else "";
   let vert = if length(r.vertAlign) > 0
     then "<w:vertAlign w:val=\"${xmlAttrEscape(r.vertAlign)}\"/>"
     else "";
-  "${fonts}${bold}${italic}${strike}${under}${vert}"
+  "${fonts}${bold}${italic}${strike}${color}${under}${vert}"
+}
+
+pure func docxRunColourView(color: string) -> string
+  tests [
+    ("#123456", "<w:color w:val=\"123456\"/>"),
+    ("#000000", "<w:color w:val=\"000000\"/>"),
+    ("", ""),
+    ("red;bad", "")
+  ]
+{
+  docxRunPropsInner({plainRun("colour") | color: color})
 }
 
 -- Build OOXML <w:drawing> for an inline image

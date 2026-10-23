@@ -11,6 +11,14 @@ from ailang_parse.types import (
 # ── Cell ──
 
 class TestCell:
+    def test_rich_cell_preserves_run_formatting_and_plain_cells_stay_plain(self):
+        cell = Cell.from_raw({"text": "linked", "runs": [{"text": "linked", "bold": True, "color": "#123456", "href": "https://example.com"}]})
+        assert cell.runs[0].text == "linked"
+        assert cell.runs[0].bold is True
+        assert cell.runs[0].color == "#123456"
+        assert cell.runs[0].href == "https://example.com"
+        assert Cell.from_raw("plain").runs == []
+
     def test_from_string(self):
         cell = Cell.from_raw("hello")
         assert cell.text == "hello"

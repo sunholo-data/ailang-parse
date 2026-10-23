@@ -788,6 +788,18 @@ describe("structured dict error", () => {
 });
 
 describe("InlineRun", () => {
+  it("retains cell formatting through an API parse response", async () => {
+    setMock(200, { result: JSON.stringify({ blocks: [{ type: "table", rows: [[{
+      text: "linked", runs: [{ text: "linked", bold: true, color: "#123456", href: "https://example.com" }],
+    }]] }] }) });
+    const client = new DocParse({ apiKey: "dp_test", baseUrl });
+    const result = await client.parse("rich-cells.docx");
+    const run = result.blocks[0].rows?.[0][0].runs?.[0];
+    assert.equal(run?.text, "linked");
+    assert.equal(run?.bold, true);
+    assert.equal(run?.color, "#123456");
+    assert.equal(run?.href, "https://example.com");
+  });
   it("decodes runs and itemRuns with the right flags", () => {
     const b: Block = JSON.parse(`{
       "type": "text",

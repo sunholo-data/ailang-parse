@@ -69,6 +69,17 @@ class StructuralTests(unittest.TestCase):
         )
         self.assertEqual(complex_html["features"]["tables"]["count"], 3)
 
+    def test_pptx_audit_preserves_source_spaces_and_excludes_unused_media(self):
+        truth = audited(runner._find_test_file("poi_comment.pptx"), {"features": {}})
+        self.assertIn("finance", truth["full_text_words"])
+        self.assertNotIn("tofinancefor", truth["full_text_words"])
+        self.assertNotIn("worldwaterforum", truth["full_text_words"])
+        self.assertEqual(truth["features"]["images"]["count"], 0)
+        basic = audited(runner._find_test_file("pandoc_basic.pptx"), {"features": {}})
+        self.assertIn("everworker", basic["full_text_words"])
+        self.assertIn("venn", basic["full_text_words"])
+        self.assertNotIn("everworkervenn", basic["full_text_words"])
+
     def assert_sensitive(self, key, want, mutation):
         gt = {key: want}
         output = {"structure": {key: copy.deepcopy(want)}}
@@ -316,6 +327,43 @@ class StructuralTests(unittest.TestCase):
         )
         self.assertEqual(len(out["images"]), 1)
         self.assertIn("Missing note part", out["warnings"])
+
+    def test_cell_runs_are_scored_from_provider_output(self):
+        output = {
+            "document": {
+                "blocks": [
+                    {
+                        "type": "table",
+                        "headers": [],
+                        "rows": [
+                            [
+                                {
+                                    "text": "label",
+                                    "runs": [
+                                        {
+                                            "text": "label",
+                                            "bold": True,
+                                            "color": "#123456",
+                                            "href": "https://example.com",
+                                        }
+                                    ],
+                                }
+                            ]
+                        ],
+                    }
+                ]
+            }
+        }
+        got = raw_structure(output)
+        expected = {
+            "runs": [{"text": "label", "bold": True, "color": "#123456"}],
+            "hyperlinks": [{"text": "label", "url": "https://example.com"}],
+        }
+        self.assertEqual(score_structure(expected, {"structure": got})["score"], 1)
+        output["document"]["blocks"][0]["rows"][0][0].pop("runs")
+        self.assertEqual(
+            score_structure(expected, {"structure": raw_structure(output)})["score"], 0
+        )
 
     def test_markdown_adapter_keeps_empty_cells_and_styles(self):
         out = markdown_output(
