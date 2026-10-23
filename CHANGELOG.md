@@ -11,6 +11,38 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.52.2](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.52.2) — 2026-10-22
+
+### Fixed
+
+- DOCX: every ordered list restarts at 1. All ordered lists shared one
+  `<w:num>` instance, and instances of one list definition share a counter, so
+  the second list in a document continued from the first (`4. first`,
+  `5. second`). Each ordered list in the body now gets its own instance with a
+  `startOverride`, with or without `--reference-doc`. (sunholo-data/ailang-packages#153)
+- DOCX: nested list items keep their list's style. `numbering.xml` defined
+  level 0 only, so a nested item pointed at a level that did not exist and Word
+  and LibreOffice rendered nested bullets as `1. 2. 3.`. Both definitions now
+  carry all nine levels: bullets `•` `o` `▪`, numbers `1.` `a.` `i.`.
+- New CI gate `benchmarks/check_docx_list_numbering.py` reads both back from
+  the package XML (and from a LibreOffice render when `soffice` is installed).
+- Known limit: a list that starts at another number (`3.`) still starts at 1;
+  the list block does not carry its start number yet.
+- Browser mirror (`docs/ailang/docparse/`) re-vendored. It had missed v0.52.0's
+  picture embedding (`image_embed`, `image_size`) and, after the list fix, no
+  longer type-checked against the canonical modules, which the publish
+  validator does. CI now fails when the mirror is stale.
+
+## [v0.52.1](https://github.com/sunholo-data/ailang-parse/compare/v0.52.0...v0.52.1) — 2026-10-19
+
+### Fixed
+
+- EML markdown output no longer carries attachment bytes. The `.md` rendering
+  printed each attachment's base64 `attachment-data` block as a paragraph, so one
+  3.4 MB PNG produced a 3.28 MB line that stalled text readers. The
+  `name (mime)` line still marks the attachment; the JSON keeps the bytes for
+  `--deep` and downstream extractors. (#95)
+
 ## [v0.52.0](https://github.com/sunholo-data/ailang-parse/compare/v0.51.0...v0.52.0) — 2026-10-19
 
 ### Fixed — pictures are embedded in every office output, sized from their own pixels

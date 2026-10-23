@@ -1,8 +1,8 @@
 module docparse/services/markdown_writer
 
-import std/string (length, replaceMany, startsWith, substring, repeat, join, split)
+import std/string (length, replaceMany, startsWith, substring, repeat, join, split, contains)
 import std/list (map, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText, mkText, mkNamedSection)
 
 -- Markdown writer — renders a ParsedDocument to markdown for LLM consumption.
 --
@@ -50,7 +50,8 @@ export pure func renderBlockMd(block: Block) -> string =
     HeadingBlock(h) =>
       "${headingPrefix(h.level)}${mdOneLine(inlineMd(h.text, h.runs))}\n\n",
     TextBlock(t) =>
-      if t.style == "hr" then "---\n\n"
+      if isAttachmentPayloadStyle(t.style) then ""
+      else if t.style == "hr" then "---\n\n"
       else if t.style == "quote" then "> ${mdOneLine(inlineMd(t.text, t.runs))}\n\n"
       else if isCodeStyle(t.style) then "```${codeStyleLang(t.style)}\n${t.text}\n```\n\n"
       else if length(t.text) > 0 || listLength(t.runs) > 0
@@ -105,6 +106,28 @@ pure func mdQuoteCont(s: string) -> string
     ("", "")
   ]
 { join("\n> ", split(s, "\n")) }
+
+-- An EML attachment section carries its bytes as base64 in an
+-- "attachment-data" block (and the extension in "attachment-ext") so the
+-- --deep pass and JSON readers can get at them. They are machine payload, not
+-- text: the "name (mime)" attachment-meta line already tells a reader the
+-- attachment is there. Rendering them put a 3.28 MB base64 line in the .md of
+-- an iPhone mail with one PNG and stalled a text reader on it (issue #95).
+pure func isAttachmentPayloadStyle(style: string) -> bool =
+  style == "attachment-data" || style == "attachment-ext"
+
+-- Pins #95: the attachment's meta line reaches the markdown, its bytes do not.
+pure func mdAttachmentBytesStayOutOfMarkdown() -> bool
+  tests [((), true)]
+{
+  let att = mkNamedSection("attachment", "image0.png",
+    [mkText("image0.png (image/png)", "attachment-meta", 0),
+     mkText("iVBORw0KGgoAAAANSUhEUg", "attachment-data", 0),
+     mkText("png", "attachment-ext", 0)]);
+  let md = renderBlockMd(att);
+  contains(md, "image0.png (image/png)") && contains(md, "iVBORw0KGgo") == false
+    && contains(md, "\n\npng\n\n") == false
+}
 
 -- A fenced code block is carried as a TextBlock whose style is "code" or
 -- "code:<lang>". Keeping the fence as a style rather than as literal backticks

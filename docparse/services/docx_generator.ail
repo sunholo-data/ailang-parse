@@ -78,17 +78,21 @@ pure func docxPlan(doc: ParsedDocument, ref: DocxRefDoc) -> {documentXml: string
   -- point at the template's header parts. Emitting our header parts alongside
   -- would leave them written but referenced by nothing, so a SectionBlock
   -- header in the source document is dropped rather than half-applied.
+  let headers = if ref.active then [] else docxHdrFtrParts(sections.headers, "header", 1);
+  let footers = if ref.active then [] else docxHdrFtrParts(sections.footers, "footer", 1);
+  let sectPr = if ref.active then ref.sectPr else docxSectPr(headers, footers);
+  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1, olist: 0, numBase: ref.numIdBase, tblStyle: ref.tableStyleId, tableWidth: docxUsableWidth(sectPr)});
+  -- orderedLists is read off the walk itself, so numbering.xml defines exactly
+  -- the instances the list paragraphs were given.
   let parts = {
     images: docxCollectImages(body, 1),
     links: docxCollectLinks(body, 1),
     comments: docxCollectComments(body, 1),
-    headers: if ref.active then [] else docxHdrFtrParts(sections.headers, "header", 1),
-    footers: if ref.active then [] else docxHdrFtrParts(sections.footers, "footer", 1),
-    hasNumbering: docxHasList(body)
+    headers: headers,
+    footers: footers,
+    hasNumbering: docxHasList(body),
+    orderedLists: bodyResult.idx.olist
   };
-
-  let sectPr = if ref.active then ref.sectPr else docxSectPr(parts.headers, parts.footers);
-  let bodyResult = docxBlocksToXml(body, {img: 1, link: 1, rev: 1, cmt: 1, numBase: ref.numIdBase, tblStyle: ref.tableStyleId, tableWidth: docxUsableWidth(sectPr)});
   { documentXml: docxBuildDocument("${bodyResult.xml}${sectPr}"), parts: parts }
 }
 
@@ -258,11 +262,11 @@ pure func docxBlockToXml(block: Block) -> string =
       docxTableToXml(t.headers, t.rows, "", 9360),
 
     -- Header and footer bodies are rendered standalone, so they use the
-    -- built-in numbering ids. Reference-doc mode drops our header parts
-    -- entirely, so this never reaches a package whose numbering came from a
-    -- template.
+    -- built-in numbering ids (1 bullets, 2 decimal). Reference-doc mode drops
+    -- our header parts entirely, so this never reaches a package whose
+    -- numbering came from a template.
     ListBlock(l) =>
-      docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, 1),
+      docxListToXml(l.items, l.itemRuns, l.itemLevels, if l.ordered then 2 else 1),
 
     ImageBlock(i) =>
       if length(i.description) > 0
@@ -306,7 +310,9 @@ pure func docxBlockToXml(block: Block) -> string =
 -- <w:tbl> elements bind to, resolved once at template load. "" = none (no
 -- reference doc, or the template defines no usable table style) and tables
 -- keep the hardcoded borders they have always had.
-type DocxIdx = { img: int, link: int, rev: int, cmt: int, numBase: int, tblStyle: string, tableWidth: int }
+-- olist counts the ordered lists already emitted: ordered list k takes numId
+-- numBase + 2 + k, its own restarting instance (docxNumberingDefs).
+type DocxIdx = { img: int, link: int, rev: int, cmt: int, olist: int, numBase: int, tblStyle: string, tableWidth: int }
 
 type DocxBlockResult = { xml: string, idx: DocxIdx }
 
@@ -335,7 +341,7 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       if embedIsBinaryPayload(i.data, i.mime)
       then {
         xml: docxImageXml(idx.img, i.data, i.mime, i.description, i.width, i.height, idx.tableWidth),
-        idx: {img: idx.img + 1, link: idx.link, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+        idx: {idx | img: idx.img + 1}
       }
       else {xml: docxBlockToXml(block), idx: idx},
 
@@ -343,18 +349,18 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
       if length(l.href) > 0
       then {
         xml: docxHyperlinkPara(idx.link, l.text, l.title),
-        idx: {img: idx.img, link: idx.link + 1, rev: idx.rev, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+        idx: {idx | link: idx.link + 1}
       }
       else {xml: docxBlockToXml(block), idx: idx},
 
     ChangeBlock(c) => {
       xml: docxRevisionPara(idx.rev, c.changeType, c.author, c.date, c.text),
-      idx: {img: idx.img, link: idx.link, rev: idx.rev + 1, cmt: idx.cmt, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+      idx: {idx | rev: idx.rev + 1}
     },
 
     CommentBlock(c) => {
       xml: docxCommentAnchorPara(idx.cmt, c.anchorText, c.anchored),
-      idx: {img: idx.img, link: idx.link, rev: idx.rev, cmt: idx.cmt + 1, numBase: idx.numBase, tblStyle: idx.tblStyle, tableWidth: idx.tableWidth}
+      idx: {idx | cmt: idx.cmt + 1}
     },
 
     SectionBlock(s) =>
@@ -368,7 +374,10 @@ pure func docxBlockToXmlIndexed(block: Block, idx: DocxIdx) -> DocxBlockResult =
     -- template's table style. The fallthrough renders header and footer
     -- bodies, which have no counters to thread.
     ListBlock(l) =>
-      {xml: docxListToXml(l.items, l.ordered, l.itemRuns, l.itemLevels, idx.numBase), idx: idx},
+      if l.ordered
+      then {xml: docxListToXml(l.items, l.itemRuns, l.itemLevels, idx.numBase + 2 + idx.olist),
+            idx: {idx | olist: idx.olist + 1}}
+      else {xml: docxListToXml(l.items, l.itemRuns, l.itemLevels, idx.numBase), idx: idx},
 
     TableBlock(t) =>
       {xml: docxTableToXml(t.headers, t.rows, idx.tblStyle, idx.tableWidth), idx: idx},

@@ -183,12 +183,18 @@ pure func emlHeadersToBlocks(headers: [EmlHeader]) -> [Block] =
   map(\h. mkText("${h.name}: ${emlDecodeHeaderValue(h.value)}", "email-header", 0), headers)
 
 -- Headers that carry semantic meaning for email intelligence
--- (strips transport noise: Received, ARC-*, DKIM-*, X-*, etc.)
+-- (strips transport noise: Received, ARC-*, DKIM-*, other X-*, etc.)
+-- Delivered-To and X-Original-To are included deliberately: they are what
+-- the RECEIVING server wrote, so they reliably carry the original envelope
+-- recipient (plus-address tag) even when the sender's client rewrote To.
+-- Multiple Delivered-To lines (forwarding chains) are all emitted in order;
+-- consumers keep the first.
 pure func emlIsKeyHeader(name: string) -> bool {
   let n = toLower(name);
   n == "from" || n == "to" || n == "cc" || n == "bcc" || n == "reply-to" ||
   n == "subject" || n == "date" || n == "message-id" ||
-  n == "in-reply-to" || n == "references" || n == "content-type"
+  n == "in-reply-to" || n == "references" || n == "content-type" ||
+  n == "delivered-to" || n == "x-original-to"
 }
 
 -- Like emlHeadersToBlocks but only emits key headers

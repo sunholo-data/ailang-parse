@@ -24,7 +24,9 @@ export type DocxOptParts = {
   comments: [DocxComment],
   headers: [DocxHdrFtr],
   footers: [DocxHdrFtr],
-  hasNumbering: bool
+  hasNumbering: bool,
+  -- ordered lists in the body: one restarting <w:num> each (docxNumberingDefs)
+  orderedLists: int
 }
 
 -- Our media parts get a distinct basename under a reference doc: the template
@@ -346,25 +348,62 @@ pure func docxDctermsDate(field: string, value: string) -> string =
 -- word/numbering.xml — real Word lists (P1 item 4)
 -- ============================================================
 
--- Two abstract definitions, one instance each: numBase bullets, numBase + 1
--- decimal. Single level only — mkList([string], bool) is flat, so
--- there is no nesting to represent. Nested lists need an ADT change.
+-- Two abstract definitions: absBase bullets, absBase + 1 decimal, each with all
+-- nine levels. Only level 0 used to be defined, so a nested item (ilvl 1+)
+-- pointed at a level that did not exist and Word/LibreOffice fell back to
+-- their own default — decimal — turning nested bullets into 1. 2. 3.
+--
+-- Instances: numBase bullets, numBase + 1 decimal (header/footer lists), then
+-- one decimal instance per ordered list in the body, numBase + 2 onwards.
+-- Instances of one abstractNum share a counter, so a second ordered list on a
+-- shared instance continued at 4, 5… where markdown means 1, 2. Each body
+-- ordered list therefore gets its own <w:num> with a startOverride.
 --
 -- The ids are parameters because a reference doc's numbering.xml already
 -- defines its own. Writing our numId 1 into a template that defines numId 1 as
 -- a legal-style multilevel list does not fail — it renders every bullet as that
 -- list, which is the kind of wrong that survives a green suite.
-export pure func docxNumberingDefs(numBase: int, absBase: int) -> {abstracts: string, nums: string} {
-  let bulletLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"•\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr></w:lvl>";
-  let decimalLvl = "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>";
+export pure func docxNumberingDefs(numBase: int, absBase: int, orderedLists: int) -> {abstracts: string, nums: string} {
   {
-    abstracts: "<w:abstractNum w:abstractNumId=\"${intToStr(absBase)}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${bulletLvl}</w:abstractNum><w:abstractNum w:abstractNumId=\"${intToStr(absBase + 1)}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${decimalLvl}</w:abstractNum>",
-    nums: "<w:num w:numId=\"${intToStr(numBase)}\"><w:abstractNumId w:val=\"${intToStr(absBase)}\"/></w:num><w:num w:numId=\"${intToStr(numBase + 1)}\"><w:abstractNumId w:val=\"${intToStr(absBase + 1)}\"/></w:num>"
+    abstracts: "<w:abstractNum w:abstractNumId=\"${intToStr(absBase)}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${docxLvls(false, 0)}</w:abstractNum><w:abstractNum w:abstractNumId=\"${intToStr(absBase + 1)}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>${docxLvls(true, 0)}</w:abstractNum>",
+    nums: "<w:num w:numId=\"${intToStr(numBase)}\"><w:abstractNumId w:val=\"${intToStr(absBase)}\"/></w:num><w:num w:numId=\"${intToStr(numBase + 1)}\"><w:abstractNumId w:val=\"${intToStr(absBase + 1)}\"/></w:num>${docxRestartNums(numBase + 2, orderedLists, absBase + 1)}"
   }
 }
 
-pure func docxNumbering(numBase: int, absBase: int) -> string {
-  let defs = docxNumberingDefs(numBase, absBase);
+-- Levels ilvl..8. Indent steps 720 twips per level; glyphs and number formats
+-- cycle every three levels the way Word's own default lists do.
+pure func docxLvls(ordered: bool, ilvl: int) -> string =
+  if ilvl > 8 then ""
+  else "${if ordered then docxDecimalLvl(ilvl) else docxBulletLvl(ilvl)}${docxLvls(ordered, ilvl + 1)}"
+
+pure func docxLvlCycle(ilvl: int) -> int =
+  if ilvl < 3 then ilvl else docxLvlCycle(ilvl - 3)
+
+pure func docxLvlInd(ilvl: int) -> string =
+  "<w:pPr><w:ind w:left=\"${intToStr(720 * (ilvl + 1))}\" w:hanging=\"360\"/></w:pPr>"
+
+pure func docxBulletLvl(ilvl: int) -> string {
+  let c = docxLvlCycle(ilvl);
+  let glyph = if c == 0 then "•" else if c == 1 then "o" else "▪";
+  let font = if c == 0 then "<w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr>"
+    else if c == 1 then "<w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\" w:hint=\"default\"/></w:rPr>"
+    else "";
+  "<w:lvl w:ilvl=\"${intToStr(ilvl)}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"${glyph}\"/><w:lvlJc w:val=\"left\"/>${docxLvlInd(ilvl)}${font}</w:lvl>"
+}
+
+pure func docxDecimalLvl(ilvl: int) -> string {
+  let c = docxLvlCycle(ilvl);
+  let fmt = if c == 0 then "decimal" else if c == 1 then "lowerLetter" else "lowerRoman";
+  "<w:lvl w:ilvl=\"${intToStr(ilvl)}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"${fmt}\"/><w:lvlText w:val=\"%${intToStr(ilvl + 1)}.\"/><w:lvlJc w:val=\"left\"/>${docxLvlInd(ilvl)}</w:lvl>"
+}
+
+-- count instances numId first.., each restarting level 0 at 1.
+pure func docxRestartNums(first: int, count: int, absId: int) -> string =
+  if count <= 0 then ""
+  else "<w:num w:numId=\"${intToStr(first)}\"><w:abstractNumId w:val=\"${intToStr(absId)}\"/><w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride></w:num>${docxRestartNums(first + 1, count - 1, absId)}"
+
+pure func docxNumbering(numBase: int, absBase: int, orderedLists: int) -> string {
+  let defs = docxNumberingDefs(numBase, absBase, orderedLists);
   "${xmlDecl()}<w:numbering xmlns:w=\"${docxNs()}\">${defs.abstracts}${defs.nums}</w:numbering>"
 }
 
@@ -373,9 +412,9 @@ pure func docxNumbering(numBase: int, absBase: int) -> string {
 -- than gaining two definitions nothing references.
 export pure func docxNumberingPart(parts: DocxOptParts, ref: DocxRefDoc) -> string =
   if not docxCanMerge(ref.numberingXml, "</w:numbering>")
-  then docxNumbering(ref.numIdBase, ref.absNumIdBase)
+  then docxNumbering(ref.numIdBase, ref.absNumIdBase, parts.orderedLists)
   else if parts.hasNumbering
-  then docxNumberingMerge(ref.numberingXml, docxNumberingDefs(ref.numIdBase, ref.absNumIdBase))
+  then docxNumberingMerge(ref.numberingXml, docxNumberingDefs(ref.numIdBase, ref.absNumIdBase, parts.orderedLists))
   else ref.numberingXml
 
 -- CT_Numbering is an ordered sequence: every <w:abstractNum> precedes every
