@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import markdown_output, add_sheet_scopes
+from .structure import markdown_output
 
 # llama-parse 0.6.x prints a DeprecationWarning on import recommending the
 # new unified SDK; the SDK still works fine and OfficeDocBench is pinned to
@@ -115,9 +115,48 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         output["hyperlinks"] = rich["hyperlinks"]
         if rich["tables"]:
             output["tables"] = rich["tables"]
-        return (
-            add_sheet_scopes(output) if filepath.suffix.lower() == ".xlsx" else output
-        )
+        pages = [page for job in jobs for page in job.get("pages", [])]
+        if filepath.suffix.lower() in (".xlsx", ".pptx"):
+            kind = "sheet" if filepath.suffix.lower() == ".xlsx" else "slide"
+            structure = output["structure"]
+            structure["containers"], structure["table_cells"], structure["notes"] = (
+                [],
+                [],
+                [],
+            )
+            table_offset = 0
+            for page in pages:
+                title_item = next(
+                    (
+                        item
+                        for item in page.get("items", [])
+                        if item.get("type") == "heading"
+                    ),
+                    {},
+                )
+                title = (
+                    (title_item.get("value") or title_item.get("md") or "")
+                    .lstrip("# ")
+                    .strip()
+                )
+                structure["containers"].append({"kind": kind, "name": title})
+                mapped = markdown_output(page.get("md") or "")
+                for c in mapped["structure"]["table_cells"]:
+                    c["table"] += table_offset
+                    c["scope"] = title
+                    structure["table_cells"].append(c)
+                table_offset += len(mapped["tables"])
+                notes = page.get("slideSpeakerNotes") or ""
+                if isinstance(notes, str) and notes.strip():
+                    structure["notes"].append({"scope": title, "text": notes})
+            if kind == "sheet":
+                output["metadata"]["sheet_names"] = [
+                    c["name"] for c in structure["containers"]
+                ]
+            output["speaker_notes"] = [{"text": n["text"]} for n in structure["notes"]]
+        if rich["lists"]:
+            output["lists"] = rich["lists"]
+        return output
 
     # ------------------------------------------------------------------ JSON
 

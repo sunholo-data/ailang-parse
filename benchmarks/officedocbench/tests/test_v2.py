@@ -16,6 +16,7 @@ from scoring import (
     _score_ordering,
 )
 from adapters.docparse_adapter import DocParseAdapter
+from adapters.llamaparse_adapter import LlamaParseAdapter
 from adapters.structure import (
     raw_structure,
     markdown_output,
@@ -340,6 +341,45 @@ class StructuralTests(unittest.TestCase):
         actual = {p.name[:-5] for p in (BENCH / "ground_truth").glob("*.json")}
         self.assertEqual(declared, actual)
         self.assertEqual(len(declared), 87)
+
+    def test_llamaparse_native_page_heading_scopes_table(self):
+        response = [
+            {
+                "pages": [
+                    {
+                        "md": "<table><tr><td>A</td></tr></table>",
+                        "items": [{"type": "heading", "value": "Revenue", "lvl": 1}],
+                    }
+                ]
+            }
+        ]
+        output = LlamaParseAdapter().convert_json(response, Path("input.xlsx"))
+        self.assertEqual(output["structure"]["table_cells"][0]["scope"], "Revenue")
+        self.assertEqual(output["metadata"]["sheet_names"], ["Revenue"])
+
+    def test_llamaparse_native_notes_keep_slide_attribution(self):
+        response = [
+            {
+                "pages": [
+                    {
+                        "md": "# Agenda",
+                        "items": [{"type": "heading", "value": "Agenda"}],
+                        "slideSpeakerNotes": "Ask for feedback",
+                    }
+                ]
+            }
+        ]
+        output = LlamaParseAdapter().convert_json(response, Path("input.pptx"))
+        self.assertEqual(
+            output["structure"]["notes"],
+            [{"scope": "Agenda", "text": "Ask for feedback"}],
+        )
+
+    def test_llamaparse_job_failure_is_visible(self):
+        with self.assertRaisesRegex(RuntimeError, "conversion failed"):
+            LlamaParseAdapter().convert_json(
+                [{"error": "conversion failed"}], Path("input.epub")
+            )
 
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):
