@@ -510,6 +510,13 @@ def _write_summary(all_results: list[dict]) -> None:
     }
     if len(fingerprints) != 1:
         raise ValueError("refusing to combine runs from different corpus revisions")
+    expected = set(json.loads((SCRIPT_DIR / "corpus.json").read_text())["files"])
+    for result in all_results:
+        actual = [row["file"] for row in result["results"]]
+        if len(actual) != len(expected) or set(actual) != expected:
+            raise ValueError(
+                "refusing to publish filtered, duplicate, or incomplete corpus results"
+            )
     total_files = max((len(ar["results"]) for ar in all_results), default=0)
     adapters_summary = []
     for ar in all_results:

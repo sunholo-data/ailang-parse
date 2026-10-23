@@ -403,6 +403,19 @@ class StructuralTests(unittest.TestCase):
         self.assertEqual(output["structure"]["table_cells"][-1]["col"], 2)
         self.assertEqual(output["structure"]["table_cells"][-1]["text"], "")
 
+    def test_summary_rejects_filtered_provider_results(self):
+        result = {
+            "adapter": "Example",
+            "provenance": {
+                "benchmark_version": "2.0.0",
+                "mode": "live",
+                "corpus_sha256": "same",
+            },
+            "results": [{"file": "sample.docx", "status": "ERROR"}],
+        }
+        with self.assertRaisesRegex(ValueError, "filtered"):
+            runner._write_summary([result])
+
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):
             runner._write_summary([{"adapter": "old", "results": []}])

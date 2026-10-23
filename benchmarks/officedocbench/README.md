@@ -57,7 +57,7 @@ uv run benchmarks/officedocbench/eval_officedocbench.py --summarize
 
 LlamaParse needs `LLAMA_CLOUD_API_KEY`; inject it into the process from your secret manager. Standard non-premium mode is the default. `LLAMAPARSE_PREMIUM=1` is a different, more expensive run configuration and is recorded in provenance. Local adapters need their native dependencies, including Node.js/LibreOffice for LiteParse and Pandoc for the Pandoc adapter and some Unstructured formats.
 
-`--golden` is diagnostic only and cannot produce a published summary. `--results-dir` supports isolated runs; only the canonical results directory mirrors a summary into `docs/data/officedocbench-summary.json`. `--summarize` rejects incompatible corpus revisions, legacy results, and golden diagnostics.
+`--golden` is diagnostic only and cannot produce a published summary. `--results-dir` supports isolated runs; only the canonical results directory mirrors a summary into `docs/data/officedocbench-summary.json`. `--summarize` rejects incompatible corpus revisions, filtered/incomplete case sets, duplicate cases, legacy results, and golden diagnostics.
 
 ## Reproducibility and failures
 
