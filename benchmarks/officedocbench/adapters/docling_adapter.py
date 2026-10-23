@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import docling_structure, markdown_output
 
 
 class DoclingAdapter(OfficeDocBenchAdapter):
@@ -30,7 +31,9 @@ class DoclingAdapter(OfficeDocBenchAdapter):
         except ImportError:
             raise RuntimeError("docling not installed: uv pip install docling")
 
-        converter = DocumentConverter()
+        if not hasattr(self, "_converter"):
+            self._converter = DocumentConverter()
+        converter = self._converter
         result = converter.convert(str(filepath))
 
         text_elements = []
@@ -58,7 +61,7 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                 if label in ("title", "section_header", "section-header"):
                     headings.append({"text": text, "level": item.get("level", 1)})
                 elif label == "list_item":
-                    lists_out.append({"items": [text], "ordered": False})
+                    lists_out.append({"items": [text], "ordered": item.get("enumerated", False)})
                 elif label in ("page_header", "page-header"):
                     headers_footers.append({"type": "header", "text": text})
                 elif label in ("page_footer", "page-footer"):
@@ -66,7 +69,7 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                 elif label == "footnote":
                     footnotes.append({"text": text})
                 else:
-                    text_elements.append({"text": text, "style": label})
+                    text_elements.append({"text": text, "style": label, **(item.get("formatting") or {})})
 
             for tbl in tables_list:
                 # Extract table text and detect merged cells from Docling's
@@ -92,6 +95,7 @@ class DoclingAdapter(OfficeDocBenchAdapter):
 
                 num_rows = data.get("num_rows", 0) if isinstance(data, dict) else 0
                 tables.append({
+                    "rows": data.get("grid", []),
                     "row_count": num_rows,
                     "has_merged_cells": has_merged,
                     "cell_text": cell_text,
@@ -149,7 +153,17 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                 else:
                     text_elements.append({"text": line, "style": "markdown"})
 
+        structure = docling_structure(doc_dict)
+        rich = markdown_output(result.document.export_to_markdown())
+        # Docling represents formatted paragraphs as inline groups of text
+        # fragments. Its own serializer preserves those paragraph boundaries.
+        text_elements = rich["text_elements"]
+        structure["element_order"] = rich["structure"]["element_order"]
+        sheet_names = [c["name"] for c in structure["containers"] if c["kind"] == "sheet"]
+        if sheet_names: metadata["sheet_names"] = sheet_names
         return {
+            "structure": structure,
+            "hyperlinks": structure["hyperlinks"],
             "text_elements": text_elements,
             "headings": headings,
             "tables": tables,
@@ -165,4 +179,4 @@ class DoclingAdapter(OfficeDocBenchAdapter):
         }
 
     def supported_formats(self) -> set[str]:
-        return {"docx", "pptx", "xlsx"}
+        return {"docx", "pptx", "xlsx", "odt", "ods", "odp", "html", "csv", "md", "epub"}

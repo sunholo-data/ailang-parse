@@ -1,237 +1,102 @@
-# OfficeDocBench
+# OfficeDocBench v2
 
-**The first benchmark for Office structural document parsing.**
+OfficeDocBench evaluates document parsers on **87 files across 11 formats**. It measures structural fidelity as well as text extraction. The corpus retains the original 69 cases and adds 18 Office regression fixtures. `corpus.json` declares the exact case set; extra files downloaded by CI never silently change the public comparison. Results from v1 use different scoring and must not be compared directly with v2 percentages.
 
-Every existing document parsing benchmark (OmniDocBench, READOC, SCORE-Bench, DP-Bench) evaluates PDF extraction only. No benchmark measures whether a parser can extract **structural Office features**: track changes, comments, merged cells, headers/footers, text boxes, speaker notes, footnotes, or document metadata from DOCX, PPTX, XLSX, ODT, ODP, and ODS files.
+## What changed
 
-OfficeDocBench fills this gap.
+The reference adapter now preserves comment anchors and sheet attribution, logical table cells, formulas, colours on empty cells, list depth, inline formatting, bookmarks, breaks, and slide/notes relationships. Competitor adapters map the same evidence when their output exposes it. They never reopen the input document to fill in features missing from a provider's response. Raw OOXML is explicitly a local reference parser, not an external product.
 
-## Dataset
+There are **61 Office cases with source-derived structural assertions**. `build_structure_truth.py` reads the original DOCX/PPTX/XLSX XML, independently of AILANG output, and records the source SHA-256. It checks exact cell coordinates and merge anchors, sheet/slide order, notes attribution, comment targets, list levels, run formatting, formulas, colours, links, bookmarks, and section breaks where the input supplies those features.
 
-**69 test files** across **11 formats**, sourced from real-world test suites (54 core + 15 challenge):
+`audit_legacy_truth.py` independently audits selected legacy fields in six cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, and an extra image count. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
 
-| Format | Files | Sources |
-|--------|-------|---------|
-| DOCX   | 29    | Pandoc, Apache POI, original, 15 challenge files |
-| PPTX   | 8     | Pandoc, Apache POI, python-pptx, Unstructured, challenge |
-| XLSX   | 6     | Pandoc, Apache POI, XlsxWriter, Unstructured, challenge |
-| ODT    | 6     | LibreOffice, OfficeParser, original |
-| ODP    | 2     | OfficeParser, original |
-| ODS    | 4     | LibreOffice, OfficeParser, original |
-| EPUB   | 3     | Project Gutenberg, original |
-| HTML   | 5     | Pandoc, original, challenge |
-| CSV    | 2     | Original |
-| MD     | 3     | Pandoc, original |
-| TSV    | 1     | Original |
+Assertions are selective, not an exhaustive claim about every Office feature. For example, stored numbers are not treated as display-formatted text, theme/tint colours are not yet fully annotated here, and spreadsheet row-coordinate assertions stop at row 100 to avoid conflating original rows with parsers' collapsed large gaps. Image detection remains a count metric; lossless image bytes and document generation are covered by separate regression suites.
 
-### Feature Distribution (17 features)
+One added fixture, `challenge_threaded_comments.xlsx`, is labeled `input_profile: recovery`: it deliberately lacks workbook relationships. Its failures test recovery from a minimal package and should not be described as failures on a fully formed standard workbook. Other known minimal-file failures remain visible by filename in the results.
 
-| Feature | Files | Notes |
-|---------|-------|-------|
-| Tables | 36 | Including merged cell detection |
-| Headings | 30 | With level distribution scoring |
-| Lists | 15 | Ordered/unordered + nesting depth |
-| Images | 8 | |
-| Section breaks | 8 | ECMA-376 §17.6 (aspirational) |
-| Sheets | 5 | With sheet name accuracy |
-| Track changes | 3 | With author attribution |
-| Headers/footers | 3 | |
-| Text boxes | 2 | |
-| Comments | 2 | With comment range accuracy §17.13.1 |
-| Footnotes/endnotes | 1 | Aspirational |
-| Equations | 1 | ECMA-376 §22.1 (aspirational) |
-| Field codes | 1 | ECMA-376 §17.16 (aspirational) |
-| Bookmarks | 1 | ECMA-376 §17.13.6 (aspirational) |
-| Hyperlinks | 1 | Aspirational |
-| Styles | 1 | Aspirational |
+The legacy `challenge_footnotes.docx` is also labeled as recovery input: it references notes but contains no note-body parts. Parsers cannot recover note text that is absent. AILANG warning blocks remain in adapter diagnostics and do not count as source prose or source reading-order elements. Image blocks do contribute reading-order evidence.
 
-## Evaluation Protocol
+## Scoring
 
-### Ground Truth
+The seven original dimensions keep their relative weights: feature detection (15%), structural recall (20%), structural quality (15%), content fidelity (15%), text Jaccard (10%), element count (15%), and metadata (10%).
 
-Each test file has a parser-independent ground truth annotation (`ground_truth/*.json`) documenting which structural features are present and their expected values. Ground truth was auto-generated from validated golden outputs and follows `schema/ground_truth.schema.json`.
+The eighth dimension, **structural fidelity**, uses the source-derived assertions. On annotated legacy cases, it receives 25% of the score and the seven legacy dimensions share 75%. The 18 added cases test only independently derived assertions, so their score is structural fidelity alone. Cases without new assertions retain the legacy weights. Metric aggregates omit explicitly inapplicable dimensions.
 
-Features use `null` for "not applicable to this format" and `{"present": false}` for "applicable but absent in this file".
+Structural assertions compare identity and position, not just word presence. Reading/container order uses a sequence alignment that penalizes missing, additional, or reordered entries. Other assertions require their declared properties to agree; missing evidence scores zero. Styled phrases can match within a coalesced run. Formula comparisons ignore the optional leading `=` used in spreadsheet display notation; missing or changed expressions still lose credit. An actual paragraph containing the target words does not establish a comment-to-target relationship.
 
-### Adapter Interface
+The legacy scorer also now checks real reading order, actual comment anchors, and ordered sheet names. It no longer reconstructs document order by concatenating feature buckets. Corrected an inconsistent legacy list count in `challenge_real_world.docx` (six list groups).
 
-Parsers implement the `OfficeDocBenchAdapter` interface:
+**Composite** is the mean over successfully parsed cases. **Coverage** is successful parses divided by all 87 cases. **Coverage-adjusted score** is composite times coverage; failed and unsupported cases contribute zero. Always publish coverage and error counts alongside scores. Per-feature structural results expose which new capabilities actually survive extraction.
 
-```python
-from adapters.base_adapter import OfficeDocBenchAdapter
-
-class MyParserAdapter(OfficeDocBenchAdapter):
-    def name(self) -> str: ...
-    def version(self) -> str: ...
-    def parse(self, filepath: Path) -> dict: ...
-    def supported_formats(self) -> set[str]: ...
-```
-
-The `parse()` method returns a dict matching `schema/adapter_output.schema.json` — a flat structure with lists for each feature type (headings, tables, track_changes, comments, etc.).
-
-### Metrics
-
-Seven scoring dimensions, each in [0, 1]:
-
-| Metric | Weight | Description |
-|--------|--------|-------------|
-| **Feature Detection** | 0.15 | Binary: did the parser detect each of 17 features? Includes aspirational features (equations, bookmarks, fields, section breaks) |
-| **Structural Recall** | 0.20 | How completely were features extracted? (count accuracy + type matching) |
-| **Structural Quality** | 0.15 | Heading level distribution, TC author attribution, comment text matching, list numbering accuracy (§17.9), table merge span accuracy (§18.3.1.55), heading text match, section break detection (§17.6), comment range accuracy (§17.13.1) |
-| **Content Fidelity** | 0.15 | Key phrase recall, paragraph count, element ordering (LCS), hyperlink extraction, style preservation, equation text (§22.1), field display text (§17.16), footnote text, bookmark detection (§17.13.6) |
-| **Text Jaccard** | 0.10 | Word-level Jaccard similarity with ground truth |
-| **Element Count** | 0.15 | `1 - |actual - expected| / max(actual, expected, 1)` per element type (9 types) |
-| **Metadata** | 0.10 | Exact match on title, author, created, modified + sheet name accuracy |
-
-**Composite score** = weighted average. **Coverage-Adjusted** = Composite × (files parsed / total files).
-
-Aspirational sub-dimensions within Structural Quality and Content Fidelity intentionally lower scores when ECMA-376 spec features aren't yet implemented, creating transparent roadmap targets.
-
-## Usage
+## Run
 
 ```bash
-# Evaluate AILANG Parse (uses golden outputs, instant)
+# Reference parser, live by default
 uv run benchmarks/officedocbench/eval_officedocbench.py
 
-# Evaluate AILANG Parse (re-parse files)
-uv run benchmarks/officedocbench/eval_officedocbench.py --live
+# Tests include saved pre-fix outputs and deliberately corrupted structures
+uv run python -m unittest discover -s benchmarks/officedocbench/tests -v
+python3 benchmarks/officedocbench/build_structure_truth.py --check
+uv run python benchmarks/officedocbench/audit_legacy_truth.py --check
 
-# Evaluate all installed adapters
-uv run benchmarks/officedocbench/eval_officedocbench.py --all
+# Install the local comparison providers; install native pandoc separately
+uv sync --extra competitors
+uv run benchmarks/officedocbench/eval_officedocbench.py --all \
+  --output-cache /tmp/officedocbench-output
 
-# Single adapter
-uv run benchmarks/officedocbench/eval_officedocbench.py --adapter unstructured
+# One provider, or one format
+uv run benchmarks/officedocbench/eval_officedocbench.py --adapter docling
+uv run benchmarks/officedocbench/eval_officedocbench.py --adapter pandoc --format docx
 
-# Filter by format
-uv run benchmarks/officedocbench/eval_officedocbench.py --format docx
+# Explicit reuse of matching converted output, not a hidden fallback
+uv run benchmarks/officedocbench/eval_officedocbench.py --all \
+  --output-cache /tmp/officedocbench-output --reuse-cache
 
-# Output formats
-uv run benchmarks/officedocbench/eval_officedocbench.py --json
-uv run benchmarks/officedocbench/eval_officedocbench.py --latex
-
-# Regenerate ground truth from golden files
-uv run benchmarks/officedocbench/annotate.py
+# Rescore an identifiable live parse after a scoring/annotation correction
+# This preserves its original parser/adapter revision and parse timestamps.
+uv run benchmarks/officedocbench/rescore.py \
+  --results-dir benchmarks/officedocbench/results \
+  --output-cache /tmp/officedocbench-output
+uv run benchmarks/officedocbench/eval_officedocbench.py --summarize
 ```
 
-## Results
+LlamaParse needs `LLAMA_CLOUD_API_KEY`; inject it into the process from your secret manager. Standard non-premium mode is the default. `LLAMAPARSE_PREMIUM=1` is a different, more expensive run configuration and is recorded in provenance. Local adapters need their native dependencies, including Node.js/LibreOffice for LiteParse and Pandoc for the Pandoc adapter and some Unstructured formats.
 
-**Run date**: 2026-04-06
+`--golden` is diagnostic only and cannot produce a published summary. `--results-dir` supports isolated runs; only the canonical results directory mirrors a summary into `docs/data/officedocbench-summary.json`. `--summarize` rejects incompatible corpus revisions, filtered/incomplete case sets, duplicate cases, legacy results, and golden diagnostics.
 
-### Composite Scores (8 Parsers)
+## Reproducibility and failures
 
-| Tool | Files | Coverage | Composite | Adjusted | Feat. Det. | Struct. Quality | Content Fidelity | Metadata |
-|------|-------|----------|-----------|----------|------------|-----------------|------------------|----------|
-| **AILANG Parse** | 69/69 | **100%** | **93.9%** | **93.9%** | 91.9% | 95.3% | 81.4% | 99.6% |
-| Raw OOXML | 43/69 | 62% | 84.4% | 52.6% | 82.0% | 80.3% | 68.1% | 100.0% |
-| MarkItDown | 24/69 | 35% | 78.6% | 27.3% | 95.8% | 82.1% | 65.4% | 33.3% |
-| Pandoc | 45/69 | 65% | 74.0% | 48.2% | 75.7% | 81.2% | 66.1% | 24.4% |
-| Kreuzberg | 66/69 | 96% | 71.1% | 68.0% | 66.3% | 63.9% | 61.0% | 86.2% |
-| Docling | 42/69 | 61% | 63.3% | 38.5% | 61.3% | 71.5% | 61.4% | 2.4% |
-| Unstructured | 37/69 | 54% | 60.9% | 32.6% | 60.4% | 61.1% | 62.3% | 0.0% |
+Each adapter result records its installed version, adapter hash, corpus/scorer hashes, source commit, toolchain, run timestamps, and configuration. Converted-output caches are keyed by provider version, adapter revision, and input bytes. Cached reads are not reported as fresh parsing latency. A rescore has its own timestamp and revision and retains the original parse provenance. Its separately hashed portable normalizer may use evidence already present in cached output, such as worksheet headings; it never reads the source to fill a provider gap.
 
-Coverage-Adjusted = Composite × (files parsed / total files). AILANG Parse is the only tool with 100% format coverage.
+Provider errors and unsupported formats are explicit. An empty response is an error except for source-verified blank documents and slide decks. Failed runs overwrite their own result with the failure; they never substitute a historical score. The command exits nonzero on parse or missing-fixture errors while retaining the complete report. A comparison may therefore be publishable with documented provider failures even when the command exits nonzero.
 
-### Per-Format Breakdown
+The current comparison environment is pinned in `results/environment.txt`. Raw converted-output caches are local artifacts and are not committed. v1 repository and website summaries are retained separately in `results/v1/` because those summaries previously disagreed.
 
-| Format | AILANG Parse | Raw OOXML | Pandoc | Kreuzberg | MarkItDown | Docling | Unstructured |
-|--------|-------------|-----------|--------|-----------|------------|---------|--------------|
-| DOCX | 90.9% (29) | 82.4% (29) | 69.0% (29) | 73.8% (29) | — | 59.7% (28) | 59.8% (29) |
-| PPTX | 94.4% (8) | 89.1% (8) | — | 34.1% (8) | 70.2% (8) | 67.7% (8) | 64.8% (8) |
-| XLSX | 96.3% (6) | 88.2% (6) | — | 95.1% (6) | 84.7% (6) | 74.0% (6) | — |
-| ODT | 92.6% (6) | — | 70.9% (5) | 73.8% (6) | — | — | — |
-| ODP | 97.7% (2) | — | — | — | — | — | — |
-| ODS | 100% (4) | — | — | 72.2% (3) | — | — | — |
-| EPUB | 98.5% (3) | — | 98.0% (3) | 71.6% (3) | 74.8% (3) | — | — |
-| HTML | 94.2% (5) | — | 87.0% (5) | 72.9% (5) | 82.5% (5) | — | — |
-| CSV | 100% (2) | — | — | 85.8% (2) | 89.8% (2) | — | — |
-| MD | 97.7% (3) | — | 81.0% (3) | 72.1% (3) | — | — | — |
-
-### Feature Detection Heatmap (17 Features)
-
-| Feature | AILANG Parse | Raw OOXML | Pandoc | Kreuzberg | MarkItDown | Unstructured | Docling |
-|---------|-------------|-----------|--------|-----------|------------|--------------|---------|
-| headings | **30/30** | 21/21 | 22/23 | 24/29 | 9/9 | 20/21 | 20/21 |
-| tables | **36/36** | 16/16 | 18/18 | 29/34 | 17/17 | 9/10 | 13/15 |
-| **track_changes** | **3/3** | 2/3 | 3/3 | 0/3 | — | 0/3 | 0/3 |
-| **comments** | **2/2** | 2/2 | 0/2 | 0/2 | — | 0/2 | 0/2 |
-| **headers_footers** | **3/3** | 2/2 | 0/3 | 2/3 | — | 1/2 | 0/2 |
-| **text_boxes** | **2/2** | 1/2 | 0/2 | 0/2 | — | 0/2 | 0/2 |
-| images | 7/8 | 3/4 | 5/5 | 3/7 | 2/3 | 0/4 | 2/4 |
-| lists | **15/15** | 1/4 | 11/12 | 8/13 | 4/4 | 4/4 | 1/4 |
-| sheets | 4/5 | 1/1 | — | 4/4 | 0/1 | — | 0/1 |
-| equations (§22.1) | **1/1** | 0/1 | 0/1 | 0/1 | — | 0/1 | 0/1 |
-| fields (§17.16) | **1/1** | 1/1 | 0/1 | 1/1 | — | 0/1 | 0/1 |
-| *footnotes* | 0/1 | 0/1 | 0/1 | 0/1 | — | 0/1 | 0/1 |
-| *hyperlinks* | 0/1 | 0/1 | 0/1 | 0/1 | — | 0/1 | 0/1 |
-| *styles* | 0/1 | 0/1 | 0/1 | 0/1 | — | 0/1 | 0/1 |
-| *bookmarks (§17.13.6)* | 0/1 | 0/1 | 0/1 | 0/1 | — | 0/1 | 0/1 |
-| *section_breaks (§17.6)* | 0/8 | 0/8 | 0/8 | 0/8 | — | 0/8 | 0/8 |
-
-*Italic* = aspirational features that no tool handles yet. **Bold** = AILANG Parse leads or ties for best.
-
-### Aspirational Roadmap Targets
-
-These ECMA-376 spec features intentionally lower every tool's score — they represent the next frontier:
-
-| Feature | Spec Reference | Impact | What's Needed |
-|---------|---------------|--------|---------------|
-| Footnotes/endnotes | — | 0/1 detection | Extract footnote content as separate blocks |
-| Hyperlink URLs | §17.16.22 | 0/1 detection | Surface URL + display text in output |
-| Style preservation | §17.3.2 | 0/1 detection | Expose bold/italic/underline on text elements |
-| Bookmark detection | §17.13.6 | 0/1 detection | Detect and surface bookmark names |
-| Section breaks | §17.6 | 0/8 detection | Surface section break markers in output |
-| Comment ranges | §17.13.1 | Quality score | Link comments to annotated text spans |
-| List numbering | §17.9 | Quality score | Preserve ordered/unordered + nesting depth |
-| Table merge spans | §18.3.1.55 | Quality score | Cell-level merge span comparison |
-
-## Adding Your Tool
-
-1. Create `adapters/your_parser_adapter.py` implementing `OfficeDocBenchAdapter`
-2. Add a loader in `eval_officedocbench.py:load_adapter()`
-3. Run: `uv run benchmarks/officedocbench/eval_officedocbench.py --adapter your_parser`
-
-See `adapters/unstructured_adapter.py` for a minimal example.
-
-## File Structure
-
-```
-benchmarks/officedocbench/
-  README.md                      # This file
-  schema/
-    ground_truth.schema.json     # Ground truth format spec
-    adapter_output.schema.json   # Adapter output format spec
-  ground_truth/                  # 69 annotated ground truth files
-  adapters/
-    base_adapter.py              # Abstract interface
-    docparse_adapter.py          # AILANG Parse reference implementation
-    unstructured_adapter.py      # Unstructured.io
-    docling_adapter.py           # IBM Docling
-    llamaparse_adapter.py        # LlamaIndex LlamaParse
-    markitdown_adapter.py        # Microsoft MarkItDown
-    kreuzberg_adapter.py         # Kreuzberg (Rust)
-    pandoc_adapter.py            # Pandoc (Haskell)
-    ooxml_adapter.py             # Raw OOXML (stdlib)
-  eval_officedocbench.py         # Main evaluation script
-  scoring.py                     # 7-metric scoring (ECMA-376 spec-driven)
-  report.py                      # Report generation (markdown, JSON, LaTeX)
-  annotate.py                    # Ground truth generator
-  enrich_gt.py                   # GT enrichment from golden outputs
-  results/                       # Per-tool results
-```
+Ground truth must be checked against the input source, not regenerated to make the reference parser pass. Run the oracle with no `--check` to rebuild source assertions, inspect the diff, and run the corruption tests. Legacy `annotate.py`/`enrich_gt.py` are v1 annotation utilities, not the v2 maintenance path.
 
 ## License
 
-- Benchmark data and ground truth: CC-BY-4.0
-- Evaluation code: Apache-2.0
-- Test files: see `benchmarks/SOURCES.md` for per-file attribution
+Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files retain their original licenses; see `benchmarks/SOURCES.md`.
 
-## Citation
+## Recorded comparison (2026-10-23)
 
-```bibtex
-@misc{officedocbench2026,
-  title={OfficeDocBench: A Benchmark for Office Structural Document Parsing},
-  author={AILANG Parse Contributors},
-  year={2026},
-  url={https://github.com/sunholo-data/docparse}
-}
-```
+The reference is the **PR #114 candidate**, labeled `0.52.2+pr114`, and includes
+the unreleased DOCX hyperlink fix. `DOCPARSE_BENCHMARK_LABEL=pr114` records that
+label; the exact source revision and toolchain remain in provenance. Competitor
+outputs retain their original live parse timestamps and are rescored against
+the same audited expectations without new API requests. Do not attribute this
+candidate's score to the unchanged v0.52.2 release.
+
+| Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
+|---|---|---:|---:|---:|---:|
+| AILANG Parse | 0.52.2+pr114 | 87/87 | 97.3% | 97.3% | 0 |
+| Kreuzberg | 4.10.4 | 82/87 | 68.2% | 64.3% | 5 |
+| Docling | 2.142.1 | 83/87 | 64.9% | 61.9% | 3 |
+| LlamaParse (standard) | 0.6.94 | 83/87 | 61.8% | 59.0% | 4 |
+| Unstructured | 0.27.34 | 76/87 | 58.7% | 51.3% | 5 |
+| Raw OOXML | 2.0.0-stdlib | 60/87 | 70.3% | 48.5% | 1 |
+| MarkItDown | 0.1.5 | 69/87 | 58.4% | 46.3% | 2 |
+| Pandoc | 3.12.1 | 49/87 | 63.1% | 35.6% | 1 |
+| LiteParse | 2.17.0 | 70/87 | 35.9% | 28.9% | 6 |
+
+LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. The original provider job responses were retrieved to audit and repair the mappings; no new parsing requests were needed for that remap. Its EPUB and minimal ODS/ODT conversion failures are retained. Other model tiers require separate configured runs.

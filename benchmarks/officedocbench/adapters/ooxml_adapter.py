@@ -14,12 +14,14 @@ metadata, sheet names, and lists.
 from __future__ import annotations
 
 import re
+import posixpath
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import table_cells
 
 # ── OOXML namespaces ───────────────────────────────────────────────
 NS = {
@@ -69,18 +71,19 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
         return "Raw OOXML"
 
     def version(self) -> str:
-        return "1.0.0-stdlib"
+        return "2.0.0-stdlib"
 
     def parse(self, filepath: Path) -> dict[str, Any]:
         ext = filepath.suffix.lower().lstrip(".")
-        if ext == "docx":
-            return self._parse_docx(filepath)
-        elif ext == "pptx":
-            return self._parse_pptx(filepath)
-        elif ext == "xlsx":
-            return self._parse_xlsx(filepath)
-        else:
-            raise ValueError(f"Unsupported format: {ext}")
+        self._structure = {k: [] for k in ("table_cells", "element_order", "containers", "runs", "list_items")}
+        parsers = {"docx": self._parse_docx, "pptx": self._parse_pptx, "xlsx": self._parse_xlsx}
+        if ext not in parsers: raise ValueError(f"Unsupported format: {ext}")
+        output = parsers[ext](filepath)
+        for ti, table in enumerate(output.get("tables", [])):
+            names = output.get("metadata", {}).get("sheet_names", [])
+            self._structure["table_cells"] += table_cells(table.get("rows", []), ti, names[ti] if ext == "xlsx" and ti < len(names) else "")
+        output["structure"] = self._structure
+        return output
 
     # ── DOCX ───────────────────────────────────────────────────────
 
@@ -179,13 +182,18 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
             tag = child.tag
 
             if tag == _tag("w", "p"):
+                before = (len(text_elements), len(headings), len(lists_out))
                 self._process_paragraph(
                     child, text_elements, headings, track_changes,
                     images, text_boxes, lists_out,
                 )
+                for typ, items, prior in zip(("text", "heading", "list"), (text_elements, headings, lists_out), before):
+                    for item in items[prior:]:
+                        self._structure["element_order"].append({"type": typ, **({"text": item["text"]} if typ != "list" else {})})
 
             elif tag == _tag("w", "tbl"):
                 tables.append(self._process_table(child))
+                self._structure["element_order"].append({"type": "table"})
 
             # Track changes at block level
             elif tag == _tag("w", "ins"):
@@ -211,6 +219,14 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
         lists_out: list[dict],
     ) -> None:
         """Process a single w:p paragraph element."""
+        for run in para.findall(".//" + _tag("w", "r")):
+            value = "".join(t.text or "" for t in run.findall(_tag("w", "t")))
+            pr = run.find(_tag("w", "rPr"))
+            flags = {}
+            for prop, key in (("b", "bold"), ("i", "italic"), ("u", "underline"), ("strike", "strike")):
+                node = pr.find(_tag("w", prop)) if pr is not None else None
+                flags[key] = node is not None and node.get(_tag("w", "val"), "1") not in ("0", "false", "none")
+            if value: self._structure["runs"].append({"text": value, **flags})
         # Check for heading style
         ppr = para.find(_tag("w", "pPr"))
         style_name = ""
@@ -309,8 +325,10 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
         cell_texts = []
         has_merged = False
 
+        grid = []
         for tr in tbl.findall(_tag("w", "tr")):
             row_count += 1
+            grid_row = []
             for tc in tr.findall(_tag("w", "tc")):
                 # Check for merged cells
                 tc_pr = tc.find(_tag("w", "tcPr"))
@@ -325,10 +343,17 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
                         has_merged = True
 
                 cell_text = _text_of(tc)
+                span_node = tc.find("./" + _tag("w", "tcPr") + "/" + _tag("w", "gridSpan"))
+                vm = tc.find("./" + _tag("w", "tcPr") + "/" + _tag("w", "vMerge"))
+                grid_row.append({"text": cell_text, "colSpan": int(span_node.get(_tag("w", "val"), "1")) if span_node is not None else 1,
+                                 "merged": vm is not None and vm.get(_tag("w", "val")) != "restart"})
                 if cell_text:
                     cell_texts.append(cell_text)
 
+            grid.append(grid_row)
+
         return {
+            "rows": grid,
             "row_count": row_count,
             "has_merged_cells": has_merged,
             "cell_text": " ".join(cell_texts),
@@ -367,10 +392,12 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
                 if slide is None:
                     continue
 
+                old_headings = len(headings)
                 # Extract text from shapes
                 for sp in slide.findall(".//" + _tag("p", "sp")):
                     self._process_pptx_shape(sp, text_elements, headings, lists_out)
 
+                self._structure["containers"].append({"kind": "slide", "name": headings[old_headings]["text"] if len(headings) > old_headings else ""})
                 # Tables
                 for tbl in slide.findall(".//" + _tag("a", "tbl")):
                     tables.append(self._process_pptx_table(tbl))
@@ -528,6 +555,13 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
                 if re.match(r"xl/worksheets/sheet\d+\.xml", e)
             )
 
+            workbook_rels = _read_xml(zf, "xl/_rels/workbook.xml.rels")
+            mapping = {r.get("Id"): r.get("Target") for r in workbook_rels} if workbook_rels is not None else {}
+            if wb is not None and mapping:
+                sheet_files = [posixpath.normpath(posixpath.join("xl", mapping[x.get(_tag("r", "id"))])).lstrip("/")
+                               if not mapping[x.get(_tag("r", "id"))].startswith("/") else mapping[x.get(_tag("r", "id"))][1:]
+                               for x in wb.findall("./" + _tag("ss", "sheets") + "/" + _tag("ss", "sheet"))]
+            self._structure["containers"] = [{"kind": "sheet", "name": n} for n in sheet_names]
             for sheet_path in sheet_files:
                 sheet = _read_xml(zf, sheet_path)
                 if sheet is None:
@@ -542,12 +576,14 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
                 # Extract cell data
                 row_count = 0
                 cell_texts = []
+                positioned = {}
 
                 sheet_data = sheet.find(_tag("ss", "sheetData"))
                 if sheet_data is not None:
                     for row in sheet_data.findall(_tag("ss", "row")):
                         row_count += 1
                         for cell in row.findall(_tag("ss", "c")):
+                            begin = len(cell_texts)
                             cell_type = cell.get("t", "")
                             v_elem = cell.find(_tag("ss", "v"))
                             if v_elem is not None and v_elem.text:
@@ -565,9 +601,21 @@ class OOXMLAdapter(OfficeDocBenchAdapter):
                             is_elem = cell.find(_tag("ss", "is"))
                             if is_elem is not None:
                                 cell_texts.append(_text_of(is_elem))
+                            match = re.fullmatch(r"([A-Z]+)([0-9]+)", cell.get("r", ""))
+                            if match:
+                                col = 0
+                                for ch in match[1]: col = col * 26 + ord(ch) - 64
+                                rec = {"text": " ".join(cell_texts[begin:])}
+                                f = cell.find(_tag("ss", "f"))
+                                if f is not None: rec["formula"] = f.text or ""
+                                positioned[int(match[2]), col] = rec
 
                 if row_count > 0:
+                    maxr = max((r for r,c in positioned), default=0)
+                    maxc = max((c for r,c in positioned), default=0)
+                    grid = [[positioned.get((r,c), "") for c in range(1, maxc+1)] for r in range(1, maxr+1)]
                     tables.append({
+                        "rows": grid,
                         "row_count": row_count,
                         "has_merged_cells": has_merged,
                         "cell_text": " ".join(cell_texts),

@@ -471,6 +471,15 @@ jobs:
       # sequence. Before that it gated on counts and bags of words and ALWAYS
       # exited 0, so this step could not fail. This proves the gate still
       # rejects the parser output that shipped v0.47.0's bugs at 100%.
+      - name: OfficeDocBench v2 scoring, adapter, and provenance tests
+        run: uv run python -m unittest discover -s benchmarks/officedocbench/tests -v
+
+      - name: OfficeDocBench assertions match source Office XML
+        run: python3 benchmarks/officedocbench/build_structure_truth.py --check
+
+      - name: Audited legacy annotations match their source HTML and XML
+        run: uv run python benchmarks/officedocbench/audit_legacy_truth.py --check
+
       - name: Office structure gate still catches the v0.47.0 bugs
         run: python3 benchmarks/check_structure_gate.py
 

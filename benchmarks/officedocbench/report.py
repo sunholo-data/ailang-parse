@@ -18,7 +18,8 @@ def _aggregate_scores(adapter_result: dict) -> dict[str, Any]:
     n = len(ok_results)
 
     def _avg(key: str) -> float:
-        return sum(r["scores"].get(key, {}).get("score", 1.0) for r in ok_results) / n
+        values = [r["scores"].get(key, {}).get("score", 0) for r in ok_results if r["scores"].get(key, {}).get("applicable", True)]
+        return sum(values) / len(values) if values else 0.0
 
     return {
         "composite": round(sum(r["scores"]["composite"] for r in ok_results) / n, 4),
@@ -30,6 +31,7 @@ def _aggregate_scores(adapter_result: dict) -> dict[str, Any]:
         "text_jaccard": round(_avg("text_jaccard"), 4),
         "element_count": round(_avg("element_count"), 4),
         "metadata": round(_avg("metadata"), 4),
+        "structural_fidelity": round(_avg("structural_fidelity"), 4),
     }
 
 
@@ -55,8 +57,8 @@ def _aggregate_by_format(adapter_result: dict) -> dict[str, dict]:
 def print_summary(all_results: list[dict]) -> None:
     """Print a comparative summary table."""
     print("\n# OfficeDocBench Results\n")
-    print("| Tool | Files | Coverage | Composite | Adjusted | Feat. Det. | Struct. Recall | Struct. Quality | Content Fidelity | Text Jaccard | Elem. Count | Metadata |")
-    print("|------|-------|----------|-----------|----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|")
+    print("| Tool | Files | Coverage | Composite | Adjusted | Feat. Det. | Struct. Recall | Struct. Quality | Content Fidelity | Text Jaccard | Elem. Count | Metadata | Structure v2 |")
+    print("|------|-------|----------|-----------|----------|------------|----------------|-----------------|------------------|--------------|-------------|----------|--------------|")
 
     for ar in all_results:
         agg = _aggregate_scores(ar)
@@ -88,7 +90,7 @@ def print_summary(all_results: list[dict]) -> None:
             f"| {agg['content_fidelity']:.1%} "
             f"| {agg['text_jaccard']:.1%} "
             f"| {agg['element_count']:.1%} "
-            f"| {agg['metadata']:.1%} |"
+            f"| {agg['metadata']:.1%} | {agg['structural_fidelity']:.1%} |"
         )
 
     print()

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from structure_v2 import score_structure
 
 
 WEIGHTS = {
@@ -48,6 +49,7 @@ def score_file(ground_truth: dict, adapter_output: dict) -> dict[str, Any]:
     counts = score_element_counts(features, adapter_output)
     meta = score_metadata(features.get("metadata"), adapter_output.get("metadata", {}),
                           features.get("sheets"))
+    structural = score_structure(ground_truth.get("structure", {}), adapter_output)
 
     # Composite weighted score
     composite = (
@@ -59,6 +61,14 @@ def score_file(ground_truth: dict, adapter_output: dict) -> dict[str, Any]:
         + WEIGHTS["element_count"] * counts["score"]
         + WEIGHTS["metadata"] * meta["score"]
     )
+    # v2 reserves a quarter of the score for source-verified assertions when
+    # the fixture has them. Legacy fixtures retain the seven original weights.
+    if ground_truth.get("structure_only"):
+        composite = structural["score"]
+        for metric in (detection, recall, quality, fidelity, jaccard, counts, meta):
+            metric["applicable"] = False
+    elif structural["applicable"]:
+        composite = .75 * composite + .25 * structural["score"]
 
     return {
         "composite": round(composite, 4),
@@ -69,6 +79,7 @@ def score_file(ground_truth: dict, adapter_output: dict) -> dict[str, Any]:
         "text_jaccard": jaccard,
         "element_count": counts,
         "metadata": meta,
+        "structural_fidelity": structural,
     }
 
 
@@ -508,15 +519,14 @@ def score_structural_quality(features: dict, output: dict,
     gt_c = features.get("comments")
     if isinstance(gt_c, dict) and gt_c.get("ranges"):
         gt_ranges = gt_c["ranges"]
-        all_text = _collect_all_text(output).lower()
         range_matched = 0
         for r in gt_ranges:
-            annotated = r.get("annotated_text", "").lower()
-            if annotated and annotated in all_text:
-                range_matched += 0.5  # Partial: text present
-            comment_text = r.get("comment_text", "").lower()
-            if comment_text and comment_text in all_text:
-                range_matched += 0.5  # Partial: comment present
+            annotated = " ".join(r.get("annotated_text", "").lower().split())
+            comment_text = " ".join(r.get("comment_text", "").lower().split())
+            if any(" ".join(c.get("text", "").lower().split()) == comment_text
+                   and " ".join(c.get("annotated_text", "").lower().split()) == annotated
+                   and c.get("anchored", False) for c in output.get("comments", [])):
+                range_matched += 1
         range_score = range_matched / len(gt_ranges) if gt_ranges else 0.0
         scores["comment_ranges"] = {
             "score": round(min(range_score, 1.0), 4),
@@ -673,27 +683,22 @@ def score_content_fidelity(ground_truth: dict, adapter_output: dict) -> dict[str
             total += 1
             weighted_sum += style_score
 
-    # ── Cell-Level Table Accuracy (Tier 2 aspirational: GT field = features.tables.cells) ──
+    # Legacy cell triples identify a logical position, not a bag of words.
     gt_t = features.get("tables")
     if isinstance(gt_t, dict) and gt_t.get("cells"):
         expected_cells = gt_t["cells"]  # [[row_idx, col_idx, text], ...]
         actual_tables = adapter_output.get("tables", [])
-        # Flatten all actual cell text
-        actual_cell_texts = set()
-        for tbl in actual_tables:
-            cell_text = tbl.get("cell_text", "")
-            actual_cell_texts |= set(re.findall(r"\b[a-zA-Z0-9]+\b", cell_text.lower()))
-        expected_cell_texts = set()
-        for cell in expected_cells:
-            if len(cell) >= 3:
-                expected_cell_texts |= set(re.findall(r"\b[a-zA-Z0-9]+\b", str(cell[2]).lower()))
-
-        if expected_cell_texts:
-            cell_recall = len(expected_cell_texts & actual_cell_texts) / len(expected_cell_texts)
+        actual_rows = [row for tbl in actual_tables for row in tbl.get("rows", [])]
+        if expected_cells:
+            def matches(c):
+                ri, ci, want = c
+                if ri >= len(actual_rows) or ci >= len(actual_rows[ri]): return False
+                got = actual_rows[ri][ci]
+                return str(got.get("text", "") if isinstance(got, dict) else got).strip() == str(want).strip()
+            cell_recall = sum(matches(c) for c in expected_cells) / len(expected_cells)
             details["cell_accuracy"] = {
                 "score": round(cell_recall, 4),
-                "expected_words": len(expected_cell_texts),
-                "actual_words": len(actual_cell_texts),
+                "expected_cells": len(expected_cells),
             }
             total += 1
             weighted_sum += cell_recall
@@ -822,17 +827,10 @@ def _collect_all_text(output: dict) -> str:
 
 def _build_element_order(output: dict) -> list[dict]:
     """Build an ordered list of elements from adapter output for ordering comparison."""
-    elements = []
-    for el in output.get("text_elements", []):
-        elements.append({"type": "text", "text": el.get("text", "")[:50]})
-    for h in output.get("headings", []):
-        elements.append({"type": "heading", "text": h.get("text", "")[:50]})
-    for t in output.get("tables", []):
-        elements.append({"type": "table", "text": t.get("cell_text", "")[:50]})
-    for li in output.get("lists", []):
-        items_text = " ".join(li.get("items", []))
-        elements.append({"type": "list", "text": items_text[:50]})
-    return elements
+    if "element_order" in output.get("structure", {}):
+        return output["structure"]["element_order"]
+    # A flat set of feature buckets carries no reading-order evidence.
+    return []
 
 
 def _score_ordering(gt_order: list[dict], actual_order: list[dict]) -> float:
@@ -841,8 +839,8 @@ def _score_ordering(gt_order: list[dict], actual_order: list[dict]) -> float:
         return 0.0
 
     # Build simplified type sequences for LCS
-    gt_types = [e.get("type", "") for e in gt_order]
-    actual_types = [e.get("type", "") for e in actual_order]
+    gt_types = [(e.get("type", ""), (" ".join(e.get("text", "").lower().split())[:50] if e.get("type") in ("text", "heading") else "")) for e in gt_order]
+    actual_types = [(e.get("type", ""), (" ".join(e.get("text", "").lower().split())[:50] if e.get("type") in ("text", "heading") else "")) for e in actual_order]
 
     # LCS length
     m, n = len(gt_types), len(actual_types)
@@ -958,11 +956,11 @@ def score_metadata(gt_meta: dict | None, output_meta: dict,
 
     # Sheet name accuracy (Tier 1: GT exists in sheets.names)
     if isinstance(gt_sheets, dict) and gt_sheets.get("names"):
-        expected_names = set(gt_sheets["names"])
-        actual_names = set(output_meta.get("sheet_names", []))
+        expected_names = gt_sheets["names"]
+        actual_names = output_meta.get("sheet_names", [])
         total += 1
         name_match = expected_names == actual_names
-        partial = len(expected_names & actual_names) / len(expected_names) if expected_names else 1.0
+        partial = sum(g == a for g, a in zip(expected_names, actual_names)) / max(len(expected_names), len(actual_names), 1)
         checks["sheet_names"] = {
             "expected": sorted(expected_names),
             "actual": sorted(actual_names),

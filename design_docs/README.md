@@ -1,7 +1,9 @@
 # AILANG Parse Design Documentation
 
-Released in v0.41.2: [Document quality and portable verification](implemented/v0_41_2/document-quality-and-portable-verification.md)
-(AILANG rendering, audits and DOCX table geometry).
+Current release: **v0.52.2**. See [CHANGELOG.md](../CHANGELOG.md) for shipped work.
+
+Current fidelity follow-ups: [OfficeDocBench source audit and remaining gaps](planned/unscheduled/office_fidelity_followups.md).
+Older target-version folders contain partially shipped designs; consult each status and the changelog.
 
 ## Structure
 
@@ -17,7 +19,7 @@ design_docs/
 │   │                        #   ecosystem benchmarks, Gemini Files API, WASM threat model
 │   └── v0_9_0/              # Email parsing, MCP server, workbench,
 │                            #   OfficeDocBench v2, GTM, markdown+metadata
-├── planned/                  # Future features (> v0.9.3)
+├── planned/                  # Planned and partially shipped designs
 │   ├── v0_10_0/             # Quarto, trust, PDF pipeline, Ollama, auth providers,
 │   │                        #   WASM images, manifest API, friction onboarding
 │   ├── v0_11_0/             # Structured extraction (FAST-TRACK)
@@ -32,7 +34,7 @@ design_docs/
 └── README.md
 ```
 
-> **Current version**: v0.9.3 (`ailang.toml`). Folders in `implemented/` reflect
+> **Current version**: v0.52.2 (`ailang.toml`). Folders in `implemented/` reflect
 > the version each feature actually shipped in. Folders in `planned/` are target
 > versions for upcoming work. See also [CHANGELOG.md](../CHANGELOG.md) for a
 > concise release-by-release summary.

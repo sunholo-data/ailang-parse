@@ -379,10 +379,7 @@ pure func docCoalesceStep(runs: [InlineRun], cur: InlineRun, acc: [InlineRun]) -
     [] => cur :: acc,
     r :: rest =>
       if docRunFmtEq(cur, r)
-      then docCoalesceStep(rest, {text: "${cur.text}${r.text}", bold: cur.bold,
-                                  italic: cur.italic, underline: cur.underline,
-                                  strike: cur.strike, code: cur.code, href: "",
-                                  vertAlign: cur.vertAlign, color: cur.color}, acc)
+      then docCoalesceStep(rest, {cur | text: "${cur.text}${r.text}"}, acc)
       else docCoalesceStep(rest, r, cur :: acc)
   }
 
@@ -395,6 +392,19 @@ pure func docRunFmtEq(a: InlineRun, b: InlineRun) -> bool =
   a.bold == b.bold && a.italic == b.italic && a.underline == b.underline &&
   a.strike == b.strike && a.code == b.code && a.vertAlign == b.vertAlign &&
   a.href == b.href && a.color == b.color
+
+pure func docCoalesceLinkView(mode: int) -> string
+  tests [
+    (0, "one two@https://a:false"),
+    (1, "one @https://a:false|two@https://b:false"),
+    (2, "one @https://a:false|two@https://a:true"),
+    (3, "one @https://a:false|two@:false")
+  ]
+{
+  let first = {plainRun("one ") | href: "https://a"};
+  let second = {plainRun("two") | href: if mode == 1 then "https://b" else if mode == 3 then "" else "https://a", bold: mode == 2};
+  join("|", map(\r. "${r.text}@${r.href}:${show(r.bold)}", coalesceRuns([first, second])))
+}
 
 -- Construct a HeadingBlock. Same rationale as mkText: route constructions
 -- through one function so field additions don't touch 25 call sites.

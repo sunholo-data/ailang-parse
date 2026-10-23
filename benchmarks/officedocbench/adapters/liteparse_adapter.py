@@ -19,16 +19,17 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import markdown_output
 
 
 class LiteParseAdapter(OfficeDocBenchAdapter):
-
     def name(self) -> str:
         return "LiteParse"
 
     def version(self) -> str:
         try:
             from importlib.metadata import version as pkg_version
+
             return pkg_version("liteparse")
         except Exception:
             return "unknown"
@@ -39,93 +40,95 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
         except ImportError:
             raise RuntimeError("liteparse not installed: uv pip install liteparse")
 
-        parser = LiteParse()
-        result = parser.parse(str(filepath))
-        text = result.text or ""
+        parser = LiteParse(
+            extract_structure_tree=True,
+            extract_links=True,
+            extract_annotations=True,
+            extract_blocks=True,
+            extract_images=True,
+            extract_text_metadata=True,
+            output_format="markdown",
+        )
+        return self.convert_result(parser.parse(str(filepath)), filepath)
 
-        text_elements: list[dict[str, Any]] = []
-        headings: list[dict[str, Any]] = []
-        tables: list[dict[str, Any]] = []
-        images: list[dict[str, Any]] = []
-        lists_out: list[dict[str, Any]] = []
+    def convert_result(self, result, filepath):
+        from .structure import table_cells
 
-        lines = text.split("\n")
-        table_rows: list[str] = []
-        in_table = False
-
-        for line in lines:
-            stripped = line.strip()
-
-            if not stripped:
-                if in_table and table_rows:
-                    tables.append(self._flush_table(table_rows))
-                    table_rows = []
-                    in_table = False
-                continue
-
-            # Table row: starts and contains |
-            if stripped.startswith("|") and "|" in stripped[1:]:
-                cells = [c.strip() for c in stripped.split("|") if c.strip()]
-                if cells and all(set(c) <= {"-", ":", " "} for c in cells):
-                    in_table = True
-                    continue
-                in_table = True
-                table_rows.append(stripped)
-                continue
-
-            # Flush table if we were in one
-            if in_table and table_rows:
-                tables.append(self._flush_table(table_rows))
-                table_rows = []
-                in_table = False
-
-            # Heading
-            if stripped.startswith("#"):
-                level = len(stripped) - len(stripped.lstrip("#"))
-                heading_text = stripped.lstrip("# ").strip()
-                if heading_text:
-                    headings.append({"text": heading_text, "level": min(level, 6)})
-                continue
-
-            # Image
-            img_match = re.match(r"!\[([^\]]*)\]\(([^)]*)\)", stripped)
-            if img_match:
-                images.append({"description": img_match.group(1) or img_match.group(2)})
-                continue
-
-            # Ordered list
-            if re.match(r"^\d+\.\s+", stripped):
-                item_text = re.sub(r"^\d+\.\s+", "", stripped)
-                lists_out.append({"items": [item_text], "ordered": True})
-                continue
-
-            # Unordered list
-            if re.match(r"^[-*+]\s+", stripped):
-                item_text = re.sub(r"^[-*+]\s+", "", stripped)
-                lists_out.append({"items": [item_text], "ordered": False})
-                continue
-
-            # Regular text
-            text_elements.append({"text": stripped, "style": "paragraph"})
-
-        # Flush trailing table
-        if in_table and table_rows:
-            tables.append(self._flush_table(table_rows))
-
-        return {
-            "text_elements": text_elements,
-            "headings": headings,
-            "tables": tables,
-            "track_changes": [],
-            "comments": [],
-            "headers_footers": [],
-            "footnotes": [],
-            "speaker_notes": [],
-            "text_boxes": [],
-            "images": images,
-            "lists": lists_out,
-            "metadata": {},
-        }
+        text = "\n\n".join(getattr(p, "markdown", "") or p.text for p in result.pages)
+        output = markdown_output(text)
+        blocks = [
+            b for page in result.pages for b in (getattr(page, "blocks", None) or [])
+        ]
+        if blocks:
+            output.update(text_elements=[], headings=[], tables=[], lists=[])
+            output["structure"].update(element_order=[], table_cells=[], list_items=[])
+            for block in blocks:
+                kind = block.kind
+                value = block.text or ""
+                if kind == "heading":
+                    output["headings"].append(
+                        {"text": value, "level": block.level or 1}
+                    )
+                    output["structure"]["element_order"].append(
+                        {"type": "heading", "text": value}
+                    )
+                elif kind == "table":
+                    rows = (
+                        [[c.text for c in block.header]] if block.header else []
+                    ) + [[c.text for c in row] for row in block.rows or []]
+                    output["structure"]["table_cells"] += table_cells(
+                        rows, len(output["tables"])
+                    )
+                    output["structure"]["element_order"].append({"type": "table"})
+                    output["tables"].append(
+                        {
+                            "rows": rows,
+                            "row_count": len(block.rows or []),
+                            "cell_text": " ".join(x for row in rows for x in row),
+                            "has_merged_cells": False,
+                        }
+                    )
+                elif kind == "list_item":
+                    output["lists"].append(
+                        {"items": [value], "ordered": bool(block.ordered)}
+                    )
+                    output["structure"]["list_items"].append(
+                        {
+                            "text": value,
+                            "ordered": bool(block.ordered),
+                            "level": block.level or 0,
+                        }
+                    )
+                elif value:
+                    output["text_elements"].append({"text": value, "style": kind})
+                    output["structure"]["element_order"].append(
+                        {"type": "text", "text": value}
+                    )
+                if value:
+                    output["structure"]["runs"].append(
+                        {
+                            "text": value,
+                            "bold": bool(block.bold),
+                            "italic": bool(block.italic),
+                        }
+                    )
+        output["images"] = [
+            {"description": str(getattr(image, "id", ""))}
+            for image in getattr(result, "images", [])
+        ]
+        for page in result.pages:
+            for annotation in getattr(page, "annotations", None) or []:
+                if annotation.uri:
+                    output["hyperlinks"].append(
+                        {"url": annotation.uri, "text": annotation.contents or ""}
+                    )
+            for item in getattr(page, "text_items", []) or []:
+                weight = getattr(item, "font_weight", None)
+                if weight is not None:
+                    output["structure"]["runs"].append(
+                        {"text": item.text, "bold": weight >= 600}
+                    )
+        return output
 
     def _flush_table(self, rows: list[str]) -> dict[str, Any]:
         """Convert accumulated table rows into adapter schema."""
@@ -140,4 +143,4 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
         }
 
     def supported_formats(self) -> set[str]:
-        return {"docx", "pptx", "xlsx", "odt", "odp", "ods", "html", "csv", "tsv", "epub", "md"}
+        return {"docx", "pptx", "xlsx", "odt", "odp", "ods", "csv", "tsv"}

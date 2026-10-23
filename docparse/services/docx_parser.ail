@@ -655,7 +655,7 @@ pure func childNodeRuns(node: XmlNode, rels: Map[string, string]) -> [InlineRun]
   else if tag == "w:smartTag" then map(extractRun, findAll(node, "w:r"))
   -- The URL suffix is a plain run so `runs` still concatenates to `text`.
   else if tag == "w:hyperlink" then
-    concat(map(extractRun, findAll(node, "w:r")),
+    concat(docxHyperlinkRuns(node, rels),
            docxHyperlinkSuffixRuns(node, rels))
   -- w:fldSimple wraps the field's cached result run (DATE, NUMPAGES, FILENAME).
   -- Deleted by e9de665; without it the result text vanishes and a paragraph
@@ -665,6 +665,13 @@ pure func childNodeRuns(node: XmlNode, rels: Map[string, string]) -> [InlineRun]
   else if tag == "m:oMath" then [plainRun(renderOmml(node))]
   else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
   else []
+}
+
+-- Keep the source link relationship on each anchor run. The plain URL suffix
+-- remains for existing text-only consumers, and carries no href of its own.
+pure func docxHyperlinkRuns(node: XmlNode, rels: Map[string, string]) -> [InlineRun] {
+  let url = docxRelTarget(rels, getOrElse(getAttr(node, "r:id"), ""));
+  map(\n. { let run = extractRun(n); {run | href: url} }, findAll(node, "w:r"))
 }
 
 pure func childNodeSdtRuns(sdt: XmlNode) -> [InlineRun] =
@@ -702,7 +709,31 @@ pure func docxRunColor(rPr: XmlNode) -> string =
   }
 
 pure func docxRunIsFormatted(r: InlineRun) -> bool =
-  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0 || length(r.color) > 0
+  r.bold || r.italic || r.underline || r.strike || r.code || length(r.vertAlign) > 0 || length(r.color) > 0 || length(r.href) > 0
+
+-- A link is semantic run metadata even when Word applies no direct formatting.
+-- Also prove that adding href does not duplicate or move the legacy URL suffix.
+pure func docxHyperlinkRunView(xml: string) -> string
+  tests [
+    ("<w:p xmlns:w=\"w\" xmlns:r=\"r\"><w:hyperlink r:id=\"rId1\"><w:r><w:t>Site</w:t></w:r></w:hyperlink></w:p>",
+     "true;Site->https://example.com| (https://example.com)->"),
+    ("<w:p xmlns:w=\"w\" xmlns:r=\"r\"><w:r><w:t>Visit </w:t></w:r><w:hyperlink r:id=\"rId1\"><w:r><w:rPr><w:b/></w:rPr><w:t>Our</w:t></w:r><w:r><w:t> site</w:t></w:r></w:hyperlink><w:r><w:t>!</w:t></w:r></w:p>",
+     "true;Visit ->|Our->https://example.com*| site->https://example.com| (https://example.com)->|!->"),
+    ("<w:p xmlns:w=\"w\" xmlns:r=\"r\"><w:hyperlink r:id=\"missing\"><w:r><w:t>Unresolved</w:t></w:r></w:hyperlink></w:p>",
+     "true;"),
+    ("<w:p xmlns:w=\"w\"><w:r><w:t>Plain</w:t></w:r></w:p>", "true;")
+  ]
+{
+  match parseLenient(xml) {
+    Ok(p) => {
+      let rels = mapFromList([("rId1", "https://example.com")]);
+      let runs = extractParagraphRuns(p, rels);
+      let sameText = listLength(runs) == 0 || join("", map(\r. r.text, runs)) == extractTextFromChildren(getChildren(p), rels);
+      "${show(sameText)};${join("|", map(\r. "${r.text}->${r.href}${if r.bold then "*" else ""}", runs))}"
+    },
+    Err(_) => "parse error"
+  }
+}
 
 -- ECMA-376 toggle properties: a bare <w:b/> means ON, but <w:b w:val="0"/>
 -- means OFF. Presence alone is not the signal — a paragraph that explicitly

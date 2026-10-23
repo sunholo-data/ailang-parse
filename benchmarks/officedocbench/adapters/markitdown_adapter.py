@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
+from .structure import markdown_output, add_sheet_scopes
 
 
 class MarkItDownAdapter(OfficeDocBenchAdapter):
@@ -38,92 +39,8 @@ class MarkItDownAdapter(OfficeDocBenchAdapter):
         result = md.convert(str(filepath))
         text = result.text_content or ""
 
-        text_elements = []
-        headings = []
-        tables = []
-        images = []
-        lists_out = []
-
-        # Parse markdown line by line
-        lines = text.split("\n")
-        table_rows: list[str] = []
-        in_table = False
-
-        for line in lines:
-            stripped = line.strip()
-
-            if not stripped:
-                # Flush any accumulated table
-                if in_table and table_rows:
-                    tables.append(self._flush_table(table_rows))
-                    table_rows = []
-                    in_table = False
-                continue
-
-            # Table row: starts and contains |
-            if stripped.startswith("|") and "|" in stripped[1:]:
-                # Skip separator rows (|---|---|)
-                cells = [c.strip() for c in stripped.split("|") if c.strip()]
-                if cells and all(set(c) <= {"-", ":", " "} for c in cells):
-                    in_table = True
-                    continue
-                in_table = True
-                table_rows.append(stripped)
-                continue
-
-            # Flush table if we were in one
-            if in_table and table_rows:
-                tables.append(self._flush_table(table_rows))
-                table_rows = []
-                in_table = False
-
-            # Heading
-            if stripped.startswith("#"):
-                level = len(stripped) - len(stripped.lstrip("#"))
-                heading_text = stripped.lstrip("# ").strip()
-                if heading_text:
-                    headings.append({"text": heading_text, "level": min(level, 6)})
-                continue
-
-            # Image
-            img_match = re.match(r"!\[([^\]]*)\]\(([^)]*)\)", stripped)
-            if img_match:
-                images.append({"description": img_match.group(1) or img_match.group(2)})
-                continue
-
-            # Ordered list
-            if re.match(r"^\d+\.\s+", stripped):
-                item_text = re.sub(r"^\d+\.\s+", "", stripped)
-                lists_out.append({"items": [item_text], "ordered": True})
-                continue
-
-            # Unordered list
-            if re.match(r"^[-*+]\s+", stripped):
-                item_text = re.sub(r"^[-*+]\s+", "", stripped)
-                lists_out.append({"items": [item_text], "ordered": False})
-                continue
-
-            # Regular text
-            text_elements.append({"text": stripped, "style": "paragraph"})
-
-        # Flush trailing table
-        if in_table and table_rows:
-            tables.append(self._flush_table(table_rows))
-
-        return {
-            "text_elements": text_elements,
-            "headings": headings,
-            "tables": tables,
-            "track_changes": [],
-            "comments": [],
-            "headers_footers": [],
-            "footnotes": [],
-            "speaker_notes": [],
-            "text_boxes": [],
-            "images": images,
-            "lists": lists_out,
-            "metadata": {},
-        }
+        output = markdown_output(text)
+        return add_sheet_scopes(output) if filepath.suffix.lower() == ".xlsx" else output
 
     def _flush_table(self, rows: list[str]) -> dict[str, Any]:
         """Convert accumulated table rows into adapter schema."""

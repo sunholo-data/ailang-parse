@@ -32,7 +32,7 @@
     if (typeof value === 'number') {
       // Coverage / score / composite — anything ratio-shaped → percentage
       if (value >= 0 && value <= 1 && /composite|coverage|adjusted|score|recall|quality|fidelity|jaccard|count|metadata|detection|fields|fmt/i.test(key)) {
-        return (value * 100).toFixed(0) + '%';
+        return (value * 100).toFixed(1) + '%';
       }
       return String(value);
     }
@@ -84,7 +84,15 @@
     document.querySelectorAll('[data-bench]').forEach(function (el) {
       var path = el.getAttribute('data-bench');
       var value = resolve(summary, path);
-      if (value === undefined || typeof value === 'object') return;
+      if (value === undefined || value === null) {
+        var missingAttr = el.getAttribute('data-bench-attr');
+        var missingStyle = el.getAttribute('data-bench-style');
+        if (missingAttr) el.setAttribute(missingAttr, '0');
+        else if (missingStyle) el.style[missingStyle] = '0%';
+        else el.textContent = '—';
+        return;
+      }
+      if (typeof value === 'object') return;
 
       // data-bench-attr → write raw numeric value (0-100 for ratios) to that attribute.
       // data-bench-style → write percentage string to that CSS style property (e.g. "width").
@@ -92,7 +100,7 @@
       var attrTarget = el.getAttribute('data-bench-attr');
       var styleTarget = el.getAttribute('data-bench-style');
       var pct = (typeof value === 'number' && value >= 0 && value <= 1)
-        ? (value * 100).toFixed(0)
+        ? (value * 100).toFixed(1)
         : null;
 
       if (attrTarget) {
