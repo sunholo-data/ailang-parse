@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Benchmarks — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="OfficeDocBench: 69 files, 11 formats, 7 scoring dimensions, 17 features. AILANG Parse 92% vs Raw OOXML 84.4%, Pandoc 74.0%, Kreuzberg 71.1%, MarkItDown 67.9%, Docling 63.3%, Unstructured 62.1%, LlamaParse 54.4%. Coverage-adjusted: AILANG Parse 92% — nearest competitor 68.0%. Open-source, reproducible.">
+<meta name="description" content="OfficeDocBench v2: 87 files, 11 formats, nine adapters. AILANG Parse 95.6% composite, 87/87 parsed. Source-verified structural fidelity, explicit errors and reproducible results.">
 <meta property="og:title" content="Benchmarks — AILANG Parse">
-<meta property="og:description" content="OfficeDocBench: 69 files, 11 formats, 17 features. AILANG Parse 92% (coverage-adjusted: 92%) vs nearest competitor 68.0%. Includes ECMA-376 spec-driven aspirational targets.">
+<meta property="og:description" content="OfficeDocBench v2: 87 files, 11 formats, nine adapters. AILANG Parse 95.6% composite, 87/87 parsed. Source-verified structural fidelity, explicit errors and reproducible results.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/benchmarks.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -335,17 +335,48 @@
 @media (max-width: 900px) {
   .dp-eval-steps { grid-template-columns: 1fr; }
 }
+
+.dp-docs-content, .dp-bench-section { min-width: 0; }
+.dp-bench-section > div { max-width: 100%; }
+.dp-docs-content p code, .dp-docs-content li code { overflow-wrap: anywhere; white-space: normal; }
 </style>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How does AILANG Parse compare to other document parsers on benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "On OfficeDocBench (69 files, 11 formats, 7 scoring dimensions), AILANG Parse scores 92% composite with 100% format coverage. Coverage-adjusted: 92% vs Kreuzberg 68.0%, LlamaParse 54.4%, Raw OOXML 52.6%, MarkItDown 51.2%, Pandoc 48.2%, Unstructured 38.7%, Docling 38.5%. The benchmark tests 17 features including table merge spans (ECMA-376 §18.3.1.55), track changes, comment ranges (§17.13.1), equations (§22.1), field codes (§17.16), bookmarks (§17.13.6), and section breaks (§17.6)."}},
-    {"@type": "Question", "name": "Is the OfficeDocBench benchmark open source?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The benchmark suite, golden output files, and scoring scripts are all open source. You can run the full comparison on your own machine. The methodology uses structural diff scoring, not text similarity, so it measures actual structural fidelity."}},
-    {"@type": "Question", "name": "Why do Docling and Unstructured score the same on OfficeDocBench?", "acceptedAnswer": {"@type": "Answer", "text": "Both Docling and Unstructured use the same fundamental approach for Office formats: convert to PDF first, then apply ML-based layout detection. Since the same structural information is lost during PDF conversion — merge attributes, track changes, comments — both tools hit the same ceiling. AILANG Parse bypasses this ceiling entirely by reading Office XML directly."}},
-{"@type": "Question", "name": "Why does AILANG Parse score so much higher than competitors?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse is built with an eval-first methodology: structural benchmark tests are defined with hand-verified ground truth, then an AI agent writes parsing code specifically to pass them. Other parsers are hand-coded and then measured independently. The gap reflects different development approaches, not cherry-picked test files. Every result is fully reproducible."}},
-    {"@type": "Question", "name": "How can I submit a document that doesn't parse correctly?", "acceptedAnswer": {"@type": "Answer", "text": "Email it to docparse@sunholo.com. If your document reveals a parsing gap that gets added to the eval corpus, you receive 1 month of Business tier free (worth \u20AC99). You can anonymize content before sending. Any format is accepted."}}
+    {
+      "@type": "Question",
+      "name": "How does AILANG Parse compare to other document parsers on benchmarks?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "OfficeDocBench v2 evaluates nine adapters on 87 files across 11 formats. AILANG Parse scores 95.6% composite and parses 87/87 files. Coverage-adjusted scores and per-feature results are published with versions, errors, and provenance."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the OfficeDocBench benchmark open source?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. The corpus manifest, annotations, source-XML oracle, scoring code, adapters, tests, and per-file results are public. Scoring combines structural checks and text metrics."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why do providers score differently?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Providers expose different structures and support different formats. v2 credits native metadata and structured output where available, including worksheet names and speaker notes. Missing structure and failed files remain visible in the results."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How are benchmark expectations verified?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Sixty-one Office cases have assertions independently derived from source XML with hashes. The remaining annotations are retained from the legacy suite. Corruption tests prove that structural defects reduce the score."
+      }
+    }
   ]
 }
 </script>
@@ -372,7 +403,7 @@
         <a href="#head-to-head" class="active">Head-to-Head</a>
         <a href="#full-suite">Full Suite</a>
         <a href="#performance">Performance</a>
-        <a href="#exclusive-features">Exclusive Features</a>
+        <a href="#exclusive-features">Structural Fidelity</a>
         <a href="#feature-heatmap">Feature Detection Heatmap</a>
         <a href="#what-we-measure">What We Measure</a>
         <a href="#why-ailang">Why AILANG</a>
@@ -391,22 +422,22 @@
   <!-- Top stats -->
   <div class="dp-bench-stats reveal">
     <div class="dp-bench-stat">
-      <div class="dp-bench-stat-val" data-bench="total_files">69</div>
+      <div class="dp-bench-stat-val" data-bench="total_files">87</div>
       <div class="dp-bench-stat-lbl">Test Files</div>
     </div>
     <div class="dp-bench-stat">
-      <div class="dp-bench-stat-val" data-bench="ailang_parse.composite">92%</div>
+      <div class="dp-bench-stat-val" data-bench="ailang_parse.composite">95.6%</div>
       <div class="dp-bench-stat-lbl">Composite Score</div>
-      <div class="dp-bench-stat-sub">7 metrics, 17 features</div>
+      <div class="dp-bench-stat-sub">8 metrics, source assertions</div>
     </div>
     <div class="dp-bench-stat">
-      <div class="dp-bench-stat-val">8</div>
+      <div class="dp-bench-stat-val">9</div>
       <div class="dp-bench-stat-lbl">Parsers Compared</div>
     </div>
-    <div class="dp-bench-stat" title="We intentionally include aspirational scoring dimensions that lower our own score. These are roadmap targets from ECMA-376 spec features we know we should handle.">
-      <div class="dp-bench-stat-val">6.1%</div>
-      <div class="dp-bench-stat-lbl">Roadmap Gap (Honest)</div>
-      <div class="dp-bench-stat-sub">aspirational features that lower our score</div>
+    <div class="dp-bench-stat" title="Gap to a perfect composite score on this corpus.">
+      <div class="dp-bench-stat-val">4.4%</div>
+      <div class="dp-bench-stat-lbl">Measured Gap</div>
+      <div class="dp-bench-stat-sub">remaining measured gaps</div>
     </div>
   </div>
 
@@ -418,206 +449,56 @@
 
   <!-- Head-to-Head: Same Files, Same Formats -->
   <section class="dp-bench-section reveal">
-    <h2 id="head-to-head">Head-to-Head: DOCX Parsing (29 Files)</h2>
-    <p>The fairest comparison: <strong>29 DOCX files</strong> that all 8 tools can parse. Same files, same format, same metrics. No format advantage &mdash; just parsing quality on the most important Office format.</p>
-
-    <div class="dp-bench-callout">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Apples-to-apples.</strong> All scores below are computed on the same 29 DOCX files, including 15 challenge files with <strong>hand-verified ground truth</strong> testing track changes, comments, equations, bookmarks, merged cells, multi-level lists, field codes, footnotes, and formatting. Seven scoring dimensions drawn from ECMA-376 spec references. <em>Run date: 2026-04-06.</em></div>
-    </div>
-
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="dp-results-table">
-      <thead>
-        <tr><th>Tool</th><th>Version</th><th>Composite</th><th>Feat. Det.</th><th>Struct. Quality</th><th>Content Fidelity</th><th>Metadata</th></tr>
-      </thead>
-      <tbody>
-        <tr><td style="font-weight:600">AILANG Parse</td><td>v0.3.0 (AILANG)</td><td class="pass">90.9%</td><td class="pass">89.7%</td><td class="pass">94.2%</td><td class="pass">78.7%</td><td class="pass">99.5%</td></tr>
-        <tr><td>Raw OOXML</td><td>v1.0.0 (stdlib)</td><td>82.4%</td><td>78.1%</td><td>75.5%</td><td>66.0%</td><td class="pass">100.0%</td></tr>
-        <tr><td>Kreuzberg</td><td>v4.7.2 (Rust)</td><td>73.8%</td><td>61.3%</td><td>59.9%</td><td>60.7%</td><td class="pass">87.7%</td></tr>
-        <tr><td>Pandoc</td><td>v3.9.0 (Haskell)</td><td>69.0%</td><td>67.3%</td><td>72.5%</td><td>63.3%</td><td class="fail">9.3%</td></tr>
-        <tr><td>Docling</td><td>v2.84.0 (IBM)</td><td>59.7%</td><td>52.8%</td><td>62.3%</td><td>58.6%</td><td class="fail">0.0%</td></tr>
-        <tr><td>Unstructured</td><td>v0.22.16</td><td>59.8%</td><td>57.1%</td><td>55.7%</td><td>61.2%</td><td class="fail">0.0%</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)">29 DOCX files, 7 scoring dimensions. AILANG Parse leads by 8.5+ points even on pure DOCX. Scores include aspirational dimensions (bookmarks, footnote text, section breaks) that intentionally lower every tool's score &mdash; including ours. Parser versions as of 2026-04-06.</p>
-
-    <div class="dp-bench-callout" style="margin-top:16px">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Why the gap?</strong> AILANG Parse parses Office XML directly &mdash; reading <code>w:tbl</code>, <code>w:p</code>, and <code>w:r</code> nodes from the ZIP archive and mapping them to typed blocks. Raw OOXML (stdlib Python) takes the same XML approach but loses quality on heading levels, author attribution, and list structure. Kreuzberg and Pandoc use intermediate Markdown, dropping track changes, comments, and text boxes entirely. The gap is architectural, not cosmetic.</div>
-    </div>
+    <h2 id="head-to-head">OfficeDocBench v2: compare the same corpus</h2>
+    <p>All nine adapters were run against the same 87 files and annotations. Missing features lose credit, unsupported formats reduce coverage, and provider errors remain visible. Source-derived assertions pin the structural details that earlier text and count checks missed.</p>
+    <p>Version 2 adds 18 Office regression fixtures and verifies 61 cases against original Office XML. The original 69 annotations remain as the legacy component. v1 and v2 percentages use different protocols and are not directly comparable.</p>
   </section>
 
   <hr class="dp-divider">
 
   <!-- Full Suite: OfficeDocBench -->
   <section class="dp-bench-section reveal">
-    <h2 id="full-suite">Full Suite: OfficeDocBench (69 Files, 11 Formats, 7 Metrics)</h2>
-    <p>The full suite spans 11 formats with 54 core files plus 15 challenge files. Scores use 7 weighted metrics including ECMA-376 spec-driven dimensions. <strong>Coverage-Adjusted</strong> = Composite &times; format coverage &mdash; penalizes tools that skip formats.</p>
-
-    <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-radius:8px;background:var(--dp-blue-faded);border:1px solid var(--dp-blue-border);margin-bottom:20px;font-size:13px;color:var(--text-secondary);line-height:1.6">
-      <svg viewBox="0 0 24 24" style="width:18px;height:18px;min-width:18px;margin-top:1px;stroke:var(--dp-blue);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-      <div><strong>Open source.</strong> The full OfficeDocBench suite &mdash; ground truth annotations, scoring scripts, adapter interface, and all parser results &mdash; is available on <a href="https://github.com/sunholo-data/docparse/tree/main/benchmarks/officedocbench" style="color:var(--dp-blue);font-weight:600">GitHub</a>. Run <code>uv run benchmarks/officedocbench/eval_officedocbench.py --all</code> to reproduce every result on this page. Apache 2.0 licensed.</div>
-    </div>
-
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="dp-results-table">
-      <thead>
-        <tr><th>Tool</th><th>Files</th><th>Coverage</th><th>Composite</th><th>Adjusted</th><th>Feat. Det.</th><th>Struct. Quality</th><th>Content Fidelity</th><th>Metadata</th></tr>
-      </thead>
-      <tbody>
-        <tr><td style="font-weight:600">AILANG Parse</td><td>69/69</td><td data-bench="ailang_parse.coverage">100%</td><td data-bench="ailang_parse.composite">92%</td><td data-bench="ailang_parse.adjusted">92%</td><td data-bench="ailang_parse.feature_detection">91.9%</td><td data-bench="ailang_parse.structural_quality">95.3%</td><td data-bench="ailang_parse.content_fidelity">81.4%</td><td data-bench="ailang_parse.metadata">99.6%</td></tr>
-        <tr><td>Kreuzberg</td><td>66/69</td><td data-bench="kreuzberg.coverage">96%</td><td data-bench="kreuzberg.composite">71.3%</td><td data-bench="kreuzberg.adjusted">68.2%</td><td data-bench="kreuzberg.feature_detection">66.8%</td><td data-bench="kreuzberg.structural_quality">63.9%</td><td data-bench="kreuzberg.content_fidelity">61.0%</td><td data-bench="kreuzberg.metadata">86.2%</td></tr>
-        <tr><td>LlamaParse</td><td>69/69</td><td data-bench="llamaparse.coverage">100%</td><td data-bench="llamaparse.composite">54.4%</td><td data-bench="llamaparse.adjusted">54.4%</td><td data-bench="llamaparse.feature_detection">61.0%</td><td data-bench="llamaparse.structural_quality">60.6%</td><td data-bench="llamaparse.content_fidelity">45.0%</td><td data-bench="llamaparse.metadata">17.4%</td></tr>
-        <tr><td>Raw OOXML</td><td>43/69</td><td data-bench="ooxml.coverage">62%</td><td data-bench="ooxml.composite">84.4%</td><td data-bench="ooxml.adjusted">52.6%</td><td data-bench="ooxml.feature_detection">82.0%</td><td data-bench="ooxml.structural_quality">80.3%</td><td data-bench="ooxml.content_fidelity">68.1%</td><td data-bench="ooxml.metadata">100.0%</td></tr>
-        <tr><td>MarkItDown</td><td>52/69</td><td data-bench="markitdown.coverage">75%</td><td data-bench="markitdown.composite">67.9%</td><td data-bench="markitdown.adjusted">51.2%</td><td data-bench="markitdown.feature_detection">72.0%</td><td data-bench="markitdown.structural_quality">73.1%</td><td data-bench="markitdown.content_fidelity">64.6%</td><td data-bench="markitdown.metadata">15.4%</td></tr>
-        <tr><td>Pandoc</td><td>45/69</td><td data-bench="pandoc.coverage">65%</td><td data-bench="pandoc.composite">74.6%</td><td data-bench="pandoc.adjusted">48.6%</td><td data-bench="pandoc.feature_detection">75.7%</td><td data-bench="pandoc.structural_quality">81.2%</td><td data-bench="pandoc.content_fidelity">66.1%</td><td data-bench="pandoc.metadata">24.4%</td></tr>
-        <tr><td>Docling</td><td>42/69</td><td data-bench="docling.coverage">61%</td><td data-bench="docling.composite">64.0%</td><td data-bench="docling.adjusted">38.9%</td><td data-bench="docling.feature_detection">61.3%</td><td data-bench="docling.structural_quality">72.2%</td><td data-bench="docling.content_fidelity">61.4%</td><td data-bench="docling.metadata">2.4%</td></tr>
-        <tr><td>Unstructured</td><td>43/69</td><td data-bench="unstructured.coverage">62%</td><td data-bench="unstructured.composite">62.1%</td><td data-bench="unstructured.adjusted">38.7%</td><td data-bench="unstructured.feature_detection">62.4%</td><td data-bench="unstructured.structural_quality">62.4%</td><td data-bench="unstructured.content_fidelity">61.8%</td><td data-bench="unstructured.metadata">2.3%</td></tr>
-        <tr><td>LiteParse</td><td>56/69</td><td data-bench="liteparse.coverage">81%</td><td data-bench="liteparse.composite">22.0%</td><td data-bench="liteparse.adjusted">17.9%</td><td data-bench="liteparse.feature_detection">8.9%</td><td data-bench="liteparse.structural_quality">18.1%</td><td data-bench="liteparse.content_fidelity">39.9%</td><td data-bench="liteparse.metadata">7.1%</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)">Coverage-Adjusted = Composite &times; (files parsed / total files). Raw OOXML scores 84.4% on the 43 files it can parse, but only covers 62% of the benchmark. AILANG Parse and LlamaParse are the only tools with 100% format coverage; AILANG Parse leads on every dimension. Run date: <span data-bench="run_date">2026-04-08</span>.</p>
-
-    <h3 style="font-family:var(--font-display);font-size:17px;font-weight:700;margin:20px 0 12px">Per-Format Breakdown (AILANG Parse)</h3>
-    <div class="dp-format-breakdown">
-      <div class="dp-format-chip"><div class="dp-format-chip-ext">DOCX</div><div class="dp-format-chip-count">29 files</div><div class="dp-format-chip-status">90.9%</div></div>
-      <div class="dp-format-chip"><div class="dp-format-chip-ext">PPTX</div><div class="dp-format-chip-count">8 files</div><div class="dp-format-chip-status">94.4%</div></div>
-      <div class="dp-format-chip"><div class="dp-format-chip-ext">XLSX</div><div class="dp-format-chip-count">6 files</div><div class="dp-format-chip-status">96.3%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">ODT</div><div class="dp-format-chip-count">6 files</div><div class="dp-format-chip-status">92%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">ODP</div><div class="dp-format-chip-count">2 files</div><div class="dp-format-chip-status">97.7%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">ODS</div><div class="dp-format-chip-count">4 files</div><div class="dp-format-chip-status">100%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">EPUB</div><div class="dp-format-chip-count">3 files</div><div class="dp-format-chip-status">98.5%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">HTML</div><div class="dp-format-chip-count">5 files</div><div class="dp-format-chip-status">94.2%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">CSV</div><div class="dp-format-chip-count">2 files</div><div class="dp-format-chip-status">100%</div></div>
-      <div class="dp-format-chip" style="border-color:var(--dp-blue-border)"><div class="dp-format-chip-ext">MD</div><div class="dp-format-chip-count">3 files</div><div class="dp-format-chip-status">97.7%</div></div>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)">DOCX score drops to 90.9% due to aspirational metrics (bookmarks, footnotes, section breaks, hyperlinks). Scores below 100% represent real roadmap targets. Formats with blue borders are not supported by most competitors.</p>
+    <h2 id="full-suite">Full Suite: OfficeDocBench v2 (87 Files, 11 Formats, 8 Metrics)</h2>
+    <p>Composite averages the successfully parsed cases. Coverage-adjusted score counts failed and unsupported cases as zero. Compare both columns; the per-feature breakdown below shows which structural details survive extraction.</p>
+<div style="overflow-x:auto"><table class="dp-results-table"><thead><tr><th>Provider</th><th>Version</th><th>Files parsed</th><th>Errors</th><th>Coverage</th><th>Composite</th><th>Adjusted</th><th>Structural fidelity</th></tr></thead><tbody><tr><td>AILANG Parse</td><td><span data-bench="ailang_parse.version">0.52.2</span></td><td><span data-bench="ailang_parse.files_ok">87</span>/<span data-bench="ailang_parse.files_total">87</span></td><td><span data-bench="ailang_parse.errors">0</span></td><td><span data-bench="ailang_parse.coverage">100.0%</span></td><td><span data-bench="ailang_parse.composite">95.6%</span></td><td><span data-bench="ailang_parse.adjusted">95.6%</span></td><td><span data-bench="ailang_parse.structural_fidelity">95.7%</span></td></tr><tr><td>Kreuzberg</td><td><span data-bench="kreuzberg.version">4.10.4</span></td><td><span data-bench="kreuzberg.files_ok">82</span>/<span data-bench="kreuzberg.files_total">87</span></td><td><span data-bench="kreuzberg.errors">5</span></td><td><span data-bench="kreuzberg.coverage">94.2%</span></td><td><span data-bench="kreuzberg.composite">68.0%</span></td><td><span data-bench="kreuzberg.adjusted">64.1%</span></td><td><span data-bench="kreuzberg.structural_fidelity">37.7%</span></td></tr><tr><td>Docling</td><td><span data-bench="docling.version">2.142.1</span></td><td><span data-bench="docling.files_ok">83</span>/<span data-bench="docling.files_total">87</span></td><td><span data-bench="docling.errors">3</span></td><td><span data-bench="docling.coverage">95.4%</span></td><td><span data-bench="docling.composite">64.6%</span></td><td><span data-bench="docling.adjusted">61.6%</span></td><td><span data-bench="docling.structural_fidelity">46.5%</span></td></tr><tr><td>LlamaParse (standard)</td><td><span data-bench="llamaparse.version">0.6.94</span></td><td><span data-bench="llamaparse.files_ok">83</span>/<span data-bench="llamaparse.files_total">87</span></td><td><span data-bench="llamaparse.errors">4</span></td><td><span data-bench="llamaparse.coverage">95.4%</span></td><td><span data-bench="llamaparse.composite">61.7%</span></td><td><span data-bench="llamaparse.adjusted">58.9%</span></td><td><span data-bench="llamaparse.structural_fidelity">42.8%</span></td></tr><tr><td>Unstructured</td><td><span data-bench="unstructured.version">0.27.34</span></td><td><span data-bench="unstructured.files_ok">76</span>/<span data-bench="unstructured.files_total">87</span></td><td><span data-bench="unstructured.errors">5</span></td><td><span data-bench="unstructured.coverage">87.4%</span></td><td><span data-bench="unstructured.composite">58.9%</span></td><td><span data-bench="unstructured.adjusted">51.4%</span></td><td><span data-bench="unstructured.structural_fidelity">30.8%</span></td></tr><tr><td>Raw OOXML</td><td><span data-bench="ooxml.version">2.0.0-stdlib</span></td><td><span data-bench="ooxml.files_ok">60</span>/<span data-bench="ooxml.files_total">87</span></td><td><span data-bench="ooxml.errors">1</span></td><td><span data-bench="ooxml.coverage">69.0%</span></td><td><span data-bench="ooxml.composite">69.9%</span></td><td><span data-bench="ooxml.adjusted">48.2%</span></td><td><span data-bench="ooxml.structural_fidelity">45.2%</span></td></tr><tr><td>MarkItDown</td><td><span data-bench="markitdown.version">0.1.5</span></td><td><span data-bench="markitdown.files_ok">69</span>/<span data-bench="markitdown.files_total">87</span></td><td><span data-bench="markitdown.errors">2</span></td><td><span data-bench="markitdown.coverage">79.3%</span></td><td><span data-bench="markitdown.composite">58.0%</span></td><td><span data-bench="markitdown.adjusted">46.0%</span></td><td><span data-bench="markitdown.structural_fidelity">27.5%</span></td></tr><tr><td>Pandoc</td><td><span data-bench="pandoc.version">3.12.1</span></td><td><span data-bench="pandoc.files_ok">49</span>/<span data-bench="pandoc.files_total">87</span></td><td><span data-bench="pandoc.errors">1</span></td><td><span data-bench="pandoc.coverage">56.3%</span></td><td><span data-bench="pandoc.composite">62.7%</span></td><td><span data-bench="pandoc.adjusted">35.3%</span></td><td><span data-bench="pandoc.structural_fidelity">16.8%</span></td></tr><tr><td>LiteParse</td><td><span data-bench="liteparse.version">2.17.0</span></td><td><span data-bench="liteparse.files_ok">70</span>/<span data-bench="liteparse.files_total">87</span></td><td><span data-bench="liteparse.errors">6</span></td><td><span data-bench="liteparse.coverage">80.5%</span></td><td><span data-bench="liteparse.composite">35.6%</span></td><td><span data-bench="liteparse.adjusted">28.7%</span></td><td><span data-bench="liteparse.structural_fidelity">6.3%</span></td></tr></tbody></table></div>
+    <p>Run date: <span data-bench="run_date">2026-10-23</span>. LlamaParse used standard non-premium mode. Its client version and all configurations, input/scorer hashes, original parse timestamps, and rescore provenance are recorded in the <a href="https://github.com/sunholo-data/ailang-parse/tree/main/benchmarks/officedocbench/results">per-file results</a>. Conversion failures are retained, including LlamaParse’s EPUB and minimal Office-file failures.</p>
+    <p>One minimal XLSX fixture intentionally lacks workbook relationships and is labeled as a recovery case. Source verification and legacy annotations are distinguished in the <a href="https://github.com/sunholo-data/ailang-parse/tree/main/benchmarks/officedocbench/README.md">methodology</a>.</p>
   </section>
 
   <hr class="dp-divider">
 
   <!-- Performance -->
   <section class="dp-bench-section reveal">
-    <h2 id="performance">Performance: Folder Parsing</h2>
-    <p>Real-world use case: parse a folder of <strong><span data-bench="folder_benchmark.total_files">58</span> mixed Office documents</strong> (<span data-bench="folder_benchmark.total_size_mb">22.9</span>MB across <span data-bench="folder_benchmark.formats">11</span> formats, including a 10MB DOCX and 11MB PPTX). AILANG Parse uses <strong>batch mode</strong> &mdash; compile once, parse all files &mdash; matching how <code>docparse ~/Documents/</code> works in practice.</p>
-
-    <div class="dp-bench-callout">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Fair comparison.</strong> Python-native tools (Kreuzberg, MarkItDown, Docling) run in-process with zero startup cost. AILANG Parse and Pandoc are subprocess-based. The total time reflects what users actually experience when parsing a folder. All tools tested on the same files, same machine.</div>
-    </div>
-
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="dp-results-table">
-      <thead>
-        <tr><th>Tool</th><th>Files Parsed</th><th>Total Time</th><th>Per File</th><th>Quality (Composite)</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Kreuzberg</td><td>55/58</td><td>318ms</td><td>6ms</td><td data-bench="kreuzberg.composite">71.3%</td></tr>
-        <tr><td>MarkItDown</td><td>46/58</td><td>905ms</td><td>20ms</td><td data-bench="markitdown.composite">67.9%</td></tr>
-        <tr style="font-weight:600"><td>AILANG Parse</td><td class="pass">58/58</td><td>2.54s</td><td>44ms</td><td class="pass" data-bench="ailang_parse.composite">92%</td></tr>
-        <tr><td>Unstructured</td><td>39/58</td><td>3.46s</td><td>89ms</td><td data-bench="unstructured.composite">62.1%</td></tr>
-        <tr><td>Pandoc</td><td>51/58</td><td>3.64s</td><td>71ms</td><td data-bench="pandoc.composite">74.6%</td></tr>
-        <tr><td>Docling</td><td>42/58</td><td>8.64s</td><td>206ms</td><td data-bench="docling.composite">64.0%</td></tr>
-        <tr><td>LiteParse</td><td>56/69</td><td>120s</td><td>2.1s</td><td class="fail" data-bench="liteparse.composite">22.0%</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)"><span data-bench="folder_benchmark.total_files">58</span> files across 11 formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, EPUB, HTML, Markdown, CSV, TSV). AILANG Parse is the only tool that parses all files. LlamaParse omitted (API-based, timing reflects network latency). Run date: <span data-bench="folder_benchmark.run_date">2026-04-10</span>.</p>
-
-    <div class="dp-bench-callout" style="margin-top:16px">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>No quality compromise.</strong> The fastest tools (Kreuzberg 318ms, MarkItDown 905ms) fail on 3&ndash;12 files and score 20+ points lower on structural quality. AILANG Parse parses every file at 92% composite &mdash; competitive speed without sacrificing extraction quality. See our <a href="performance.html" style="color:#16a34a;font-weight:600">performance guide</a> for tuning tips.</div>
-    </div>
+    <h2 id="performance">Parsing times and configuration</h2>
+    <p>Per-file results retain observed parsing times. AILANG Parse uses an amortized batch invocation, local providers have their own initialization costs, and LlamaParse includes upload and polling latency. These operational timings are recorded separately from quality scores. Cached rescoring preserves the original parse timestamps and does not report cache reads as fresh parsing latency.</p>
   </section>
 
   <hr class="dp-divider">
 
   <!-- Exclusive Features -->
   <section class="dp-bench-section reveal">
-    <h2 id="exclusive-features">Exclusive Features <span class="dp-exclusive-badge">AILANG Parse Only</span></h2>
-    <p>These structural features are extracted by AILANG Parse but <strong>missed by most or all other parsers tested</strong>. They represent real capabilities that matter for document understanding &mdash; and they're why the composite gap exists.</p>
-
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="dp-results-table">
-      <thead>
-        <tr><th>Feature</th><th>AILANG Parse</th><th>Raw OOXML</th><th>Pandoc</th><th>Kreuzberg</th><th>Others</th><th>Why It Matters</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Track Changes</td><td class="pass">3/3</td><td class="partial">2/3</td><td class="pass">3/3</td><td class="fail">0/3</td><td class="fail">0/3</td><td style="font-size:12px">Legal review, contract redlining, audit trails</td></tr>
-        <tr><td>Comments</td><td class="pass">2/2</td><td class="pass">2/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td style="font-size:12px">Review feedback, annotation extraction</td></tr>
-        <tr><td>Headers/Footers</td><td class="pass">3/3</td><td class="partial">2/2</td><td class="fail">0/3</td><td class="partial">2/3</td><td class="fail">0&ndash;1</td><td style="font-size:12px">Document metadata, page numbering, letterheads</td></tr>
-        <tr><td>Text Boxes</td><td class="pass">2/2</td><td class="partial">1/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td style="font-size:12px">Callouts, sidebars, floating content</td></tr>
-        <tr><td>Equations (&sect;22.1)</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td style="font-size:12px">OMML math content extraction</td></tr>
-        <tr><td>Field Codes (&sect;17.16)</td><td class="pass">1/1</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="pass">1/1</td><td class="fail">0/1</td><td style="font-size:12px">Dates, page counts, cross-references</td></tr>
-        <tr><td>Merged Cells</td><td class="pass">Yes</td><td class="pass">Yes</td><td class="fail">No</td><td class="fail">No</td><td class="fail">No</td><td style="font-size:12px">Complex tables, financial reports, schedules</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)">Raw OOXML and Pandoc detect some features through XML/AST access, but miss others. No tool detects footnotes, bookmarks, section breaks, hyperlinks, or styles yet &mdash; these are aspirational targets for all.</p>
+    <h2 id="exclusive-features">Structural fidelity by feature</h2>
+    <p>Each cell is the mean over parsed cases that have assertions for that feature. An absent mapping scores zero; it is never reconstructed from the source document. Consult coverage above alongside these conditional means.</p>
+<div style="overflow-x:auto"><table class="dp-results-table"><thead><tr><th>Source-verified feature</th><th>AILANG Parse</th><th>Kreuzberg</th><th>Docling</th><th>LlamaParse</th><th>Unstructured</th><th>Raw OOXML</th><th>MarkItDown</th><th>Pandoc</th><th>LiteParse</th></tr></thead><tbody><tr><td>Bookmarks</td><td><span data-bench="ailang_parse.structural_features.bookmarks.score">100.0%</span></td><td><span data-bench="kreuzberg.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="docling.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="llamaparse.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="unstructured.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="ooxml.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="markitdown.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="pandoc.structural_features.bookmarks.score">0.0%</span></td><td><span data-bench="liteparse.structural_features.bookmarks.score">0.0%</span></td></tr><tr><td>Section breaks</td><td><span data-bench="ailang_parse.structural_features.breaks.score">100.0%</span></td><td><span data-bench="kreuzberg.structural_features.breaks.score">0.0%</span></td><td><span data-bench="docling.structural_features.breaks.score">0.0%</span></td><td><span data-bench="llamaparse.structural_features.breaks.score">0.0%</span></td><td><span data-bench="unstructured.structural_features.breaks.score">0.0%</span></td><td><span data-bench="ooxml.structural_features.breaks.score">0.0%</span></td><td><span data-bench="markitdown.structural_features.breaks.score">0.0%</span></td><td><span data-bench="pandoc.structural_features.breaks.score">0.0%</span></td><td><span data-bench="liteparse.structural_features.breaks.score">0.0%</span></td></tr><tr><td>Comment targets and attribution</td><td><span data-bench="ailang_parse.structural_features.comment_anchors.score">100.0%</span></td><td><span data-bench="kreuzberg.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="docling.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="llamaparse.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="unstructured.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="ooxml.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="markitdown.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="pandoc.structural_features.comment_anchors.score">0.0%</span></td><td><span data-bench="liteparse.structural_features.comment_anchors.score">0.0%</span></td></tr><tr><td>Sheet / slide identity and order</td><td><span data-bench="ailang_parse.structural_features.containers.score">99.1%</span></td><td><span data-bench="kreuzberg.structural_features.containers.score">82.0%</span></td><td><span data-bench="docling.structural_features.containers.score">100.0%</span></td><td><span data-bench="llamaparse.structural_features.containers.score">91.0%</span></td><td><span data-bench="unstructured.structural_features.containers.score">59.3%</span></td><td><span data-bench="ooxml.structural_features.containers.score">97.2%</span></td><td><span data-bench="markitdown.structural_features.containers.score">59.3%</span></td><td><span data-bench="pandoc.structural_features.containers.score">—</span></td><td><span data-bench="liteparse.structural_features.containers.score">0.0%</span></td></tr><tr><td>Link text and target</td><td><span data-bench="ailang_parse.structural_features.hyperlinks.score">0.0%</span></td><td><span data-bench="kreuzberg.structural_features.hyperlinks.score">0.0%</span></td><td><span data-bench="docling.structural_features.hyperlinks.score">46.4%</span></td><td><span data-bench="llamaparse.structural_features.hyperlinks.score">0.0%</span></td><td><span data-bench="unstructured.structural_features.hyperlinks.score">75.0%</span></td><td><span data-bench="ooxml.structural_features.hyperlinks.score">0.0%</span></td><td><span data-bench="markitdown.structural_features.hyperlinks.score">46.4%</span></td><td><span data-bench="pandoc.structural_features.hyperlinks.score">100.0%</span></td><td><span data-bench="liteparse.structural_features.hyperlinks.score">10.7%</span></td></tr><tr><td>List type and depth</td><td><span data-bench="ailang_parse.structural_features.list_items.score">80.0%</span></td><td><span data-bench="kreuzberg.structural_features.list_items.score">20.0%</span></td><td><span data-bench="docling.structural_features.list_items.score">80.0%</span></td><td><span data-bench="llamaparse.structural_features.list_items.score">45.7%</span></td><td><span data-bench="unstructured.structural_features.list_items.score">0.0%</span></td><td><span data-bench="ooxml.structural_features.list_items.score">0.0%</span></td><td><span data-bench="markitdown.structural_features.list_items.score">29.2%</span></td><td><span data-bench="pandoc.structural_features.list_items.score">29.2%</span></td><td><span data-bench="liteparse.structural_features.list_items.score">29.2%</span></td></tr><tr><td>Speaker notes on the correct slide</td><td><span data-bench="ailang_parse.structural_features.notes.score">100.0%</span></td><td><span data-bench="kreuzberg.structural_features.notes.score">0.0%</span></td><td><span data-bench="docling.structural_features.notes.score">0.0%</span></td><td><span data-bench="llamaparse.structural_features.notes.score">94.4%</span></td><td><span data-bench="unstructured.structural_features.notes.score">0.0%</span></td><td><span data-bench="ooxml.structural_features.notes.score">0.0%</span></td><td><span data-bench="markitdown.structural_features.notes.score">0.0%</span></td><td><span data-bench="pandoc.structural_features.notes.score">—</span></td><td><span data-bench="liteparse.structural_features.notes.score">0.0%</span></td></tr><tr><td>Inline formatting</td><td><span data-bench="ailang_parse.structural_features.runs.score">90.9%</span></td><td><span data-bench="kreuzberg.structural_features.runs.score">31.8%</span></td><td><span data-bench="docling.structural_features.runs.score">34.7%</span></td><td><span data-bench="llamaparse.structural_features.runs.score">12.3%</span></td><td><span data-bench="unstructured.structural_features.runs.score">20.8%</span></td><td><span data-bench="ooxml.structural_features.runs.score">31.5%</span></td><td><span data-bench="markitdown.structural_features.runs.score">32.6%</span></td><td><span data-bench="pandoc.structural_features.runs.score">17.9%</span></td><td><span data-bench="liteparse.structural_features.runs.score">21.5%</span></td></tr><tr><td>Cell positions, merges, formulas and colours</td><td><span data-bench="ailang_parse.structural_features.table_cells.score">97.6%</span></td><td><span data-bench="kreuzberg.structural_features.table_cells.score">86.8%</span></td><td><span data-bench="docling.structural_features.table_cells.score">81.6%</span></td><td><span data-bench="llamaparse.structural_features.table_cells.score">78.2%</span></td><td><span data-bench="unstructured.structural_features.table_cells.score">78.1%</span></td><td><span data-bench="ooxml.structural_features.table_cells.score">90.6%</span></td><td><span data-bench="markitdown.structural_features.table_cells.score">54.5%</span></td><td><span data-bench="pandoc.structural_features.table_cells.score">88.8%</span></td><td><span data-bench="liteparse.structural_features.table_cells.score">19.7%</span></td></tr></tbody></table></div>
   </section>
 
   <hr class="dp-divider">
 
   <!-- Shared Features: Feature Detection Heatmap -->
   <section class="dp-bench-section reveal">
-    <h2 id="feature-heatmap">Feature Detection Heatmap (17 Features)</h2>
-    <p>Feature-by-feature detection across all 69 test files. Fractions show files where the feature was correctly detected out of files where it should be present. Features marked <span class="dp-exclusive-badge" style="margin:0">ASPIRATIONAL</span> are ECMA-376 spec targets that no tool handles yet.</p>
-
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="dp-results-table">
-      <thead>
-        <tr><th>Feature</th><th>AILANG Parse</th><th>Raw OOXML</th><th>Pandoc</th><th>Kreuzberg</th><th>MarkItDown</th><th>Unstructured</th><th>Docling</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Headings</td><td class="pass">30/30</td><td class="pass">21/21</td><td>22/23</td><td>24/29</td><td class="pass">9/9</td><td>20/21</td><td>20/21</td></tr>
-        <tr><td>Tables</td><td class="pass">36/36</td><td class="pass">16/16</td><td>18/18</td><td>29/34</td><td class="pass">17/17</td><td>9/10</td><td>13/15</td></tr>
-        <tr><td>Track Changes</td><td class="pass">3/3</td><td class="partial">2/3</td><td class="pass">3/3</td><td class="fail">0/3</td><td class="na">&mdash;</td><td class="fail">0/3</td><td class="fail">0/3</td></tr>
-        <tr><td>Comments</td><td class="pass">2/2</td><td class="pass">2/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="na">&mdash;</td><td class="fail">0/2</td><td class="fail">0/2</td></tr>
-        <tr><td>Headers/Footers</td><td class="pass">3/3</td><td class="partial">2/2</td><td class="fail">0/3</td><td class="partial">2/3</td><td class="na">&mdash;</td><td class="partial">1/2</td><td class="fail">0/2</td></tr>
-        <tr><td>Text Boxes</td><td class="pass">2/2</td><td class="partial">1/2</td><td class="fail">0/2</td><td class="fail">0/2</td><td class="na">&mdash;</td><td class="fail">0/2</td><td class="fail">0/2</td></tr>
-        <tr><td>Images</td><td class="pass">7/8</td><td class="partial">3/4</td><td class="pass">5/5</td><td class="partial">3/7</td><td class="partial">2/3</td><td class="fail">0/4</td><td class="partial">2/4</td></tr>
-        <tr><td>Lists</td><td class="pass">15/15</td><td class="fail">1/4</td><td>11/12</td><td>8/13</td><td class="pass">4/4</td><td>4/4</td><td>1/4</td></tr>
-        <tr><td>Sheet Names</td><td>4/5</td><td>1/1</td><td class="na">&mdash;</td><td class="pass">4/4</td><td>0/1</td><td class="na">&mdash;</td><td>0/1</td></tr>
-        <tr><td>Equations (&sect;22.1)</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="na">&mdash;</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr><td>Field Codes (&sect;17.16)</td><td class="pass">1/1</td><td class="pass">1/1</td><td class="fail">0/1</td><td class="pass">1/1</td><td class="na">&mdash;</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr style="background:rgba(168,85,247,0.04)"><td>Footnotes <span class="dp-exclusive-badge" style="margin:0;font-size:8px">ASPIRATIONAL</span></td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="na">&mdash;</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr style="background:rgba(168,85,247,0.04)"><td>Hyperlinks <span class="dp-exclusive-badge" style="margin:0;font-size:8px">ASPIRATIONAL</span></td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="na">&mdash;</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr style="background:rgba(168,85,247,0.04)"><td>Styles <span class="dp-exclusive-badge" style="margin:0;font-size:8px">ASPIRATIONAL</span></td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="na">&mdash;</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr style="background:rgba(168,85,247,0.04)"><td>Bookmarks (&sect;17.13.6) <span class="dp-exclusive-badge" style="margin:0;font-size:8px">ASPIRATIONAL</span></td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="fail">0/1</td><td class="na">&mdash;</td><td class="fail">0/1</td><td class="fail">0/1</td></tr>
-        <tr style="background:rgba(168,85,247,0.04)"><td>Section Breaks (&sect;17.6) <span class="dp-exclusive-badge" style="margin:0;font-size:8px">ASPIRATIONAL</span></td><td class="fail">0/8</td><td class="fail">0/8</td><td class="fail">0/8</td><td class="fail">0/8</td><td class="na">&mdash;</td><td class="fail">0/8</td><td class="fail">0/8</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)">Aspirational features (purple rows) are ECMA-376 spec-referenced targets that intentionally lower every tool's score. They represent the next frontier &mdash; features that <em>should</em> be extracted but currently aren't by any parser. AILANG Parse uniquely detects equations and leads on track changes, comments, headers/footers, text boxes, and lists.</p>
+    <h2 id="shared-features">Per-format composite scores</h2>
+<div style="overflow-x:auto"><table class="dp-results-table"><thead><tr><th>Format</th><th>AILANG Parse</th><th>Kreuzberg</th><th>Docling</th><th>LlamaParse</th><th>Unstructured</th><th>Raw OOXML</th><th>MarkItDown</th><th>Pandoc</th><th>LiteParse</th></tr></thead><tbody><tr><td>CSV</td><td><span data-bench="ailang_parse.per_format.csv.composite">98.5%</span></td><td><span data-bench="kreuzberg.per_format.csv.composite">98.5%</span></td><td><span data-bench="docling.per_format.csv.composite">98.5%</span></td><td><span data-bench="llamaparse.per_format.csv.composite">98.5%</span></td><td><span data-bench="unstructured.per_format.csv.composite">98.3%</span></td><td><span data-bench="ooxml.per_format.csv.composite">—</span></td><td><span data-bench="markitdown.per_format.csv.composite">100.0%</span></td><td><span data-bench="pandoc.per_format.csv.composite">—</span></td><td><span data-bench="liteparse.per_format.csv.composite">88.7%</span></td></tr><tr><td>DOCX</td><td><span data-bench="ailang_parse.per_format.docx.composite">94.4%</span></td><td><span data-bench="kreuzberg.per_format.docx.composite">55.8%</span></td><td><span data-bench="docling.per_format.docx.composite">48.1%</span></td><td><span data-bench="llamaparse.per_format.docx.composite">43.3%</span></td><td><span data-bench="unstructured.per_format.docx.composite">46.7%</span></td><td><span data-bench="ooxml.per_format.docx.composite">61.0%</span></td><td><span data-bench="markitdown.per_format.docx.composite">42.3%</span></td><td><span data-bench="pandoc.per_format.docx.composite">52.6%</span></td><td><span data-bench="liteparse.per_format.docx.composite">43.7%</span></td></tr><tr><td>EPUB</td><td><span data-bench="ailang_parse.per_format.epub.composite">98.0%</span></td><td><span data-bench="kreuzberg.per_format.epub.composite">71.9%</span></td><td><span data-bench="docling.per_format.epub.composite">79.0%</span></td><td><span data-bench="llamaparse.per_format.epub.composite">72.5%</span></td><td><span data-bench="unstructured.per_format.epub.composite">79.6%</span></td><td><span data-bench="ooxml.per_format.epub.composite">—</span></td><td><span data-bench="markitdown.per_format.epub.composite">79.6%</span></td><td><span data-bench="pandoc.per_format.epub.composite">98.2%</span></td><td><span data-bench="liteparse.per_format.epub.composite">—</span></td></tr><tr><td>HTML</td><td><span data-bench="ailang_parse.per_format.html.composite">90.3%</span></td><td><span data-bench="kreuzberg.per_format.html.composite">74.9%</span></td><td><span data-bench="docling.per_format.html.composite">84.9%</span></td><td><span data-bench="llamaparse.per_format.html.composite">82.8%</span></td><td><span data-bench="unstructured.per_format.html.composite">85.3%</span></td><td><span data-bench="ooxml.per_format.html.composite">—</span></td><td><span data-bench="markitdown.per_format.html.composite">83.7%</span></td><td><span data-bench="pandoc.per_format.html.composite">88.6%</span></td><td><span data-bench="liteparse.per_format.html.composite">—</span></td></tr><tr><td>MD</td><td><span data-bench="ailang_parse.per_format.md.composite">97.7%</span></td><td><span data-bench="kreuzberg.per_format.md.composite">73.0%</span></td><td><span data-bench="docling.per_format.md.composite">67.7%</span></td><td><span data-bench="llamaparse.per_format.md.composite">88.6%</span></td><td><span data-bench="unstructured.per_format.md.composite">67.5%</span></td><td><span data-bench="ooxml.per_format.md.composite">—</span></td><td><span data-bench="markitdown.per_format.md.composite">—</span></td><td><span data-bench="pandoc.per_format.md.composite">82.3%</span></td><td><span data-bench="liteparse.per_format.md.composite">—</span></td></tr><tr><td>ODP</td><td><span data-bench="ailang_parse.per_format.odp.composite">99.0%</span></td><td><span data-bench="kreuzberg.per_format.odp.composite">—</span></td><td><span data-bench="docling.per_format.odp.composite">75.4%</span></td><td><span data-bench="llamaparse.per_format.odp.composite">52.0%</span></td><td><span data-bench="unstructured.per_format.odp.composite">—</span></td><td><span data-bench="ooxml.per_format.odp.composite">—</span></td><td><span data-bench="markitdown.per_format.odp.composite">—</span></td><td><span data-bench="pandoc.per_format.odp.composite">—</span></td><td><span data-bench="liteparse.per_format.odp.composite">55.4%</span></td></tr><tr><td>ODS</td><td><span data-bench="ailang_parse.per_format.ods.composite">100.0%</span></td><td><span data-bench="kreuzberg.per_format.ods.composite">72.2%</span></td><td><span data-bench="docling.per_format.ods.composite">64.4%</span></td><td><span data-bench="llamaparse.per_format.ods.composite">59.7%</span></td><td><span data-bench="unstructured.per_format.ods.composite">—</span></td><td><span data-bench="ooxml.per_format.ods.composite">—</span></td><td><span data-bench="markitdown.per_format.ods.composite">—</span></td><td><span data-bench="pandoc.per_format.ods.composite">—</span></td><td><span data-bench="liteparse.per_format.ods.composite">35.2%</span></td></tr><tr><td>ODT</td><td><span data-bench="ailang_parse.per_format.odt.composite">94.2%</span></td><td><span data-bench="kreuzberg.per_format.odt.composite">76.8%</span></td><td><span data-bench="docling.per_format.odt.composite">64.5%</span></td><td><span data-bench="llamaparse.per_format.odt.composite">41.5%</span></td><td><span data-bench="unstructured.per_format.odt.composite">72.0%</span></td><td><span data-bench="ooxml.per_format.odt.composite">—</span></td><td><span data-bench="markitdown.per_format.odt.composite">—</span></td><td><span data-bench="pandoc.per_format.odt.composite">70.0%</span></td><td><span data-bench="liteparse.per_format.odt.composite">51.4%</span></td></tr><tr><td>PPTX</td><td><span data-bench="ailang_parse.per_format.pptx.composite">97.0%</span></td><td><span data-bench="kreuzberg.per_format.pptx.composite">57.0%</span></td><td><span data-bench="docling.per_format.pptx.composite">63.7%</span></td><td><span data-bench="llamaparse.per_format.pptx.composite">67.3%</span></td><td><span data-bench="unstructured.per_format.pptx.composite">34.1%</span></td><td><span data-bench="ooxml.per_format.pptx.composite">69.7%</span></td><td><span data-bench="markitdown.per_format.pptx.composite">40.2%</span></td><td><span data-bench="pandoc.per_format.pptx.composite">—</span></td><td><span data-bench="liteparse.per_format.pptx.composite">34.7%</span></td></tr><tr><td>TSV</td><td><span data-bench="ailang_parse.per_format.tsv.composite">100.0%</span></td><td><span data-bench="kreuzberg.per_format.tsv.composite">97.5%</span></td><td><span data-bench="docling.per_format.tsv.composite">—</span></td><td><span data-bench="llamaparse.per_format.tsv.composite">100.0%</span></td><td><span data-bench="unstructured.per_format.tsv.composite">97.5%</span></td><td><span data-bench="ooxml.per_format.tsv.composite">—</span></td><td><span data-bench="markitdown.per_format.tsv.composite">—</span></td><td><span data-bench="pandoc.per_format.tsv.composite">—</span></td><td><span data-bench="liteparse.per_format.tsv.composite">11.4%</span></td></tr><tr><td>XLSX</td><td><span data-bench="ailang_parse.per_format.xlsx.composite">96.4%</span></td><td><span data-bench="kreuzberg.per_format.xlsx.composite">87.8%</span></td><td><span data-bench="docling.per_format.xlsx.composite">82.8%</span></td><td><span data-bench="llamaparse.per_format.xlsx.composite">83.1%</span></td><td><span data-bench="unstructured.per_format.xlsx.composite">76.6%</span></td><td><span data-bench="ooxml.per_format.xlsx.composite">86.8%</span></td><td><span data-bench="markitdown.per_format.xlsx.composite">84.6%</span></td><td><span data-bench="pandoc.per_format.xlsx.composite">—</span></td><td><span data-bench="liteparse.per_format.xlsx.composite">13.4%</span></td></tr></tbody></table></div>
   </section>
 
   <hr class="dp-divider">
 
   <!-- What We Measure -->
   <section class="dp-bench-section reveal">
-    <h2 id="what-we-measure">What We Measure: 7 Scoring Dimensions</h2>
-    <p>OfficeDocBench uses 7 weighted scoring dimensions, many driven by ECMA-376 spec references. Each dimension scores [0, 1] and the composite is a weighted average. Aspirational sub-dimensions intentionally score 0 when ground truth data exists but no parser handles the feature yet.</p>
-
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="dp-results-table">
-      <thead>
-        <tr><th>Dimension</th><th>Weight</th><th>What It Tests</th><th>Spec References</th></tr>
-      </thead>
-      <tbody>
-        <tr><td style="font-weight:600">Feature Detection</td><td>15%</td><td>Binary: does the parser detect each feature present in the document? 17 features tested including aspirational targets.</td><td>&sect;17.13.6, &sect;22.1, &sect;17.16, &sect;17.6</td></tr>
-        <tr><td style="font-weight:600">Structural Recall</td><td>20%</td><td>Completeness: correct count of tables, track changes, comments, headings, headers/footers, images. Type matching for track change operations.</td><td>&mdash;</td></tr>
-        <tr><td style="font-weight:600">Structural Quality</td><td>15%</td><td>Heading level distribution, TC author attribution, comment text matching, list numbering accuracy, table merge span accuracy, heading text match, section break detection, comment range accuracy.</td><td>&sect;17.9, &sect;18.3.1.55, &sect;17.6, &sect;17.13.1</td></tr>
-        <tr><td style="font-weight:600">Content Fidelity</td><td>15%</td><td>Key phrase recall, paragraph count, element ordering (LCS), hyperlink extraction, style preservation, equation text, field display text, footnote text, bookmark detection.</td><td>&sect;22.1, &sect;17.16, &sect;17.13.6</td></tr>
-        <tr><td style="font-weight:600">Text Jaccard</td><td>10%</td><td>Word-level Jaccard similarity between ground truth and parser output. Measures raw text extraction quality.</td><td>&mdash;</td></tr>
-        <tr><td style="font-weight:600">Element Count</td><td>15%</td><td>Per-type count precision across 9 element types: headings, tables, track changes, comments, images, lists, text boxes, footnotes, speaker notes.</td><td>&mdash;</td></tr>
-        <tr><td style="font-weight:600">Metadata</td><td>10%</td><td>Exact match on title, author, created, modified timestamps. Sheet name accuracy with partial credit for partial matches.</td><td>&mdash;</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted)">Weights emphasize structural extraction (Structural Recall 20% + Element Count 15% = 35%) since that is the benchmark's primary purpose. Aspirational sub-dimensions within Structural Quality and Content Fidelity intentionally lower scores to create roadmap targets.</p>
+    <h2 id="what-we-measure">What We Measure: 8 Scoring Dimensions</h2>
+    <p>The seven legacy dimensions are feature detection, structural recall, structural quality, content fidelity, text Jaccard, element count, and metadata. Their relative weights are 15%, 20%, 15%, 15%, 10%, 15%, and 10%.</p>
+    <p>On annotated legacy cases, source-verified structural fidelity receives 25% of the score and the legacy dimensions share 75%. The 18 added cases are scored entirely on their independent structural assertions. Unannotated legacy cases retain the original weights. Inapplicable dimensions are excluded from their aggregate.</p>
+    <p>Assertions check logical cell coordinates and merge anchors, sheet and slide order, comment targets, speaker-note attribution, list depth, formatting, formulas, selected colours, links, bookmarks, and breaks. Reading order compares element identity as well as type. Separate corruption tests verify that the captured column shifts and misplaced notes lose credit.</p>
+    <p>Annotations are selective: theme/tint colours, display number formats, image bytes, and document generation still need their separate checks. Source hashes, the declared corpus, and reproducible oracle checks prevent an extra CI download or a changed file from silently changing the comparison.</p>
   </section>
 
   <hr class="dp-divider">
@@ -630,7 +511,7 @@
     <div class="dp-ailang-grid">
       <div class="dp-ailang-card">
         <h4>Deterministic by Default</h4>
-        <p>AILANG's effect system separates pure parsing logic from IO. The <code>pure func</code> annotation guarantees the XML&rarr;Block pipeline produces identical output for identical input &mdash; no hidden state, no ambient randomness. That's why structural recall scores 98.8% across all 69 test files.</p>
+        <p>AILANG's effect system separates pure parsing logic from IO. The <code>pure func</code> annotation guarantees the XML&rarr;Block pipeline produces identical output for identical input &mdash; no hidden state, no ambient randomness. That's why structural recall scores 98.3% on the applicable legacy cases.</p>
       </div>
       <div class="dp-ailang-card">
         <h4>Algebraic Data Types</h4>
@@ -760,7 +641,7 @@ export pure func detectFormat(ext: string) -> string
   <!-- Help Us Find Our Gaps -->
   <section class="dp-bench-section reveal" id="submit-document">
     <h2>Help Us Find Our Gaps</h2>
-    <p>We score 92% today &mdash; intentionally including aspirational metrics that lower our own score. ECMA-376 alone is over 5,000 pages, and we're expanding into email, calendar, and more formats. There are documents in the wild that will break our parser. <strong>We want to find them.</strong></p>
+    <p>We score 95.6% on OfficeDocBench v2 &mdash; intentionally including aspirational metrics that lower our own score. ECMA-376 alone is over 5,000 pages, and we're expanding into email, calendar, and more formats. There are documents in the wild that will break our parser. <strong>We want to find them.</strong></p>
 
     <p>If you have a document that AILANG Parse doesn't handle well, send it to us. If it reveals a gap that gets added to our eval corpus, you get <strong>1 month of Business tier free</strong> (worth &euro;99).</p>
 
@@ -833,7 +714,7 @@ export pure func detectFormat(ext: string) -> string
 
     <p style="font-size:13px;color:var(--text-muted)"><strong>All scores below measure structural preservation</strong> &mdash; whether the parser emits each element as a typed, separable block. Raw text capture is a different bar: OCR adapters scoring 0% on bibliography still usually have the reference-list <em>text</em> in their output, just as flat paragraphs rather than as one entry per <code>\bibitem</code>.</p>
 
-    <table class="dp-results-table">
+    <div class="dp-arxiv-table-scroll" style="overflow-x:auto;max-width:100%"><table class="dp-results-table">
       <thead>
         <tr>
           <th>Adapter</th>
@@ -861,7 +742,7 @@ export pure func detectFormat(ext: string) -> string
         <tr><td>Unstructured</td><td>pdf</td><td>13/19</td><td>75%</td><td>0%</td><td>0%</td><td>0%</td><td>0%</td><td>23%</td><td>0%</td><td>0%</td></tr>
         <tr><td>LiteParse</td><td>pdf</td><td>13/19</td><td>0%</td><td>0%</td><td>0%</td><td>5%</td><td>0%</td><td>23%</td><td>0%</td><td>0%</td></tr>
       </tbody>
-    </table>
+    </table></div>
 
     <div class="dp-bench-callout">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -893,22 +774,10 @@ uv run benchmarks/officedocbench/eval_officedocbench.py --all</code></pre>
 
   <div class="dp-faq" id="faq" style="max-width:800px;margin:48px auto 0;padding-top:24px;border-top:2px solid var(--border)">
     <h2>Frequently Asked Questions</h2>
-    <details>
-      <summary>How does AILANG Parse compare to other document parsers on benchmarks?</summary>
-      <div class="dp-faq-answer"><p>On OfficeDocBench (69 files, 11 formats, 7 scoring dimensions, 17 features), AILANG Parse scores 92% composite with 100% format coverage. The benchmark tests table merge spans, <a href="track-changes.html">track changes</a>, <a href="comments.html">comments</a>, heading hierarchy, equation text, field codes, bookmarks, section breaks, and more across DOCX, PPTX, XLSX, and 8 additional formats. Coverage-adjusted, the nearest competitor (Kreuzberg) scores 68.0%.</p></div>
-    </details>
-    <details>
-      <summary>Is the OfficeDocBench benchmark open source?</summary>
-      <div class="dp-faq-answer"><p>Yes. The benchmark suite, golden output files, and scoring scripts are all open source. You can run the full comparison on your own machine. The methodology uses structural diff scoring, not text similarity, so it measures actual structural fidelity.</p></div>
-    </details>
-    <details>
-      <summary>Why do Docling and Unstructured score the same on OfficeDocBench?</summary>
-      <div class="dp-faq-answer"><p>Both Docling and Unstructured use the same fundamental approach for Office formats: convert to PDF first, then apply ML-based layout detection. Since the same structural information is lost during PDF conversion &mdash; merge attributes, track changes, comments &mdash; both tools hit the same ceiling. AILANG Parse bypasses this ceiling entirely by reading Office XML directly.</p></div>
-    </details>
-    <details>
-      <summary>Why does AILANG Parse score so much higher than competitors?</summary>
-      <div class="dp-faq-answer"><p>AILANG Parse is built with an <a href="#eval-driven">eval-first methodology</a>: we define structural benchmark tests with hand-verified ground truth, then an AI agent writes AILANG parsing code specifically to pass them. We intentionally include aspirational metrics (bookmarks, footnotes, section breaks) that lower our own score to 92% &mdash; creating transparent roadmap targets. The gap reflects fundamentally different development approaches, not cherry-picked tests. Every result is <a href="#run-benchmarks">fully reproducible</a>.</p></div>
-    </details>
+    <details><summary>How does AILANG Parse compare to other document parsers on benchmarks?</summary><div class="dp-faq-answer"><p>OfficeDocBench v2 evaluates nine adapters on 87 files across 11 formats. AILANG Parse scores 95.6% composite and parses 87/87 files. Coverage-adjusted scores and per-feature results are published with versions, errors, and provenance.</p></div></details>
+    <details><summary>Is the OfficeDocBench benchmark open source?</summary><div class="dp-faq-answer"><p>Yes. The corpus manifest, annotations, source-XML oracle, scoring code, adapters, tests, and per-file results are public. Scoring combines structural checks and text metrics.</p></div></details>
+    <details><summary>Why do providers score differently?</summary><div class="dp-faq-answer"><p>Providers expose different structures and support different formats. v2 credits native metadata and structured output where available, including worksheet names and speaker notes. Missing structure and failed files remain visible in the results.</p></div></details>
+    <details><summary>How are benchmark expectations verified?</summary><div class="dp-faq-answer"><p>Sixty-one Office cases have assertions independently derived from source XML with hashes. The remaining annotations are retained from the legacy suite. Corruption tests prove that structural defects reduce the score.</p></div></details>
     <details>
       <summary>How can I submit a document that doesn't parse correctly?</summary>
       <div class="dp-faq-answer"><p>Email it to <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a>. If your document reveals a parsing gap that gets added to our eval corpus, you receive <strong>1 month of Business tier free</strong> (worth &euro;99). You can anonymize content before sending. We accept any format &mdash; Office, email, calendar, or anything else. See the <a href="#submit-document">Document Submission Program</a> for details.</p></div>

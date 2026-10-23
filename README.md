@@ -133,7 +133,7 @@ Every run produces, in the directory you ran from (`--output-dir DIR` or
 | Speaker notes | — | Yes | — | None |
 | Multi-sheet extraction | — | — | Yes | Kreuzberg |
 
-**OfficeDocBench** (69 files, 11 formats, 7 metrics): AILANG Parse **93.9%** composite with 100% coverage vs nearest competitor 68.0% coverage-adjusted. 8 parsers compared including Raw OOXML, Pandoc, Kreuzberg, MarkItDown, Unstructured, Docling. Scores include aspirational ECMA-376 spec targets that intentionally lower our score.
+**OfficeDocBench v2** (87 files, 11 formats, 8 metrics): AILANG Parse **95.6%** composite with 100.0% coverage. Nine adapters compared, including LlamaParse in standard mode. Source-verified structural assertions now measure cell positions, comment targets, list depth, formatting, formulas, colours, and slide/notes relationships. [Methodology and results](benchmarks/officedocbench/README.md).
 
 ## Supported Formats
 

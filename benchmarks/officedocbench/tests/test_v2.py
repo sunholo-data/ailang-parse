@@ -17,6 +17,8 @@ from scoring import (
 )
 from adapters.docparse_adapter import DocParseAdapter
 from adapters.llamaparse_adapter import LlamaParseAdapter
+from adapters.liteparse_adapter import LiteParseAdapter
+from types import SimpleNamespace
 from adapters.structure import (
     raw_structure,
     markdown_output,
@@ -380,6 +382,26 @@ class StructuralTests(unittest.TestCase):
             LlamaParseAdapter().convert_json(
                 [{"error": "conversion failed"}], Path("input.epub")
             )
+
+    def test_liteparse_native_layout_keeps_table_cells(self):
+        c = lambda value: SimpleNamespace(text=value)
+        block = SimpleNamespace(
+            kind="table",
+            text=None,
+            header=[c("A"), c("B")],
+            rows=[[c("one"), c("")]],
+            bold=False,
+            italic=False,
+        )
+        page = SimpleNamespace(
+            markdown="", text="fallback", blocks=[block], annotations=[], text_items=[]
+        )
+        output = LiteParseAdapter().convert_result(
+            SimpleNamespace(pages=[page], images=[]), Path("file.docx")
+        )
+        self.assertEqual(len(output["tables"]), 1)
+        self.assertEqual(output["structure"]["table_cells"][-1]["col"], 2)
+        self.assertEqual(output["structure"]["table_cells"][-1]["text"], "")
 
     def test_summary_rejects_legacy_results(self):
         with self.assertRaises(ValueError):

@@ -72,3 +72,19 @@ Ground truth must be checked against the input source, not regenerated to make t
 ## License
 
 Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files retain their original licenses; see `benchmarks/SOURCES.md`.
+
+## Recorded comparison (2026-10-23)
+
+| Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
+|---|---|---:|---:|---:|---:|
+| AILANG Parse | 0.52.2 | 87/87 | 95.6% | 95.6% | 0 |
+| Kreuzberg | 4.10.4 | 82/87 | 68.0% | 64.1% | 5 |
+| Docling | 2.142.1 | 83/87 | 64.6% | 61.6% | 3 |
+| LlamaParse (standard) | 0.6.94 | 83/87 | 61.7% | 58.9% | 4 |
+| Unstructured | 0.27.34 | 76/87 | 58.9% | 51.4% | 5 |
+| Raw OOXML | 2.0.0-stdlib | 60/87 | 69.9% | 48.2% | 1 |
+| MarkItDown | 0.1.5 | 69/87 | 58.0% | 46.0% | 2 |
+| Pandoc | 3.12.1 | 49/87 | 62.7% | 35.3% | 1 |
+| LiteParse | 2.17.0 | 70/87 | 35.6% | 28.7% | 6 |
+
+LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. The original provider job responses were retrieved to audit and repair the mappings; no new parsing requests were needed for that remap. Its EPUB and minimal ODS/ODT conversion failures are retained. Other model tiers require separate configured runs.
