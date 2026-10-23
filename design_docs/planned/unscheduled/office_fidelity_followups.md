@@ -10,6 +10,8 @@
 - DOCX relationship-based hyperlinks retain `InlineRun.href`, including plain
   and mixed-format labels. Existing plain-text URL suffixes remain readable.
   Adapter normalization joins adjacent runs for the same link label.
+- The shared run coalescer retains `href` when combining runs for the same
+  target, including labels split around an inline image.
 - Six legacy annotations are independently audited against source HTML/XML:
   `test_complex.html`, `challenge_complex.html`, `challenge_footnotes.docx`,
   `challenge_nested_lists.docx`, `pandoc_inline_images.docx`, and `nested_sdt.docx`.

@@ -16,6 +16,9 @@ separately — see `sdks/` for per-SDK changelogs.
 - DOCX relationship-based hyperlinks preserve their targets on inline runs,
   including unformatted and mixed-format labels. Plain-text URL suffixes remain
   available to existing consumers.
+- Coalescing adjacent inline runs preserves the link target. It previously
+  reset `href` while joining runs for the same link, losing linked text in
+  DOCX and other formats that use the shared constructors.
 - OfficeDocBench v2 adds source-derived structural scoring, explicit provider
   failures and provenance, and a fresh nine-provider comparison. Six historical
   annotations are audited against source HTML/XML; warning blocks remain
