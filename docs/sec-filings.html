@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Digest a 421-Page S-1 — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Anthropic's S-1 is 14 MB of page-layout HTML. AILANG Parse turns it into 3,274 typed blocks with headings, lists, tables and page numbers in seconds, with no AI, so an agent can read the outline first and fetch only the section it needs.">
+<meta name="description" content="Anthropic's S-1 is 14 MB of HTML. AILANG Parse turns it into 3,274 typed blocks with headings, lists, tables and page numbers in seconds, with no AI, so an agent can read the outline first and fetch only the section it needs.">
 <meta property="og:title" content="Digest a 421-Page S-1 — AILANG Parse">
 <meta property="og:description" content="14 MB of SEC filing HTML to a structured, page-cited document in seconds. Outline-first reading for agents: 3.7k tokens to see the whole filing.">
 <meta property="og:type" content="website">
@@ -18,25 +18,7 @@
 <link rel="stylesheet" href="css/docs-layout.css">
 <link rel="stylesheet" href="css/components.css">
 <style>
-/* Page-local, like the dp-feature-* / dp-pill classes on chunking.html. */
-.dp-pill {
-  display: inline-block;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  vertical-align: middle;
-  margin-left: 6px;
-  border-radius: 999px;
-  background: var(--bg-soft, #f0f0f0);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
-.dp-pill-new {
-  background: var(--accent, #16a34a);
-  color: #fff;
-  border-color: transparent;
-}
+/* Page-local, like the dp-feature-* classes on chunking.html. */
 .sec-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -59,7 +41,7 @@
 }
 .sec-stat span { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; display: block; margin-top: 4px; }
 
-.sec-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.sec-what { max-width: 560px; margin-bottom: 24px; }
 .sec-pane { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); overflow: hidden; min-width: 0; }
 .sec-pane h4 {
   margin: 0; padding: 10px 14px; font-family: var(--font-display); font-size: 13px; font-weight: 700;
@@ -142,7 +124,7 @@
 
 @media (max-width: 900px) {
   .sec-stats { grid-template-columns: 1fr 1fr; }
-  .sec-compare, .sec-explorer, .sec-images { grid-template-columns: 1fr; }
+  .sec-explorer, .sec-images { grid-template-columns: 1fr; }
   .sec-tree { border-right: 0; border-bottom: 1px solid var(--border); }
   .sec-tree ul { max-height: 300px; }
   .sec-bar { grid-template-columns: 1fr 70px; }
@@ -158,7 +140,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">Digest a <span class="dp-accent">421-Page S-1</span></h1>
-    <p class="subtitle reveal reveal-delay-1">Anthropic's IPO registration statement is 14&nbsp;MB of page-layout HTML. AILANG Parse turns it into a structured document with headings, tables and page numbers, so a person or an agent can read the outline and open only the section they need.</p>
+    <p class="subtitle reveal reveal-delay-1">Anthropic's IPO registration statement is 14&nbsp;MB of HTML. AILANG Parse turns it into a structured document with headings, tables and page numbers, so a person or an agent can read the outline and open only the section they need.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -166,7 +148,7 @@
     <aside class="dp-docs-sidebar reveal">
       <nav>
         <a href="#result" class="active">The Result</a>
-        <a href="#before-after">Before &amp; After</a>
+        <a href="#what-you-get">What You Get</a>
         <a href="#outline">Explore the Outline</a>
         <a href="#outline-first">Outline-First Reading</a>
         <a href="#risk-factors">Every Risk Factor</a>
@@ -178,43 +160,21 @@
 
     <main class="dp-docs-content">
 
-      <h2 id="result">The Result <span class="dp-pill dp-pill-new">v0.53+</span></h2>
+      <h2 id="result">The Result</h2>
 
       <div class="sec-stats" id="sec-stats" aria-live="polite">
         <div class="sec-stat"><b>&hellip;</b><span>Loading parse results</span></div>
       </div>
 
-      <p>The filing is the <a href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm" rel="noopener">S-1 as filed on EDGAR</a>, fetched as-is and parsed with the <code>docparse</code> CLI on a laptop. Everything on this page is drawn from that one JSON output: the outline, the page numbers, the risk factors and the tables. No model was called.</p>
+      <p>This is the <a href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm" rel="noopener">S-1 as filed on EDGAR</a>. Everything below comes from one parse of it, with no model involved.</p>
 
-      <div class="dp-callout">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>A filing tool lays out each page of an EDGAR filing for print. Every line is an absolutely positioned <code>&lt;div&gt;</code> of positioned <code>&lt;font&gt;</code> fragments, and there is no <code>&lt;p&gt;</code> or <code>&lt;h1&gt;</code> anywhere. A section title is just a line in a 20pt bold font. AILANG Parse rebuilds the structure from the page geometry: it groups lines into paragraphs by their spacing, finds headings by font size and weight, picks up bullets, footnotes and page numbers, and rejoins paragraphs that were split across pages.</div>
-      </div>
+      <h2 id="what-you-get">What You Get</h2>
 
-      <h2 id="before-after">Before &amp; After</h2>
+      <p>Every heading, paragraph, list and table comes out as a typed block, in reading order. A marker before each page carries its printed page number, so any passage can be cited.</p>
 
-      <p>Read naively, page-layout HTML gives one block per printed line, with words split wherever a fragment ends. Read for its layout, it gives a document.</p>
-
-      <div class="sec-compare">
+      <div class="sec-what">
         <div class="sec-pane">
-          <h4>Line by line <small id="naive-count">20,554 blocks &middot; 0 headings</small></h4>
-<pre><code class="language-text">text  "As filed with the Securities and"
-text  "Exchange"
-text  "Commission on October 26, 2026."
-text  "UNITED STATES"
-text  "SE"
-text  "CURITIES AND EXCHANGE COMMISSION"
-text  "Table of Contents"
-text  "Risk Factors"
-text  "Investing in our Class A common stock involves a high degree of risk. You should carefully consider the risks"
-text  "and uncertainties described below, together with all of the other information in this prospectus, including the"
-text  "&bull;"
-text  "advance the frontier of AI capabilities through"
-text  "Table of Contents"
-text  "27"</code></pre>
-        </div>
-        <div class="sec-pane">
-          <h4>By layout <small id="struct-count">3,274 blocks &middot; 676 headings</small></h4>
+          <h4>anthropicpbc-sx1.htm.json <small>page 27</small></h4>
 <pre><code class="language-json">{"type": "section",
  "kind": "page-break", "name": "27"}
 {"type": "heading", "level": 1,
@@ -240,7 +200,7 @@ text  "27"</code></pre>
 
       <h2 id="outline">Explore the Outline</h2>
 
-      <p>These are the filing's headings, levels 1 to 3, exactly as the parser emitted them. Each one shows the printed page it starts on, taken from the <code>page-break</code> marker before it. Pick a section to see its size and how it opens. Sizes count everything up to the next heading at the same level.</p>
+      <p>The filing's headings, levels 1 to 3, with the page each one starts on. Pick a section to see its size and how it opens.</p>
 
       <div class="sec-explorer" id="sec-explorer">
         <div class="sec-tree">
@@ -264,34 +224,31 @@ text  "27"</code></pre>
 
       <div class="sec-bars" id="sec-bars" role="img" aria-label="Token cost comparison"></div>
 
-      <p style="font-size:13px;color:var(--text-muted)">Token counts are estimates (words &times; 1.3), the same rule AILANG Parse's <a href="chunking.html">chunker</a> uses. The full figure counts the text of every block in the JSON.</p>
+      <p style="font-size:13px;color:var(--text-muted)">Token counts are estimates (words &times; 1.3).</p>
 
       <h2 id="risk-factors">Every Risk Factor, With Its Page</h2>
 
-      <p>In a prospectus, each risk factor is a one-sentence title in bold italic, followed by its explanation. The parser makes each title a heading, under the risk category it belongs to, so the whole list of risks is a single query over the JSON:</p>
+      <p>Each risk factor's title is a heading under its category, so the full list, with pages, is a single query:</p>
 
       <div class="sec-risk" id="sec-risk"></div>
 
       <h2 id="tables">Tables as Data</h2>
 
-      <p>Financial statements in a filing are laid out for print. Empty columns hold the gap where a <code>$</code> or a closing parenthesis would hang, an empty first row sets column widths, and blank rows add vertical spacing. The parser removes all three, makes the first real row the header, and narrows spanning header cells to fit, so each figure lands in its column:</p>
+      <p>Financial statements come out as tables: one row per line item, one column per period.</p>
 
       <div id="sec-table"></div>
 
       <h2 id="images">What Still Needs AI</h2>
 
-      <p>Parsing is deterministic and does not read pixels. This filing has <strong id="img-count">43</strong> images, and some of them are content rather than decoration. The eight-page letter from the founders that opens the prospectus exists only as page images. They come through as <code>ImageBlock</code>s in place, so you know exactly which pages need an AI pass. Here they are, grouped by file name:</p>
+      <p>Some of the filing is only in pictures. The founders' letter that opens the prospectus is eight page images, and the customer case studies are images too. They come through as image blocks in place, so you can see exactly what's there and send just those pages to a model.</p>
 
       <div class="sec-images" id="sec-images"></div>
 
-      <div class="dp-callout dp-callout--warn">
-        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        <div>To read these pages, download the images next to the <code>.htm</code> and run <code>--describe</code> (opt-in, AI-metered). Each image then gets a short description. A full transcription of each letter page, placed back into the document as blocks, is planned next. Parsing one letter page through the image path took about 10&nbsp;s and recovered its full text and footnote. The two-column reading order still needs work.</div>
-      </div>
+      <p>Run <code>docparse</code> with <code>--describe</code> (opt-in, uses AI) and keep the images next to the <code>.htm</code> to have each one described.</p>
 
       <h2 id="try-it">Try It</h2>
 
-      <p>EDGAR asks automated clients to identify themselves, so send a User-Agent with a contact address. The <code>.json</code> file is the structured output, and the <code>.md</code> file is Markdown for a model to read.</p>
+      <p>EDGAR asks for a User-Agent with a contact address. You get a <code>.json</code> file with the structure and a <code>.md</code> file for a model to read.</p>
 
 <pre><code class="language-bash">curl -sL -A "Your Name you@example.com" -o anthropicpbc-sx1.htm \
   https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm
@@ -324,7 +281,7 @@ jq -r 'foreach .document.blocks[] as $b ({page: "", h1: ""};
 # ["Revenue","$41","$386","$4,585","$1,163","$16,286"]</code></pre>
       </div>
 
-      <p>Nothing here is specific to Anthropic. Any EDGAR filing laid out the same way, such as a 10-K, 10-Q, S-1 or proxy statement, parses into the same structure. Ordinary HTML pages are not affected, because this handling only applies to pages with a fixed width and height in points. See <a href="html-parsing.html">HTML parsing</a> for the rest, and <a href="chunking.html">chunking</a> to split the result for retrieval.</p>
+      <p>The same works for any EDGAR filing: 10-K, 10-Q, S-1 or proxy statement. See <a href="html-parsing.html">HTML parsing</a> for more, and <a href="chunking.html">chunking</a> to split the result for retrieval.</p>
 
     </main>
   </div>
@@ -354,13 +311,11 @@ jq -r 'foreach .document.blocks[] as $b ({page: "", h1: ""};
   function render(d) {
     var P = d.parse, k = P.kinds;
     document.getElementById('sec-stats').innerHTML = [
-      ['' + (d.source.bytes / 1e6).toFixed(1) + '&nbsp;MB', 'of EDGAR HTML in, parsed in ' + P.seconds.toFixed(1) + '&nbsp;s on a laptop'],
-      [fmt(P.blocks), 'typed blocks (was ' + fmt(P.naiveBlocks) + ', one per printed line)'],
+      ['' + (d.source.bytes / 1e6).toFixed(1) + '&nbsp;MB', 'of filing HTML, parsed in ' + P.seconds.toFixed(1) + '&nbsp;s'],
+      [fmt(P.blocks), 'typed blocks in reading order'],
       [fmt(k.heading || 0), 'headings &middot; ' + fmt(k.table || 0) + ' tables &middot; ' + fmt(k.list || 0) + ' lists'],
-      [fmt(P.pages), 'pages, each marked so every passage cites its page']
+      [fmt(P.pages), 'pages, so every passage cites its page']
     ].map(function (s) { return '<div class="sec-stat"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>'; }).join('');
-    document.getElementById('naive-count').textContent = fmt(P.naiveBlocks) + ' blocks · 0 headings';
-    document.getElementById('struct-count').textContent = fmt(P.blocks) + ' blocks · ' + fmt(k.heading || 0) + ' headings';
 
     window.__secFull = d.tokens.full;
     renderOutline(d.outline);
@@ -484,9 +439,7 @@ jq -r 'foreach .document.blocks[] as $b ({page: "", h1: ""};
     }).join('');
     document.getElementById('sec-table').innerHTML =
       '<p style="font-size:13px;margin:0 0 8px"><strong>' + esc(tb.title) + '</strong> ' + pageChip(tb.p) + '</p>' +
-      '<div class="sec-table-wrap"><table class="sec-fin"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>' +
-      '<p style="font-size:13px;color:var(--text-muted)">Rendered from the <code>TableBlock</code> as emitted (' + tb.rows.length +
-      ' rows). In the source HTML this table has an empty sizing row, blank spacer rows, and an empty column between every pair of figures.</p>';
+      '<div class="sec-table-wrap"><table class="sec-fin"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>';
   }
 
   // ---- Images -------------------------------------------------------------
@@ -500,7 +453,6 @@ jq -r 'foreach .document.blocks[] as $b ({page: "", h1: ""};
     imgs.forEach(function (im) {
       for (var g = 0; g < groups.length; g++) if (groups[g][1].test(im.src)) { buckets[g].push(im); break; }
     });
-    document.getElementById('img-count').textContent = imgs.length;
     document.getElementById('sec-images').innerHTML = groups.map(function (g, gi) {
       var b = buckets[gi];
       var numbered = b.filter(function (im) { return im.p; }).length;

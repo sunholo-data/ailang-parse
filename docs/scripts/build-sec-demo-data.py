@@ -10,10 +10,7 @@ JSON can do with jq.
       https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm
     docparse anthropicpbc-sx1.htm                # writes anthropicpbc-sx1.htm.json
     python3 docs/scripts/build-sec-demo-data.py anthropicpbc-sx1.htm.json \\
-      --source-bytes 14169252 --seconds 7.4 --naive-blocks 20554
-
---naive-blocks is the block count the HTML parser produced before v0.53.0 read
-page-layout filings (one block per printed line); pass what you measured.
+      --source-bytes 14169252 --seconds 7.4
 """
 import argparse
 import json
@@ -60,7 +57,6 @@ def main():
     ap.add_argument("parse_json")
     ap.add_argument("--source-bytes", type=int, required=True)
     ap.add_argument("--seconds", type=float, required=True)
-    ap.add_argument("--naive-blocks", type=int, required=True)
     ap.add_argument("-o", "--out", default="docs/data/sec-s1-demo.json")
     a = ap.parse_args()
 
@@ -150,7 +146,7 @@ def main():
         "source": {"url": SOURCE_URL, "title": doc["metadata"]["title"],
                    "bytes": a.source_bytes},
         "parse": {"seconds": a.seconds, "blocks": n, "kinds": kinds,
-                  "headingLevels": levels, "naiveBlocks": a.naive_blocks,
+                  "headingLevels": levels,
                   "pages": kinds.get("section:page-break", 0),
                   "riskFactors": sum(len(g["items"]) for g in groups)},
         "tokens": {"full": round(full_words * 1.3), "riskFactors": round(rf_words * 1.3),
