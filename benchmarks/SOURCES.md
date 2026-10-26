@@ -9,7 +9,8 @@ Files: `sample.docx`, `comments.docx`, `docx-hdrftr.docx`, `docx-shapes.docx`,
 `table_header_rowspan.docx`, `tables-with-incomplete-rows.docx`,
 `track_changes_move.docx`, `test.odt`, `test.odp`, `test.ods`, `test.epub`,
 `test.html`, `test.csv`, `test.tsv`, `test.md`, `test_quoted.csv`,
-`test_complex.html`, `test_code.md`
+`test_complex.html`, `test_code.md`, `challenge/challenge_edgar_layout.html`
+(hand-written in the page-layout shape EDGAR filing tools emit; invented content)
 
 License: Project-specific, not redistributed from external sources.
 

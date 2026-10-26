@@ -13,6 +13,26 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ### Fixed
 
+- HTML: SEC EDGAR filings parse into a document instead of one block or a
+  line-per-block stream. A filing fetched from EDGAR's Archives keeps its SGML
+  envelope (`<DOCUMENT><TYPE>S-1…<TEXT>`) before `<html>`, which made the whole
+  page one text block; the envelope is now skipped. Filings laid out as print
+  pages (Workiva and similar: fixed-size page boxes, every line an absolutely
+  positioned `<div>` of positioned `<font>` fragments, no `<p>` or `<h1>`) are
+  read by the new `html_layout` module: lines regroup into paragraphs by line
+  pitch, headings come from font size and weight relative to the body font,
+  bullet runs become lists, footnotes stay separate notes, paragraphs split by
+  a page break (or by the page's footnotes) rejoin, the running header and
+  page number are dropped, and each page leaves an empty `page-break` section
+  named by its printed page number. Laid-out tables lose their column-width
+  sizing row, blank rows and empty spacer columns (spans narrowed to match,
+  with `{merged}` continuations so a spanning header row stays as wide as the
+  rows under it), and wrapped cell lines rejoin. On Anthropic's S-1 (14 MB,
+  421 pages): 20,554 blocks with no headings → 3,274 blocks with 676 headings,
+  129 lists and 421 page markers, in about the same time. Ordinary HTML is
+  unaffected: a page needs a fixed width and height in points.
+  Fixture: `challenge_edgar_layout.html` (invented content).
+
 - PPTX preserves standalone DrawingML space runs in slide text, speaker notes,
   and inline formatting on native and browser paths. Exact source checks catch
   the previous `Everworkervenn` and `Access toFinancefor` output.

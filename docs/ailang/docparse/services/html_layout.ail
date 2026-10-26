@@ -1,0 +1,682 @@
+module docparse/services/html_layout
+
+import std/xml (findAll, getAttr, getChildren, getTag, getText, nodeKind, NodeKind, KindElement, KindText, KindComment)
+import std/option (Some, None, getOrElse)
+import std/string (stringToInt, replace, length, trim, find, split, join, words, startsWith, endsWith, stringToFloat, substring, charAt, charCode, floatToStr, toLower)
+import std/list (map, flatMap, filter, foldl, zip, any, range, nth, drop, concat, contains, length as listLength)
+import std/math (abs_Float, intToFloat)
+import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, TableCell, mergedCell, mkText, mkHeading, mkList, mkNamedSection, mkTableFull)
+
+-- Page-layout HTML: documents laid out as positioned lines, not paragraphs.
+--
+-- Filing tools that print to the SEC's EDGAR (Workiva and its kind) write a
+-- page as a fixed-size box of absolutely positioned line <div>s, each holding
+-- positioned <font> fragments. There is no <p>, no <h1>: a section title is a
+-- line in a 20pt bold font, a paragraph is a run of lines 1.2em apart, and
+-- every page repeats its running header ("Table of Contents") and its page
+-- number. Read naively, an S-1 became 20,000 one-line text blocks with no
+-- headings, split mid-word wherever a fragment boundary fell ("SE" /
+-- "CURITIES AND EXCHANGE COMMISSION").
+--
+-- This module puts the structure back from the geometry the page already
+-- declares, in two steps:
+--
+--   1. While html_parser walks the tree, a container of positioned lines is
+--      grouped into paragraphs (htmlLayoutContainer): consecutive lines in the
+--      same font whose vertical step is a line pitch, not a paragraph gap.
+--      A page box (htmlLayoutPage) drops its running header and footer and
+--      leaves a "page-break" marker named by the page's printed number.
+--   2. Once the whole document is read, the body font size is known, and
+--      htmlLayoutFinish turns each provisional paragraph into a heading or a
+--      paragraph by its size and weight relative to the body, rejoins
+--      paragraphs a page break split, and makes bullet runs into lists.
+--
+-- Step 1 carries a paragraph's font to step 2 in its style string
+-- ("layout:<size>:<bold>:<italic>"); htmlLayoutFinish rewrites every one of
+-- them, so the encoding never reaches output.
+--
+-- Ordinary web pages are untouched: a line needs an absolutely positioned
+-- <div> of only inline children, and a page needs a fixed height in points,
+-- which screen layouts do not use.
+
+type HtmlLayoutLine = {top: float, fs: float, bold: bool, italic: bool, text: string}
+
+type HtmlLayoutFrag = {text: string, fs: float, bold: bool, italic: bool, st: string}
+
+type HtmlLayoutItem = HtmlLayLine(HtmlLayoutLine) | HtmlLayOther(XmlNode)
+
+-- === EDGAR envelope ========================================================
+--
+-- A document fetched from EDGAR's Archives keeps its SGML submission envelope:
+-- "<DOCUMENT><TYPE>S-1<SEQUENCE>1<FILENAME>…<TEXT>" before <html>. An HTML5
+-- parser reads those as unknown elements wrapping the whole page, and the page
+-- collapsed to a single text block. The envelope carries nothing a reader
+-- needs, so the document starts at its <html>.
+export pure func htmlLayoutStripEnvelope(content: string) -> string {
+  if startsWith(trim(substring(content, 0, 64)), "<DOCUMENT>") == false then content
+  else {
+    let lower = find(content, "<html");
+    let upper = find(content, "<HTML");
+    let at = if lower >= 0 && (upper < 0 || lower < upper) then lower else upper;
+    if at > 0 then substring(content, at, length(content)) else content
+  }
+}
+
+-- === Inline CSS ============================================================
+
+-- Value of one property of a style read by htmlLayoutStyle, "" when absent.
+--
+-- A filing has ~50,000 fragments and each is asked for five properties, so
+-- this is a native substring search, not a split-and-walk: splitting the
+-- declarations and walking them in AILANG tripled the parse time of an S-1.
+export pure func htmlLayoutCss(st: string, prop: string) -> string {
+  let key = ";${prop}:";
+  let i = find(st, key);
+  if i < 0 then ""
+  else {
+    let rest = substring(st, i + length(key), length(st));
+    let j = find(rest, ";");
+    if j < 0 then rest else substring(rest, 0, j)
+  }
+}
+
+-- A CSS length in points. Pixels convert at 96dpi (0.75pt); anything else,
+-- including an absent value, is 0.
+export pure func htmlLayoutPt(v: string) -> float {
+  let scaled = if endsWith(v, "pt") then {num: substring(v, 0, length(v) - 2), k: 1.0}
+               else if endsWith(v, "px") then {num: substring(v, 0, length(v) - 2), k: 0.75}
+               else {num: v, k: 1.0};
+  match stringToFloat(trim(scaled.num)) {
+    Some(f) => f * scaled.k,
+    None => 0.0
+  }
+}
+
+-- A node's inline style, ready for htmlLayoutCss: spaces dropped ("top: 9pt;
+-- left:0" reads like "top:9pt;left:0") and a leading ";" so "height" cannot
+-- match inside "line-height". The properties read here (lengths, position,
+-- weight, style) have no spaces in their values.
+pure func htmlLayoutStyle(node: XmlNode) -> string =
+  match getAttr(node, "style") {
+    Some(st) => ";${replace(st, " ", "")}",
+    None => ""
+  }
+
+pure func htmlLayoutIsElem(node: XmlNode) -> bool =
+  match nodeKind(node) {
+    KindElement => true,
+    _ => false
+  }
+
+-- === Lines =================================================================
+
+-- A positioned line: an absolutely positioned <div> holding only inline
+-- fragments (<font>/<span>) and whitespace. Its `top` may be absent — the
+-- first line of a block sits at 0 and the filing leaves it out.
+export pure func htmlLayoutIsLine(node: XmlNode) -> bool {
+  if getTag(node) != "div" then false
+  else {
+    let st = htmlLayoutStyle(node);
+    if find(st, "absolute") < 0 then false
+    else if htmlLayoutCss(st, "position") != "absolute" then false
+    else {
+      let elems = filter(htmlLayoutIsElem, getChildren(node));
+      listLength(elems) > 0 && (any(\c. getTag(c) != "font" && getTag(c) != "span", elems) == false)
+    }
+  }
+}
+
+-- Does this element directly hold positioned lines?
+export pure func htmlLayoutHasLines(node: XmlNode) -> bool =
+  any(htmlLayoutIsLine, getChildren(node))
+
+pure func htmlLayoutIsBold(st: string) -> bool =
+  find(st, ";font-weight:bold") >= 0 || find(st, ";font-weight:bolder") >= 0
+    || find(st, ";font-weight:600") >= 0 || find(st, ";font-weight:700") >= 0
+    || find(st, ";font-weight:800") >= 0 || find(st, ";font-weight:900") >= 0
+
+-- One fragment. Its raw text keeps its spaces: a fragment that is only a space
+-- is the space between two words ("prompt" / " " / "injection"). Size and
+-- weight fall back to the line's own style.
+--
+-- This runs ~50,000 times on a filing, so it does the least it can: getText
+-- rather than the parser's deepText (whose block-spacing walk, which also
+-- drops blank text, was half the parse time), nothing at all for a blank
+-- fragment, weight and slant by one substring search each, and position
+-- only later, at the rare word boundary that needs it (htmlLayoutFragJoin).
+pure func htmlLayoutFragOf(lineStyle: string, node: XmlNode) -> HtmlLayoutFrag {
+  let text = getText(node);
+  if length(trim(text)) == 0 then {text: text, fs: 0.0, bold: false, italic: false, st: ""}
+  else {
+    let st = htmlLayoutStyle(node);
+    let size = htmlLayoutCss(st, "font-size");
+    {
+      text: text,
+      fs: htmlLayoutPt(if length(size) > 0 then size else htmlLayoutCss(lineStyle, "font-size")),
+      bold: if find(st, ";font-weight:") >= 0 then htmlLayoutIsBold(st) else htmlLayoutIsBold(lineStyle),
+      italic: find(st, ";font-style:italic") >= 0,
+      st: st
+    }
+  }
+}
+
+pure func htmlLayoutIsSpace(c: string) -> bool =
+  c == " " || c == "\t" || c == "\n" || c == "\u00a0"
+
+-- Fragments are placed, not spaced: the gap between two words is sometimes a
+-- " " fragment, sometimes only distance ("(1)" at 72pt, "Includes" at 90pt).
+-- Join two fragments with a space when neither brings one and the next starts
+-- clearly past where the previous ended. Where a fragment declares no width
+-- its end is estimated at half an em per character, so the gap must also
+-- clear the estimate's slack — a kerned split like "SE" / "CURITIES" stays
+-- one word.
+pure func htmlLayoutFragJoin(acc: {text: string, prev: HtmlLayoutFrag}, f: HtmlLayoutFrag) -> {text: string, prev: HtmlLayoutFrag} {
+  let a = acc.text;
+  let spaced = length(a) == 0 || length(f.text) == 0
+    || htmlLayoutIsSpace(charAt(a, length(a) - 1)) || htmlLayoutIsSpace(charAt(f.text, 0));
+  {text: if spaced || htmlLayoutApart(acc.prev, f) == false then "${a}${f.text}" else "${a} ${f.text}", prev: f}
+}
+
+-- Does `next` start clearly past where `prev` ends?
+pure func htmlLayoutApart(prev: HtmlLayoutFrag, next: HtmlLayoutFrag) -> bool {
+  let left = htmlLayoutPt(htmlLayoutCss(next.st, "left"));
+  let prevLeft = htmlLayoutPt(htmlLayoutCss(prev.st, "left"));
+  let prevWidth = htmlLayoutPt(htmlLayoutCss(prev.st, "width"));
+  let est = intToFloat(length(prev.text)) * prev.fs * 0.5;
+  let end = if prevWidth > 0.0 then prevLeft + prevWidth else prevLeft + est;
+  let slack = if prevWidth > 0.0 then 0.0 else 0.1 * est;
+  left > 0.0 && left - end > 0.5 * next.fs + slack
+}
+
+-- One line: its fragments' text run together as written (the spaces are in
+-- the fragments; "SE" + "CURITIES" is one word), its size that of the
+-- fragment carrying the most text, bold or italic only when every visible
+-- fragment is. Not the largest size: a blank placeholder set a point larger
+-- ("$          ") made its line read as a different font and split the
+-- paragraph there.
+pure func htmlLayoutLineOf(node: XmlNode, deepText: XmlNode -> string) -> HtmlLayoutLine {
+  let st = htmlLayoutStyle(node);
+  let frags = map(\c. htmlLayoutFragOf(st, c), filter(htmlLayoutIsElem, getChildren(node)));
+  let visible = filter(\f. length(trim(f.text)) > 0, frags);
+  {
+    top: htmlLayoutPt(htmlLayoutCss(st, "top")),
+    fs: foldl(\m f. if length(f.text) > m.n then {fs: f.fs, n: length(f.text)} else m, {fs: 0.0, n: 0}, visible).fs,
+    bold: listLength(visible) > 0 && (any(\f. f.bold == false, visible) == false),
+    italic: listLength(visible) > 0 && (any(\f. f.italic == false, visible) == false),
+    text: join(" ", words(foldl(htmlLayoutFragJoin, {text: "", prev: {text: "", fs: 0.0, bold: false, italic: false, st: ""}}, frags).text))
+  }
+}
+
+-- A line that is nothing but an in-document link: the "Table of Contents"
+-- back-link a filing prints at the top of every page. Running headers that
+-- also carry a statement title are too long to drop whole as furniture, so
+-- the link goes line by line.
+pure func htmlLayoutIsBackLink(line: XmlNode) -> bool {
+  let text = trim(getText(line));
+  let links = filter(\a. startsWith(getOrElse(getAttr(a, "href"), ""), "#"), findAll(line, "a"));
+  length(text) > 0 && listLength(links) > 0
+    && join("", words(join("", map(\a. getText(a), links)))) == join("", words(text))
+}
+
+-- === Paragraphs ============================================================
+
+-- The next line continues the paragraph: same font, and the step down is a
+-- line pitch. Body text sits 1.2em apart and paragraphs ~2.1em; 1.55em
+-- separates them and still holds a line a blank placeholder pushed down
+-- (an S-1's "$          " shifts its line 3pt, a 1.49em step).
+--
+-- Footnotes are set solid, one after another: a line opening with a marker
+-- ("(2)", "(a)") after a line that finished a sentence starts the next note.
+pure func htmlLayoutContinues(prev: HtmlLayoutLine, next: HtmlLayoutLine) -> bool {
+  let gap = next.top - prev.top;
+  abs_Float(next.fs - prev.fs) <= 0.3 && next.bold == prev.bold
+    && gap >= 0.0 && gap <= 1.55 * prev.fs
+    && (htmlLayoutOpensNote(next.text) && htmlLayoutEndsSentence(prev.text)) == false
+}
+
+-- A footnote marker at the start of a line: "(1) …", "(12) …", "(a) …", or a
+-- bare note number before a capital ("2 IDC, The Economic Impact of AI").
+pure func htmlLayoutOpensNote(text: string) -> bool =
+  (startsWith(text, "(") && length(text) > 3
+    && (charAt(text, 2) == ")" || charAt(text, 3) == ")"))
+  || (length(text) > 3 && htmlLayoutIsDigit(charAt(text, 0))
+      && ((charAt(text, 1) == " " && htmlLayoutIsUpper(charAt(text, 2)))
+          || (htmlLayoutIsDigit(charAt(text, 1)) && charAt(text, 2) == " " && htmlLayoutIsUpper(charAt(text, 3)))))
+
+pure func htmlLayoutIsDigit(c: string) -> bool {
+  let k = charCode(c);
+  k >= 48 && k <= 57
+}
+
+pure func htmlLayoutIsUpper(c: string) -> bool {
+  let k = charCode(c);
+  k >= 65 && k <= 90
+}
+
+-- A line holding only a note marker ("1", "(2)", "*") set apart from its
+-- note, usually raised as a superscript; it starts the line after it.
+pure func htmlLayoutIsMarker(text: string) -> bool =
+  (length(text) == 1 && (htmlLayoutIsDigit(text) || text == "*" || text == "†"))
+  || (length(text) == 2 && htmlLayoutIsDigit(charAt(text, 0)) && htmlLayoutIsDigit(charAt(text, 1)))
+  || (startsWith(text, "(") && endsWith(text, ")") && length(text) >= 3 && length(text) <= 4)
+
+-- An element child as a layout item. Blank lines and childless elements
+-- (the empty anchor <div id> targets a table of contents links to) vanish
+-- rather than splitting the paragraph they sit in.
+pure func htmlLayoutItemOf(deepText: XmlNode -> string, node: XmlNode) -> [HtmlLayoutItem] =
+  match nodeKind(node) {
+    KindComment => [],
+    KindText => if length(trim(deepText(node))) > 0 then [HtmlLayOther(node)] else [],
+    KindElement =>
+      if htmlLayoutIsLine(node) && htmlLayoutIsBackLink(node) then []
+      else if htmlLayoutIsLine(node) then {
+        let line = htmlLayoutLineOf(node, deepText);
+        if length(line.text) > 0 then [HtmlLayLine(line)] else []
+      }
+      else if listLength(getChildren(node)) == 0 && getTag(node) != "img" && getTag(node) != "hr" then []
+      else [HtmlLayOther(node)]
+  }
+
+pure func htmlLayoutStartsAt(items: [HtmlLayoutItem], i: int) -> bool =
+  if i == 0 then true
+  else match (nth(items, i - 1), nth(items, i)) {
+    (Some(HtmlLayLine(prev)), Some(HtmlLayLine(next))) =>
+      htmlLayoutIsMarker(prev.text) == false && htmlLayoutContinues(prev, next) == false,
+    _ => true
+  }
+
+-- Group a container's positioned lines into paragraphs. Anything else in the
+-- container (a table, an image, a nested block) ends the paragraph before it
+-- and goes back to the caller's walker. Grouping is by index over the item
+-- list — find where each paragraph starts, then read each [start, next start)
+-- span — so it stays linear on a 400-page filing.
+export pure func htmlLayoutContainer(node: XmlNode, processNode: XmlNode -> [Block], deepText: XmlNode -> string) -> [Block] {
+  let items = flatMap(\c. htmlLayoutItemOf(deepText, c), getChildren(node));
+  let starts = filter(\i. htmlLayoutStartsAt(items, i), range(0, listLength(items)));
+  let ends = concat(drop(1, starts), [listLength(items)]);
+  flatMap(\span. match span {
+    (s, e) => match nth(items, s) {
+      Some(HtmlLayOther(other)) => processNode(other),
+      Some(HtmlLayLine(first)) => {
+        let lines = flatMap(\j. match nth(items, j) {
+          Some(HtmlLayLine(l)) => [l],
+          _ => []
+        }, range(s, e));
+        [htmlLayoutParagraph(first, lines)]
+      },
+      None => []
+    }
+  }, zip(starts, ends))
+}
+
+-- A line that ends in a hyphen ("Co-" / "Founder") joins without a space.
+pure func htmlLayoutJoin(acc: string, next: string) -> string =
+  if length(acc) == 0 then next
+  else if endsWith(acc, "-") then "${acc}${next}"
+  else "${acc} ${next}"
+
+pure func htmlLayoutFlag(b: bool) -> string = if b then "1" else "0"
+
+pure func htmlLayoutParagraph(first: HtmlLayoutLine, lines: [HtmlLayoutLine]) -> Block {
+  let text = foldl(\acc l. htmlLayoutJoin(acc, l.text), "", lines);
+  let italic = any(\l. l.italic == false, lines) == false;
+  mkText(text, "layout:${floatToStr(first.fs)}:${htmlLayoutFlag(first.bold)}:${htmlLayoutFlag(italic)}", 0)
+}
+
+-- === Pages =================================================================
+
+-- A page box: position:relative with a fixed width and height in points.
+-- Screen layouts size boxes in px, %, or not at all; print layouts size the
+-- sheet. A page may hold only a full-page picture and no lines at all.
+export pure func htmlLayoutIsPage(node: XmlNode) -> bool {
+  if getTag(node) != "div" then false
+  else {
+    let st = htmlLayoutStyle(node);
+    if find(st, "relative") < 0 then false
+    else htmlLayoutCss(st, "position") == "relative"
+      && endsWith(htmlLayoutCss(st, "height"), "pt") && endsWith(htmlLayoutCss(st, "width"), "pt")
+  }
+}
+
+-- Running header or footer: a short positioned block of text in the top 12%
+-- or the bottom 15% of the page. Body content sits in the page's static
+-- child; a full-page picture sits at the top with no text, and is content.
+pure func htmlLayoutFurniture(pageHeight: float, deepText: XmlNode -> string, node: XmlNode) -> {furniture: bool, footer: bool, text: string} {
+  let st = htmlLayoutStyle(node);
+  if getTag(node) != "div" || htmlLayoutCss(st, "position") != "absolute" || htmlLayoutIsLine(node)
+  then {furniture: false, footer: false, text: ""}
+  else {
+    let top = htmlLayoutPt(htmlLayoutCss(st, "top"));
+    let text = join(" ", words(deepText(node)));
+    let short = length(text) > 0 && length(text) <= 80;
+    {
+      furniture: short && (top <= 0.12 * pageHeight || top >= 0.85 * pageHeight),
+      footer: top >= 0.85 * pageHeight,
+      text: text
+    }
+  }
+}
+
+-- A page: a "page-break" marker named by its printed page number (from the
+-- footer; "" for an unnumbered page), then its content without the running
+-- header and footer. The marker renders as nothing in Markdown; in JSON it
+-- lets a reader cite the page a passage came from.
+export pure func htmlLayoutPage(node: XmlNode, processNode: XmlNode -> [Block], deepText: XmlNode -> string) -> [Block] {
+  let height = htmlLayoutPt(htmlLayoutCss(htmlLayoutStyle(node), "height"));
+  let kids = map(\c. {node: c, f: htmlLayoutFurniture(height, deepText, c)}, getChildren(node));
+  let labels = filter(\k. k.f.furniture && k.f.footer && length(k.f.text) > 0, kids);
+  let label = match labels {
+    k :: _ => k.f.text,
+    [] => ""
+  };
+  concat([mkNamedSection("page-break", label, [])],
+         flatMap(\k. if k.f.furniture then [] else processNode(k.node), kids))
+}
+
+-- === Tables ================================================================
+--
+-- A laid-out table is a grid sized for print: a first row of empty cells that
+-- only sets column widths, blank rows for vertical rhythm, and narrow empty
+-- columns between the figures (where a "$" or a ")" would hang). Each cell
+-- holds positioned lines like the page does. Read as a plain HTML table, the
+-- column widths row became the header and every figure sat between blanks.
+
+-- Does this table lay its cells out as positioned lines?
+export pure func htmlLayoutIsTable(table: XmlNode) -> bool =
+  any(htmlLayoutIsLine, findAll(table, "div"))
+
+-- A cell's lines: a line opening in lower case, or after a hyphen, continues
+-- the one before ("Change in fair value of convertible" / "notes, …"); any
+-- other line starts its own ("Rezwan D. Pavri" / "Allison B. Spinner").
+pure func htmlLayoutCellJoin(acc: string, next: string) -> string =
+  if length(acc) == 0 then next
+  else if endsWith(acc, "-") then "${acc}${next}"
+  else if htmlLayoutStartsLower(next) then "${acc} ${next}"
+  else "${acc}\n${next}"
+
+pure func htmlLayoutCellText(cell: XmlNode, deepText: XmlNode -> string) -> string {
+  let lines = filter(\l. length(l.text) > 0,
+                     map(\d. htmlLayoutLineOf(d, deepText), filter(htmlLayoutIsLine, findAll(cell, "div"))));
+  if listLength(lines) == 0 then join(" ", words(deepText(cell)))
+  else foldl(\acc l. htmlLayoutCellJoin(acc, l.text), "", lines)
+}
+
+pure func htmlLayoutSpan(cell: XmlNode, attr: string) -> int =
+  match stringToInt(trim(getOrElse(getAttr(cell, attr), "1"))) {
+    Some(n) => if n >= 1 then n else 1,
+    None => 1
+  }
+
+pure func htmlLayoutCell(cell: XmlNode, deepText: XmlNode -> string) -> TableCell =
+  {text: htmlLayoutCellText(cell, deepText), colSpan: htmlLayoutSpan(cell, "colspan"),
+   rowSpan: htmlLayoutSpan(cell, "rowspan"), merged: false, scope: "", align: "",
+   runs: [], fill: "", color: "", formula: ""}
+
+-- A row's own cells, in order (not those of a table nested in a cell).
+pure func htmlLayoutRowCells(tr: XmlNode) -> [XmlNode] =
+  filter(\c. getTag(c) == "td" || getTag(c) == "th", getChildren(tr))
+
+pure func htmlLayoutCellSpan(row: [TableCell], j: int) -> int =
+  match nth(row, j) {
+    Some(c) => c.colSpan,
+    None => 0
+  }
+
+-- Grid column where each cell of a row starts.
+pure func htmlLayoutStarts(row: [TableCell]) -> [int] =
+  map(\i. foldl(\s j. s + htmlLayoutCellSpan(row, j), 0, range(0, i)), range(0, listLength(row)))
+
+pure func htmlLayoutPlaced(row: [TableCell]) -> [{start: int, cell: TableCell}] =
+  map(\p. match p { (st, c) => {start: st, cell: c} }, zip(htmlLayoutStarts(row), row))
+
+pure func htmlLayoutKeptIn(kept: [int], start: int, span: int) -> int =
+  listLength(filter(\c. c >= start && c < start + span, kept))
+
+-- Drop every grid column no cell of its own has text in. A cell spanning a
+-- dropped column narrows by one; a spanning cell left with no column keeps
+-- its first.
+pure func htmlLayoutPrune(rows: [[TableCell]]) -> [[TableCell]] {
+  let placed = map(htmlLayoutPlaced, rows);
+  let width = foldl(\m r. foldl(\w p. if p.start + p.cell.colSpan > w then p.start + p.cell.colSpan else w, m, r), 0, placed);
+  let singles = flatMap(\r. map(\p. p.start, filter(\p. p.cell.colSpan == 1 && length(p.cell.text) > 0, r)), placed);
+  let orphans = flatMap(\r. map(\p. p.start,
+                  filter(\p. p.cell.colSpan > 1 && length(p.cell.text) > 0
+                              && any(\c. c >= p.start && c < p.start + p.cell.colSpan, singles) == false, r)), placed);
+  let kept = filter(\c. contains(singles, c) || contains(orphans, c), range(0, width));
+  if listLength(kept) == width then rows
+  else map(\r. flatMap(\p. {
+    let span = htmlLayoutKeptIn(kept, p.start, p.cell.colSpan);
+    if span == 0 then []
+    else [{text: p.cell.text, colSpan: span, rowSpan: p.cell.rowSpan, merged: p.cell.merged,
+           scope: p.cell.scope, align: p.cell.align, runs: p.cell.runs, fill: p.cell.fill,
+           color: p.cell.color, formula: p.cell.formula}]
+  }, r), placed)
+}
+
+-- A cell spanning n columns is followed by n-1 merged continuations, the
+-- shape markdown_writer and markdown_table already share ("Total {colspan=3}"
+-- then two "{merged}"). Without them a spanning header row has fewer cells
+-- than the rows under it, and a GFM renderer, which takes its column count
+-- from the header, drops the extra columns of every row.
+pure func htmlLayoutWithContinuations(row: [TableCell]) -> [TableCell] =
+  flatMap(\c. if c.colSpan > 1 then concat([c], map(\_. mergedCell(), range(1, c.colSpan))) else [c], row)
+
+-- A laid-out table: blank rows and empty columns gone, the first row with
+-- text as the header.
+export pure func htmlLayoutTable(table: XmlNode, deepText: XmlNode -> string) -> Block {
+  let rows = map(\tr. map(\c. htmlLayoutCell(c, deepText), htmlLayoutRowCells(tr)), findAll(table, "tr"));
+  let filled = filter(\r. any(\c. length(c.text) > 0, r), rows);
+  match map(htmlLayoutWithContinuations, htmlLayoutPrune(filled)) {
+    [] => mkTableFull([], [], ""),
+    h :: rest => mkTableFull(rest, h, "")
+  }
+}
+
+-- === Finishing pass ========================================================
+
+pure func htmlLayoutIsPara(b: Block) -> bool =
+  match b {
+    TextBlock(t) => startsWith(t.style, "layout:"),
+    _ => false
+  }
+
+pure func htmlLayoutAny(blocks: [Block]) -> bool =
+  any(\b. match b {
+    TextBlock(t) => startsWith(t.style, "layout:"),
+    SectionBlock(s) => htmlLayoutAny(s.blocks),
+    _ => false
+  }, blocks)
+
+-- The font a provisional paragraph was set in, read back from its style.
+pure func htmlLayoutFontOf(style: string) -> {fs: float, bold: bool, italic: bool} =
+  match split(style, ":") {
+    [_, size, b, i] => {fs: htmlLayoutPt(size), bold: b == "1", italic: i == "1"},
+    _ => {fs: 0.0, bold: false, italic: false}
+  }
+
+-- (size, characters) for every provisional paragraph, sections included.
+pure func htmlLayoutSizes(blocks: [Block]) -> [{fs: float, n: int}] =
+  flatMap(\b. match b {
+    TextBlock(t) => if startsWith(t.style, "layout:")
+                    then [{fs: htmlLayoutFontOf(t.style).fs, n: length(t.text)}]
+                    else [],
+    SectionBlock(s) => htmlLayoutSizes(s.blocks),
+    _ => []
+  }, blocks)
+
+pure func htmlLayoutTally(acc: [{fs: float, n: int}], x: {fs: float, n: int}) -> [{fs: float, n: int}] =
+  if any(\a. a.fs == x.fs, acc)
+  then map(\a. if a.fs == x.fs then {fs: a.fs, n: a.n + x.n} else a, acc)
+  else concat(acc, [x])
+
+-- The body font: the size most of the document's characters are set in.
+pure func htmlLayoutBodySize(blocks: [Block]) -> float {
+  let tally = foldl(htmlLayoutTally, [], htmlLayoutSizes(blocks));
+  let best = foldl(\m a. if a.n > m.n then a else m, {fs: 0.0, n: 0}, tally);
+  best.fs
+}
+
+-- Heading level from size and weight relative to the body font, 0 for a
+-- paragraph. Larger than body: by how much. Body size: only when bold, and
+-- short enough to be a title (bold italic carries the long one-sentence
+-- risk-factor titles of a prospectus). Smaller than body — cover-page
+-- legends, table labels — is never a heading.
+export pure func htmlLayoutLevel(body: float, fs: float, bold: bool, italic: bool, chars: int) -> int {
+  if body <= 0.0 || fs <= 0.0 then 0
+  else {
+    let r = fs / body;
+    if r >= 1.8 && chars <= 200 then 1
+    else if r >= 1.2 && chars <= 200 then 2
+    else if r > 1.02 && (bold || italic) && chars <= 200 then (if bold then 3 else 4)
+    else if r >= 0.97 && r <= 1.02 && bold && italic && chars <= 400 then 4
+    else if r >= 0.97 && r <= 1.02 && bold && chars <= 150 then 5
+    else 0
+  }
+}
+
+-- A title a statement repeats at the top of each of its pages ("Notes to
+-- Consolidated Financial Statements (Continued)") restates a heading already
+-- given; as a heading it would add one outline entry per page.
+pure func htmlLayoutIsContinued(text: string) -> bool =
+  endsWith(toLower(text), "(continued)")
+
+pure func htmlLayoutResolve(body: float, b: Block) -> [Block] =
+  match b {
+    TextBlock(t) =>
+      if startsWith(t.style, "layout:") then {
+        let font = htmlLayoutFontOf(t.style);
+        let level = htmlLayoutLevel(body, font.fs, font.bold, font.italic, length(t.text));
+        if level > 0 && htmlLayoutIsContinued(t.text) then []
+        else if level > 0 then [mkHeading(t.text, level)]
+        else [mkText(t.text, "normal", 0)]
+      }
+      else [b],
+    SectionBlock(s) => [mkNamedSection(s.kind, s.name, flatMap(\x. htmlLayoutResolve(body, x), s.blocks))],
+    _ => [b]
+  }
+
+pure func htmlLayoutIsPageBreak(b: Option[Block]) -> bool =
+  match b {
+    Some(SectionBlock(s)) => s.kind == "page-break",
+    _ => false
+  }
+
+pure func htmlLayoutText(b: Option[Block]) -> string =
+  match b {
+    Some(TextBlock(t)) => t.text,
+    _ => ""
+  }
+
+pure func htmlLayoutStyleOf(b: Option[Block]) -> string =
+  match b {
+    Some(TextBlock(t)) => t.style,
+    _ => ""
+  }
+
+pure func htmlLayoutIsBullet(text: string) -> bool =
+  startsWith(text, "•") || startsWith(text, "◦") || startsWith(text, "▪") || startsWith(text, "●")
+
+pure func htmlLayoutEndsSentence(text: string) -> bool =
+  endsWith(text, ".") || endsWith(text, ":") || endsWith(text, "?") || endsWith(text, "!")
+    || endsWith(text, "”") || endsWith(text, "\"")
+
+pure func htmlLayoutStartsLower(text: string) -> bool {
+  if length(text) == 0 then false
+  else {
+    let c = charCode(charAt(text, 0));
+    c >= 97 && c <= 122
+  }
+}
+
+-- What a page-split paragraph may be read across: the page marker, the
+-- page's footnotes — paragraphs set smaller than the body, which a filing may
+-- place before the page's text in the markup — and a running "(Continued)"
+-- title at the head of the next page.
+pure func htmlLayoutPassable(body: float, b: Option[Block]) -> bool =
+  match b {
+    Some(SectionBlock(s)) => s.kind == "page-break",
+    Some(TextBlock(t)) => startsWith(t.style, "layout:")
+      && (htmlLayoutFontOf(t.style).fs < body - 0.3 || htmlLayoutIsContinued(t.text)),
+    _ => false
+  }
+
+-- The nearest block before i that is not passable, and whether a page break
+-- was passed on the way; at is -1 when there is none.
+pure func htmlLayoutBack(body: float, bs: [Block], i: int, crossed: bool) -> {at: int, crossed: bool} =
+  if i < 0 then {at: -1, crossed: crossed}
+  else if htmlLayoutPassable(body, nth(bs, i))
+  then htmlLayoutBack(body, bs, i - 1, crossed || htmlLayoutIsPageBreak(nth(bs, i)))
+  else {at: i, crossed: crossed}
+
+-- The nearest block after i that is not passable.
+pure func htmlLayoutAhead(body: float, bs: [Block], i: int) -> int =
+  if i >= listLength(bs) then i
+  else if htmlLayoutPassable(body, nth(bs, i)) then htmlLayoutAhead(body, bs, i + 1)
+  else i
+
+-- Block i is the tail of a paragraph a page break cut: the paragraph before
+-- the break (footnotes aside) is in the same font, i is not a new bullet, and
+-- either it starts mid-sentence or the paragraph above did not end one.
+pure func htmlLayoutAbsorbed(body: float, bs: [Block], i: int) -> bool {
+  let b = nth(bs, i);
+  if startsWith(htmlLayoutStyleOf(b), "layout:") == false || htmlLayoutPassable(body, b) then false
+  else {
+    let back = htmlLayoutBack(body, bs, i - 1, false);
+    let a = nth(bs, back.at);
+    let tb = htmlLayoutText(b);
+    back.crossed && back.at >= 0
+      && htmlLayoutStyleOf(a) == htmlLayoutStyleOf(b)
+      && htmlLayoutIsBullet(tb) == false
+      && (htmlLayoutStartsLower(tb) || htmlLayoutEndsSentence(htmlLayoutText(a)) == false)
+  }
+}
+
+-- The paragraph at i with every page-split tail after it appended.
+pure func htmlLayoutChain(body: float, bs: [Block], i: int, text: string) -> string {
+  let k = htmlLayoutAhead(body, bs, i + 1);
+  if htmlLayoutAbsorbed(body, bs, k)
+  then htmlLayoutChain(body, bs, k, htmlLayoutJoin(text, htmlLayoutText(nth(bs, k))))
+  else text
+}
+
+-- Rejoin paragraphs split by a page break. The joined paragraph stays where
+-- it started; the page marker and any footnotes follow it.
+pure func htmlLayoutMergePages(body: float, bs: [Block]) -> [Block] =
+  flatMap(\i. match nth(bs, i) {
+    Some(b) =>
+      if htmlLayoutAbsorbed(body, bs, i) then []
+      else if htmlLayoutIsPara(b) && htmlLayoutPassable(body, Some(b)) == false
+      then [mkText(htmlLayoutChain(body, bs, i, htmlLayoutText(Some(b))), htmlLayoutStyleOf(Some(b)), 0)]
+      else [b],
+    None => []
+  }, range(0, listLength(bs)))
+
+pure func htmlLayoutBulletAt(bs: [Block], i: int) -> bool =
+  match nth(bs, i) {
+    Some(TextBlock(t)) => t.style == "normal" && htmlLayoutIsBullet(t.text),
+    _ => false
+  }
+
+pure func htmlLayoutBulletEnd(bs: [Block], i: int) -> int =
+  if htmlLayoutBulletAt(bs, i) then htmlLayoutBulletEnd(bs, i + 1) else i
+
+-- "• item" → "item": drop the glyph (one code point) and the space after it.
+pure func htmlLayoutBulletItem(text: string) -> string =
+  trim(substring(text, 1, length(text)))
+
+-- Runs of bullet paragraphs become one list each.
+pure func htmlLayoutLists(bs: [Block]) -> [Block] =
+  flatMap(\i. if htmlLayoutBulletAt(bs, i) == false then (match nth(bs, i) { Some(b) => [b], None => [] })
+              else if i > 0 && htmlLayoutBulletAt(bs, i - 1) then []
+              else [mkList(map(\j. htmlLayoutBulletItem(htmlLayoutText(nth(bs, j))), range(i, htmlLayoutBulletEnd(bs, i))), false)],
+          range(0, listLength(bs)))
+
+-- Resolve every provisional paragraph once the whole document has been read.
+-- Documents with no positioned lines come back unchanged.
+export pure func htmlLayoutFinish(blocks: [Block]) -> [Block] {
+  if htmlLayoutAny(blocks) == false then blocks
+  else {
+    let body = htmlLayoutBodySize(blocks);
+    htmlLayoutLists(flatMap(\b. htmlLayoutResolve(body, b), htmlLayoutMergePages(body, blocks)))
+  }
+}
