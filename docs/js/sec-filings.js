@@ -18,6 +18,8 @@
   var EDGAR = 'https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/';
   var IMG = 'data/sec-s1/img/';
   var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  // Running as the Claude artifact copy of this page (window.claude is set by the viewer).
+  var IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
   var KEY_SLOT = 'gemini-api-key';
 
   var D, B;            // summary, blocks
@@ -414,7 +416,7 @@
     renderSelection();
     aiStatus();
     // Inside a Claude artifact viewer the page can ask Claude instead.
-    if (window.claude && typeof window.claude.use === 'function') {
+    if (IN_CLAUDE) {
       window.claude.use('sample').then(function (s) { if (s) { ai.claude = s; aiStatus(); } }).catch(function () {});
     }
   }
@@ -422,6 +424,7 @@
   function aiStatus() {
     var p = provider();
     $('sec-key-box').querySelector('.keyrow').hidden = p === 'claude';
+    $('sec-claude-link').hidden = IN_CLAUDE;
     $('sec-ai-status').textContent =
       p === 'claude' ? 'Answers come from Claude in this preview. Only the selected sections are sent.'
       : p === 'gemini' ? 'Using your Gemini key, saved in this browser and shared with the Workbench. Only the selected sections are sent to Google.'
