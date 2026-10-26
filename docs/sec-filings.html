@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Digest a 421-Page S-1 — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Anthropic's S-1 is 14 MB of page-layout HTML. AILANG Parse turns it into 3,274 typed blocks with headings, lists, tables and page numbers in seconds, with no AI, so an agent can read the outline first and fetch only the section it needs.">
+<meta property="og:title" content="Digest a 421-Page S-1 — AILANG Parse">
+<meta property="og:description" content="14 MB of SEC filing HTML to a structured, page-cited document in seconds. Outline-first reading for agents: 3.7k tokens to see the whole filing.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* Page-local, like the dp-feature-* / dp-pill classes on chunking.html. */
+.dp-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--bg-soft, #f0f0f0);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.dp-pill-new {
+  background: var(--accent, #16a34a);
+  color: #fff;
+  border-color: transparent;
+}
+.sec-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 8px 0 28px;
+}
+.sec-stat {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+.sec-stat b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.sec-stat span { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; display: block; margin-top: 4px; }
+
+.sec-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.sec-pane { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); overflow: hidden; min-width: 0; }
+.sec-pane h4 {
+  margin: 0; padding: 10px 14px; font-family: var(--font-display); font-size: 13px; font-weight: 700;
+  border-bottom: 1px solid var(--border); color: var(--text-primary); display: flex; justify-content: space-between; gap: 8px;
+}
+.sec-pane h4 small { font-weight: 500; color: var(--text-secondary); }
+.sec-pane pre { margin: 0; border-radius: 0; font-size: 12px; max-height: 300px; overflow: auto; }
+
+/* Outline explorer */
+.sec-explorer {
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card);
+  overflow: hidden; margin-bottom: 12px;
+}
+.sec-tree { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sec-tree input {
+  margin: 10px; padding: 8px 10px; font: inherit; font-size: 13px; border: 1px solid var(--border);
+  border-radius: var(--radius-xs); background: var(--bg-input, var(--bg)); color: var(--text-primary);
+}
+.sec-tree ul { list-style: none; margin: 0; padding: 0 0 8px; max-height: 460px; overflow: auto; }
+.sec-tree li button {
+  display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; border: 0; background: none;
+  padding: 5px 12px; font: inherit; font-size: 13px; color: var(--text-primary); cursor: pointer; line-height: 1.35;
+}
+.sec-tree li button:hover { background: var(--dp-blue-faded, rgba(59,130,246,.08)); }
+.sec-tree li button[aria-current="true"] { background: var(--dp-blue-faded, rgba(59,130,246,.12)); box-shadow: inset 3px 0 0 var(--dp-blue); }
+.sec-tree li button .t { flex: 1; min-width: 0; }
+.sec-tree li button .pg { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.sec-tree li.l1 button { font-weight: 700; }
+.sec-tree li.l2 button { padding-left: 26px; color: var(--text-secondary); }
+.sec-tree li.l3 button { padding-left: 40px; color: var(--text-secondary); font-size: 12.5px; }
+.sec-tree .toggle { width: 12px; color: var(--text-muted); font-size: 10px; flex: none; }
+.sec-detail { padding: 18px 20px; min-width: 0; }
+.sec-detail .crumb { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.sec-detail h3 { margin: 0 0 10px; font-family: var(--font-display); font-size: 19px; line-height: 1.3; }
+.sec-detail .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.sec-chip {
+  display: inline-block; padding: 2px 9px; font-size: 11.5px; font-weight: 600; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-secondary); background: var(--bg);
+  font-variant-numeric: tabular-nums;
+}
+.sec-chip--page { color: var(--dp-blue); border-color: var(--dp-blue-border, var(--border)); }
+.sec-detail p { font-size: 14px; line-height: 1.65; color: var(--text-secondary); margin: 0 0 12px; }
+.sec-detail .cost { font-size: 12.5px; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 10px; }
+
+/* Token budget */
+.sec-bars { margin: 8px 0 24px; }
+.sec-bar { display: grid; grid-template-columns: 210px 1fr 90px; gap: 12px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.sec-bar .track { height: 14px; background: var(--bg-alt, rgba(0,0,0,.04)); border-radius: 4px; overflow: hidden; }
+.sec-bar .fill { height: 100%; background: var(--dp-blue); border-radius: 4px; min-width: 2px; }
+.sec-bar .n { font-family: var(--font-mono); font-size: 12px; text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sec-bar .lbl { color: var(--text-secondary); }
+
+/* Risk factors */
+.sec-risk details { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); margin-bottom: 8px; }
+.sec-risk summary { padding: 11px 14px; cursor: pointer; font-weight: 600; font-size: 14px; display: flex; gap: 10px; align-items: baseline; }
+.sec-risk summary .t { flex: 1; }
+.sec-risk ol { margin: 0; padding: 0 16px 12px 40px; }
+.sec-risk li { font-size: 13px; line-height: 1.55; color: var(--text-secondary); margin-bottom: 6px; }
+.sec-risk li .sec-chip { margin-left: 6px; font-size: 10.5px; padding: 0 7px; }
+
+/* Financial table */
+.sec-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 10px; }
+.sec-fin { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.sec-fin th, .sec-fin td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.sec-fin td:not(:first-child), .sec-fin th:not(:first-child) { text-align: right; }
+.sec-fin td:first-child { white-space: normal; min-width: 220px; color: var(--text-primary); }
+.sec-fin thead th { font-weight: 700; background: var(--bg-alt, transparent); text-align: center; }
+.sec-fin tr.sub td:first-child { font-weight: 600; }
+
+.sec-images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+
+.sec-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 0; flex-wrap: wrap; }
+.sec-tabs button {
+  border: 0; background: none; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.sec-tabs button[aria-selected="true"] { color: var(--dp-blue); border-bottom-color: var(--dp-blue); }
+.sec-tabpanel pre { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+
+@media (max-width: 900px) {
+  .sec-stats { grid-template-columns: 1fr 1fr; }
+  .sec-compare, .sec-explorer, .sec-images { grid-template-columns: 1fr; }
+  .sec-tree { border-right: 0; border-bottom: 1px solid var(--border); }
+  .sec-tree ul { max-height: 300px; }
+  .sec-bar { grid-template-columns: 1fr 70px; }
+  .sec-bar .track { grid-column: 1 / -1; grid-row: 2; }
+}
+</style>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">Digest a <span class="dp-accent">421-Page S-1</span></h1>
+    <p class="subtitle reveal reveal-delay-1">Anthropic's IPO registration statement is 14&nbsp;MB of page-layout HTML. AILANG Parse turns it into a structured document with headings, tables and page numbers, so a person or an agent can read the outline and open only the section they need.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#result" class="active">The Result</a>
+        <a href="#before-after">Before &amp; After</a>
+        <a href="#outline">Explore the Outline</a>
+        <a href="#outline-first">Outline-First Reading</a>
+        <a href="#risk-factors">Every Risk Factor</a>
+        <a href="#tables">Tables as Data</a>
+        <a href="#images">What Still Needs AI</a>
+        <a href="#try-it">Try It</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="result">The Result <span class="dp-pill dp-pill-new">v0.53+</span></h2>
+
+      <div class="sec-stats" id="sec-stats" aria-live="polite">
+        <div class="sec-stat"><b>&hellip;</b><span>Loading parse results</span></div>
+      </div>
+
+      <p>The filing is the <a href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm" rel="noopener">S-1 as filed on EDGAR</a>, fetched as-is and parsed with the <code>docparse</code> CLI on a laptop. Everything on this page is drawn from that one JSON output: the outline, the page numbers, the risk factors and the tables. No model was called.</p>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>A filing tool lays out each page of an EDGAR filing for print. Every line is an absolutely positioned <code>&lt;div&gt;</code> of positioned <code>&lt;font&gt;</code> fragments, and there is no <code>&lt;p&gt;</code> or <code>&lt;h1&gt;</code> anywhere. A section title is just a line in a 20pt bold font. AILANG Parse rebuilds the structure from the page geometry: it groups lines into paragraphs by their spacing, finds headings by font size and weight, picks up bullets, footnotes and page numbers, and rejoins paragraphs that were split across pages.</div>
+      </div>
+
+      <h2 id="before-after">Before &amp; After</h2>
+
+      <p>Read naively, page-layout HTML gives one block per printed line, with words split wherever a fragment ends. Read for its layout, it gives a document.</p>
+
+      <div class="sec-compare">
+        <div class="sec-pane">
+          <h4>Line by line <small id="naive-count">20,554 blocks &middot; 0 headings</small></h4>
+<pre><code class="language-text">text  "As filed with the Securities and"
+text  "Exchange"
+text  "Commission on October 26, 2026."
+text  "UNITED STATES"
+text  "SE"
+text  "CURITIES AND EXCHANGE COMMISSION"
+text  "Table of Contents"
+text  "Risk Factors"
+text  "Investing in our Class A common stock involves a high degree of risk. You should carefully consider the risks"
+text  "and uncertainties described below, together with all of the other information in this prospectus, including the"
+text  "&bull;"
+text  "advance the frontier of AI capabilities through"
+text  "Table of Contents"
+text  "27"</code></pre>
+        </div>
+        <div class="sec-pane">
+          <h4>By layout <small id="struct-count">3,274 blocks &middot; 676 headings</small></h4>
+<pre><code class="language-json">{"type": "section",
+ "kind": "page-break", "name": "27"}
+{"type": "heading", "level": 1,
+ "text": "Risk Factors"}
+{"type": "text",
+ "text": "Investing in our Class A common
+   stock involves a high degree of risk.
+   You should carefully consider …"}
+{"type": "heading", "level": 2,
+ "text": "Risks Related to our Business
+   and Industry"}
+{"type": "heading", "level": 4,
+ "text": "Our success depends in large
+   part on our ability to continue to
+   develop the most advanced and
+   capable AI models, …"}
+{"type": "list", "ordered": false,
+ "items": ["advance the frontier of AI
+   capabilities through breakthrough
+   research, …", …]}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="outline">Explore the Outline</h2>
+
+      <p>These are the filing's headings, levels 1 to 3, exactly as the parser emitted them. Each one shows the printed page it starts on, taken from the <code>page-break</code> marker before it. Pick a section to see its size and how it opens. Sizes count everything up to the next heading at the same level.</p>
+
+      <div class="sec-explorer" id="sec-explorer">
+        <div class="sec-tree">
+          <input type="search" id="sec-filter" placeholder="Filter headings — try “compute” or “dividend”" aria-label="Filter headings">
+          <ul id="sec-tree" role="tree" aria-label="Filing outline"></ul>
+        </div>
+        <div class="sec-detail" id="sec-detail" aria-live="polite">
+          <p>Loading outline&hellip;</p>
+        </div>
+      </div>
+
+      <h2 id="outline-first">Outline-First Reading</h2>
+
+      <p>Ask a model about an S-1 by pasting the whole filing and you spend hundreds of thousands of tokens on every question. Give it the outline first and it can choose what to read. With structured blocks, an agent can work in three steps:</p>
+
+      <ol>
+        <li><strong>Read the outline.</strong> All the headings, with page numbers.</li>
+        <li><strong>Pick the sections</strong> the question needs: <em>"What does the company say about compute supply?"</em> points to a handful of risk factors and one sub-section of MD&amp;A.</li>
+        <li><strong>Fetch only those blocks</strong>, using the block index on each heading, and cite the page each passage came from.</li>
+      </ol>
+
+      <div class="sec-bars" id="sec-bars" role="img" aria-label="Token cost comparison"></div>
+
+      <p style="font-size:13px;color:var(--text-muted)">Token counts are estimates (words &times; 1.3), the same rule AILANG Parse's <a href="chunking.html">chunker</a> uses. The full figure counts the text of every block in the JSON.</p>
+
+      <h2 id="risk-factors">Every Risk Factor, With Its Page</h2>
+
+      <p>In a prospectus, each risk factor is a one-sentence title in bold italic, followed by its explanation. The parser makes each title a heading, under the risk category it belongs to, so the whole list of risks is a single query over the JSON:</p>
+
+      <div class="sec-risk" id="sec-risk"></div>
+
+      <h2 id="tables">Tables as Data</h2>
+
+      <p>Financial statements in a filing are laid out for print. Empty columns hold the gap where a <code>$</code> or a closing parenthesis would hang, an empty first row sets column widths, and blank rows add vertical spacing. The parser removes all three, makes the first real row the header, and narrows spanning header cells to fit, so each figure lands in its column:</p>
+
+      <div id="sec-table"></div>
+
+      <h2 id="images">What Still Needs AI</h2>
+
+      <p>Parsing is deterministic and does not read pixels. This filing has <strong id="img-count">43</strong> images, and some of them are content rather than decoration. The eight-page letter from the founders that opens the prospectus exists only as page images. They come through as <code>ImageBlock</code>s in place, so you know exactly which pages need an AI pass. Here they are, grouped by file name:</p>
+
+      <div class="sec-images" id="sec-images"></div>
+
+      <div class="dp-callout dp-callout--warn">
+        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div>To read these pages, download the images next to the <code>.htm</code> and run <code>--describe</code> (opt-in, AI-metered). Each image then gets a short description. A full transcription of each letter page, placed back into the document as blocks, is planned next. Parsing one letter page through the image path took about 10&nbsp;s and recovered its full text and footnote. The two-column reading order still needs work.</div>
+      </div>
+
+      <h2 id="try-it">Try It</h2>
+
+      <p>EDGAR asks automated clients to identify themselves, so send a User-Agent with a contact address. The <code>.json</code> file is the structured output, and the <code>.md</code> file is Markdown for a model to read.</p>
+
+<pre><code class="language-bash">curl -sL -A "Your Name you@example.com" -o anthropicpbc-sx1.htm \
+  https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm
+
+docparse anthropicpbc-sx1.htm      # writes anthropicpbc-sx1.htm.json and .md</code></pre>
+
+      <div class="sec-tabs" role="tablist" id="sec-tabs">
+        <button role="tab" aria-selected="true" aria-controls="tab-outline" id="t-outline">Outline</button>
+        <button role="tab" aria-selected="false" aria-controls="tab-risks" id="t-risks">Risk factors + pages</button>
+        <button role="tab" aria-selected="false" aria-controls="tab-table" id="t-table">A table row</button>
+      </div>
+      <div class="sec-tabpanel" role="tabpanel" id="tab-outline" aria-labelledby="t-outline">
+<pre><code class="language-bash">jq -r '.document.blocks[]
+  | select(.type == "heading" and .level &lt;= 2)
+  | ("  " * (.level - 1)) + .text' anthropicpbc-sx1.htm.json</code></pre>
+      </div>
+      <div class="sec-tabpanel" role="tabpanel" id="tab-risks" aria-labelledby="t-risks" hidden>
+<pre><code class="language-bash"># Carry the page and the level-1 section along, keep the risk-factor titles
+jq -r 'foreach .document.blocks[] as $b ({page: "", h1: ""};
+    if $b.type == "section" and $b.kind == "page-break" then .page = ($b.name // "")
+    elif $b.type == "heading" and $b.level == 1 then .h1 = $b.text
+    else . end;
+    select(.h1 == "Risk Factors" and $b.type == "heading" and $b.level == 4)
+    | "p.\(.page)  \($b.text)")' anthropicpbc-sx1.htm.json</code></pre>
+      </div>
+      <div class="sec-tabpanel" role="tabpanel" id="tab-table" aria-labelledby="t-table" hidden>
+<pre><code class="language-bash">jq -c '.document.blocks as $b
+  | ($b | map(.text) | index("Consolidated Statements of Operations Data")) as $i
+  | $b[$i:] | map(select(.type == "table")) | .[0].rows[1]' anthropicpbc-sx1.htm.json
+# ["Revenue","$41","$386","$4,585","$1,163","$16,286"]</code></pre>
+      </div>
+
+      <p>Nothing here is specific to Anthropic. Any EDGAR filing laid out the same way, such as a 10-K, 10-Q, S-1 or proxy statement, parses into the same structure. Ordinary HTML pages are not affected, because this handling only applies to pages with a fixed width and height in points. See <a href="html-parsing.html">HTML parsing</a> for the rest, and <a href="chunking.html">chunking</a> to split the result for retrieval.</p>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function () {
+  var fmt = function (n) { return Number(n).toLocaleString('en-US'); };
+  var esc = function (s) {
+    return String(s).replace(/[&<>"]/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; });
+  };
+  var pageChip = function (p) {
+    return p ? '<span class="sec-chip sec-chip--page">p.&nbsp;' + esc(p) + '</span>' : '<span class="sec-chip">unnumbered</span>';
+  };
+
+  fetch('data/sec-s1-demo.json').then(function (r) { return r.json(); }).then(render).catch(function () {
+    document.getElementById('sec-detail').innerHTML = '<p>Could not load the parse data.</p>';
+  });
+
+  function render(d) {
+    var P = d.parse, k = P.kinds;
+    document.getElementById('sec-stats').innerHTML = [
+      ['' + (d.source.bytes / 1e6).toFixed(1) + '&nbsp;MB', 'of EDGAR HTML in, parsed in ' + P.seconds.toFixed(1) + '&nbsp;s on a laptop'],
+      [fmt(P.blocks), 'typed blocks (was ' + fmt(P.naiveBlocks) + ', one per printed line)'],
+      [fmt(k.heading || 0), 'headings &middot; ' + fmt(k.table || 0) + ' tables &middot; ' + fmt(k.list || 0) + ' lists'],
+      [fmt(P.pages), 'pages, each marked so every passage cites its page']
+    ].map(function (s) { return '<div class="sec-stat"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>'; }).join('');
+    document.getElementById('naive-count').textContent = fmt(P.naiveBlocks) + ' blocks · 0 headings';
+    document.getElementById('struct-count').textContent = fmt(P.blocks) + ' blocks · ' + fmt(k.heading || 0) + ' headings';
+
+    window.__secFull = d.tokens.full;
+    renderOutline(d.outline);
+    renderBars(d.tokens);
+    renderRisks(d.riskGroups, P.riskFactors);
+    renderTable(d.tables[0]);
+    renderImages(d.images);
+  }
+
+  // ---- Outline explorer -------------------------------------------------
+  function renderOutline(items) {
+    var tree = document.getElementById('sec-tree');
+    var filter = document.getElementById('sec-filter');
+    var open = {};      // index of an H1 entry -> expanded
+    var current = null;
+
+    // parent index for each entry (nearest shallower heading before it)
+    var stack = [];
+    items.forEach(function (o, i) {
+      while (stack.length && items[stack[stack.length - 1]].l >= o.l) stack.pop();
+      o.parent = stack.length ? stack[stack.length - 1] : -1;
+      o.top = stack.length ? (items[stack[0]].l === 1 ? stack[0] : o.parent) : i;
+      stack.push(i);
+    });
+
+    function visible(i, q) {
+      var o = items[i];
+      if (q) return o.t.toLowerCase().indexOf(q) >= 0;
+      return o.l === 1 || open[o.top];
+    }
+
+    function draw() {
+      var q = filter.value.trim().toLowerCase();
+      var html = '';
+      items.forEach(function (o, i) {
+        if (!visible(i, q)) return;
+        var hasKids = o.l === 1 && o.sub > 0;
+        var tog = hasKids && !q ? (open[i] ? '▾' : '▸') : '';
+        html += '<li class="l' + o.l + '" role="treeitem"' + (hasKids && !q ? ' aria-expanded="' + !!open[i] + '"' : '') + '>' +
+          '<button data-i="' + i + '"' + (current === i ? ' aria-current="true"' : '') + '>' +
+          (o.l === 1 ? '<span class="toggle">' + tog + '</span>' : '') +
+          '<span class="t">' + esc(o.t) + '</span><span class="pg">' + (o.p ? 'p.' + esc(o.p) : '') + '</span></button></li>';
+      });
+      tree.innerHTML = html || '<li style="padding:10px 14px;font-size:13px;color:var(--text-muted)">No heading matches.</li>';
+    }
+
+    function show(i) {
+      current = i;
+      var o = items[i], path = [], p = o.parent;
+      while (p >= 0) { path.unshift(items[p].t); p = items[p].parent; }
+      var tokens = Math.round(o.w * 1.3);
+      document.getElementById('sec-detail').innerHTML =
+        (path.length ? '<div class="crumb">' + path.map(esc).join(' › ') + '</div>' : '') +
+        '<h3>' + esc(o.t) + '</h3>' +
+        '<div class="meta">' + pageChip(o.p) +
+        '<span class="sec-chip">H' + o.l + '</span>' +
+        '<span class="sec-chip">' + fmt(o.w) + ' words</span>' +
+        (o.sub ? '<span class="sec-chip">' + fmt(o.sub) + ' sub-headings</span>' : '') +
+        (o.tables ? '<span class="sec-chip">' + fmt(o.tables) + ' table' + (o.tables > 1 ? 's' : '') + '</span>' : '') +
+        '<span class="sec-chip">block #' + fmt(o.i) + '</span></div>' +
+        (o.preview ? '<p>' + esc(o.preview) + '</p>' : '<p><em>This section opens with a table, a list or sub-headings rather than a paragraph.</em></p>') +
+        '<div class="cost">Reading this section costs about <strong>' + fmt(tokens) + ' tokens</strong>, against ~' +
+        fmt(window.__secFull || 0) + ' for the whole filing.</div>';
+      draw();
+    }
+
+    tree.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-i]');
+      if (!b) return;
+      var i = +b.getAttribute('data-i');
+      if (items[i].l === 1 && items[i].sub > 0 && !filter.value.trim()) open[i] = !open[i];
+      show(i);
+    });
+    filter.addEventListener('input', draw);
+
+    // Open on Risk Factors: the section most readers come for.
+    var rf = items.findIndex(function (o) { return o.l === 1 && o.t === 'Risk Factors'; });
+    if (rf >= 0) { open[rf] = true; show(rf); } else { draw(); }
+  }
+
+  // ---- Token bars ---------------------------------------------------------
+  function renderBars(t) {
+    var rows = [
+      ['Whole filing', t.full],
+      ['Risk Factors section', t.riskFactors],
+      ['Outline (headings H1–H3 + pages)', t.outline]
+    ];
+    var max = t.full;
+    document.getElementById('sec-bars').innerHTML = rows.map(function (r) {
+      return '<div class="sec-bar"><span class="lbl">' + r[0] + '</span>' +
+        '<span class="track"><span class="fill" style="display:block;width:' + Math.max(0.4, 100 * r[1] / max).toFixed(2) + '%"></span></span>' +
+        '<span class="n">~' + fmt(r[1]) + '</span></div>';
+    }).join('');
+  }
+
+  // ---- Risk factors -------------------------------------------------------
+  function renderRisks(groups, total) {
+    document.getElementById('sec-risk').innerHTML =
+      '<p style="font-size:13px;color:var(--text-muted);margin:0 0 10px"><strong>' + fmt(total) + '</strong> risk factors in ' + groups.length + ' categories.</p>' +
+      groups.map(function (g) {
+        return '<details><summary><span class="t">' + esc(g.t) + '</span>' +
+          '<span class="sec-chip">' + g.items.length + '</span>' + pageChip(g.p) + '</summary><ol>' +
+          g.items.map(function (r) { return '<li>' + esc(r.t) + pageChip(r.p) + '</li>'; }).join('') +
+          '</ol></details>';
+      }).join('');
+  }
+
+  // ---- Financial table ----------------------------------------------------
+  function cell(c) { return typeof c === 'string' ? {t: c} : c; }
+  function renderTable(tb) {
+    var head = '<tr>' + tb.headers.map(cell).filter(function (c) { return !c.m; }).map(function (c) {
+      return '<th' + (c.s ? ' colspan="' + c.s + '"' : '') + '>' + esc(c.t) + '</th>';
+    }).join('') + '</tr>';
+    var body = tb.rows.map(function (r, ri) {
+      var cs = r.map(cell).filter(function (c) { return !c.m; });
+      var label = cs[0] ? cs[0].t : '';
+      var isSub = cs.slice(1).every(function (c) { return !c.t; });
+      return '<tr' + (isSub || ri === 0 ? ' class="sub"' : '') + '>' + cs.map(function (c, ci) {
+        return (ri === 0 && ci > 0 ? '<th>' : '<td' + (c.s ? ' colspan="' + c.s + '"' : '') + '>') + esc(c.t) + (ri === 0 && ci > 0 ? '</th>' : '</td>');
+      }).join('') + '</tr>';
+    }).join('');
+    document.getElementById('sec-table').innerHTML =
+      '<p style="font-size:13px;margin:0 0 8px"><strong>' + esc(tb.title) + '</strong> ' + pageChip(tb.p) + '</p>' +
+      '<div class="sec-table-wrap"><table class="sec-fin"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>' +
+      '<p style="font-size:13px;color:var(--text-muted)">Rendered from the <code>TableBlock</code> as emitted (' + tb.rows.length +
+      ' rows). In the source HTML this table has an empty sizing row, blank spacer rows, and an empty column between every pair of figures.</p>';
+  }
+
+  // ---- Images -------------------------------------------------------------
+  function renderImages(imgs) {
+    var groups = [
+      ['Founders’ letter pages', /x25pg\d/],
+      ['Customer case studies', /case ?stud/i],
+      ['Section dividers, covers and graphics', /./]
+    ];
+    var buckets = groups.map(function () { return []; });
+    imgs.forEach(function (im) {
+      for (var g = 0; g < groups.length; g++) if (groups[g][1].test(im.src)) { buckets[g].push(im); break; }
+    });
+    document.getElementById('img-count').textContent = imgs.length;
+    document.getElementById('sec-images').innerHTML = groups.map(function (g, gi) {
+      var b = buckets[gi];
+      var numbered = b.filter(function (im) { return im.p; }).length;
+      return '<div class="sec-stat"><b>' + b.length + '</b><span>' + g[0] + '<br>' +
+        (numbered ? numbered + ' on numbered pages' : 'on unnumbered pages') + '</span></div>';
+    }).join('');
+  }
+
+  // ---- Tabs ---------------------------------------------------------------
+  var tabs = document.querySelectorAll('#sec-tabs [role=tab]');
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      tabs.forEach(function (o) {
+        var on = o === t;
+        o.setAttribute('aria-selected', on);
+        document.getElementById(o.getAttribute('aria-controls')).hidden = !on;
+      });
+    });
+  });
+
+  // Sidebar active link tracking on scroll (as on chunking.html)
+  var links = document.querySelectorAll('.dp-docs-sidebar a'), sections = [];
+  links.forEach(function (link) {
+    var sec = document.getElementById(link.getAttribute('href').replace('#', ''));
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100, current = null;
+    sections.forEach(function (s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
