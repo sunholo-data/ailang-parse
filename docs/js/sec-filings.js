@@ -411,6 +411,8 @@
       $('sec-key').value = ''; aiStatus();
     });
     $('sec-compare-btn').addEventListener('click', renderCompare);
+    $('sec-export-md').addEventListener('click', function () { exportSelected('md'); });
+    $('sec-export-json').addEventListener('click', function () { exportSelected('json'); });
     $('sec-ask-btn').addEventListener('click', ask);
     $('sec-stop-btn').addEventListener('click', function () { if (ai.ctl) ai.ctl.abort(); });
     renderSelection();
@@ -536,6 +538,88 @@
       r.onerror = rej;
       r.readAsDataURL(blob);
     });
+  }
+
+  // ---- Export the selected sections ------------------------------------------------------
+  var SOURCE = { title: 'Anthropic, PBC — Form S-1 (filed with the SEC on October 26, 2026)',
+                 url: EDGAR + 'anthropicpbc-sx1.htm' };
+
+  function mdCell(c) { return c.t.replace(/\|/g, '\\|').replace(/\n/g, '<br>'); }
+  // `base`: the level of the section's own heading, written as "##".
+  function blockMd(b, base) {
+    switch (b[0]) {
+      case 'g': return '*[page ' + (b[1] || 'unnumbered') + ']*';
+      case 'h': return '#'.repeat(Math.min(2 + b[1] - base, 6)) + ' ' + b[2];
+      case 'l': return b[2].map(function (x, n) { return (b[1] ? (n + 1) + '. ' : '- ') + x; }).join('\n');
+      case 'i': return '![' + b[1] + '](' + EDGAR + encodeURIComponent(b[1]) + ')';
+      case 't': {
+        // Merged continuation cells stay as empty cells so every row keeps its columns.
+        var rows = [b[1]].concat(b[2]).map(function (r) { return r.map(cell).map(function (c) { return c.m ? '' : mdCell(c); }); });
+        if (!rows[0].some(Boolean) && rows.length > 1) rows.shift();
+        var width = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+        var line = function (r) { while (r.length < width) r.push(''); return '| ' + r.join(' | ') + ' |'; };
+        return [line(rows[0]), '|' + ' --- |'.repeat(width)].concat(rows.slice(1).map(line)).join('\n');
+      }
+      default: return b[1];
+    }
+  }
+  function selectionMarkdown() {
+    return '# ' + SOURCE.title + '\n\nSource: ' + SOURCE.url + '  \nSelected sections, parsed with AILANG Parse.\n\n' +
+      selected.map(function (k) {
+        var o = outline[k], out = [];
+        out.push('## ' + o.t);
+        out.push('*' + (o.path.length ? o.path.join(' › ') + ' · ' : '') + (o.p ? 'starts on page ' + o.p : 'unnumbered page') + '*');
+        for (var i = o.i + 1; i < o.end; i++) out.push(blockMd(B[i], o.l));
+        return out.join('\n\n');
+      }).join('\n\n---\n\n') + '\n';
+  }
+  function blockJson(b) {
+    switch (b[0]) {
+      case 'g': return { type: 'section', kind: 'page-break', name: b[1], blocks: [] };
+      case 'h': return { type: 'heading', level: b[1], text: b[2] };
+      case 'l': return { type: 'list', ordered: !!b[1], items: b[2] };
+      case 'i': return { type: 'image', src: b[1], original: EDGAR + b[1] };
+      case 't': {
+        var c = function (x) { var v = cell(x); return v.s > 1 || v.m ? { text: v.t, colSpan: v.s, merged: !!v.m } : v.t; };
+        return { type: 'table', headers: b[1].map(c), rows: b[2].map(function (r) { return r.map(c); }) };
+      }
+      default: return { type: 'text', text: b[1], style: 'normal', level: 0 };
+    }
+  }
+  function selectionJson() {
+    return {
+      source: SOURCE,
+      sections: selected.map(function (k) {
+        var o = outline[k];
+        return { title: o.t, path: o.path, level: o.l, page: o.p, blocks: B.slice(o.i, o.end).map(blockJson) };
+      })
+    };
+  }
+  function exportSelected(kind) {
+    var msg = $('sec-export-msg');
+    if (!selected.length) { msg.textContent = 'Select at least one section first: tick it in the outline or pick an example.'; return; }
+    var name = 'anthropic-s1-' + (selected.length === 1 ? slug(outline[selected[0]].t) : selected.length + '-sections') + '.' + kind;
+    var data = kind === 'md' ? selectionMarkdown() : JSON.stringify(selectionJson(), null, 2);
+    saveFile(name, data, kind === 'md' ? 'text/markdown' : 'application/json', msg);
+  }
+  function slug(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60); }
+  function saveFile(name, data, type, msg) {
+    if (IN_CLAUDE) {
+      // The Claude viewer saves files only through its downloads capability.
+      window.claude.use('downloads').then(function (d) {
+        if (!d) throw { code: 'unavailable' };
+        return d.save({ filename: name, data: data });
+      }).then(function () { msg.textContent = 'Saved ' + name + '.'; }).catch(function (e) {
+        msg.textContent = e && e.code === 'declined' ? '' : 'Saving files is not available in this view.';
+      });
+      return;
+    }
+    var url = URL.createObjectURL(new Blob([data], { type: type }));
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    msg.textContent = 'Downloaded ' + name + '.';
   }
 
   // ---- Minimal Markdown for answers (escaped first; page citations become links) -------------
