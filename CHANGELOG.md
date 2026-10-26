@@ -9,9 +9,11 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased]
+## [v0.53.0](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.53.0) — 2026-10-26
 
-### Fixed
+Also ships v0.52.2, which was versioned but never tagged.
+
+### Added
 
 - HTML: SEC EDGAR filings parse into a document instead of one block or a
   line-per-block stream. A filing fetched from EDGAR's Archives keeps its SGML
@@ -29,9 +31,11 @@ separately — see `sdks/` for per-SDK changelogs.
   with `{merged}` continuations so a spanning header row stays as wide as the
   rows under it), and wrapped cell lines rejoin. On Anthropic's S-1 (14 MB,
   421 pages): 20,554 blocks with no headings → 3,274 blocks with 676 headings,
-  129 lists and 421 page markers, in about the same time. Ordinary HTML is
+  129 lists and 421 page markers, in ~7 s (was ~5 s). Ordinary HTML is
   unaffected: a page needs a fixed width and height in points.
   Fixture: `challenge_edgar_layout.html` (invented content).
+
+### Fixed
 
 - PPTX preserves standalone DrawingML space runs in slide text, speaker notes,
   and inline formatting on native and browser paths. Exact source checks catch
@@ -58,7 +62,7 @@ separately — see `sdks/` for per-SDK changelogs.
   diagnostics, images retain reading-order evidence, and formula notation
   accepts an optional leading `=`. Both source audits run in CI.
 
-## [v0.52.2](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.52.2) — 2026-10-22
+## v0.52.2 — 2026-10-22 (never tagged; ships in v0.53.0)
 
 ### Fixed
 
