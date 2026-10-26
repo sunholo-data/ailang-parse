@@ -7,6 +7,7 @@ import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, any, length as listLength)
 import std/map (lookup)
+import docparse/services/html_layout (htmlLayoutStripEnvelope, htmlLayoutFinish, htmlLayoutDiv, htmlLayoutTableBlocks)
 import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull, mkSection)
 
 -- HTML Parser — converts HTML5 to Block ADT.
@@ -39,8 +40,8 @@ import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mk
 export pure func parseHtml(content: string) -> [Block]
   ensures { length(content) > 0 || listLength(result) == 0 }
 {
-  match parse(content) {
-    Ok(root) => htmlExtractBlocks(root),
+  match parse(htmlLayoutStripEnvelope(content)) {
+    Ok(root) => htmlLayoutFinish(htmlExtractBlocks(root)),
     Err(e) => [mkText("HTML parse error: ${e}", "error", 0)]
   }
 }
@@ -50,8 +51,8 @@ export pure func parseHtml(content: string) -> [Block]
 -- on the same input (one for blocks, one for metadata). For an 80 KB
 -- page like sunholo.com this halves the parse cost.
 export pure func parseHtmlDoc(content: string) -> {blocks: [Block], metadata: DocMetadata} {
-  match parse(content) {
-    Ok(root) => {blocks: htmlExtractBlocks(root), metadata: htmlExtractMetadata(root)},
+  match parse(htmlLayoutStripEnvelope(content)) {
+    Ok(root) => {blocks: htmlLayoutFinish(htmlExtractBlocks(root)), metadata: htmlExtractMetadata(root)},
     Err(e) => {
       blocks: [mkText("HTML parse error: ${e}", "error", 0)],
       metadata: emptyMetadata()
@@ -71,7 +72,7 @@ export pure func parseHtmlDoc(content: string) -> {blocks: [Block], metadata: Do
 -- Returns emptyMetadata() if no <head> or no <title> and no <meta> tags
 -- are present. Pure: requires no FS / IO effects.
 export pure func parseHtmlMetadata(content: string) -> DocMetadata {
-  match parse(content) {
+  match parse(htmlLayoutStripEnvelope(content)) {
     Ok(root) => htmlExtractMetadata(root),
     Err(_) => emptyMetadata()
   }
@@ -209,8 +210,8 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     if length(text) > 0 then [mkTextRuns(text, "normal", 0, htmlRunsFor(node))]
     else []
 
-  -- Tables
-  else if tag == "table" then [htmlParseTable(node)]
+  -- Tables (html_layout reads print-laid-out ones and drops empty spacers)
+  else if tag == "table" then htmlLayoutTableBlocks(node, htmlParseTable, htmlDeepText)
 
   -- Lists
   else if tag == "ul" then htmlParseList(node, false)
@@ -269,6 +270,10 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     let blocks = htmlProcessChildrenOf(node) in
     if listLength(blocks) > 0 then [mkSection(tag, blocks)]
     else []
+
+  -- <div>: html_layout reads page-layout HTML (EDGAR filings) and hands any
+  -- other div back to htmlProcessChildrenOf.
+  else if tag == "div" then htmlLayoutDiv(node, htmlProcessNode, htmlDeepText, htmlProcessChildrenOf)
 
   -- Block-level containers that flatten into the parent stream.
   else if tag == "div" || tag == "blockquote" ||

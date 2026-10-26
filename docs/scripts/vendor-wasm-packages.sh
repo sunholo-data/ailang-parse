@@ -106,6 +106,7 @@ MODULES=(
   "services/docx_parser.ail"
   "services/pptx_parser.ail"
   "services/xlsx_parser.ail"
+  "services/html_layout.ail"
   "services/html_parser.ail"
   "services/csv_parser.ail"
   "services/image_size.ail"

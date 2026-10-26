@@ -91,7 +91,9 @@
     { name: 'docparse/services/xlsx_parser', path: 'docparse/services/xlsx_parser.ail', formats: ['xlsx'] },
     { name: 'docparse/services/browser_xlsx', path: 'docparse/services/browser_xlsx.ail', formats: ['xlsx'],
       binds: ['parseXlsxSheet', 'orderXlsxSheets'] },
-    // html_parser before eml_parser and epub_parser — both import it
+    // html_layout before html_parser, which imports it (page-layout HTML:
+    // EDGAR filings); html_parser before eml_parser and epub_parser — both import it
+    { name: 'docparse/services/html_layout', path: 'docparse/services/html_layout.ail', formats: ['html', 'eml', 'epub'] },
     { name: 'docparse/services/html_parser', path: 'docparse/services/html_parser.ail', formats: ['html', 'eml', 'epub'] },
     // EPUB chapters are XHTML and go through parseHtmlContent
     { name: 'docparse/services/browser_html', path: 'docparse/services/browser_html.ail', formats: ['html', 'epub'],
