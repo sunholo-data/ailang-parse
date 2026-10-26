@@ -521,13 +521,18 @@ pure func htmlLayoutBodySize(blocks: [Block]) -> float {
 -- short enough to be a title (bold italic carries the long one-sentence
 -- risk-factor titles of a prospectus). Smaller than body — cover-page
 -- legends, table labels — is never a heading.
+--
+-- A slightly larger italic title sits below a bold-italic one: in a
+-- prospectus it names a sub-topic inside a risk factor ("Electrical Power
+-- and Fuel Constraints" under "Constraints on the critical inputs …"), and
+-- at level 4 it read as a risk factor of its own.
 export pure func htmlLayoutLevel(body: float, fs: float, bold: bool, italic: bool, chars: int) -> int {
   if body <= 0.0 || fs <= 0.0 then 0
   else {
     let r = fs / body;
     if r >= 1.8 && chars <= 200 then 1
     else if r >= 1.2 && chars <= 200 then 2
-    else if r > 1.02 && (bold || italic) && chars <= 200 then (if bold then 3 else 4)
+    else if r > 1.02 && (bold || italic) && chars <= 200 then (if bold then 3 else 5)
     else if r >= 0.97 && r <= 1.02 && bold && italic && chars <= 400 then 4
     else if r >= 0.97 && r <= 1.02 && bold && chars <= 150 then 5
     else 0
