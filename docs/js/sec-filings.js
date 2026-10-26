@@ -6,7 +6,10 @@
  *   data/sec-s1/blocks.json the whole document as compact blocks:
  *     ["g", page] ["h", level, text] ["p", text] ["l", ordered, items]
  *     ["t", headers, rows]  (cell: string | [text, colSpan, merged]) ["i", src]
- *   data/sec-s1/img/<src>   web copies of the filing's images
+ *
+ * Images stay on EDGAR: the site links each one there. Only the Claude artifact
+ * copy of this page carries web copies (data/sec-s1/img/<src>), which it shows
+ * and can send to Claude for transcription.
  *
  * AI: the visitor's own Gemini key (localStorage 'gemini-api-key', the slot the
  * homepage and Workbench share), or Claude where the page runs as a Claude
@@ -20,6 +23,7 @@
   var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
   // Running as the Claude artifact copy of this page (window.claude is set by the viewer).
   var IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
+  var HAS_IMAGES = IN_CLAUDE;
   var KEY_SLOT = 'gemini-api-key';
 
   var D, B;            // summary, blocks
@@ -121,7 +125,9 @@
       case 'h': return '<div class="h h' + Math.min(b[1], 5) + '"' + id + '>' + esc(b[2]) + '</div>';
       case 'l': return '<' + (b[1] ? 'ol' : 'ul') + id + '>' + b[2].map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</' + (b[1] ? 'ol' : 'ul') + '>';
       case 't': return '<div' + id + '>' + tableHtml(b) + '</div>';
-      case 'i': return '<figure' + id + '><img loading="lazy" src="' + IMG + esc(b[1]) + '" alt="Image from the filing: ' + esc(b[1]) + '" data-img="' + i + '"><figcaption>' + esc(b[1]) + '</figcaption></figure>';
+      case 'i': return HAS_IMAGES
+        ? '<figure' + id + '><img loading="lazy" src="' + IMG + esc(b[1]) + '" alt="Image from the filing: ' + esc(b[1]) + '" data-img="' + i + '"><figcaption>' + esc(b[1]) + '</figcaption></figure>'
+        : '<figure class="link"' + id + '><figcaption>Image' + (imgKind(b[1]) ? ': ' + imgKind(b[1]) : '') + ' · ' + esc(b[1]) + '</figcaption>' + edgarLink(b[1]) + '</figure>';
       default: return '<p' + id + '>' + esc(b[1]) + '</p>';
     }
   }
@@ -303,17 +309,24 @@
     if (/case ?stud/i.test(src)) return 'Case study';
     return '';
   }
+  function edgarLink(src) {
+    return '<a class="sec-btn" href="' + EDGAR + encodeURIComponent(src) + '" target="_blank" rel="noopener">View on EDGAR</a>';
+  }
   function renderImages() {
     var html = '';
     B.forEach(function (b, i) {
       if (b[0] !== 'i') return;
       var o = outline[entryFor(i)];
       var kind = imgKind(b[1]);
-      html += '<figure><button type="button" class="thumb" data-img="' + i + '" aria-label="Open ' + esc(b[1]) + '">' +
-        '<img loading="lazy" src="' + IMG + esc(b[1]) + '" alt=""></button><figcaption>' +
-        (kind ? '<b>' + kind + '</b>' : '') + '<span>' + esc(o ? o.t : '') + '</span>' + pageChip(pages[i]) + '</figcaption></figure>';
+      var caption = (kind ? '<b>' + kind + '</b>' : '') + '<span>' + esc(o ? o.t : '') + '</span>' + pageChip(pages[i]);
+      html += HAS_IMAGES
+        ? '<figure><button type="button" class="thumb" data-img="' + i + '" aria-label="Open ' + esc(b[1]) + '">' +
+          '<img loading="lazy" src="' + IMG + esc(b[1]) + '" alt=""></button><figcaption>' + caption + '</figcaption></figure>'
+        : '<figure class="link"><figcaption>' + caption + '<span style="color:var(--text-muted)">' + esc(b[1]) + '</span>' +
+          edgarLink(b[1]) + '</figcaption></figure>';
     });
     $('img-grid').innerHTML = html;
+    if (HAS_IMAGES) $('img-intro').textContent += ' Open one to see it larger or have AI transcribe it.';
   }
   $('img-grid').addEventListener('click', function (e) {
     var b = e.target.closest('[data-img]');

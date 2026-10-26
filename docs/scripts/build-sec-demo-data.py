@@ -21,7 +21,7 @@ block is a list whose first item says what it is:
     ["p", text]                  paragraph
     ["l", ordered, [items]]      list
     ["t", headers, rows]         table; a cell is a string, or [text, colSpan, merged]
-    ["i", src]                   image (web copies live in sec-s1/img/<src>)
+    ["i", src]                   image; the page links it to EDGAR (same file name)
 """
 import argparse
 import json
