@@ -7,8 +7,8 @@ import std/result (Ok, Err)
 import std/string (length, trim, find, replace, join, stringToInt, substring, charAt)
 import std/list (map, flatMap, filter, concat, any, length as listLength)
 import std/map (lookup)
-import docparse/services/html_layout (htmlLayoutStripEnvelope, htmlLayoutIsPage, htmlLayoutPage, htmlLayoutHasLines, htmlLayoutContainer, htmlLayoutFinish, htmlLayoutIsTable, htmlLayoutTable)
-import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull, mkSection, cellText)
+import docparse/services/html_layout (htmlLayoutStripEnvelope, htmlLayoutFinish, htmlLayoutDiv, htmlLayoutTableBlocks)
+import docparse/types/document (mkHeadingRuns, mkListRuns, mkHeading, mkList, mkText, mkTextRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, LinkBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, scopedCell, mkImageFull, mkTable, mkTableFull, mkSection)
 
 -- HTML Parser — converts HTML5 to Block ADT.
 -- Pure AILANG implementation using std/html (WHATWG HTML5 spec via
@@ -210,10 +210,8 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     if length(text) > 0 then [mkTextRuns(text, "normal", 0, htmlRunsFor(node))]
     else []
 
-  -- Tables. One with no text in any cell is layout (a ruled line, a spacer).
-  else if tag == "table" then
-    let t = if htmlLayoutIsTable(node) then htmlLayoutTable(node, htmlDeepText) else htmlParseTable(node) in
-    if htmlTableIsEmpty(t) then [] else [t]
+  -- Tables (html_layout reads print-laid-out ones and drops empty spacers)
+  else if tag == "table" then htmlLayoutTableBlocks(node, htmlParseTable, htmlDeepText)
 
   -- Lists
   else if tag == "ul" then htmlParseList(node, false)
@@ -273,12 +271,9 @@ pure func htmlProcessElement(node: XmlNode) -> [Block] {
     if listLength(blocks) > 0 then [mkSection(tag, blocks)]
     else []
 
-  -- Page-layout HTML (EDGAR filings): a fixed-size page box, or a container
-  -- of absolutely positioned lines, is read by html_layout.
-  else if tag == "div" && htmlLayoutIsPage(node) then
-    htmlLayoutPage(node, htmlProcessNode, htmlDeepText)
-  else if tag == "div" && htmlLayoutHasLines(node) then
-    htmlLayoutContainer(node, htmlProcessNode, htmlDeepText)
+  -- <div>: html_layout reads page-layout HTML (EDGAR filings) and hands any
+  -- other div back to htmlProcessChildrenOf.
+  else if tag == "div" then htmlLayoutDiv(node, htmlProcessNode, htmlDeepText, htmlProcessChildrenOf)
 
   -- Block-level containers that flatten into the parent stream.
   else if tag == "div" || tag == "blockquote" ||
@@ -712,15 +707,6 @@ pure func htmlParseTable(table: XmlNode) -> Block
       mkTableFull(dataRows, firstRow, caption)
   }
 }
-
-pure func htmlTableIsEmpty(block: Block) -> bool =
-  match block {
-    TableBlock(t) =>
-      length(t.caption) == 0
-        && any(\c. length(cellText(c)) > 0, t.headers) == false
-        && any(\r. any(\c. length(cellText(c)) > 0, r), t.rows) == false,
-    _ => false
-  }
 
 -- Check if a block is a table (for contract)
 pure func isTable(block: Block) -> bool =

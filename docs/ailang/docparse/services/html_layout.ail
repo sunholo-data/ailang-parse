@@ -5,7 +5,7 @@ import std/option (Some, None, getOrElse)
 import std/string (stringToInt, replace, length, trim, find, split, join, words, startsWith, endsWith, stringToFloat, substring, charAt, charCode, floatToStr, toLower)
 import std/list (map, flatMap, filter, foldl, zip, any, range, nth, drop, concat, contains, length as listLength)
 import std/math (abs_Float, intToFloat)
-import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, TableCell, mergedCell, mkText, mkHeading, mkList, mkNamedSection, mkTableFull)
+import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, TableBlock, TableCell, mergedCell, mkText, mkHeading, mkList, mkNamedSection, mkTableFull)
 
 -- Page-layout HTML: documents laid out as positioned lines, not paragraphs.
 --
@@ -471,6 +471,34 @@ export pure func htmlLayoutTable(table: XmlNode, deepText: XmlNode -> string) ->
     h :: rest => mkTableFull(rest, h, "")
   }
 }
+
+-- === Entry points from html_parser =========================================
+--
+-- html_parser hands every <div> and <table> here. Kept to two calls so that
+-- module stays inside its per-module WASM type-check budget.
+
+-- A <div>: a page box, a container of positioned lines, or neither (then
+-- `children` walks it as html_parser always has).
+export pure func htmlLayoutDiv(node: XmlNode, processNode: XmlNode -> [Block], deepText: XmlNode -> string, children: XmlNode -> [Block]) -> [Block] =
+  if htmlLayoutIsPage(node) then htmlLayoutPage(node, processNode, deepText)
+  else if htmlLayoutHasLines(node) then htmlLayoutContainer(node, processNode, deepText)
+  else children(node)
+
+-- A <table>: laid out for print, or plain (`parse`). A table with no text in
+-- any cell is layout — a ruled line, a spacer — and yields nothing.
+export pure func htmlLayoutTableBlocks(node: XmlNode, parse: XmlNode -> Block, deepText: XmlNode -> string) -> [Block] {
+  let t = if htmlLayoutIsTable(node) then htmlLayoutTable(node, deepText) else parse(node);
+  if htmlLayoutTableIsEmpty(t) then [] else [t]
+}
+
+pure func htmlLayoutTableIsEmpty(block: Block) -> bool =
+  match block {
+    TableBlock(t) =>
+      length(t.caption) == 0
+        && any(\c. length(c.text) > 0, t.headers) == false
+        && any(\r. any(\c. length(c.text) > 0, r), t.rows) == false,
+    _ => false
+  }
 
 -- === Finishing pass ========================================================
 
