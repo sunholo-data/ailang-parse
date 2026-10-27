@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Digest a 421-Page S-1 — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Read, search and question Anthropic's 421-page S-1 as structured data: every section, table and image with its page number, parsed from the EDGAR filing with no AI. Add a Gemini key to compare sections and ask questions.">
+<meta property="og:title" content="Digest a 421-Page S-1 — AILANG Parse">
+<meta property="og:description" content="Every section, table and image of a 421-page SEC filing, with page numbers. Read it, search it, compare sections and ask AI about them.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* Page-local, like the dp-feature-* classes on chunking.html. */
+.dp-docs-content [hidden], .sec-lightbox [hidden] { display: none !important; }
+.sec-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 8px 0 20px; }
+.sec-stat { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); }
+.sec-stat b { display: block; font-family: var(--font-display); font-size: 26px; line-height: 1.1; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sec-stat span { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; display: block; margin-top: 4px; }
+
+.sec-what { max-width: 560px; margin-bottom: 24px; }
+.sec-pane { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); overflow: hidden; min-width: 0; }
+.sec-pane h4 {
+  margin: 0; padding: 10px 14px; font-family: var(--font-display); font-size: 13px; font-weight: 700;
+  border-bottom: 1px solid var(--border); color: var(--text-primary); display: flex; justify-content: space-between; gap: 8px;
+}
+.sec-pane h4 small { font-weight: 500; color: var(--text-secondary); }
+.sec-pane pre { margin: 0; border-radius: 0; font-size: 12px; max-height: 300px; overflow: auto; }
+
+.sec-chip {
+  display: inline-block; padding: 2px 9px; font-size: 11.5px; font-weight: 600; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-secondary); background: var(--bg);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.sec-chip--page { color: var(--dp-blue); border-color: var(--dp-blue-border); }
+button.sec-chip--page, a.sec-chip--page { cursor: pointer; text-decoration: none; font: inherit; font-size: 11.5px; font-weight: 600; }
+button.sec-chip--page:hover, a.sec-chip--page:hover { background: var(--dp-blue-faded); }
+
+.sec-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 600;
+  border-radius: var(--radius-xs); border: 1px solid var(--border-active); background: var(--bg-card); color: var(--text-primary); cursor: pointer;
+}
+.sec-btn:hover { border-color: var(--dp-blue); color: var(--dp-blue); }
+.sec-btn--primary { background: var(--dp-blue); border-color: var(--dp-blue); color: #fff; }
+.sec-btn--primary:hover { background: var(--dp-blue-dark); color: #fff; }
+.sec-btn[aria-pressed="true"] { background: var(--dp-blue-faded); border-color: var(--dp-blue); color: var(--dp-blue); }
+.sec-btn:disabled { opacity: .5; cursor: default; }
+.sec-btn:focus-visible, .sec-tree button:focus-visible, .sec-tabs button:focus-visible { outline: 2px solid var(--dp-blue); outline-offset: 2px; }
+
+/* Reader: outline + full section */
+.sec-explorer {
+  display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card);
+  overflow: hidden; margin-bottom: 12px;
+}
+.sec-tree { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sec-tree input[type=search] {
+  margin: 10px; padding: 8px 10px; font: inherit; font-size: 13px; border: 1px solid var(--border);
+  border-radius: var(--radius-xs); background: var(--bg-input); color: var(--text-primary);
+}
+.sec-tree ul { list-style: none; margin: 0; padding: 0 0 8px; height: 560px; overflow: auto; }
+.sec-tree li { display: flex; align-items: flex-start; margin: 0; }
+.sec-tree li input[type=checkbox] { margin: 8px 0 0 10px; flex: none; accent-color: var(--dp-blue); }
+.sec-tree li button {
+  display: flex; flex: 1; min-width: 0; gap: 8px; align-items: baseline; text-align: left; border: 0; background: none;
+  padding: 5px 10px 5px 6px; font: inherit; font-size: 13px; color: var(--text-primary); cursor: pointer; line-height: 1.35;
+}
+.sec-tree li button:hover { background: var(--dp-blue-faded); }
+.sec-tree li button[aria-current="true"] { background: var(--dp-blue-faded); box-shadow: inset 3px 0 0 var(--dp-blue); }
+.sec-tree li button .t { flex: 1; min-width: 0; }
+.sec-tree li button .pg { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.sec-tree li.l1 button { font-weight: 700; }
+.sec-tree li.l2 button { padding-left: 20px; color: var(--text-secondary); }
+.sec-tree li.l3 button { padding-left: 34px; color: var(--text-secondary); font-size: 12.5px; }
+.sec-tree .toggle { width: 12px; color: var(--text-muted); font-size: 10px; flex: none; }
+.sec-tree .hint { padding: 0 12px 10px; font-size: 11.5px; color: var(--text-muted); }
+
+.sec-reader { display: flex; flex-direction: column; min-width: 0; }
+.sec-reader-head { padding: 14px 18px 12px; border-bottom: 1px solid var(--border); }
+.sec-reader-head .crumb { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.sec-reader-head h3 { margin: 0 0 8px; font-family: var(--font-display); font-size: 19px; line-height: 1.3; text-wrap: balance; }
+.sec-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sec-meta .sec-btn { margin-left: auto; }
+.sec-body { padding: 14px 18px 18px; height: 500px; overflow: auto; }
+
+/* Rendered blocks (reader, compare, table catalogue) */
+.sec-doc { font-size: 14px; line-height: 1.65; color: var(--text-secondary); max-width: 68ch; }
+.sec-doc p { margin: 0 0 12px; }
+.sec-doc .h { font-family: var(--font-display); color: var(--text-primary); line-height: 1.3; margin: 18px 0 8px; text-wrap: balance; }
+.sec-doc .h1 { font-size: 19px; }
+.sec-doc .h2 { font-size: 17px; }
+.sec-doc .h3 { font-size: 15px; }
+.sec-doc .h4 { font-size: 14px; font-style: italic; }
+.sec-doc .h5 { font-size: 13.5px; font-style: italic; color: var(--text-secondary); }
+.sec-doc ul, .sec-doc ol { margin: 0 0 12px 20px; }
+.sec-doc li { margin-bottom: 4px; }
+.sec-doc .pg { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
+.sec-doc .pg::before, .sec-doc .pg::after { content: ""; flex: 1; border-top: 1px dashed var(--border-active); }
+.sec-doc figure { margin: 0 0 14px; }
+.sec-doc figure img { display: block; max-width: 260px; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-xs); cursor: zoom-in; }
+.sec-doc figcaption { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+.sec-doc .flash { animation: sec-flash 1.6s ease-out; }
+@keyframes sec-flash { from { background: var(--dp-blue-faded); } to { background: transparent; } }
+
+.sec-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-xs); margin: 0 0 14px; max-width: 100%; }
+.sec-fin { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+.sec-fin th, .sec-fin td { padding: 5px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; color: var(--text-primary); }
+.sec-fin td:not(:first-child), .sec-fin th:not(:first-child) { text-align: right; }
+.sec-fin td:first-child { white-space: normal; min-width: 180px; }
+.sec-fin thead th { font-weight: 700; background: var(--bg-alt); text-align: center; white-space: normal; }
+
+/* Catalogue */
+.sec-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.sec-tabs button {
+  border: 0; background: none; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--text-secondary); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.sec-tabs button[aria-selected="true"] { color: var(--dp-blue); border-bottom-color: var(--dp-blue); }
+.sec-tabpanel { padding-top: 14px; }
+.sec-tabpanel pre { margin-top: 0; }
+.sec-catbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.sec-catbar input { flex: 1; min-width: 180px; padding: 7px 10px; font: inherit; font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg-input); color: var(--text-primary); }
+.sec-catbar span { font-size: 12px; color: var(--text-muted); }
+.sec-tlist { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); max-height: 560px; overflow: auto; }
+.sec-tlist details { border-bottom: 1px solid var(--border); }
+.sec-tlist details:last-child { border-bottom: 0; }
+.sec-tlist summary { display: flex; gap: 10px; align-items: baseline; padding: 9px 14px; cursor: pointer; font-size: 13px; }
+.sec-tlist summary .t { flex: 1; min-width: 0; color: var(--text-primary); font-weight: 600; }
+.sec-tlist summary .t small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec-tlist .inner { padding: 4px 14px 12px; }
+.sec-tlist .inner .acts { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.sec-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.sec-gallery figure { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); overflow: hidden; display: flex; flex-direction: column; }
+.sec-gallery button.thumb { border: 0; padding: 0; background: var(--bg-alt); cursor: zoom-in; aspect-ratio: 612 / 792; }
+.sec-gallery img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.sec-gallery figcaption { padding: 8px 10px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; display: flex; flex-direction: column; gap: 4px; }
+.sec-gallery figcaption b { color: var(--text-primary); font-weight: 600; }
+.sec-gallery figure.link figcaption { padding: 12px; gap: 6px; flex: 1; }
+.sec-gallery figure.link figcaption a { margin-top: auto; align-self: flex-start; }
+.sec-doc figure.link { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border: 1px dashed var(--border-active); border-radius: var(--radius-xs); }
+.sec-doc figure.link figcaption { margin: 0; flex: 1; }
+.sec-source { font-size: 12.5px; color: var(--text-muted); margin-top: -8px; }
+.sec-source a { color: var(--dp-blue); }
+
+/* Lightbox */
+.sec-lightbox { border: 0; padding: 0; background: transparent; max-width: min(1100px, 96vw); width: 100%; }
+.sec-lightbox::backdrop { background: rgba(15, 20, 30, .7); }
+.sec-lb { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--bg-card); border-radius: var(--radius); overflow: hidden; max-height: 90vh; }
+.sec-lb .img { background: var(--bg-alt); overflow: auto; max-height: 90vh; }
+.sec-lb .img img { display: block; width: 100%; }
+.sec-lb .side { padding: 18px 20px; overflow: auto; max-height: 90vh; display: flex; flex-direction: column; gap: 10px; }
+.sec-lb .side h3 { margin: 0; font-family: var(--font-display); font-size: 16px; }
+.sec-lb .side .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Ask AI */
+.sec-ask { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); padding: 16px 18px; margin-bottom: 16px; }
+.sec-ask .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.sec-ask label { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.sec-ask textarea, .sec-ask input[type=password] {
+  width: 100%; padding: 9px 11px; font: inherit; font-size: 13.5px; border: 1px solid var(--border-active);
+  border-radius: var(--radius-xs); background: var(--bg-input); color: var(--text-primary);
+}
+.sec-ask textarea { min-height: 70px; resize: vertical; }
+.sec-ask .keyrow { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.sec-ask .note { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.sec-sel { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; align-items: center; }
+.sec-sel .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; font-size: 12px; border-radius: 999px; background: var(--dp-blue-faded); border: 1px solid var(--dp-blue-border); color: var(--text-primary); }
+.sec-sel .chip button { border: 0; background: none; cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1; padding: 0 4px; }
+.sec-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.sec-answer { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; font-size: 14px; line-height: 1.65; color: var(--text-secondary); }
+.sec-answer h4, .sec-answer h5 { font-family: var(--font-display); color: var(--text-primary); margin: 12px 0 6px; font-size: 15px; }
+.sec-answer p { margin: 0 0 10px; }
+.sec-answer ul, .sec-answer ol { margin: 0 0 10px 20px; }
+.sec-answer strong { color: var(--text-primary); }
+.sec-answer .err { color: var(--coral-deep); }
+.sec-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+.sec-compare .col { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); min-width: 0; display: flex; flex-direction: column; }
+.sec-compare .col h4 { margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--border); font-family: var(--font-display); font-size: 13.5px; line-height: 1.35; }
+.sec-compare .col h4 small { display: block; font-weight: 500; color: var(--text-muted); font-size: 11.5px; margin-top: 2px; }
+.sec-compare .col .sec-doc { padding: 10px 12px; max-height: 420px; overflow: auto; font-size: 13px; }
+
+/* Token bars */
+.sec-bars { margin: 8px 0 12px; }
+.sec-bar { display: grid; grid-template-columns: 220px 1fr 90px; gap: 12px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.sec-bar .track { height: 14px; background: var(--bg-alt); border-radius: 4px; overflow: hidden; }
+.sec-bar .fill { display: block; height: 100%; background: var(--dp-blue); border-radius: 4px; min-width: 2px; }
+.sec-bar .n { font-family: var(--font-mono); font-size: 12px; text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sec-bar .lbl { color: var(--text-secondary); }
+
+/* Risk factors */
+.sec-risk details { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); margin-bottom: 8px; }
+.sec-risk summary { padding: 11px 14px; cursor: pointer; font-weight: 600; font-size: 14px; display: flex; gap: 10px; align-items: baseline; }
+.sec-risk summary .t { flex: 1; }
+.sec-risk ol { margin: 0; padding: 0 16px 12px 40px; }
+.sec-risk li { font-size: 13px; line-height: 1.55; color: var(--text-secondary); margin-bottom: 6px; }
+.sec-risk li .sec-chip { margin-left: 6px; font-size: 10.5px; padding: 0 7px; }
+
+.sec-steps { counter-reset: step; list-style: none; margin: 0 0 16px !important; }
+.sec-steps > li { counter-increment: step; position: relative; padding-left: 30px; margin-bottom: 14px; }
+.sec-steps > li::before {
+  content: counter(step); position: absolute; left: 0; top: 1px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--dp-blue-faded); color: var(--dp-blue); font-size: 11.5px; font-weight: 700; display: grid; place-items: center;
+}
+.sec-steps pre { margin: 8px 0 0 !important; }
+
+@media (max-width: 900px) {
+  .sec-stats { grid-template-columns: 1fr 1fr; }
+  .sec-explorer { grid-template-columns: 1fr; }
+  .sec-tree { border-right: 0; border-bottom: 1px solid var(--border); }
+  .sec-tree ul { height: 300px; }
+  .sec-body { height: 460px; }
+  .sec-bar { grid-template-columns: 1fr 70px; }
+  .sec-bar .track { grid-column: 1 / -1; grid-row: 2; }
+  .sec-lb { grid-template-columns: 1fr; }
+  .sec-lb .img { max-height: 50vh; }
+  .sec-ask .keyrow { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .sec-doc .flash { animation: none; } }
+</style>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">Digest a <span class="dp-accent">421-Page S-1</span></h1>
+    <p class="subtitle reveal reveal-delay-1">Anthropic's IPO registration statement, parsed into structured data. Read any section, find every table and image, compare sections and ask questions, all with page numbers.</p>
+    <p class="sec-source reveal reveal-delay-1">Source: the public <a href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm" rel="noopener">Form S-1 on SEC EDGAR</a>. AILANG Parse is not affiliated with Anthropic.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#ask" class="active">Compare &amp; Ask AI</a>
+        <a href="#read">Read the Filing</a>
+        <a href="#catalogue">Tables &amp; Images</a>
+        <a href="#risk-factors">Every Risk Factor</a>
+        <a href="#result">The Result</a>
+        <a href="#what-you-get">What You Get</a>
+        <a href="#try-it">Run It Yourself</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="ask">Compare &amp; Ask AI</h2>
+
+      <p>Start from an example, or tick sections in the outline below. Compare shows them side by side. Ask sends only those sections, with their page numbers, so the answer can cite pages. Click a cited page to jump to it in the reader.</p>
+
+      <div class="sec-ask">
+        <div class="row"><label>Examples</label></div>
+        <div class="sec-presets" id="sec-presets"></div>
+
+        <div class="row" style="margin-top:14px"><label>Selected sections</label></div>
+        <div class="sec-sel" id="sec-sel"></div>
+
+        <div class="row" style="margin-top:14px">
+          <label for="sec-q">Question</label>
+        </div>
+        <textarea id="sec-q" placeholder="e.g. Compare how revenue grew in each period, and what drove it. Cite pages."></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="sec-btn" id="sec-compare-btn" type="button">Compare side by side</button>
+          <button class="sec-btn" id="sec-export-md" type="button">Export Markdown</button>
+          <button class="sec-btn" id="sec-export-json" type="button">Export JSON</button>
+          <button class="sec-btn sec-btn--primary" id="sec-ask-btn" type="button">Ask AI</button>
+          <button class="sec-btn" id="sec-stop-btn" type="button" hidden>Stop</button>
+          <span class="note" id="sec-cost"></span>
+        </div>
+        <p class="note" id="sec-export-msg" aria-live="polite"></p>
+
+        <div id="sec-key-box" style="margin-top:10px">
+          <div class="keyrow">
+            <input type="password" id="sec-key" placeholder="Gemini API key" aria-label="Gemini API key" autocomplete="off">
+            <button class="sec-btn" id="sec-key-save" type="button">Save key</button>
+            <button class="sec-btn" id="sec-key-clear" type="button">Clear</button>
+          </div>
+          <p class="note" id="sec-ai-status" style="margin-top:6px"></p>
+          <p class="note" id="sec-claude-link" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <a class="sec-btn" href="https://claude.ai/artifact/LqVW4Zh6ThJXQeXA334wDR" target="_blank" rel="noopener">Open in Claude</a>
+            <span>No Gemini key? Open this page in Claude and ask with your own Claude account.</span>
+          </p>
+        </div>
+
+        <div class="sec-answer" id="sec-answer" hidden aria-live="polite"></div>
+      </div>
+      <div class="sec-compare" id="sec-compare"></div>
+
+      <h3>Why select sections first</h3>
+      <p>The whole filing is about 317,000 tokens. Its outline, with page numbers, fits in under 4,000, so a person or an agent can read the outline, pick the sections a question needs, and send only those.</p>
+      <div class="sec-bars" id="sec-bars" role="img" aria-label="Token cost comparison"></div>
+      <p style="font-size:12.5px;color:var(--text-muted)">Token counts are estimates (words &times; 1.3).</p>
+
+      <h2 id="read">Read the Filing</h2>
+
+      <p>Pick a heading to read that section in full, with its tables, images and page breaks. Filter the outline to find a topic. Tick sections to compare them or ask about them below.</p>
+
+      <p style="font-size:12.5px;color:var(--text-muted)">Some figures are blank in the filing itself, for example &ldquo;revenue growing from $0 at commercial launch in the first quarter of 2023 to $ for the three months ended September 30, 2026.&rdquo; The S-1 as filed leaves those amounts as blank space, usually for the most recent quarter, and they are filled in by a later amendment. The parse keeps the text as filed.</p>
+
+      <div class="sec-explorer">
+        <div class="sec-tree">
+          <input type="search" id="sec-filter" placeholder="Filter headings, e.g. compute, dividend, trust" aria-label="Filter headings">
+          <div class="hint">Headings 1–3 &middot; tick to select</div>
+          <ul id="sec-tree" aria-label="Filing outline"></ul>
+        </div>
+        <div class="sec-reader">
+          <div class="sec-reader-head" id="sec-reader-head"><p class="crumb">Loading&hellip;</p></div>
+          <div class="sec-body" id="sec-body" tabindex="0" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <h2 id="catalogue">Every Table and Image</h2>
+
+      <p>Because every block is typed, listing all the tables or all the images is a filter, not a search. Each entry shows the section it sits in and its page.</p>
+
+      <div class="sec-tabs" role="tablist" id="cat-tabs">
+        <button role="tab" aria-selected="true" aria-controls="cat-tables" id="ct-tables">Tables</button>
+        <button role="tab" aria-selected="false" aria-controls="cat-images" id="ct-images">Images</button>
+      </div>
+      <div class="sec-tabpanel" role="tabpanel" id="cat-tables" aria-labelledby="ct-tables">
+        <div class="sec-catbar">
+          <input type="search" id="tbl-filter" placeholder="Filter tables by section or cell text, e.g. revenue, lease, option" aria-label="Filter tables">
+          <span id="tbl-count"></span>
+        </div>
+        <div class="sec-tlist" id="tbl-list"></div>
+      </div>
+      <div class="sec-tabpanel" role="tabpanel" id="cat-images" aria-labelledby="ct-images" hidden>
+        <p style="font-size:13px" id="img-intro">Some of the filing is only in pictures. The founders' letter that opens the prospectus is eight page images, and the customer case studies are images too. Each one links to the original on EDGAR.</p>
+        <div class="sec-gallery" id="img-grid"></div>
+      </div>
+
+      <h2 id="risk-factors">Every Risk Factor, With Its Page</h2>
+
+      <p>Each risk factor's title is a heading under its category, so the full list, with pages, is a single query:</p>
+
+      <div class="sec-risk" id="sec-risk"></div>
+
+      <h2 id="result">The Result</h2>
+
+      <div class="sec-stats" id="sec-stats" aria-live="polite">
+        <div class="sec-stat"><b>&hellip;</b><span>Loading the parsed filing</span></div>
+      </div>
+
+      <p>This is the <a href="https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm" rel="noopener">S-1 as filed on EDGAR</a>, parsed by AILANG Parse with no model involved. Everything on this page is that parse: the sections, tables, images and page numbers.</p>
+
+      <h2 id="what-you-get">What You Get</h2>
+
+      <p>Every heading, paragraph, list, table and image comes out as a typed block, in reading order. A marker before each page carries its printed page number.</p>
+
+      <div class="sec-what">
+        <div class="sec-pane">
+          <h4>anthropicpbc-sx1.htm.json <small>page 27</small></h4>
+<pre><code class="language-json">{"type": "section",
+ "kind": "page-break", "name": "27"}
+{"type": "heading", "level": 1,
+ "text": "Risk Factors"}
+{"type": "text",
+ "text": "Investing in our Class A common
+   stock involves a high degree of risk.
+   You should carefully consider …"}
+{"type": "heading", "level": 2,
+ "text": "Risks Related to our Business
+   and Industry"}
+{"type": "heading", "level": 4,
+ "text": "Our success depends in large
+   part on our ability to continue to
+   develop the most advanced and
+   capable AI models, …"}
+{"type": "list", "ordered": false,
+ "items": ["advance the frontier of AI
+   capabilities through breakthrough
+   research, …", …]}</code></pre>
+        </div>
+      </div>
+
+      <h2 id="try-it">Run It Yourself</h2>
+
+      <ol class="sec-steps">
+        <li><strong>Download the filing.</strong> SEC asks scripts to say who they are, so put your name and email in the <code>-A</code> (User-Agent) value.
+<pre><code class="language-bash">curl -sL -A "Your Name you@example.com" -o anthropicpbc-sx1.htm \
+  https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/anthropicpbc-sx1.htm</code></pre></li>
+        <li><strong>Parse it.</strong> This writes <code>anthropicpbc-sx1.htm.json</code> (the structure) and <code>anthropicpbc-sx1.htm.md</code> (Markdown to give a model).
+<pre><code class="language-bash">docparse anthropicpbc-sx1.htm</code></pre></li>
+        <li><strong>Query the JSON.</strong> For example, the outline, every risk factor with its page, or one row of a table:
+          <div class="sec-tabs" role="tablist" id="sec-tabs" style="margin-top:8px">
+            <button role="tab" aria-selected="true" aria-controls="tab-outline" id="t-outline">Outline</button>
+            <button role="tab" aria-selected="false" aria-controls="tab-risks" id="t-risks">Risk factors + pages</button>
+            <button role="tab" aria-selected="false" aria-controls="tab-table" id="t-table">A table row</button>
+          </div>
+          <div class="sec-tabpanel" role="tabpanel" id="tab-outline" aria-labelledby="t-outline">
+<pre><code class="language-bash">jq -r '.document.blocks[]
+  | select(.type == "heading" and .level &lt;= 2)
+  | ("  " * (.level - 1)) + .text' anthropicpbc-sx1.htm.json</code></pre>
+          </div>
+          <div class="sec-tabpanel" role="tabpanel" id="tab-risks" aria-labelledby="t-risks" hidden>
+<pre><code class="language-bash">jq -r 'foreach .document.blocks[] as $b ({page: "", h1: ""};
+    if $b.type == "section" and $b.kind == "page-break" then .page = ($b.name // "")
+    elif $b.type == "heading" and $b.level == 1 then .h1 = $b.text
+    else . end;
+    select(.h1 == "Risk Factors" and $b.type == "heading" and $b.level == 4)
+    | "p.\(.page)  \($b.text)")' anthropicpbc-sx1.htm.json</code></pre>
+          </div>
+          <div class="sec-tabpanel" role="tabpanel" id="tab-table" aria-labelledby="t-table" hidden>
+<pre><code class="language-bash">jq -c '.document.blocks as $b
+  | ($b | map(.text) | index("Consolidated Statements of Operations Data")) as $i
+  | $b[$i:] | map(select(.type == "table")) | .[0].rows[1]' anthropicpbc-sx1.htm.json
+# ["Revenue","$41","$386","$4,585","$1,163","$16,286"]</code></pre>
+          </div>
+        </li>
+      </ol>
+
+      <p>The same works for any EDGAR filing: 10-K, 10-Q, S-1 or proxy statement. See <a href="html-parsing.html">HTML parsing</a> for more, and <a href="chunking.html">chunking</a> to split the result for retrieval.</p>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<dialog class="sec-lightbox" id="sec-lightbox" aria-label="Image">
+  <div class="sec-lb">
+    <div class="img"><img id="lb-img" alt=""></div>
+    <div class="side">
+      <h3 id="lb-title"></h3>
+      <div class="sec-meta" id="lb-meta"></div>
+      <div class="acts">
+        <button class="sec-btn sec-btn--primary" id="lb-transcribe" type="button">Transcribe with AI</button>
+        <a class="sec-btn" id="lb-orig" href="#" target="_blank" rel="noopener">Original on EDGAR</a>
+        <button class="sec-btn" id="lb-goto" type="button">Show in reader</button>
+        <button class="sec-btn" id="lb-close" type="button">Close</button>
+      </div>
+      <div class="sec-answer" id="lb-answer" hidden aria-live="polite"></div>
+    </div>
+  </div>
+</dialog>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script src="js/sec-filings.js"></script>
+</body>
+</html>
