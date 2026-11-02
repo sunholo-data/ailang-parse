@@ -9,7 +9,7 @@
 
 Universal document parsing **and generation** in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown — and writes documents back out in 9 formats. To author a document, write Markdown and convert it; see [Writing documents in Markdown](#writing-documents-in-markdown).
 
-**Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs** default to the deterministic `pdftotext` backend (poppler) — also no AI, no cloud — with `docling` and `liteparse` as local alternatives escalating automatically to local `docling` OCR for scanned/image-only PDFs. Pluggable AI (Gemini, Claude, local Ollama) is available via `--pdf-backend ai` but is never chosen automatically. **Images** delegate to whatever AI model you plug in. AILANG Parse is AI-agnostic: swap `--pdf-backend`/`--ai` to change the backend, zero code changes.
+**Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs** default to the deterministic `pdftotext` backend (poppler) — also no AI, no cloud — with `poppler` (headings, lists, tables and header/footer from the same tools, no installs), `docling` and `liteparse` as local alternatives escalating automatically to local `docling` OCR for scanned/image-only PDFs. Pluggable AI (Gemini, Claude, local Ollama) is available via `--pdf-backend ai` but is never chosen automatically. **Images** delegate to whatever AI model you plug in. AILANG Parse is AI-agnostic: swap `--pdf-backend`/`--ai` to change the backend, zero code changes.
 
 ## Install
 

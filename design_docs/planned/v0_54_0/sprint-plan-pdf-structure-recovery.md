@@ -4,6 +4,7 @@
 **Sprint ID**: M-PDFSTRUCT
 **Branch**: `feat/pdf-structure-recovery` (off `docs/pdf-structure-recovery`)
 **Duration**: ~3 working days, 6 milestones, each sized for one sitting
+**Status**: ✅ Executed 2026-11-02 (all 6 milestones). See Outcome at the end.
 **Risk**: Medium. The heuristics in M4 are the uncertain part, which is why the benchmark (M5)
 is built to tune them, not written afterwards.
 **AILANG prompt version loaded**: v0.16.8 (`ailang prompt --version-active`). Load it with
@@ -36,7 +37,7 @@ function from its own convert service in a follow-up.
 
 ## Milestones
 
-### M1: Adapter protocol: list, image, page, region (~90 LOC)
+### ✅ M1: Adapter protocol: list, image, page, region (~90 LOC)
 
 - `pdf_backend_external.ail` `decodeBlock`:
   - `kind: "list"` → `ListBlock` (items, ordered, itemLevels).
@@ -47,7 +48,7 @@ function from its own convert service in a follow-up.
 - **Acceptance**: `./bin/docparse --check` and `--prove` pass. An inline/`main()` test decodes
   each new kind. The `pdftotext` JSON for the 3 golden PDFs is byte-identical to `origin/main`.
 
-### M2: Furniture pass, `docparse/services/pdf_furniture.ail` (~220 LOC + tests)
+### ✅ M2: Furniture pass, `docparse/services/pdf_furniture.ail` (~220 LOC + tests)
 
 - Pure core:
   - normalise text (collapse whitespace, replace digit runs with `#`);
@@ -77,7 +78,7 @@ function from its own convert service in a follow-up.
     outside the header/footer sections, and no bare page numbers;
   - the 3 golden PDFs unchanged on pdftotext.
 
-### M3: Adapter tests, docling item walk, liteparse fix (~220 LOC)
+### ✅ M3: Adapter tests, docling item walk, liteparse fix (~220 LOC)
 
 - `tests/test_pdf_adapter.py` (stdlib `unittest`, no poppler or docling needed). Fakes stand in
   for docling items and liteparse text items.
@@ -98,7 +99,7 @@ function from its own convert service in a follow-up.
     and no `<!-- image -->` text;
   - liteparse finds >0 headings.
 
-### M4: `poppler` backend (~450 LOC Python + tests)
+### ✅ M4: `poppler` backend (~450 LOC Python + tests)
 
 - `run_poppler`:
   - parse `pdftotext -bbox-layout` (text, geometry) and `pdftohtml -xml -i -stdout` (size,
@@ -123,7 +124,7 @@ function from its own convert service in a follow-up.
     in sections;
   - run time under 2s for the proposal locally.
 
-### M5: Round-trip benchmark and visual check (~250 LOC)
+### ✅ M5: Round-trip benchmark and visual check (~250 LOC)
 
 - `benchmarks/pdf/structure_roundtrip.py`:
   - for our own DOCX sources (the 3 proposals plus `data/test_files` DOCX with headings,
@@ -143,7 +144,7 @@ function from its own convert service in a follow-up.
 - Plus a run inside the docparse image's poppler. This is a stretch item; if it can't be done
   locally, note it for the docparse PR.
 
-### M6: `--convert` furniture on pdftotext, docs, release notes (~120 LOC)
+### ✅ M6: `--convert` furniture on pdftotext, docs, release notes (~120 LOC)
 
 - `main.ail` convert path: when the input format is pdf and the convert target is a document
   format, apply `pdfFurnitureApply` before generation, whatever the backend. It is
@@ -184,3 +185,31 @@ milestones is about 3 days.
 
 Image extraction (the logo), heading normalisation, making `poppler` the default ladder rung,
 and the docparse (hosted) wiring. Each is a follow-up once M5's numbers are in.
+
+## Outcome (2026-11-02)
+
+All six milestones landed on `feat/pdf-structure-recovery`. Changes from the plan:
+
+- **M3, docling heading levels.** Docling itself reports every
+  `section_header` as level 1 (17 of 17 on the proposal), so walking the
+  items alone could not fix the flat levels. Levels are ranked from heading
+  box height when docling's are flat. Docling's text now comes from its
+  pypdfium backend: same structure, no doubled glyphs, about 4x faster.
+- **M3, liteparse.** The actual bug was a field rename in liteparse 2.x
+  (`textItems` → `text_items`), not the matching logic.
+- **M4, module placement.** The backend lives inside `adapter.py`, not in a
+  sibling module: docparse's Dockerfile copies `adapter.py` by name, so a
+  sibling would be missing from the hosted image.
+- **M5, page count.** The proposal through `poppler` with its reference
+  doc renders as 5 pages, the same count LibreOffice gives for the original
+  DOCX. The original's explicit page breaks are not recoverable from a PDF.
+- **M6.** No `ParsedDocument`/`ParseOptions` change: `writeOutputs` applies
+  `pdfFurnitureApply` to a PDF before any document-format conversion.
+
+Results: `benchmarks/pdf/structure_roundtrip_results.md`. Follow-ups:
+
+- image extraction (logos);
+- page-break inference from end-of-page whitespace;
+- making `poppler` the default ladder's first rung;
+- the docparse (hosted) wiring, which needs `ailang_parse` bumped and
+  `pdfFurnitureApply` called in its convert service.
