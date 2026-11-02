@@ -4,6 +4,7 @@
 **Sprint ID**: M-PDF2PPTX
 **Branch**: `feat/pdf-to-powerpoint` (off `main` at a34aa31, after v0.54.0's #121)
 **Duration**: ~4 working days, 7 milestones
+**Status**: ✅ Executed 2026-11-02 (M1–M7 and M3b). See Outcome at the end.
 **Risk**: Medium. Pagination touches every PPTX/ODP output, so byte identity for content that
 fits is the guard. The rest is additive.
 **AILANG prompt version loaded**: v0.16.8 (loaded this session).
@@ -142,3 +143,31 @@ the PPTX/ODP golden identity check from M3 on.
 
 The v0.54.0 sprint landed ~1,350 LOC plus a site page in one day of focused work. This one is
 larger and riskier because of M3, so the estimate is 2–4 days.
+
+## Outcome (2026-11-02)
+
+All milestones landed on `feat/pdf-to-powerpoint`. Measured:
+
+- A 4-page test deck PDF comes back as 4 slides. Before, it came back as 1.
+- The diagram and SmartArt pages become pictures with their labels in the notes, and the
+  table page stays an editable table.
+- The slides benchmark (default, poppler slide mode): 94% slides, 100% titles, 96% text,
+  86% table cells, 0 overflow.
+- PPTX/ODP output that fits is byte-identical to main. Content that overflowed now continues
+  on further slides.
+
+Changes from the plan:
+
+- PDF → slides uses an internal `poppler-slides` mode instead of adding page tags to
+  pdftotext, so pdftotext parse output stays byte-identical.
+- Diagram detection measures drawn ink from a 24 dpi pdftoppm render, because text alone
+  cannot tell a Venn diagram from a table.
+- Flowed wide tables scale their font.
+- With a PPTX template, titles keep their size.
+
+Follow-ups:
+
+- 16:9 text column width: boxes are still 9 in wide.
+- Binding to placeholders.
+- ODP speaker notes for diagram slides: the ODP generator has no notes yet.
+- A publish exclude for docs-only `.ail` files, requested from AILANG core.
