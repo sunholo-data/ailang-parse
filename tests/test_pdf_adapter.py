@@ -250,6 +250,41 @@ class Poppler(unittest.TestCase):
         blocks, _ = adapter._poppler_blocks(bbox, None)
         self.assertTrue(any(b["kind"] == "heading" and b["text"] == "Part 1 title" for b in blocks))
 
+    def test_stacked_tables_split_on_column_change(self):
+        rows = [(60, 100, "Name", "Game", "Fame"), (60, 114, "Ann", "Chess", "High"),
+                (60, 128, "Bob", "Go", "Low")]
+        page = [(x, y, x + 50, y + 12, a, 10, False) for (x, y, a, _, _) in rows] + \
+               [(200, y, 250, y + 12, b, 10, False) for (_, y, _, b, _) in rows] + \
+               [(340, y, 390, y + 12, c, 10, False) for (_, y, _, _, c) in rows] + \
+               [(60, 150, 110, 162, "Left", 10, False), (270, 150, 320, 162, "Right", 10, False),
+                (60, 164, 110, 176, "Up", 10, False), (270, 164, 320, 176, "Down", 10, False)]
+        tables = [b for b in self.blocks([page])[0] if b["kind"] == "table"]
+        self.assertEqual([t["headers"] for t in tables], [["Name", "Game", "Fame"], ["Left", "Right"]])
+
+    def test_wrapped_cell_folds_back_and_margin_text_does_not(self):
+        page = [(60, 100, 110, 112, "Item", 10, True), (200, 100, 260, 112, "Detail", 10, True),
+                (60, 114, 110, 126, "Alpha", 10, False), (200, 114, 380, 126, "first half of a", 10, False),
+                (200, 127, 300, 139, "wrapped cell", 10, False),
+                (60, 141, 110, 153, "Beta", 10, False), (200, 141, 300, 153, "short", 10, False),
+                (50, 155, 120, 167, "Afterwards", 10, False)]
+        blocks = self.blocks([page])[0]
+        table = next(b for b in blocks if b["kind"] == "table")
+        self.assertEqual(table["rows"], [["Alpha", "first half of a wrapped cell"], ["Beta", "short"]])
+        self.assertEqual(blocks[-1]["text"], "Afterwards")
+
+    def test_bold_slightly_larger_row_is_heading(self):
+        body = [(50, 100 + i * 14, 550, 112 + i * 14, "Body text long enough to set the body size here.", 12, False)
+                for i in range(4)]
+        page = [(50, 70, 300, 84, "Bold section title", 13.3, True)] + body
+        self.assertEqual(self.blocks([page])[0][0]["kind"], "heading")
+
+    def test_space_between_styled_runs_is_plain(self):
+        words = [{"text": "plain", "bold": False, "italic": False, "href": ""},
+                 {"text": "bold", "bold": True, "italic": False, "href": ""},
+                 {"text": "after", "bold": False, "italic": False, "href": ""}]
+        self.assertEqual(adapter._pp_runs(words), [
+            {"text": "plain "}, {"text": "bold", "bold": True}, {"text": " "}, {"text": "after"}])
+
     def test_key_matches_ailang_normalisation(self):
         # Mirrors pdfFurnitureKey's inline tests in pdf_furniture.ail.
         self.assertEqual(adapter._pp_key("Holosun ApS · CVR 44 324687 · ailang.sunholo.com"),

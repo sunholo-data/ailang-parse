@@ -45,6 +45,7 @@ MODULES=(
   docparse/services/xlsx_parser.ail
   docparse/services/direct_ai_parser.ail
   docparse/services/pdf_backend_external.ail
+  docparse/services/pdf_furniture.ail
   docparse/services/layout_ai.ail
   docparse/services/markdown_writer.ail
   docparse/services/console_report.ail
@@ -141,6 +142,8 @@ TEST_MODULES=(
   docparse/services/odt_generator.ail
   docparse/services/odp_generator.ail
   docparse/services/ods_generator.ail
+  docparse/services/pdf_backend_external.ail
+  docparse/services/pdf_furniture.ail
 )
 
 usage() {
@@ -211,6 +214,8 @@ Options:
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
   --pdf-backend B   PDF backend: pdftotext (default for text-layer PDFs),
+                    poppler (structure from poppler alone: headings,
+                    lists, tables, header/footer — no extra installs),
                     docling (local ML layout/OCR), liteparse (font-size
                     headings), ai (multimodal AI — external, paid).
                     Default: pdftotext, escalating automatically to docling
@@ -640,9 +645,9 @@ while [ $# -gt 0 ]; do
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
-        pdftotext|ai|docling|liteparse) ;;
+        pdftotext|poppler|ai|docling|liteparse) ;;
         *)
-          echo "Error: --pdf-backend must be one of: pdftotext, ai, docling, liteparse (got: $PDF_BACKEND)" >&2
+          echo "Error: --pdf-backend must be one of: pdftotext, poppler, ai, docling, liteparse (got: $PDF_BACKEND)" >&2
           exit 2
           ;;
       esac

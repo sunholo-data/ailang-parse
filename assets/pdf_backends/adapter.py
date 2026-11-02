@@ -532,6 +532,7 @@ import xml.etree.ElementTree as _ET
 
 _PP_MARGIN = 0.09          # top/bottom share of the page where furniture sits
 _PP_HEADING_RATIO = 1.15   # size over body size that makes a heading
+_PP_BOLD_HEADING_RATIO = 1.05  # ... when the whole row is bold
 _PP_BULLETS = set("•▪◦‣∙·●○■□–-*")
 _PP_NUMBERED = re.compile(r"^\(?(\d{1,3}|[a-zA-Z]|[ivxIVX]{1,4})[.)]$")
 
@@ -646,7 +647,12 @@ def _pp_runs(words: list[dict]) -> list[dict]:
             runs[-1]["text"] += " " + w["text"]
         else:
             if runs:
-                runs[-1]["text"] += " "
+                # The space between differently styled words belongs to
+                # neither: inside a bold run it renders as "**bold **then".
+                if not (runs[-1]["bold"] or runs[-1]["italic"] or runs[-1]["href"]):
+                    runs[-1]["text"] += " "
+                else:
+                    runs.append({"text": " ", "bold": False, "italic": False, "href": ""})
             runs.append({"text": w["text"], "bold": w["bold"], "italic": w["italic"], "href": w["href"]})
     if len(runs) == 1 and not runs[0]["href"]:
         return []
@@ -736,6 +742,50 @@ def _pp_line_gap(pages: list[dict]) -> float:
     return gaps[len(gaps) // 5]
 
 
+def _pp_fold_into_cell(run: list[list[dict]], line: dict) -> bool:
+    """Fold a wrapped cell line into the table's last row when it starts at
+    one of the run's column edges and fits inside that column. Returns False
+    (leave it alone) otherwise. Before this, a wrapped cell ended the table
+    and split it in two; the fit test keeps a following heading or paragraph
+    (which starts at the page margin, left of the table) out of the cells."""
+    edges = sorted({round(l["x0"]) for r in run for l in r})
+    if line["x0"] < edges[0] - 1:
+        return False
+    col = next((e for e in edges if abs(e - line["x0"]) <= 3), None)
+    if col is None:
+        return False
+    nxt = next((e for e in edges if e > col + 3), None)
+    if nxt is not None and line["x1"] > nxt + 2:
+        return False
+    last = run[-1]
+    for i, seg in enumerate(last):
+        if abs(seg["x0"] - line["x0"]) <= 3:
+            last[i] = {**seg, "words": seg["words"] + line["words"],
+                       "x1": max(seg["x1"], line["x1"]), "y1": max(seg["y1"], line["y1"])}
+            return True
+    last.append(line)
+    last.sort(key=lambda l: l["x0"])
+    return True
+
+
+def _pp_continues_table(run: list[list[dict]], row: list[dict], gap: float, height: float) -> bool:
+    """Whether `row` belongs to the table being collected. A new table starts
+    when the column layout changes (a row whose segment count differs and
+    whose left edges match no column seen so far: three tables stacked with
+    4, 2 and 2 columns read as one 4-column table before this) or when the
+    gap breaks the run's row rhythm."""
+    if gap > 3 * height:
+        return False
+    prev_gaps = [b[0]["y0"] - max(l["y1"] for l in a) for a, b in zip(run, run[1:])]
+    if prev_gaps and gap > 1.6 * max(prev_gaps) + 2:
+        return False
+    if len(row) != len(run[0]):
+        lefts = [l["x0"] for r in run for l in r]
+        if not all(any(abs(seg["x0"] - x) <= 6 for x in lefts) for seg in row):
+            return False
+    return True
+
+
 def _pp_furniture_keys(pages: list[dict]) -> dict[str, set[str]]:
     """Normalised keys of margin lines that recur on 2+ pages, by region."""
     seen: dict[tuple[str, str], set[int]] = {}
@@ -773,7 +823,12 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], in
         text = " ".join(_pp_line_text(l) for l in row)
         if len(text) > 150 or not any(c.isalpha() for c in text):
             return None
-        if min(_pp_line_size(l) for l in row) >= body * _PP_HEADING_RATIO:
+        smallest = min(_pp_line_size(l) for l in row)
+        if smallest >= body * _PP_HEADING_RATIO:
+            return max(_pp_line_size(l) for l in row)
+        # Bold and a little larger: Word/LibreOffice's Heading 2-3 at 13pt
+        # over a 12pt body (ratio 1.11) is a heading too.
+        if smallest >= body * _PP_BOLD_HEADING_RATIO and all(_pp_line_bold(l) for l in row):
             return max(_pp_line_size(l) for l in row)
         return None
 
@@ -878,6 +933,10 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], in
                 items.append((" ".join(_pp_line_text(l) for l in content), 0))
                 item_x.append(row[0]["x0"])
                 continue
+            if table_rows and len(row) == 1 and gap <= line_gap + 0.5 * height \
+                    and _pp_fold_into_cell(table_rows, row[0]):
+                # A cell's text wrapped onto a second line.
+                continue
             if items and len(row) == 1 and row[0]["x0"] > min(item_x) + 4 and gap < height:
                 # Wrapped continuation of the last list item.
                 items[-1] = (f"{items[-1][0]} {text}", 0)
@@ -886,7 +945,7 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], in
 
             if len(row) >= 2:
                 flush_para()
-                if table_rows and gap > 3 * height:
+                if table_rows and not _pp_continues_table(table_rows, row, gap, height):
                     flush_table()
                 table_rows.append(row)
                 continue
