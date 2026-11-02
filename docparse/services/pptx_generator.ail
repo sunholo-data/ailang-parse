@@ -561,8 +561,12 @@ pure func pptxRefNotesPresRels(ref: PptxRefDoc, hasNotes: bool, rels: string) ->
 --                          that placeholder binding removes properly, because
 --                          then the layout supplies typography and we emit no
 --                          run properties at all.
+-- With a reference deck the template sets body text: its size and alignment
+-- are dropped here. Title size (28 pt) is kept, or every title would come out
+-- the size of the body text; so is the smaller size a flowed wide table needs
+-- to fit its slide.
 export pure func pptxStripOurTypography(xml: string) -> string =
-  pptxDropAttrs(pptxDropAll(xml, "<a:pPr algn=\"ctr\"/>"), " sz=\"")
+  pptxDropAll(pptxDropAll(xml, "<a:pPr algn=\"ctr\"/>"), " sz=\"1800\"")
 
 pure func pptxDropAll(s: string, lit: string) -> string {
   let i = find(s, lit);

@@ -1,0 +1,125 @@
+module scripts/pdf_to_powerpoint_templates
+
+-- Three example reference decks for docs/pdf-to-powerpoint.html: the same
+-- slides recovered from one PDF, in three looks, to show that restyling a
+-- deck is one --reference-doc flag.
+--
+-- A reference deck carries the look: theme (colours, fonts), slide master
+-- (background, decoration, text styles) and the presentation's default text
+-- style. Each one here starts from a deck AILANG Parse generates (the base,
+-- passed as the first argument) and rewrites those parts; slides in a
+-- reference deck are ignored.
+--
+-- Fonts are ones PowerPoint ships and LibreOffice has metric-compatible
+-- stand-ins for (Arial/Liberation Sans, Cambria/Caladea, Calibri/Carlito), so
+-- the page's LibreOffice renders show what PowerPoint shows.
+--
+-- Run from docs/:
+--   ailang run --quiet --entry main --caps IO,FS,Env scripts/pdf_to_powerpoint_templates.ail
+
+import std/fs (mkdirAll)
+import std/zip (listEntries, readEntry, createArchive)
+import std/result (Ok, Err)
+import std/io (println, exit)
+import std/env (getEnvOr)
+import std/list (map)
+import std/string (replace, find, substring, length, concat)
+
+type Look = {
+  slug: string,
+  bg: string,        -- slide background (theme lt1, mapped to bg1)
+  ink: string,       -- text (theme dk1, mapped to tx1)
+  accent: string,    -- accent1: rules, bands
+  accent2: string,
+  head: string,      -- title font (major)
+  body: string,      -- body font (minor)
+  deco: string       -- extra master shapes, behind every slide
+}
+
+pure func midnight() -> Look = {
+  slug: "midnight", bg: "0F172A", ink: "F8FAFC", accent: "22D3EE", accent2: "A78BFA",
+  head: "Arial", body: "Arial",
+  deco: concat([rect("2", "Accent bar", 0, 0, 120000, 6858000, "22D3EE"),
+                footerText("3", "«Company name»", "94A3B8")])
+}
+
+pure func paper() -> Look = {
+  slug: "paper", bg: "FAF7F0", ink: "2B2620", accent: "C2410C", accent2: "7C2D12",
+  head: "Cambria", body: "Cambria",
+  deco: concat([rect("2", "Top band", 0, 0, 12192000, 200000, "C2410C"),
+                rect("3", "Footer rule", 457200, 6420000, 11277600, 12700, "D6CFC2"),
+                footerText("4", "«Company name» · Confidential", "8A7F70")])
+}
+
+pure func bold() -> Look = {
+  slug: "bold", bg: "FFFFFF", ink: "111827", accent: "6D28D9", accent2: "DB2777",
+  head: "Calibri", body: "Calibri",
+  deco: concat([rect("2", "Header band", 0, 0, 12192000, 340000, "6D28D9"),
+                rect("3", "Corner", 11592000, 6258000, 600000, 600000, "DB2777"),
+                footerText("4", "«Company name»", "6B7280")])
+}
+
+pure func rect(id: string, name: string, x: int, y: int, cx: int, cy: int, fill: string) -> string =
+  "<p:sp><p:nvSpPr><p:cNvPr id=\"${id}\" name=\"${name}\"/><p:cNvSpPr/><p:nvPr userDrawn=\"1\"/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"${show(x)}\" y=\"${show(y)}\"/><a:ext cx=\"${show(cx)}\" cy=\"${show(cy)}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val=\"${fill}\"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>"
+
+pure func footerText(id: string, text: string, colour: string) -> string =
+  "<p:sp><p:nvSpPr><p:cNvPr id=\"${id}\" name=\"Footer\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr userDrawn=\"1\"/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"457200\" y=\"6450000\"/><a:ext cx=\"6000000\" cy=\"300000\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\"/><a:lstStyle/><a:p><a:r><a:rPr lang=\"en-US\" sz=\"1000\"><a:solidFill><a:srgbClr val=\"${colour}\"/></a:solidFill></a:rPr><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>"
+
+-- The default text style every slide's text boxes inherit: body font, size
+-- and colour. LibreOffice reads it from presentation.xml and the master's
+-- otherStyle; PowerPoint from both as well.
+pure func textStyle(l: Look) -> string =
+  "<a:lvl1pPr><a:defRPr sz=\"2000\"><a:solidFill><a:schemeClr val=\"tx1\"/></a:solidFill><a:latin typeface=\"${l.body}\"/></a:defRPr></a:lvl1pPr>"
+
+pure func theme(base: string, l: Look) -> string =
+  replaceBetween(replaceBetween(base, "<a:clrScheme", "</a:clrScheme>",
+    "<a:clrScheme name=\"${l.slug}\"><a:dk1><a:srgbClr val=\"${l.ink}\"/></a:dk1><a:lt1><a:srgbClr val=\"${l.bg}\"/></a:lt1><a:dk2><a:srgbClr val=\"${l.ink}\"/></a:dk2><a:lt2><a:srgbClr val=\"${l.bg}\"/></a:lt2><a:accent1><a:srgbClr val=\"${l.accent}\"/></a:accent1><a:accent2><a:srgbClr val=\"${l.accent2}\"/></a:accent2><a:accent3><a:srgbClr val=\"${l.accent}\"/></a:accent3><a:accent4><a:srgbClr val=\"${l.accent2}\"/></a:accent4><a:accent5><a:srgbClr val=\"${l.accent}\"/></a:accent5><a:accent6><a:srgbClr val=\"${l.accent2}\"/></a:accent6><a:hlink><a:srgbClr val=\"${l.accent}\"/></a:hlink><a:folHlink><a:srgbClr val=\"${l.accent2}\"/></a:folHlink></a:clrScheme>"),
+    "<a:fontScheme", "</a:fontScheme>",
+    "<a:fontScheme name=\"${l.slug}\"><a:majorFont><a:latin typeface=\"${l.head}\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:majorFont><a:minorFont><a:latin typeface=\"${l.body}\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:minorFont></a:fontScheme>")
+
+pure func master(base: string, l: Look) -> string {
+  let bg = "<p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"${l.bg}\"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>";
+  let withBg = replaceBetween(base, "<p:bg>", "</p:bg>", bg);
+  let withDeco = replace(withBg, "<p:grpSpPr/></p:spTree>", "<p:grpSpPr/>${l.deco}</p:spTree>");
+  let styles = "<p:txStyles><p:titleStyle>${textStyle(l)}</p:titleStyle><p:bodyStyle>${textStyle(l)}</p:bodyStyle><p:otherStyle>${textStyle(l)}</p:otherStyle></p:txStyles>";
+  replace(withDeco, "</p:sldLayoutIdLst>", "</p:sldLayoutIdLst>${styles}")
+}
+
+pure func presentation(base: string, l: Look) -> string =
+  replace(base, "</p:presentation>", "<p:defaultTextStyle>${textStyle(l)}</p:defaultTextStyle></p:presentation>")
+
+-- Replace from the first `start` through the end of the first `end` after it.
+pure func replaceBetween(s: string, start: string, end: string, replacement: string) -> string {
+  let i = find(s, start);
+  if i < 0 then s else {
+    let rest = substring(s, i, length(s));
+    let j = find(rest, end);
+    if j < 0 then s
+    else concat([substring(s, 0, i), replacement, substring(rest, j + length(end), length(rest))])
+  }
+}
+
+func transform(name: string, content: string, l: Look) -> string =
+  if name == "ppt/theme/theme1.xml" then theme(content, l)
+  else if name == "ppt/slideMasters/slideMaster1.xml" then master(content, l)
+  else if name == "ppt/presentation.xml" then presentation(content, l)
+  else content
+
+func build(basePath: string, dir: string, l: Look) -> () ! {FS, IO} {
+  let names = match listEntries(basePath) { Ok(ns) => ns, Err(e) => { println(e); exit(1); [] } };
+  let entries = map(\n. {name: n, content: transform(n, match readEntry(basePath, n) { Ok(c) => c, Err(_) => "" }, l)}, names);
+  match createArchive("${dir}/${l.slug}-reference.pptx", entries) {
+    Ok(_) => println("Built ${l.slug}-reference.pptx"),
+    Err(e) => { println(e); exit(1) }
+  }
+}
+
+export func main() -> () ! {FS, IO, Env} {
+  let base = getEnvOr("PPTX_BASE", "");
+  if length(base) == 0 then { println("set PPTX_BASE to a generated deck"); exit(1) } else ();
+  let dir = "assets/pdf-to-powerpoint/templates";
+  mkdirAll(dir);
+  build(base, dir, midnight());
+  build(base, dir, paper());
+  build(base, dir, bold())
+}
