@@ -286,6 +286,83 @@ pure func pptxGroupSentences(sentences: [string], budget: int, cur: string, acc:
   }
 
 -- =====================================================================
+-- ODP: the same fill on ODP's grid
+-- =====================================================================
+--
+-- odp_generator places frame n at n * 3 cm (1080000 EMU) on a 19.05 cm slide;
+-- frames auto-grow, so a tall one overlapped the next and the sixth ran off
+-- the bottom. A slide fits when it has at most five frames and none outgrows
+-- its slot (tables get 4 cm). Otherwise blocks are filled greedily, each
+-- taking max(its height, one slot), with the same split and "(cont.)" rules.
+
+export pure func odpGridEmu() -> int = 1080000
+
+export pure func odpFitsGrid(blocks: [Block]) -> bool {
+  let flat = pptxFlatten(blocks);
+  listLength(flat) <= 5 && foldl(\ok b. ok && pptxEstimateEmu(b) <= odpSlotRoom(b), true, flat)
+}
+
+pure func odpSlotRoom(b: Block) -> int =
+  match b {
+    TableBlock(_) => 1440000,
+    ImageBlock(_) => 6858000,
+    _ => odpGridEmu() - 180000
+  }
+
+-- The room one block takes on a flowed ODP slide: its height and a gap,
+-- never less than 1.4 cm.
+export pure func odpFlowEmu(b: Block) -> int = pptxMaxInt(pptxEstimateEmu(b) + 180000, 500000)
+
+export pure func odpPaginate(blocks: [Block]) -> [[Block]] {
+  let flat = pptxFlatten(blocks);
+  let title = match flat {
+    HeadingBlock(h) :: _ => [HeadingBlock({text: "${h.text} (cont.)", level: h.level, runs: []})],
+    _ => []
+  };
+  let pieces = flatMap(\b. pptxSplitTall(b, 4500000), flat);
+  let pages = odpFill(pieces, title, [], 0, []);
+  match pages {
+    [] => [[]],
+    _ => pages
+  }
+}
+
+-- Room on an ODP slide below the first grid row, half a centimetre clear.
+pure func odpUsableEmu() -> int = 6858000 - odpGridEmu() - 180000
+
+pure func odpFill(blocks: [Block], title: [Block], cur: [Block], used: int, acc: [[Block]]) -> [[Block]] =
+  match blocks {
+    [] => reverse(if listLength(cur) > 0 then reverse(cur) :: acc else acc),
+    b :: rest =>
+      let h = odpFlowEmu(b) in
+      if listLength(cur) == 0 || used + h <= odpUsableEmu()
+      then odpFill(rest, title, b :: cur, used + h, acc)
+      else
+        let carried = match cur {
+          HeadingBlock(_) :: earlier => if listLength(earlier) > 0 then {move: pptxHead(cur), keep: earlier} else {move: [], keep: cur},
+          _ => {move: [], keep: cur}
+        } in
+        let start = concat(carried.move, reverse(title)) in
+        let startUsed = foldl(\a t. a + odpFlowEmu(t), 0, start) in
+        let finished = if listLength(carried.keep) > listLength(title) || listLength(acc) == 0
+          then reverse(carried.keep) :: acc else acc in
+        odpFill(rest, title, b :: start, startUsed + h, finished)
+  }
+
+-- Slide count for ODP specs, same notation as pptxPaginateShape.
+export pure func odpPaginateShape(spec: string) -> string
+  tests [
+    ("h|t:50|t:50|t:50", "fits|1"),
+    ("h|t:50|t:50|t:50|t:50|t:50", "flow|1"),
+    ("h|l:40", "flow|4")
+  ]
+{
+  let blocks = map(pptxSpecBlock, split(spec, "|"));
+  if odpFitsGrid(blocks) then "fits|1"
+  else "flow|${show(listLength(odpPaginate(blocks)))}"
+}
+
+-- =====================================================================
 -- Test surface
 -- =====================================================================
 
