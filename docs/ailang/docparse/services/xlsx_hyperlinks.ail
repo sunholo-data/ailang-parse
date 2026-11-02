@@ -1,0 +1,156 @@
+module docparse/services/xlsx_hyperlinks
+
+import std/xml (parseLenient, findAll, getAttr)
+import std/iter (FoldStep, Continue, Stop)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/string (length, endsWith, split)
+import std/list (map, flatMap, foldl, range, nth, length as listLength, concat, reverse)
+import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
+import docparse/types/document (TableCell, plainRun, simpleCell)
+import docparse/services/xlsx_refs (XlsxMerge, xlsxParseMergeRef, xlsxValidLinkCell)
+
+-- === Explicit worksheet hyperlinks ====================================
+-- Targets belong to the worksheet's own relationships, not the workbook's.
+-- Read only hyperlink records, bounded independently of the streamed rows.
+-- Ranges stay rectangles: an A1:XFD1048576 link never allocates that grid.
+export type XlsxLink = { id: int, ref: string, href: string, region: XlsxMerge }
+export type XlsxLinks = {
+  rels: Map[string, string], points: Map[int, Map[int, XlsxLink]],
+  ranges: [XlsxLink], links: [XlsxLink], count: int, rangeCount: int,
+  warnings: [string]
+}
+
+export pure func xlsxEmptyLinks(rels: Map[string, string]) -> XlsxLinks =
+  { rels: rels, points: emptyMap(), ranges: [], links: [], count: 0, rangeCount: 0, warnings: [] }
+
+export pure func xlsxHyperlinkRels(xml: string) -> Map[string, string] =
+  match parseLenient(xml) {
+    Err(_) => emptyMap(),
+    Ok(root) => foldl(func(acc: Map[string, string], n: XmlNode) -> Map[string, string] {
+      let id = getOrElse(getAttr(n, "Id"), "");
+      let target = getOrElse(getAttr(n, "Target"), "");
+      if length(id) > 0 && length(target) > 0 && endsWith(getOrElse(getAttr(n, "Type"), ""), "/hyperlink")
+      then mapInsert(acc, id, target) else acc
+    }, emptyMap(), findAll(root, "Relationship"))
+  }
+
+pure func xlsxValidLinkRef(ref: string) -> bool {
+  let parts = split(ref, ":");
+  let start = getOrElse(nth(parts, 0), "");
+  let end = getOrElse(nth(parts, 1), start);
+  if listLength(parts) > 2 || not xlsxValidLinkCell(start) || not xlsxValidLinkCell(end) then false
+  else {
+    let r = xlsxParseMergeRef(ref);
+    r.startRow <= r.endRow && r.startCol <= r.endCol
+  }
+}
+
+-- location is an anchor within Target, or an internal workbook destination
+-- when there is no relationship. An unresolved r:id must never become an
+-- invented internal link. The optional display attribute is not cell text.
+pure func xlsxLinkHref(node: XmlNode, rels: Map[string, string]) -> string {
+  -- ZIP streaming normalises an inherited namespace to the local name;
+  -- materialised XML can retain the r: prefix. Both denote the same id.
+  let id = getOrElse(getAttr(node, "r:id"), getOrElse(getAttr(node, "id"), ""));
+  let location = getOrElse(getAttr(node, "location"), "");
+  if length(id) == 0 then (if length(location) == 0 then "" else "#${location}")
+  else {
+    let target = getOrElse(mapLookup(rels, id), "");
+    if length(target) == 0 || length(location) == 0 then target
+    else "${getOrElse(nth(split(target, "#"), 0), target)}#${location}"
+  }
+}
+
+export pure func xlsxFoldLink(acc: XlsxLinks, node: XmlNode) -> FoldStep[XlsxLinks] {
+  if acc.count >= 5000 then Stop({ acc | warnings: "hyperlinks beyond the 5000-record limit were omitted" :: acc.warnings })
+  else {
+    let ref = getOrElse(getAttr(node, "ref"), "");
+    let href = xlsxLinkHref(node, acc.rels);
+    let next = { acc | count: acc.count + 1 };
+    if not xlsxValidLinkRef(ref) then Continue({ next | warnings: "hyperlink has an invalid cell reference: ${ref}" :: acc.warnings })
+    else if length(href) == 0 then Continue({ next | warnings: "hyperlink ${ref} has no resolvable target" :: acc.warnings })
+    else {
+      let region = xlsxParseMergeRef(ref);
+      let link = { id: next.count, ref: ref, href: href, region: region };
+      if region.startRow == region.endRow && region.startCol == region.endCol then {
+        let row = getOrElse(mapLookup(acc.points, region.startRow), emptyMap());
+        Continue({ next | points: mapInsert(acc.points, region.startRow, mapInsert(row, region.startCol, link)), links: link :: acc.links })
+      }
+      else if acc.rangeCount >= 100 then
+        Continue({ next | warnings: "hyperlink range ${ref} exceeds the 100-range limit and was omitted" :: acc.warnings })
+      else Continue({ next | ranges: link :: acc.ranges, links: link :: acc.links, rangeCount: acc.rangeCount + 1 })
+    }
+  }
+}
+
+-- For overlapping records, the last explicit record wins and omission
+-- diagnostics report the earlier record. No destination is guessed.
+pure func xlsxRangeLink(ranges: [XlsxLink], row: int, col: int, best: Option[XlsxLink]) -> Option[XlsxLink] =
+  match ranges {
+    [] => best,
+    l :: rest => {
+      let r = l.region;
+      let hits = row >= r.startRow && row <= r.endRow && col >= r.startCol && col <= r.endCol;
+      let newer = match best { None => true, Some(b) => l.id > b.id };
+      xlsxRangeLink(rest, row, col, if hits && newer then Some(l) else best)
+    }
+  }
+
+type XlsxLinkedCells = { cells: [TableCell], col: int, row: int,
+  points: Map[int, XlsxLink], ranges: [XlsxLink], hits: Map[int, int] }
+
+pure func xlsxLinkCell(acc: XlsxLinkedCells, cell: TableCell) -> XlsxLinkedCells {
+  let link = if acc.row <= 0 || cell.merged then None
+    else xlsxRangeLink(acc.ranges, acc.row, acc.col, mapLookup(acc.points, acc.col));
+  match link {
+    None => { acc | cells: cell :: acc.cells, col: acc.col + 1 },
+    Some(l) => {
+      let linked = { cell | runs: [{plainRun(cell.text) | href: l.href}] };
+      { acc | cells: linked :: acc.cells, col: acc.col + 1,
+        hits: mapInsert(acc.hits, l.id, getOrElse(mapLookup(acc.hits, l.id), 0) + 1) }
+    }
+  }
+}
+
+type XlsxLinkedRows = { rows: [[TableCell]], positions: [int], width: int,
+  plan: XlsxLinks, hits: Map[int, int] }
+
+pure func xlsxLinkRow(acc: XlsxLinkedRows, cells: [TableCell]) -> XlsxLinkedRows {
+  let row = getOrElse(nth(acc.positions, 0), 0);
+  let positions = match acc.positions { [] => [], _ :: rest => rest };
+  let linked = foldl(xlsxLinkCell,
+    { cells: [], col: 0, row: row, points: getOrElse(mapLookup(acc.plan.points, row), emptyMap()),
+      ranges: acc.plan.ranges, hits: acc.hits }, xlsxLinkPadRow(cells, acc.width));
+  { acc | rows: reverse(linked.cells) :: acc.rows, positions: positions, hits: linked.hits }
+}
+
+-- Pass the hit map explicitly: closing over the linked result would also
+-- capture the complete sheet once per hyperlink in the interpreter.
+pure func xlsxOmittedLinks(links: [XlsxLink], hits: Map[int, int]) -> [string] =
+  match links {
+    [] => [],
+    l :: rest => {
+      let r = l.region;
+      let expected = (r.endRow - r.startRow + 1) * (r.endCol - r.startCol + 1);
+      let found = getOrElse(mapLookup(hits, l.id), 0);
+      let tail = xlsxOmittedLinks(rest, hits);
+      if found == expected then tail
+      else "hyperlink ${l.ref}: kept ${show(found)} of ${show(expected)} cell targets; remaining cells are outside retained data or covered/overridden" :: tail
+    }
+  }
+
+export pure func xlsxApplyLinks(rows: [[TableCell]], positions: [int], plan: XlsxLinks, sheet: string)
+    -> { rows: [[TableCell]], warnings: [string] } {
+  let warnings = map(\w. "Sheet \"${sheet}\": ${w}", reverse(plan.warnings));
+  if plan.count == 0 then { rows: rows, warnings: warnings }
+  else {
+    let width = foldl(\w r. if listLength(r) > w then listLength(r) else w, 0, rows);
+    let linked = foldl(xlsxLinkRow, { rows: [], positions: positions, width: width, plan: plan, hits: emptyMap() }, rows);
+    let omitted = map(\w. "Sheet \"${sheet}\": ${w}", xlsxOmittedLinks(reverse(plan.links), linked.hits));
+    { rows: reverse(linked.rows), warnings: concat(warnings, omitted) }
+  }
+}
+
+pure func xlsxLinkPadRow(row: [TableCell], width: int) -> [TableCell] =
+  concat(row, map(\_. simpleCell(""), range(listLength(row), width)))
