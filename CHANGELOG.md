@@ -51,6 +51,14 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+### Fixed
+
+- Package consumers (docparse, the hosted API) can load ailang_parse again:
+  `pdf_furniture` (0.54.0) and `pptx_layout` were missing from `[exports]`, so
+  importing the orchestrator failed with `LDR001 module not found`; the CLI
+  was unaffected. CI now checks that every module an exported module imports
+  is exported (`docs/scripts/check-exports.py`).
+
 ## [v0.54.0](https://github.com/sunholo-data/ailang-parse/compare/v0.53.0...v0.54.0) — 2026-11-02
 
 ### Added
