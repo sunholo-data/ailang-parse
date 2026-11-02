@@ -1,7 +1,7 @@
 """Compare PDF parsing backends against the existing golden files.
 
 Backends:
-  - ailang-gemini : current default (Gemini 2.5 Flash via AILANG)
+  - ailang-gemini : current default (Gemini 3.8 Flash via AILANG)
   - docling       : IBM Docling, local
   - markitdown    : Microsoft MarkItDown, local
   - unstructured  : Unstructured.io OSS, local
@@ -88,7 +88,7 @@ def run_ailang_gemini(pdf: Path) -> tuple[str, list[str], float]:
     start = time.time()
     cmd = [
         "ailang", "run", "--entry", "main", "--caps", "IO,FS,Env,AI",
-        "--ai", "gemini-2.5-flash",
+        "--ai", "gemini-3.8-flash",
         "docparse/main.ail", str(pdf),
     ]
     # main.ail writes beside the caller by default; pin it to AILANG_OUT_DIR.

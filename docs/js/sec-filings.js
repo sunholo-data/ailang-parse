@@ -20,7 +20,7 @@
 
   var EDGAR = 'https://www.sec.gov/Archives/edgar/data/2130357/000162828026067168/';
   var IMG = 'data/sec-s1/img/';
-  var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
   // Running as the Claude artifact copy of this page (window.claude is set by the viewer).
   var IN_CLAUDE = !!(window.claude && typeof window.claude.use === 'function');
   var HAS_IMAGES = IN_CLAUDE;

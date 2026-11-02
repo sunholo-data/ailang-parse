@@ -11,7 +11,7 @@ Metrics:
   - Text coverage: word-level Jaccard similarity
 
 Usage:
-    uv run benchmarks/pdf/eval_pdf.py --ai gemini-2.5-flash    # Google Cloud
+    uv run benchmarks/pdf/eval_pdf.py --ai gemini-3.8-flash    # Google Cloud
     uv run benchmarks/pdf/eval_pdf.py --ai granite-docling      # Ollama (local)
     uv run benchmarks/pdf/eval_pdf.py --ai claude-haiku-4-5     # Anthropic
     uv run benchmarks/pdf/eval_pdf.py --json                    # JSON output
@@ -251,8 +251,8 @@ def evaluate_file(pdf_name: str, ai_model: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="PDF extraction benchmark")
-    parser.add_argument("--ai", default="gemini-2.5-flash",
-                        help="AI model to use (default: gemini-2.5-flash)")
+    parser.add_argument("--ai", default="gemini-3.8-flash",
+                        help="AI model to use (default: gemini-3.8-flash)")
     parser.add_argument("--json", action="store_true", help="JSON output")
     parser.add_argument("--file", help="Run single file only")
     args = parser.parse_args()

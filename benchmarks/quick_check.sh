@@ -3,7 +3,7 @@
 # Run this during development. Use full benchmark (run_benchmarks.py) for releases.
 #
 # Usage: bash benchmarks/quick_check.sh              # deterministic only
-#        bash benchmarks/quick_check.sh gemini-2.5-flash  # + audio/video AI tests
+#        bash benchmarks/quick_check.sh gemini-3.8-flash  # + audio/video AI tests
 
 set -e
 cd "$(dirname "$0")/.."
@@ -93,7 +93,7 @@ if [ -n "$AI_MODEL" ]; then
   rm -rf "${TMPDIR_BASE}_ai"
 else
   echo ""
-  echo "(Skipping AI media tests — pass model name to enable: bash benchmarks/quick_check.sh gemini-2.5-flash)"
+  echo "(Skipping AI media tests — pass model name to enable: bash benchmarks/quick_check.sh gemini-3.8-flash)"
 fi
 
 echo ""

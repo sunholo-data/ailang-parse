@@ -140,7 +140,7 @@ def run_ailang_on_pdf(pdf_path: Path) -> dict:
     start = time.perf_counter()
     result = subprocess.run(
         ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env,AI",
-         "--ai", "gemini-2.5-flash", "docparse/main.ail", str(pdf_path)],
+         "--ai", "gemini-3.8-flash", "docparse/main.ail", str(pdf_path)],
         capture_output=True, text=True, cwd=str(DEMO_ROOT),
         env={**os.environ, "GOOGLE_API_KEY": "",
              # main.ail writes beside the caller by default; pin it to where output_path is read.

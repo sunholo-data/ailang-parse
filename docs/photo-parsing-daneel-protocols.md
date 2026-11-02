@@ -30,7 +30,7 @@ parse a single screenshot:
   `describeImages(baseDir, blocks)` sends every embedded/linked image through
   a real multimodal request (`mode=multimodal` — not base64-in-prompt),
   fail-soft per image, with warnings surfaced rather than swallowed.
-- **How to run it**: `./bin/docparse screenshot.png --ai gemini-2.5-flash`
+- **How to run it**: `./bin/docparse screenshot.png --ai gemini-3.8-flash`
   (needs `GOOGLE_API_KEY`), or hosted via the MCP `mcpParse` tool — `png` and
   `jpg` are already listed in `mcpFormats` as hosted-parseable inputs.
 
@@ -83,7 +83,7 @@ Three routes, in preference order for an agent like Daneel:
 
 ### Route B — local with an explicit AI grant
 
-`bin/docparse photo.png --ai gemini-2.5-flash` with `--caps AI` (or the AI
+`bin/docparse photo.png --ai gemini-3.8-flash` with `--caps AI` (or the AI
 cap added to a policy) and a key. This is the right route only when a human
 has decided this specific machine/agent may talk to a model provider
 directly — it is a deliberate, auditable capability widening, the same
@@ -167,7 +167,7 @@ Gaps this request exposes (proposals, not implemented here):
 ## 5. Recommended next steps (in order)
 
 1. **Answer the user now** (no code): yes — `./bin/docparse photo.png --ai
-   gemini-2.5-flash` locally with a key, or hosted via MCP `mcpParse` for
+   gemini-3.8-flash` locally with a key, or hosted via MCP `mcpParse` for
    agents. For Daneel specifically: Route A, behind device auth.
 2. **Signed-URL (or direct-bytes) upload on the hosted parse API** so an
    agent can hand over a screenshot without a pre-existing URL/bucket.
