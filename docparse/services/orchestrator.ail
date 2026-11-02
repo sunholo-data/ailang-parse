@@ -84,6 +84,7 @@ import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
 import docparse/services/pdf_backend_external (parsePdfViaBackend, parsePdfWithFallback, fetchPdfWords)
+import docparse/services/pdf_furniture (pdfFurnitureApply)
 import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocks, annotationsAsBlocksAnchored)
 import docparse/services/direct_ai_parser (
   parsePdfResult, parsePdfMetadata, parseDocumentImage, parseAudio, parseVideo
@@ -862,9 +863,11 @@ func orchPdf(filepath: string, opts: ParseOptions)
   let backend = if explicit then opts.pdfBackend else "pdftotext";
   if backend == "ai" then match parsePdfResult(filepath) {
     Err(e) => Err(e),
-    Ok(blocks) => {
+    Ok(rawBlocks) => {
       let ann = orchPdfAnnotations(filepath, opts.projectRoot);
-      Ok(mkOutcome("pdf", filepath, parsePdfMetadata(filepath),
+      let meta = parsePdfMetadata(filepath);
+      let blocks = orchPdfFurniture(backend, rawBlocks, meta.pageCount);
+      Ok(mkOutcome("pdf", filepath, meta,
         concat(blocks, ann.blocks),
         concat(["Parsed PDF (ai): ${show(countBlocks(blocks))} blocks"], ann.notes),
         ann.warnings, 1))
@@ -884,9 +887,10 @@ func orchPdf(filepath: string, opts: ParseOptions)
     if explicit then match parsePdfViaBackend(backend, filepath, opts.projectRoot) {
       Ok(ext) => {
         let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+        let blocks = orchPdfFurniture(backend, ext.blocks, ext.metadata.pageCount);
         Ok(mkOutcome("pdf", filepath, ext.metadata,
-          concat(ext.blocks, ann.blocks),
-          concat(["Parsed PDF (${backend}): ${show(countBlocks(ext.blocks))} blocks"], ann.notes),
+          concat(blocks, ann.blocks),
+          concat(["Parsed PDF (${backend}): ${show(countBlocks(blocks))} blocks"], ann.notes),
           ann.warnings, 0))
       },
       Err(msg) => Err(orchParseError("pdf_backend_failed",
@@ -899,11 +903,12 @@ func orchPdf(filepath: string, opts: ParseOptions)
     else match parsePdfWithFallback("pdftotext", filepath, opts.projectRoot) {
       Ok(fb) => {
         let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+        let blocks = orchPdfFurniture(fb.backendUsed, fb.doc.blocks, fb.doc.metadata.pageCount);
         Ok(mkOutcome("pdf", filepath, fb.doc.metadata,
-          concat(fb.doc.blocks, ann.blocks),
+          concat(blocks, ann.blocks),
           concat([if fb.backendUsed == "pdftotext"
-            then "Parsed PDF (pdftotext): ${show(countBlocks(fb.doc.blocks))} blocks"
-            else "PDF backend 'pdftotext' found no text; recovered via ${fb.backendUsed} (${show(countBlocks(fb.doc.blocks))} blocks)"], ann.notes),
+            then "Parsed PDF (pdftotext): ${show(countBlocks(blocks))} blocks"
+            else "PDF backend 'pdftotext' found no text; recovered via ${fb.backendUsed} (${show(countBlocks(blocks))} blocks)"], ann.notes),
           ann.warnings, 0))
       },
       Err(fbErr) =>
@@ -911,6 +916,15 @@ func orchPdf(filepath: string, opts: ParseOptions)
           "PDF extraction failed on ${filepath}: ${fbErr} You can also retry with --pdf-backend ai (external, paid) as a last resort."))
     }
 }
+
+-- Page furniture (running header, footer, page numbers) moved out of the body
+-- into one header and one footer section, for every backend except
+-- pdftotext. pdftotext's parse output is kept byte-for-byte as it was: users
+-- rely on its layout-faithful blocks. The --convert path applies the same
+-- pass to any PDF before generating a document (pdfFurnitureApply is
+-- idempotent, so a second application is a no-op).
+func orchPdfFurniture(backend: string, blocks: [Block], pageCount: int) -> [Block] =
+  if backend == "pdftotext" then blocks else pdfFurnitureApply(blocks, pageCount)
 
 -- Annotation blocks plus the notes/warnings describing what was found.
 -- Anchoring is by word CENTRE, not overlap: a highlight drawn slightly wide
@@ -1195,13 +1209,15 @@ export func parseDocumentAI(filepath: string, opts: ParseOptions)
   let format = detectFormat(ext);
   if format == "pdf" then match parsePdfResult(filepath) {
     Err(e) => Err(e),
-    Ok(blocks) => {
+    Ok(rawBlocks) => {
       let scan = scanAnnotations(filepath);
       let annBlocks = annotationsAsBlocks(scan.annotations);
       let warns = if scan.mayBeIncomplete
         then ["PDF uses compressed object streams — annotations inside them are not visible"]
         else [];
-      Ok(mkOutcome("pdf", filepath, parsePdfMetadata(filepath),
+      let meta = parsePdfMetadata(filepath);
+      let blocks = orchPdfFurniture("ai", rawBlocks, meta.pageCount);
+      Ok(mkOutcome("pdf", filepath, meta,
         concat(blocks, annBlocks),
         ["Parsed PDF (ai): ${show(countBlocks(blocks))} blocks",
          "Found ${show(listLength(scan.annotations))} annotations (unanchored — anchoring needs Process)"],
