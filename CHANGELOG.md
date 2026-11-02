@@ -9,6 +9,22 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.55.1](https://github.com/sunholo-data/ailang-parse/compare/v0.55.0...v0.55.1) — 2026-11-02
+
+v0.55.0 was tagged but never reached the registry: the registry validator's
+3m20s budget stopped `ailang check --package .` on all seven attempts. This
+release has the same package code as v0.55.0 and is the first registry
+release with PDF to PowerPoint and the export fix below it.
+
+### Fixed
+
+- **The package type-checks within the registry validator's budget.** The
+  browser mirror of `docparse/` under `docs/ailang/docparse/` (50 of 143
+  `.ail` files) is no longer committed. `pages.yml` already generated it on
+  every deploy, but the validator type-checked the committed copy along with
+  the package. Cold-cache `ailang check --package .` drops from 75.8s to
+  57.1s on an M-series Mac. A CI step keeps the mirror out of git (#126).
+
 ## [v0.55.0](https://github.com/sunholo-data/ailang-parse/compare/v0.54.0...v0.55.0) — 2026-11-02
 
 ### Added
