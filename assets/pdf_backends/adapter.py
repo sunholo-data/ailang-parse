@@ -10,9 +10,22 @@ module expects:
       "blocks": [
         {"kind": "heading", "text": str, "level": int} |
         {"kind": "text",    "text": str, "style": str, "level": int} |
-        {"kind": "table",   "rows": [[str]], "headers": [str], "caption": str}
+        {"kind": "table",   "rows": [[str]], "headers": [str], "caption": str} |
+        {"kind": "list",    "items": [str], "ordered": bool, "levels": [int]} |
+        {"kind": "image",   "data": str (base64), "mime": str, "width": int,
+                            "height": int, "description": str}
       ]
     }
+
+Every block may also carry:
+    "page":   int     1-based page the block came from
+    "region": str     "body" (default) | "header" | "footer" -- page furniture
+                      the backend located; AILANG wraps it in a header/footer
+                      section and pdf_furniture merges the occurrences
+    "runs":   [{"text": str, "bold": bool, "italic": bool, "href": str}]
+                      on text/heading only; inline formatting the backend saw
+Omitted fields keep their old meaning, so a backend that emits none of them
+(pdftotext) produces byte-identical output to before they existed.
 
 All errors print "ERR: <message>" to stderr and exit 1 (AILANG checks
 Result[ProcessOutput, ProcessError] for non-zero exit).
@@ -44,6 +57,28 @@ def _text(text: str, style: str = "Normal", level: int = 0) -> dict:
 
 def _table(rows: list[list[str]], headers: list[str], caption: str = "") -> dict:
     return {"kind": "table", "rows": rows, "headers": headers, "caption": caption}
+
+
+def _list(items: list[str], ordered: bool = False, levels: list[int] | None = None) -> dict:
+    block = {"kind": "list", "items": items, "ordered": ordered}
+    if levels and any(levels):
+        block["levels"] = levels
+    return block
+
+
+def _image(data_b64: str, mime: str, width: int = 0, height: int = 0, description: str = "") -> dict:
+    return {"kind": "image", "data": data_b64, "mime": mime,
+            "width": width, "height": height, "description": description}
+
+
+def _placed(block: dict, page: int = 0, region: str = "body") -> dict:
+    """Tag a block with where it sat on the page. Body blocks on an unknown
+    page stay untagged, so their JSON is unchanged."""
+    if page:
+        block["page"] = page
+    if region != "body":
+        block["region"] = region
+    return block
 
 
 def _blocks_from_markdown(md: str) -> list[dict]:
