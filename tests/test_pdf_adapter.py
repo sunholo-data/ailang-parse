@@ -135,7 +135,7 @@ class Liteparse(unittest.TestCase):
 PAGE_W, PAGE_H, SCALE = 600.0, 800.0, 1.5
 
 
-def poppler_xml(pages: list[list[tuple]]) -> tuple[str, str]:
+def poppler_xml(pages: list[list[tuple]], images: dict | None = None) -> tuple[str, str]:
     """Both poppler outputs for invented pages. Each line is
     (x0, y0, x1, y1, text, size, bold[, href]) in points; words are spread
     evenly across the line box. pdftohtml coordinates use its 1.5x scale."""
@@ -158,6 +158,9 @@ def poppler_xml(pages: list[list[tuple]]) -> tuple[str, str]:
             inner = f'<a href="{href}">{text}</a>' if href else text
             html.append(f'<text top="{y0 * SCALE}" left="{x0 * SCALE}" width="{(x1 - x0) * SCALE}" '
                         f'height="{(y1 - y0) * SCALE}" font="{fid}">{inner}</text>')
+        for (x0, y0, x1, y1, src) in (images or {}).get(pi, []):
+            html.append(f'<image top="{y0 * SCALE}" left="{x0 * SCALE}" width="{(x1 - x0) * SCALE}" '
+                        f'height="{(y1 - y0) * SCALE}" src="{src}"/>')
         bbox.append('</block></flow></page>')
         html.append('</page>')
     bbox.append('</doc>')
@@ -284,6 +287,48 @@ class Poppler(unittest.TestCase):
                  {"text": "after", "bold": False, "italic": False, "href": ""}]
         self.assertEqual(adapter._pp_runs(words), [
             {"text": "plain "}, {"text": "bold", "bold": True}, {"text": " "}, {"text": "after"}])
+
+    def image_page(self):
+        lines = [(50, 100, 550, 112, "Text above the picture, long enough to be body text here.", 10, False),
+                 (50, 420, 550, 432, "Text below the picture, long enough to be body text too.", 10, False)]
+        images = {0: [(50, 130, 410, 400, "page-1_1.jpg"),      # illustration: body
+                      (50, 15, 95, 50, "page-1_2.png"),         # logo in the header band
+                      (300, 200, 310, 210, "page-1_3.png")]}    # 10pt decoration
+        return poppler_xml([lines], images)
+
+    def test_body_image_in_reading_order_logo_and_decoration_left_out(self):
+        bbox, html = self.image_page()
+        loaded = []
+        blocks, _ = adapter._poppler_blocks(bbox, html, lambda src: loaded.append(src) or b"\xff\xd8jpeg")
+        self.assertEqual([b["kind"] for b in blocks], ["text", "image", "text"])
+        img = blocks[1]
+        self.assertEqual((img["mime"], img["width"], img["height"]), ("image/jpeg", 480, 360))
+        self.assertEqual(loaded, ["page-1_1.jpg"])
+
+    def test_no_loader_no_images(self):
+        bbox, html = self.image_page()
+        self.assertFalse(any(b["kind"] == "image" for b in adapter._poppler_blocks(bbox, html)[0]))
+
+    def test_image_byte_budget(self):
+        bbox, html = self.image_page()
+        big = b"x" * (adapter._PP_IMAGE_BUDGET + 1)
+        self.assertFalse(any(b["kind"] == "image" for b in adapter._poppler_blocks(bbox, html, lambda s: big)[0]))
+
+    def test_docling_picture_rules(self):
+        class Img:
+            def save(self, buf, format):
+                buf.write(b"\x89PNG fake")
+        class Box:
+            def __init__(self, l, t, r, b): self.l, self.t, self.r, self.b = l, t, r, b
+            def to_top_left_origin(self, page_h): return self
+        doc = NS(pages={1: NS(size=NS(width=600.0, height=800.0))})
+        def pic(l, t, r, b):
+            return NS(label=label("picture"), text="", prov=[NS(page_no=1, bbox=Box(l, t, r, b))],
+                      get_image=lambda d: Img())
+        items = [(pic(50, 200, 410, 470), 1), (pic(50, 20, 120, 50), 1)]
+        images = [b for b in adapter._docling_blocks(items, doc) if b["kind"] == "image"]
+        self.assertEqual([(i["width"], i["height"]) for i in images], [(480, 360)])
+        self.assertEqual(adapter._docling_blocks(items), [])
 
     def test_key_matches_ailang_normalisation(self):
         # Mirrors pdfFurnitureKey's inline tests in pdf_furniture.ail.

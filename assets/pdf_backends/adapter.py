@@ -237,7 +237,40 @@ def _docling_table(item: Any) -> dict | None:
     return _table(rows[1:], rows[0])
 
 
-def _docling_blocks(items: list[tuple[Any, int]]) -> list[dict]:
+def _docling_picture(item: Any, document: Any, budget: list) -> dict | None:
+    """A docling picture as an image block, by the same rules as poppler's
+    images: logos in the header/footer band, tiny decorations and full-page
+    backgrounds are left out. Needs the pipeline's generate_picture_images."""
+    import base64
+    import io
+    prov = getattr(item, "prov", None) or []
+    if document is None or not prov or not hasattr(item, "get_image"):
+        return None
+    try:
+        size = document.pages[prov[0].page_no].size
+        box = prov[0].bbox.to_top_left_origin(size.height)
+        w, h = box.r - box.l, box.b - box.t
+        cy = (box.t + box.b) / 2
+        in_band = (cy <= size.height * (_PP_MARGIN + 0.03) or cy >= size.height * (1 - _PP_MARGIN - 0.03)) \
+            and h <= size.height * 0.15
+        if in_band or w < _PP_IMAGE_MIN_PT or h < _PP_IMAGE_MIN_PT or w * h > 0.8 * size.width * size.height:
+            return None
+        img = item.get_image(document)
+        if img is None:
+            return None
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        data = buf.getvalue()
+    except Exception:
+        return None
+    if len(data) > budget[0]:
+        return None
+    budget[0] -= len(data)
+    return _image(base64.b64encode(data).decode("ascii"), "image/png",
+                  round(w * 96 / 72), round(h * 96 / 72))
+
+
+def _docling_blocks(items: list[tuple[Any, int]], document: Any = None) -> list[dict]:
     """Blocks from DoclingDocument.iterate_items() output: (item, depth) pairs.
 
     Walking the items rather than export_to_markdown() keeps what the
@@ -256,6 +289,7 @@ def _docling_blocks(items: list[tuple[Any, int]]) -> list[dict]:
         if len(doc_levels) <= 1 else {}
 
     blocks: list[dict] = []
+    budget = [_PP_IMAGE_BUDGET]
     pending: list[tuple[str, int, bool, int]] = []  # list items: text, depth, ordered, page
 
     def flush_list():
@@ -275,6 +309,9 @@ def _docling_blocks(items: list[tuple[Any, int]]) -> list[dict]:
             continue
         flush_list()
         if label in ("picture", "chart"):
+            picture = _docling_picture(item, document, budget)
+            if picture:
+                blocks.append(_placed(picture, page))
             continue
         if label == "table":
             table = _docling_table(item)
@@ -308,8 +345,11 @@ def _docling_converter():
         from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
         from docling.datamodel.base_models import InputFormat
         from docling.document_converter import PdfFormatOption
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        # Pictures rendered at 2x so they can be carried into the output.
+        options = PdfPipelineOptions(generate_picture_images=True, images_scale=2.0)
         return DocumentConverter(format_options={
-            InputFormat.PDF: PdfFormatOption(backend=PyPdfiumDocumentBackend)})
+            InputFormat.PDF: PdfFormatOption(backend=PyPdfiumDocumentBackend, pipeline_options=options)})
     except ImportError:
         return DocumentConverter()
 
@@ -333,13 +373,13 @@ def _docling_items(document: Any, traverse_pictures: bool = False) -> list[tuple
 
 def run_docling(pdf: Path) -> dict:
     result = _docling_converter().convert(str(pdf))
-    blocks = _docling_blocks(_docling_items(result.document))
+    blocks = _docling_blocks(_docling_items(result.document), result.document)
     # A scanned page is laid out as ONE picture, and docling files its OCR text
     # as that picture's children, which the default walk skips. Only when that
     # leaves nothing substantive, walk again descending into pictures, so
     # text-layer PDFs with figures are unchanged.
     if not _has_substance(blocks):
-        blocks = _docling_blocks(_docling_items(result.document, traverse_pictures=True))
+        blocks = _docling_blocks(_docling_items(result.document, traverse_pictures=True), result.document)
 
     meta = _empty_meta()
     try:
@@ -533,6 +573,9 @@ import xml.etree.ElementTree as _ET
 _PP_MARGIN = 0.09          # top/bottom share of the page where furniture sits
 _PP_HEADING_RATIO = 1.15   # size over body size that makes a heading
 _PP_BOLD_HEADING_RATIO = 1.05  # ... when the whole row is bold
+_PP_IMAGE_MIN_PT = 24.0    # smaller images are rules, bullets and decorations
+_PP_IMAGE_BUDGET = 6_000_000  # raw image bytes per document: base64 inflates by 4/3
+                              # and the hosted API caps adapter output at 10 MB
 _PP_BULLETS = set("•▪◦‣∙·●○■□–-*")
 _PP_NUMBERED = re.compile(r"^\(?(\d{1,3}|[a-zA-Z]|[ivxIVX]{1,4})[.)]$")
 
@@ -598,8 +641,51 @@ def _pp_parse_html(xml_text: str) -> list[dict]:
                          "bold": font["bold"] or (bool(full) and bold_text == full),
                          "italic": font["italic"] or (bool(full) and ital_text == full),
                          "href": href if href.startswith(("http://", "https://", "mailto:")) else ""})
-        pages.append({"h": float(page.get("height") or 0), "runs": runs})
+        images = [{"x0": float(im.get("left")), "y0": float(im.get("top")),
+                   "x1": float(im.get("left")) + float(im.get("width")),
+                   "y1": float(im.get("top")) + float(im.get("height")),
+                   "src": im.get("src") or ""} for im in page.iter("image")]
+        pages.append({"h": float(page.get("height") or 0), "runs": runs, "images": images})
     return pages
+
+
+def _pp_body_images(page: dict, html_page: dict | None) -> list[dict]:
+    """The page's content images in points, top to bottom. Left out: images
+    in the header/footer band (logos: a template brings its own, and Word
+    header parts cannot take our images), tiny ones (rules, bullets,
+    decorations) and full-page backgrounds."""
+    if not html_page or not page["h"]:
+        return []
+    scale = html_page["h"] / page["h"]
+    out = []
+    for im in html_page.get("images", []):
+        x0, y0, x1, y1 = (im[k] / scale for k in ("x0", "y0", "x1", "y1"))
+        w, h = x1 - x0, y1 - y0
+        cy = (y0 + y1) / 2
+        in_band = (cy <= page["h"] * (_PP_MARGIN + 0.03) or cy >= page["h"] * (1 - _PP_MARGIN - 0.03)) \
+            and h <= page["h"] * 0.15
+        if in_band or w < _PP_IMAGE_MIN_PT or h < _PP_IMAGE_MIN_PT or w * h > 0.8 * page["w"] * page["h"]:
+            continue
+        out.append({"y0": y0, "w": w, "h": h, "src": im["src"]})
+    return sorted(out, key=lambda i: i["y0"])
+
+
+def _pp_image_block(im: dict, load, budget: list) -> dict | None:
+    """An image block sized as it appeared on the page (CSS px at 96 dpi,
+    which is what the generators read), or None when unreadable or over the
+    document's byte budget."""
+    import base64
+    try:
+        data = load(im["src"])
+    except Exception:
+        return None
+    if not data or len(data) > budget[0]:
+        return None
+    budget[0] -= len(data)
+    ext = im["src"].rsplit(".", 1)[-1].lower()
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif"}.get(ext, "image/png")
+    return _image(base64.b64encode(data).decode("ascii"), mime,
+                  round(im["w"] * 96 / 72), round(im["h"] * 96 / 72))
 
 
 def _pp_style_words(page: dict, html_page: dict | None) -> None:
@@ -802,9 +888,12 @@ def _pp_furniture_keys(pages: list[dict]) -> dict[str, set[str]]:
     return out
 
 
-def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], int]:
+def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None) -> tuple[list[dict], int]:
+    """`load_image(src) -> bytes` reads an image pdftohtml extracted; without
+    it, images are left out."""
     pages = _pp_parse_bbox(bbox_xml)
     html_pages = _pp_parse_html(html_xml or "")
+    budget = [_PP_IMAGE_BUDGET]
     for i, page in enumerate(pages):
         _pp_style_words(page, html_pages[i] if i < len(html_pages) else None)
     all_lines = [l for p in pages for l in p["lines"]]
@@ -892,8 +981,19 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], in
         col_right = max((l["x1"] for l in single), default=page["w"])
         short_line = 0.15 * max(col_right - col_left, 1.0)
 
+        pending_images = _pp_body_images(page, html_pages[pi] if pi < len(html_pages) else None) \
+            if load_image else []
+
+        def emit_images_above(y: float):
+            while pending_images and pending_images[0]["y0"] < y:
+                block = _pp_image_block(pending_images.pop(0), load_image, budget)
+                if block:
+                    flush_all()
+                    blocks.append(_placed(block, pno))
+
         prev_bottom = None
         for row in rows:
+            emit_images_above(min(l["y0"] for l in row))
             text = " ".join(_pp_line_text(l) for l in row)
             top, bottom = min(l["y0"] for l in row), max(l["y1"] for l in row)
             height = bottom - top
@@ -963,6 +1063,7 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], in
                     flush_para()
             para.append(line)
         flush_all()
+        emit_images_above(float("inf"))
     return blocks, len(pages)
 
 
@@ -974,15 +1075,28 @@ def run_poppler(pdf: Path) -> dict:
                           capture_output=True, text=True, check=False)
     if bbox.returncode != 0:
         raise RuntimeError(f"pdftotext -bbox-layout exited {bbox.returncode}: {bbox.stderr.strip()}")
-    html_xml = None
-    try:
-        html = subprocess.run(["pdftohtml", "-xml", "-i", "-stdout", "-q", str(pdf)],
-                              capture_output=True, text=True, check=False)
-        if html.returncode == 0:
-            html_xml = html.stdout
-    except FileNotFoundError:
-        pass  # geometry-only: sizes from word boxes, no bold or links
-    blocks, pages = _poppler_blocks(bbox.stdout, html_xml)
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="docparse-poppler-") as tmp:
+        html_xml = None
+        try:
+            # Without -i, pdftohtml also writes each image beside the XML and
+            # records where it sits on the page.
+            html = subprocess.run(["pdftohtml", "-xml", "-q", "-fmt", "png", str(pdf),
+                                   str(Path(tmp) / "page")],
+                                  capture_output=True, text=True, check=False)
+            xml_path = Path(tmp) / "page.xml"
+            if html.returncode == 0 and xml_path.exists():
+                html_xml = xml_path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            pass  # geometry-only: sizes from word boxes, no bold, links or images
+
+        def load_image(src: str) -> bytes:
+            path = (Path(tmp) / Path(src).name).resolve()
+            if path.parent != Path(tmp).resolve():
+                raise ValueError("image outside the extraction directory")
+            return path.read_bytes()
+
+        blocks, pages = _poppler_blocks(bbox.stdout, html_xml, load_image)
     meta = _empty_meta()
     meta["pageCount"] = pages or _pdf_page_count(pdf)
     return {"metadata": meta, "blocks": blocks}

@@ -257,7 +257,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">PDF to Word, <span class="dp-accent">in your own template</span></h1>
-    <p class="subtitle reveal reveal-delay-1">Turn a PDF back into an editable Word document &mdash; real headings, lists and tables, styled by a <code>.docx</code> you already have. Reading the PDF is where information is lost, so that is where the work goes.</p>
+    <p class="subtitle reveal reveal-delay-1">Turn a PDF back into an editable Word document &mdash; real headings, lists, tables and pictures, styled by a <code>.docx</code> you already have. Reading the PDF is where information is lost, so that is where the work goes.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -355,7 +355,7 @@
         </figure>
         <figure class="p2w-shot">
           <img src="assets/pdf-to-word/ailang-style-p1.jpg" alt="Page 1 as a generated Word document in the AILANG template, with bold labels kept" width="745" height="1053" loading="lazy">
-          <figcaption><b>Word, AILANG template.</b> Bold labels (&ldquo;Prepared by:&rdquo;) stay bold; the PDF&rsquo;s running header and footer are not repeated in the body.</figcaption>
+          <figcaption><b>Word, AILANG template.</b> The illustration is carried over in its place; bold labels (&ldquo;Prepared by:&rdquo;) stay bold; the PDF&rsquo;s running header and footer are not repeated in the body.</figcaption>
         </figure>
         <figure class="p2w-shot">
           <img src="assets/pdf-to-word/no-template-p1.jpg" alt="The generated Word document with no template: plain styles, with the PDF's header and footer as real Word header and footer" width="745" height="1053" loading="lazy">
@@ -384,6 +384,7 @@
           <tr><td>Lists</td><td>Bullet and number markers, with nesting from indentation. Ordered lists stay ordered.</td></tr>
           <tr><td>Tables</td><td>Rows whose cells snap to shared columns. Wrapped cell text is folded back into its cell; stacked tables with different columns stay separate; prose set in two columns is read column by column, not mistaken for a table.</td></tr>
           <tr><td>Running header, footer, page numbers</td><td>Lines that recur at the top or bottom of the pages become one header and one footer. With a template, yours replaces them; without one, they become the document&rsquo;s header and footer.</td></tr>
+          <tr><td>Pictures</td><td>Illustrations, photos and figures in the body are carried into the document in their place, at the size they had on the page. Logos in the running header and footer are left to the template, which brings its own.</td></tr>
           <tr><td>Bold, italic, links</td><td>Kept as inline formatting on the words that carried it.</td></tr>
           <tr><td>Text</td><td>Taken from the layer that reads glyphs a PDF draws twice as one letter, so &ldquo;The&rdquo; does not come back as &ldquo;Thee&rdquo;.</td></tr>
         </tbody>
@@ -396,7 +397,8 @@
         <li><b>Page breaks you inserted.</b> A PDF records where pages ended, not why. The Word document repaginates in its template.</li>
         <li><b>Formatting that looks like nothing.</b> If headings were set in the same size and weight as body text, the PDF carries no sign they were headings.</li>
         <li><b>Merged cells</b> are recovered as best the column layout allows; a cell spanning several columns may come back split.</li>
-        <li><b>Images.</b> Logos and figures are not carried into the Word document. A template brings its own logo.</li>
+        <li><b>Header and footer logos.</b> A logo in the running header or footer is not copied into the Word header: the template supplies its own. Without a template, the header carries the text only.</li>
+        <li><b>Charts and diagrams as pictures.</b> A chart comes back as an image of the chart, not as editable chart data.</li>
       </ul>
       <p>When you still have the original <code>.docx</code>, <a href="docx-parsing.html">parse that instead</a> &mdash; it is lossless. This page is for when the PDF is all you have.</p>
 
@@ -408,10 +410,10 @@
           <tr><th>Backend</th><th>Use it for</th><th>Needs</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>poppler</code></td><td>Born-digital PDFs &mdash; reports, proposals, contracts, anything exported from Word. Headings, lists, tables, header and footer. The usual choice for PDF to Word.</td><td>poppler only</td></tr>
-          <tr><td><code>docling</code></td><td>Scanned PDFs (OCR) and complex layouts. Without a <code>--pdf-backend</code> flag, a PDF with no text layer is sent here automatically.</td><td>local Python package</td></tr>
-          <tr><td><code>pdftotext</code></td><td>The default for parsing: the most complete plain text, layout kept as it is. For conversion it still gets a proper header and footer.</td><td>poppler only</td></tr>
-          <tr><td><code>liteparse</code></td><td>Fast text with headings from font size, when tables don&rsquo;t matter.</td><td>local Python package</td></tr>
+          <tr><td><code>poppler</code></td><td>Born-digital PDFs &mdash; reports, proposals, contracts, anything exported from Word. Headings, lists, tables, pictures, header and footer. The usual choice for PDF to Word.</td><td>poppler only</td></tr>
+          <tr><td><code>docling</code></td><td>Scanned PDFs (OCR) and complex layouts; carries pictures too. Without a <code>--pdf-backend</code> flag, a PDF with no text layer is sent here automatically.</td><td>local Python package</td></tr>
+          <tr><td><code>pdftotext</code></td><td>The default for parsing: the most complete plain text, layout kept as it is. For conversion it still gets a proper header and footer; text only, no pictures.</td><td>poppler only</td></tr>
+          <tr><td><code>liteparse</code></td><td>Fast text with headings from font size, when tables and pictures don&rsquo;t matter.</td><td>local Python package</td></tr>
           <tr><td><code>ai</code></td><td>Handwriting and visually complex pages. Opt-in, never automatic.</td><td>an AI provider key</td></tr>
         </tbody>
       </table>
@@ -533,6 +535,11 @@ docparse scan.pdf --pdf-backend docling --convert scan.docx --reference-doc hous
           return '<tr>' + r.map(function (c) { return '<td>' + cell(c) + '</td>'; }).join('') + '</tr>';
         }).join('');
         return row('table', 'p2w-kind--table', '<table>' + head + body + '</table>');
+      }
+      if (t === 'image') {
+        var size = (b.width && b.height) ? b.width + ' &times; ' + b.height + ' px' : 'picture';
+        return row('picture', 'p2w-kind--table', size + ' &middot; ' + esc(b.mime || '') +
+          ' &mdash; carried into the Word document in this position');
       }
       if (t === 'list') {
         var tag = b.ordered ? 'ol' : 'ul';

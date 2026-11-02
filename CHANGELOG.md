@@ -20,7 +20,11 @@ separately — see `sdks/` for per-SDK changelogs.
   columns read column by column), paragraphs reflowed, bold and links as
   inline runs, and margin lines that recur across pages tagged as running
   header/footer. Text comes from `pdftotext -bbox-layout`, style from
-  `pdftohtml -xml`. Opt-in; `pdftotext` is unchanged.
+  `pdftohtml -xml`. Pictures in the body (illustrations, photos, figures) are
+  carried as image blocks in their place, sized as they appeared on the page;
+  logos in the header/footer band, tiny decorations and full-page backgrounds
+  are left out, and a document's images are capped at 6 MB. Opt-in;
+  `pdftotext` is unchanged.
 - PDF: page furniture leaves the body. A new pure `pdf_furniture` pass moves
   the running header, footer and page numbers into one header and one footer
   section (which DOCX/ODT output writes as real header/footer parts, and which
@@ -37,7 +41,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 - PDF (docling): the document is walked item by item instead of through its
   Markdown export, so lists stay lists, page headers/footers are recognised,
-  and pictures no longer leave a literal `<!-- image -->` in the output.
+  and pictures no longer leave a literal `<!-- image -->` in the output: body
+  pictures are carried as images, by the same rules as the poppler backend.
   Heading levels come from heading size when docling reports them all as one
   level. Text is read with docling's pypdfium backend, which does not double
   glyphs a PDF draws twice ("Thee", "Confidrm").
