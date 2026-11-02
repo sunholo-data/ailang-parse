@@ -456,6 +456,26 @@ class TextLayer(unittest.TestCase):
         pages = ["\n".join(rows[i % 2] for i in range(3)) + "\n" for _ in range(3)]
         self.assertEqual(self.audit(pages)["textlessPages"], [])
 
+    def test_fragmented_stamp_with_number_fragments_is_textless(self):
+        # A stamp drawn rotated / letter-spaced comes out as many 1-3 character
+        # lines, some of them digits only ("/0", ":3"). Those number-only
+        # fragments used to count as content and left every page above the
+        # threshold, hiding a 78-page scan (2026-11-02).
+        frags = ["Ce", "rt", "ifi", "ed", "co", "py", "12", "/0", "3/", "20", "31", ":3", "0", "-", "4"]
+        pages = ["\n".join(" " * (i % 7) + f for i, f in enumerate(frags)) + f"\n{' ' * 60}{n}\n"
+                 for n in range(1, 41)]
+        tl = self.audit(pages)
+        self.assertEqual(tl["textlessPages"], list(range(1, 41)))
+
+    def test_short_number_lines_on_few_pages_stay_content(self):
+        # A short figure repeated on a couple of pages out of many is not a
+        # stamp: below the repeat share it is still the page's own text.
+        pages = [f"Ref {n:03d}\n12\n/0\n3/\n20\n31\n:3\n" if n <= 2 else
+                 f"Parcel {n} was surveyed and the boundary stones were found in place.\n"
+                 for n in range(1, 21)]
+        tl = self.audit(pages, pictures={1, 2})
+        self.assertEqual(tl["textlessPages"], [])
+
     def test_without_image_data_a_line_must_repeat_widely(self):
         # A heading shared by two of ten pages is not furniture when no image
         # data says those pages are pictures.
@@ -497,6 +517,11 @@ class TextLayerFixtures(unittest.TestCase):
     def test_scanned(self):
         for backend in ("pdftotext", "poppler"):
             self.assertEqual(self.layer("scanned.pdf", backend)["textlessPages"], [1, 2, 3, 4, 5, 6])
+
+    def test_scanned_with_fragmented_stamp(self):
+        for backend in ("pdftotext", "poppler"):
+            self.assertEqual(self.layer("scanned_fragments.pdf", backend)["textlessPages"],
+                             [1, 2, 3, 4, 5, 6], backend)
 
     def test_partial(self):
         self.assertEqual(self.layer("partial.pdf")["textlessPages"], [5, 6])

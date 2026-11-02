@@ -36,6 +36,15 @@ separately — see `sdks/` for per-SDK changelogs.
   `pdfBackend "ai"`, paid) and never the file path. A PDF with no text at all
   now reports this code too, where it used to be `pdf_backend_failed`. This
   covers `--convert` from a PDF, which reads it through the same path.
+- **A stamp drawn as rotated or letter-spaced text no longer hides a scan.**
+  pdftotext emits such a stamp as dozens of 1-3 character lines per page, some
+  of them digits only ("/0", ":3"). Number-only lines never counted as
+  repeated (rows of figures are content), so on the real 78-page scan behind
+  this fix they left 32 characters on every page, above the 12-character
+  threshold, and the PDF still parsed as a success. A number-only line of at
+  most 4 characters whose exact text recurs on at least 40% of pages now counts
+  as a stamp fragment. Longer figures, and short ones on few pages, are still
+  content; a sweep of 899 local PDFs changed no other verdict.
 - A partly scanned PDF still succeeds, with a warning that starts
   `textless_pages=5-6 pages=6: ` and names the pages whose content is missing.
   Slide decks (little text per page, but their own) and repeated form pages
