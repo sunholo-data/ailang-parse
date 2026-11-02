@@ -258,7 +258,63 @@
   box-shadow: var(--shadow-blue, 0 4px 14px rgba(0,0,0,.08));
   transform: translateY(-2px);
 }
+.p2w-card-pick { position: relative; }
 .p2w-card-pick img { display: block; width: 100%; height: auto; }
+.p2w-card-cta {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--dp-blue);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--dp-blue-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  transition: background .2s ease, color .2s ease;
+}
+.p2w-card-cta svg {
+  width: 13px; height: 13px; flex-shrink: 0;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round;
+}
+.p2w-card-pick:hover .p2w-card-cta,
+.p2w-card-pick:focus-visible .p2w-card-cta { background: var(--dp-blue); color: #fff; border-color: var(--dp-blue); }
+.p2w-card-on {
+  display: none;
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--dp-blue);
+}
+.p2w-card-pick[aria-pressed="true"] { border: 2px solid var(--dp-blue); }
+.p2w-card-pick[aria-pressed="true"] .p2w-card-on { display: inline-block; }
+.p2w-card-pick[aria-pressed="true"] .p2w-card-cta { display: none; }
+.p2w-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dp-blue);
+  font-weight: 500;
+  margin: -4px 0 0;
+}
+.p2w-hint svg {
+  width: 18px; height: 18px; flex-shrink: 0;
+  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
 .p2w-card figcaption {
   margin-top: 8px;
   font-size: 12px;
@@ -498,36 +554,47 @@
       </div>
 
       <h2 id="templates">Switch templates with one flag</h2>
-      <p>The read happens once; the look is just the <code>--reference-doc</code> you pass. Below is the same page &mdash; recovered from the same PDF &mdash; in five looks. Nothing else in the command changes. Click any of them to open it in the viewer above.</p>
+      <p>The read happens once; the look is just the <code>--reference-doc</code> you pass. Below is the same page &mdash; recovered from the same PDF &mdash; in five looks. Nothing else in the command changes.</p>
+      <p class="p2w-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5a2 2 0 0 1 4 0v5"/><path d="M13 10V8a2 2 0 0 1 4 0v4"/><path d="M17 11a2 2 0 0 1 4 0v3a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3l-2.5-4a2 2 0 0 1 3.3-2.2L9 13"/></svg>Click a page to open it next to the source PDF in the viewer above.</p>
 
       <div class="p2w-gallery">
         <figure class="p2w-card">
-          <button type="button" class="p2w-card-pick" data-out="ailang-style" aria-label="Show the AILANG version in the viewer">
+          <button type="button" class="p2w-card-pick" aria-pressed="true" data-out="ailang-style" aria-label="Compare with the PDF: show the AILANG version in the viewer">
             <img src="assets/pdf-to-word/gallery-ailang-style.jpg" alt="The Scope and delivery page in the AILANG look" width="497" height="702" loading="lazy">
+            <span class="p2w-card-cta"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>Compare</span>
+            <span class="p2w-card-on">Showing above</span>
           </button>
           <figcaption><b>AILANG</b> <span>Our proposal template</span><code>ailang-reference.docx</code> <a href="templates/output/references/ailang-reference.docx" download>download</a></figcaption>
         </figure>
         <figure class="p2w-card">
-          <button type="button" class="p2w-card-pick" data-out="classic-style" aria-label="Show the Classic version in the viewer">
+          <button type="button" class="p2w-card-pick" aria-pressed="false" data-out="classic-style" aria-label="Compare with the PDF: show the Classic version in the viewer">
             <img src="assets/pdf-to-word/gallery-classic-style.jpg" alt="The Scope and delivery page in the Classic look" width="497" height="702" loading="lazy">
+            <span class="p2w-card-cta"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>Compare</span>
+            <span class="p2w-card-on">Showing above</span>
           </button>
           <figcaption><b>Classic</b> <span>Serif, navy and gold</span><code>classic-reference.docx</code> <a href="assets/pdf-to-word/templates/classic-reference.docx" download>download</a></figcaption>
         </figure>
         <figure class="p2w-card">
-          <button type="button" class="p2w-card-pick" data-out="modern-style" aria-label="Show the Modern version in the viewer">
+          <button type="button" class="p2w-card-pick" aria-pressed="false" data-out="modern-style" aria-label="Compare with the PDF: show the Modern version in the viewer">
             <img src="assets/pdf-to-word/gallery-modern-style.jpg" alt="The Scope and delivery page in the Modern look" width="497" height="702" loading="lazy">
+            <span class="p2w-card-cta"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>Compare</span>
+            <span class="p2w-card-on">Showing above</span>
           </button>
           <figcaption><b>Modern</b> <span>Sans, violet band</span><code>modern-reference.docx</code> <a href="assets/pdf-to-word/templates/modern-reference.docx" download>download</a></figcaption>
         </figure>
         <figure class="p2w-card">
-          <button type="button" class="p2w-card-pick" data-out="minimal-style" aria-label="Show the Minimal version in the viewer">
+          <button type="button" class="p2w-card-pick" aria-pressed="false" data-out="minimal-style" aria-label="Compare with the PDF: show the Minimal version in the viewer">
             <img src="assets/pdf-to-word/gallery-minimal-style.jpg" alt="The Scope and delivery page in the Minimal look" width="497" height="702" loading="lazy">
+            <span class="p2w-card-cta"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>Compare</span>
+            <span class="p2w-card-on">Showing above</span>
           </button>
           <figcaption><b>Minimal</b> <span>Black, spaced capitals</span><code>minimal-reference.docx</code> <a href="assets/pdf-to-word/templates/minimal-reference.docx" download>download</a></figcaption>
         </figure>
         <figure class="p2w-card">
-          <button type="button" class="p2w-card-pick" data-out="no-template" aria-label="Show the No template version in the viewer">
+          <button type="button" class="p2w-card-pick" aria-pressed="false" data-out="no-template" aria-label="Compare with the PDF: show the No template version in the viewer">
             <img src="assets/pdf-to-word/gallery-no-template.jpg" alt="The Scope and delivery page in the No template look" width="510" height="660" loading="lazy">
+            <span class="p2w-card-cta"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>Compare</span>
+            <span class="p2w-card-on">Showing above</span>
           </button>
           <figcaption><b>No template</b> <span>Plain styles</span><code>no template file</code></figcaption>
         </figure>
@@ -666,6 +733,9 @@ docparse scan.pdf --pdf-backend docling --convert scan.docx --reference-doc hous
     tab.addEventListener('click', function () {
       var name = tab.getAttribute('data-out');
       tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t === tab)); });
+      document.querySelectorAll('.p2w-card-pick').forEach(function (c) {
+        c.setAttribute('aria-pressed', String(c.getAttribute('data-out') === name));
+      });
       var base = 'assets/pdf-to-word/proposal-' + name;
       // pagemode/navpanes: open without the viewer's bookmarks sidebar.
       frame.src = base + '.pdf#view=FitH&pagemode=none&navpanes=0';
