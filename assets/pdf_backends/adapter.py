@@ -194,23 +194,152 @@ def run_pdftotext(pdf: Path) -> dict:
     return {"metadata": meta, "blocks": blocks}
 
 
-def run_docling(pdf: Path) -> dict:
-    from docling.document_converter import DocumentConverter
+def _rank_levels(sizes: list[float], max_levels: int = 3, step: float = 0.75) -> dict[float, int]:
+    """Map heading sizes (font size, or a heading box's height) to levels 1..n.
 
-    result = DocumentConverter().convert(str(pdf))
-    md = result.document.export_to_markdown()
-    blocks = _blocks_from_markdown(md)
+    Sizes are clustered from the largest down: a size starts a new level when
+    it drops below `step` x the largest size of the level above. That keeps
+    the jitter inside one level together (a 14pt and an 18pt box are both H2
+    when H1 is 27pt) while separating real tiers. Levels past `max_levels`
+    collapse into the last one.
+    """
+    levels: dict[float, int] = {}
+    level, top = 0, None
+    for size in sorted(set(sizes), reverse=True):
+        if top is None or size < top * step:
+            level, top = min(level + 1, max_levels), size
+        levels[size] = level
+    return levels
+
+
+def _docling_label(item: Any) -> str:
+    label = getattr(item, "label", "")
+    return getattr(label, "value", label) or ""
+
+
+def _docling_page(item: Any) -> int:
+    prov = getattr(item, "prov", None) or []
+    return int(getattr(prov[0], "page_no", 0) or 0) if prov else 0
+
+
+def _docling_height(item: Any) -> float:
+    prov = getattr(item, "prov", None) or []
+    bbox = getattr(prov[0], "bbox", None) if prov else None
+    return round(float(getattr(bbox, "height", 0.0) or 0.0), 1) if bbox is not None else 0.0
+
+
+def _docling_table(item: Any) -> dict | None:
+    grid = getattr(getattr(item, "data", None), "grid", None) or []
+    rows = [[(getattr(c, "text", "") or "").strip() for c in row] for row in grid]
+    rows = [r for r in rows if any(r)]
+    if not rows:
+        return None
+    return _table(rows[1:], rows[0])
+
+
+def _docling_blocks(items: list[tuple[Any, int]]) -> list[dict]:
+    """Blocks from DoclingDocument.iterate_items() output: (item, depth) pairs.
+
+    Walking the items rather than export_to_markdown() keeps what the
+    Markdown round trip threw away: list items stay lists (the old
+    _blocks_from_markdown joined them into one paragraph), page_header /
+    page_footer items arrive tagged as furniture, and pictures are skipped
+    instead of leaking "<!-- image -->" into the document as text.
+
+    Heading levels: docling reports section_header level 1 for every heading
+    of a typical PDF (measured on ailang-proposal.pdf: 17 of 17). When its
+    levels are all the same, rank the headings' box heights instead.
+    """
+    headers = [it for it, _ in items if _docling_label(it) == "section_header"]
+    doc_levels = {getattr(h, "level", 1) or 1 for h in headers}
+    by_height = _rank_levels([_docling_height(h) for h in headers if _docling_height(h) > 0]) \
+        if len(doc_levels) <= 1 else {}
+
+    blocks: list[dict] = []
+    pending: list[tuple[str, int, bool, int]] = []  # list items: text, depth, ordered, page
+
+    def flush_list():
+        if pending:
+            base = min(d for _, d, _, _ in pending)
+            blocks.append(_placed(_list([t for t, _, _, _ in pending], pending[0][2],
+                                        [d - base for _, d, _, _ in pending]), pending[0][3]))
+            pending.clear()
+
+    for item, depth in items:
+        label = _docling_label(item)
+        text = (getattr(item, "text", "") or "").strip()
+        page = _docling_page(item)
+        if label == "list_item":
+            if text:
+                pending.append((text, depth, bool(getattr(item, "enumerated", False)), page))
+            continue
+        flush_list()
+        if label in ("picture", "chart"):
+            continue
+        if label == "table":
+            table = _docling_table(item)
+            if table:
+                blocks.append(_placed(table, page))
+            continue
+        if not text:
+            continue
+        if label == "title":
+            blocks.append(_placed(_heading(text, 1), page))
+        elif label == "section_header":
+            level = by_height.get(_docling_height(item)) if by_height else None
+            level = level or (getattr(item, "level", 1) or 1) + (1 if any(_docling_label(i) == "title" for i, _ in items) else 0)
+            blocks.append(_placed(_heading(text, level), page))
+        elif label in ("page_header", "page_footer"):
+            blocks.append(_placed(_text(text), page, "header" if label == "page_header" else "footer"))
+        else:
+            blocks.append(_placed(_text(text), page))
+    flush_list()
+    return blocks
+
+
+def _docling_converter():
+    """Docling with the pypdfium text backend when available. The default
+    docling-parse backend reads glyphs that a PDF draws twice as two letters
+    ("matteers", "Thee", "Confidrm" on ailang-proposal.pdf, a LibreOffice
+    export); pypdfium reads the same file cleanly and ~4x faster (2.7s vs
+    ~10s measured), with the same headings, tables and lists."""
+    from docling.document_converter import DocumentConverter
+    try:
+        from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
+        from docling.datamodel.base_models import InputFormat
+        from docling.document_converter import PdfFormatOption
+        return DocumentConverter(format_options={
+            InputFormat.PDF: PdfFormatOption(backend=PyPdfiumDocumentBackend)})
+    except ImportError:
+        return DocumentConverter()
+
+
+def _docling_items(document: Any, traverse_pictures: bool = False) -> list[tuple[Any, int]]:
+    try:
+        from docling_core.types.doc.document import ContentLayer
+        layers = {ContentLayer.BODY, ContentLayer.FURNITURE}
+    except ImportError:
+        layers = None
+    kwargs: dict[str, Any] = {}
+    if layers is not None:
+        kwargs["included_content_layers"] = layers
+    if traverse_pictures:
+        kwargs["traverse_pictures"] = True
+    try:
+        return list(document.iterate_items(**kwargs))
+    except TypeError:
+        return list(document.iterate_items())
+
+
+def run_docling(pdf: Path) -> dict:
+    result = _docling_converter().convert(str(pdf))
+    blocks = _docling_blocks(_docling_items(result.document))
     # A scanned page is laid out as ONE picture, and docling files its OCR text
-    # as that picture's children, which the default export skips: the whole
-    # page comes out as "<!-- image -->". Only when that leaves nothing
-    # substantive, export again descending into pictures, so text-layer PDFs
-    # with figures are unchanged.
+    # as that picture's children, which the default walk skips. Only when that
+    # leaves nothing substantive, walk again descending into pictures, so
+    # text-layer PDFs with figures are unchanged.
     if not _has_substance(blocks):
-        try:
-            md = result.document.export_to_markdown(traverse_pictures=True)
-            blocks = _blocks_from_markdown(md)
-        except TypeError:
-            pass  # older docling without traverse_pictures
+        blocks = _docling_blocks(_docling_items(result.document, traverse_pictures=True))
 
     meta = _empty_meta()
     try:
@@ -221,30 +350,57 @@ def run_docling(pdf: Path) -> dict:
                 if isinstance(v, str):
                     meta[k] = v
             pages = doc_dict.get("pages") or []
-            if isinstance(pages, list):
+            if isinstance(pages, (list, dict)):
                 meta["pageCount"] = len(pages)
     except Exception:
         pass
     return {"metadata": meta, "blocks": blocks}
 
 
-def _liteparse_headings_from_textitems(textitems: list) -> set[str]:
-    """Heuristic: any font size strictly larger than the modal (body-text) size
-    marks a heading. Body text is whichever size appears most often."""
+def _lp_items(page: Any) -> list:
+    """Text items of a liteparse page. liteparse 2.x names them text_items /
+    font_size; older releases textItems / fontSize. Reading only the camelCase
+    names returned nothing on 2.6, which is why liteparse found 0 headings."""
+    return list(getattr(page, "text_items", None) or getattr(page, "textItems", None) or [])
+
+
+def _lp_size(item: Any) -> float | None:
+    size = getattr(item, "font_size", None)
+    if size is None:
+        size = getattr(item, "fontSize", None)
+    return float(size) if isinstance(size, (int, float)) else None
+
+
+def _liteparse_heading_levels(textitems: list, lines: set[str] | None = None) -> dict[str, int]:
+    """Heading text -> level. Any font size strictly larger than the modal
+    (body-text) size marks a heading, body size being whichever size covers
+    the most characters; larger sizes rank as higher levels.
+
+    Only text that stands as a whole line in `lines` can become a heading,
+    so only those sizes are ranked: the 24pt logo word "AILANG" shares its
+    line with "PROPOSAL", and ranking it pushed every real H2 down to H3."""
     from collections import Counter
 
-    sizes = [getattr(ti, "fontSize", None) for ti in textitems]
-    sizes = [s for s in sizes if isinstance(s, (int, float))]
-    if not sizes:
-        return set()
-    body_size = Counter(sizes).most_common(1)[0][0]
-    heading_texts: set[str] = set()
+    weights: Counter = Counter()
     for ti in textitems:
-        size = getattr(ti, "fontSize", None)
-        text = getattr(ti, "text", "").strip()
-        if isinstance(size, (int, float)) and size > body_size and text and len(text) < 200:
-            heading_texts.add(text)
-    return heading_texts
+        size = _lp_size(ti)
+        if size is not None:
+            weights[size] += len(getattr(ti, "text", "") or "")
+    if not weights:
+        return {}
+    body_size = weights.most_common(1)[0][0]
+    candidates: dict[str, float] = {}
+    for ti in textitems:
+        size = _lp_size(ti)
+        text = (getattr(ti, "text", "") or "").strip()
+        if size is not None and size > body_size and text and len(text) < 200 \
+                and (lines is None or text in lines):
+            candidates[text] = max(size, candidates.get(text, 0.0))
+    ranks = _rank_levels(list(candidates.values()), step=0.9)
+    return {t: ranks[s] for t, s in candidates.items()}
+
+
+_BULLET_RE = re.compile(r"^(?:[•▪◦‣∙·\-–]|\d{1,3}[.)])\s+")
 
 
 def run_liteparse(pdf: Path) -> dict:
@@ -255,11 +411,14 @@ def run_liteparse(pdf: Path) -> dict:
     result = LiteParse(ocr_enabled=False).parse(str(pdf))
     all_textitems = []
     for page in result.pages:
-        all_textitems.extend(getattr(page, "textItems", []) or [])
-    heading_texts = _liteparse_headings_from_textitems(all_textitems)
+        all_textitems.extend(_lp_items(page))
+    page_lines = {ln.strip() for page in result.pages for ln in page.text.splitlines() if ln.strip()}
+    heading_levels = _liteparse_heading_levels(all_textitems, page_lines)
 
     blocks: list[dict] = []
     para: list[str] = []
+    items: list[str] = []
+    ordered = [False]
 
     def flush():
         if para:
@@ -267,6 +426,9 @@ def run_liteparse(pdf: Path) -> dict:
             if text:
                 blocks.append(_text(text))
             para.clear()
+        if items:
+            blocks.append(_list(list(items), ordered[0]))
+            items.clear()
 
     for page in result.pages:
         for raw_line in page.text.splitlines():
@@ -274,16 +436,27 @@ def run_liteparse(pdf: Path) -> dict:
             if not line:
                 flush()
                 continue
-            if line in heading_texts:
+            if line in heading_levels:
                 flush()
-                # Higher font-size → lower (more important) heading level.
-                blocks.append(_heading(line, 2))
+                blocks.append(_heading(line, heading_levels[line]))
+                continue
+            bullet = _BULLET_RE.match(line)
+            if bullet:
+                if para:
+                    flush()
+                if not items:
+                    ordered[0] = bullet.group(0).strip()[0].isdigit()
+                items.append(line[bullet.end():].strip())
+            elif items and raw_line.startswith((" ", "\t")):
+                items[-1] = f"{items[-1]} {line}"
             else:
+                if items:
+                    flush()
                 para.append(line)
         flush()
 
     meta = _empty_meta()
-    meta["pageCount"] = result.num_pages
+    meta["pageCount"] = getattr(result, "num_pages", 0) or len(result.pages)
     return {"metadata": meta, "blocks": blocks}
 
 
