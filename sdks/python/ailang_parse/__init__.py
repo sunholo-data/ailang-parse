@@ -28,6 +28,7 @@ from .types import (
     KeyInfo, Quota, Usage, UsageInfo,
     Element, ElementMetadata,
     DocParseError, AuthError, QuotaError,
+    MAX_DIRECT_UPLOAD_BYTES, FILE_TOO_LARGE,
     RetryPolicy,
     Chunk, ChunkMetadata, FlattenPolicy, DEFAULT_FLATTEN_POLICY,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "KeyInfo", "Quota", "Usage", "UsageInfo",
     "Element", "ElementMetadata",
     "DocParseError", "AuthError", "QuotaError",
+    "MAX_DIRECT_UPLOAD_BYTES", "FILE_TOO_LARGE",
     "RetryPolicy",
     "Chunk", "ChunkMetadata", "FlattenPolicy", "DEFAULT_FLATTEN_POLICY",
 ]

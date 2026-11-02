@@ -52,6 +52,11 @@ func (uc *UnstructuredClient) Partition(ctx context.Context, filePath string, st
 	// Check if filePath is a local file — if so, upload via multipart
 	if f, err := os.Open(filePath); err == nil {
 		defer f.Close()
+		if st, err := f.Stat(); err == nil {
+			if err := checkUploadSize(st.Size()); err != nil {
+				return nil, err
+			}
+		}
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		part, err := writer.CreateFormFile("files", filepath.Base(filePath))

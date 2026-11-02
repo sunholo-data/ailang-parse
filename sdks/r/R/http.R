@@ -94,12 +94,13 @@ NULL
 }
 
 .raise_envelope_error <- function(msg, suggested_fix = "",
-                                  details = NULL, request_id = "") {
+                                  details = NULL, request_id = "", code = "") {
   if (.is_auth_error_message(msg)) {
-    stop(.auth_error(msg))
+    stop(.auth_error(msg, code = code))
   }
   stop(.docparse_error(msg, suggested_fix = suggested_fix,
-                       details = details, request_id = request_id))
+                       details = details, request_id = request_id,
+                       code = code))
 }
 
 .unwrap <- function(body_text) {
@@ -114,9 +115,12 @@ NULL
     err <- outer$error
     if (is.character(err)) {
       # Legacy error: {error: "CODE", message: "...", suggested_fix: "..."}
-      msg <- if (!is.null(outer$message) && nzchar(outer$message)) outer$message else err
+      has_msg <- !is.null(outer$message) && nzchar(outer$message)
+      msg <- if (has_msg) outer$message else err
       fix <- if (!is.null(outer$suggested_fix)) .s(outer$suggested_fix) else ""
-      .raise_envelope_error(msg, suggested_fix = fix)
+      # The error string is a code only when a separate message accompanies it.
+      .raise_envelope_error(msg, suggested_fix = fix,
+                            code = if (has_msg) err else "")
     }
     if (is.list(err)) {
       # Structured dict error: {error: {code, message, details, ...}, request_id}
@@ -125,7 +129,8 @@ NULL
       details <- err$details
       request_id <- if (!is.null(outer$request_id)) .s(outer$request_id) else ""
       .raise_envelope_error(msg, suggested_fix = fix,
-                            details = details, request_id = request_id)
+                            details = details, request_id = request_id,
+                            code = .s(err$code))
     }
     # Unknown error shape — return for caller handling
     return(outer)
@@ -144,7 +149,8 @@ NULL
       details <- err$details
       request_id <- if (!is.null(inner$request_id)) .s(inner$request_id) else ""
       .raise_envelope_error(msg, suggested_fix = fix,
-                            details = details, request_id = request_id)
+                            details = details, request_id = request_id,
+                            code = .s(err$code))
     }
     .raise_envelope_error(as.character(err))
   }

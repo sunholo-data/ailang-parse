@@ -84,15 +84,31 @@ DocParse <- R6::R6Class(
     #'   \code{"html"}.
     #' @param source_url Optional HTTPS signed URL (GCS, S3, Azure Blob)
     #'   to fetch the document from server-side.
+    #' @param pdf_backend How a PDF is read: \code{NULL} (server default,
+    #'   \code{"pdftotext"}), \code{"pdftotext"}, \code{"poppler"} or
+    #'   \code{"ai"}. \code{"ai"} sends page images to Google Gemini via
+    #'   Vertex AI -- for scanned or image-only PDFs -- and is billed as an AI
+    #'   request. Ignored for non-PDF sources; not validated here, so a new
+    #'   backend does not need an SDK release.
+    #' @param gcs_ref \code{gs://} ref returned by
+    #'   \code{POST /api/v1/upload/url} (Business tier): the route for files
+    #'   over the 32 MiB direct-upload limit.
     #' @return A \code{ailang_parse_result} S3 list with a
     #'   \code{"response_meta"} attribute containing quota/tier headers.
-    parse = function(filepath, output_format = "blocks", source_url = NULL) {
+    parse = function(filepath, output_format = "blocks", source_url = NULL,
+                     pdf_backend = NULL, gcs_ref = NULL) {
       body <- list(
         filepath     = jsonlite::unbox(filepath),
         outputFormat = jsonlite::unbox(output_format)
       )
       if (!is.null(source_url)) {
         body$sourceUrl <- jsonlite::unbox(source_url)
+      }
+      if (!is.null(gcs_ref)) {
+        body$gcsRef <- jsonlite::unbox(gcs_ref)
+      }
+      if (!is.null(pdf_backend)) {
+        body$pdfBackend <- jsonlite::unbox(pdf_backend)
       }
       if (nzchar(self$api_key)) {
         body$apiKey <- jsonlite::unbox(self$api_key)
@@ -115,7 +131,8 @@ DocParse <- R6::R6Class(
     #'   new target must not require an SDK release.
     #' @param source_url Fetch the source from this URL instead of a path.
     #' @param gcs_ref \code{gs://bucket/path}, Business tier only.
-    #' @param pdf_backend One of \code{"" pdftotext docling liteparse ai}.
+    #' @param pdf_backend One of \code{"" pdftotext poppler ai}; see
+    #'   \code{parse}.
     #' @param reference_doc Style the generated document (DOCX target only)
     #'   after a template's theme, fonts, headers/footers and page setup —
     #'   the CLI's \code{--reference-doc}. A URL or \code{gs://} ref here,
@@ -157,19 +174,27 @@ DocParse <- R6::R6Class(
     #'   target only).
     #' @param reference_section See \code{convert}.
     #' @param table_style See \code{convert}.
+    #' @param pdf_backend See \code{parse}.
+    #' @details The upload (source plus template) is capped at 32 MiB by the
+    #'   hosting platform; above that this stops with code
+    #'   \code{"FILE_TOO_LARGE"} before sending -- use \code{convert} with
+    #'   \code{source_url} or \code{gcs_ref}.
     #' @return An \code{ailang_convert_result} S3 list.
     convert_file = function(filepath, target, reference_doc = NULL,
-                            reference_section = NULL, table_style = NULL) {
+                            reference_section = NULL, table_style = NULL,
+                            pdf_backend = NULL) {
       stopifnot(file.exists(filepath))
+      if (!is.null(reference_doc)) stopifnot(file.exists(reference_doc))
+      .check_upload_size(list(filepath, reference_doc))
       parts <- list(
         filepath = curl::form_file(filepath, name = basename(filepath)),
         target   = target,
         apiKey   = self$api_key
       )
       if (!is.null(reference_doc)) {
-        stopifnot(file.exists(reference_doc))
         parts$referenceDoc <- curl::form_file(reference_doc, name = basename(reference_doc))
       }
+      if (!is.null(pdf_backend)) parts$pdfBackend <- pdf_backend
       if (!is.null(reference_section)) parts$referenceSection <- as.character(reference_section)
       if (!is.null(table_style)) parts$tableStyle <- table_style
       req <- .build_request(self$base_url, "/api/v1/convert",
@@ -182,22 +207,33 @@ DocParse <- R6::R6Class(
       result
     },
 
-    #' @description Upload a local file (multipart) and parse it.
+    #' @description Upload a local file (multipart) and parse it. Works on
+    #'   all tiers, up to the tier's file-size limit (Free: 10 MB, Pro:
+    #'   25 MB) and never above 32 MiB: the hosting platform caps a direct
+    #'   upload at 32 MiB on every tier. A larger file stops with an
+    #'   \code{ailang_docparse_error} whose \code{code} is
+    #'   \code{"FILE_TOO_LARGE"} before anything is sent; use
+    #'   \code{$parse_url()} or \code{$parse(gcs_ref = ...)} for it
+    #'   (Business: up to 50 MB).
     #' @param filepath Path to a local file.
     #' @param output_format One of \code{"blocks"}, \code{"markdown"},
     #'   \code{"html"}.
+    #' @param pdf_backend See \code{parse}.
     #' @return A \code{ailang_parse_result} S3 list with a
     #'   \code{"response_meta"} attribute containing quota/tier headers.
-    parse_file = function(filepath, output_format = "blocks") {
+    parse_file = function(filepath, output_format = "blocks",
+                          pdf_backend = NULL) {
       stopifnot(file.exists(filepath))
-      req <- .build_request(self$base_url, "/api/v1/parse",
-                            self$api_key, self$timeout)
-      req <- httr2::req_body_multipart(
-        req,
+      .check_upload_size(list(filepath))
+      parts <- list(
         filepath     = curl::form_file(filepath, name = basename(filepath)),
         outputFormat = output_format,
         apiKey       = self$api_key
       )
+      if (!is.null(pdf_backend)) parts$pdfBackend <- pdf_backend
+      req <- .build_request(self$base_url, "/api/v1/parse",
+                            self$api_key, self$timeout)
+      req <- do.call(httr2::req_body_multipart, c(list(req), parts))
       req <- .req_with_retry(req, self$retry)
       resp <- .perform(req)
       result <- .build_parse_result(.unwrap(resp$body), output_format)
@@ -206,15 +242,20 @@ DocParse <- R6::R6Class(
     },
 
     #' @description Parse a document from a signed URL (GCS, S3, Azure
-    #'   Blob, etc.) without uploading a local file.
+    #'   Blob, etc.) without uploading a local file. The server fetches the
+    #'   URL (HTTPS only) and enforces the tier's file-size limit (Free:
+    #'   10 MB, Pro: 25 MB, Business: 50 MB). This is the route for files
+    #'   over the 32 MiB direct-upload limit of \code{$parse_file()}.
     #' @param url HTTPS signed URL pointing to the document.
     #' @param output_format One of \code{"blocks"}, \code{"markdown"},
     #'   \code{"html"}.
+    #' @param pdf_backend See \code{parse}.
     #' @return A \code{ailang_parse_result} S3 list with a
     #'   \code{"response_meta"} attribute containing quota/tier headers.
     #' @export
-    parse_url = function(url, output_format = "blocks") {
-      self$parse(filepath = "", output_format = output_format, source_url = url)
+    parse_url = function(url, output_format = "blocks", pdf_backend = NULL) {
+      self$parse(filepath = "", output_format = output_format,
+                 source_url = url, pdf_backend = pdf_backend)
     },
 
     #' @description Check API health.

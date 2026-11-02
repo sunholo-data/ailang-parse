@@ -22,7 +22,7 @@ type ConvertOptions struct {
 
 	SourceURL  string // fetch the source from this URL instead of a path
 	GCSRef     string // gs://bucket/path, Business tier only
-	PDFBackend string // "", pdftotext, docling, liteparse, ai
+	PDFBackend string // "", pdftotext, poppler, ai (see ParseOptions.PDFBackend)
 
 	// ReferenceDoc styles the generated document (DOCX target only) after a
 	// template's theme, fonts, headers/footers and page setup — the CLI's

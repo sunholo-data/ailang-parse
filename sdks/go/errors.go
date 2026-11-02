@@ -32,6 +32,9 @@ type DocParseError struct {
 	// by the server on 5xx responses that are safe to retry. Consumers
 	// implementing custom retry policies can read this directly.
 	Replayable bool
+	// Code is the machine-readable error code from the API's structured
+	// error envelope (e.g. CodeFileTooLarge), or "" when the server sent none.
+	Code string
 }
 
 func (e *DocParseError) Error() string {
@@ -60,6 +63,60 @@ type QuotaError struct {
 
 func (e *QuotaError) Error() string { return "docparse: " + e.Message }
 func (e *QuotaError) Unwrap() error { return ErrQuota }
+
+// MaxDirectUploadBytes is the largest request body the hosting platform
+// (Cloud Run, HTTP/1) accepts: 32 MiB. A direct multipart upload above it
+// never reaches the API, on any tier.
+const MaxDirectUploadBytes int64 = 32 << 20
+
+// CodeFileTooLarge is DocParseError.Code for a file too large to upload or parse.
+const CodeFileTooLarge = "FILE_TOO_LARGE"
+
+const largeFileRoutes = "For larger files, pass a signed or public https URL with " +
+	"ParseURL (or ParseOptions.SourceURL); the server fetches it, up to your tier's " +
+	"file-size limit. On Business, POST /api/v1/upload/url, PUT the file to the " +
+	"returned upload_url, then pass its gcs_ref as ParseOptions.GCSRef."
+
+// newFileTooLargeError builds the structured error for an upload over the
+// platform's request cap. size < 0 means the SDK did not measure the upload:
+// a 413 page that came back from the hosting platform's front end.
+func newFileTooLargeError(size int64, requestID string) *DocParseError {
+	lead := "Upload rejected by the hosting platform (HTTP 413)."
+	details := map[string]interface{}{"limit_bytes": MaxDirectUploadBytes}
+	if size >= 0 {
+		lead = fmt.Sprintf("File is %d bytes.", size)
+		details["size_bytes"] = size
+	}
+	return &DocParseError{
+		Message: fmt.Sprintf("%s Direct uploads are limited to 32 MiB (%d bytes) by the "+
+			"hosting platform on every tier. %s", lead, MaxDirectUploadBytes, largeFileRoutes),
+		StatusCode:   413,
+		Code:         CodeFileTooLarge,
+		SuggestedFix: largeFileRoutes,
+		Details:      details,
+		RequestID:    requestID,
+	}
+}
+
+// checkUploadSize returns a FILE_TOO_LARGE *DocParseError, before anything is
+// sent, when a multipart upload of size bytes would exceed MaxDirectUploadBytes.
+func checkUploadSize(size int64) error {
+	if size > MaxDirectUploadBytes {
+		return newFileTooLargeError(size, "")
+	}
+	return nil
+}
+
+// withCode sets Code on a *DocParseError or *AuthError and returns it.
+func withCode(err error, code string) error {
+	switch e := err.(type) {
+	case *DocParseError:
+		e.Code = code
+	case *AuthError:
+		e.Code = code
+	}
+	return err
+}
 
 // Sentinel errors for use with errors.Is.
 var (
@@ -153,19 +210,33 @@ func raiseForResponse(resp *http.Response, body []byte) error {
 	replayable := strings.EqualFold(resp.Header.Get("X-AilangParse-Replayable"), "true")
 
 	var parsed map[string]interface{}
-	var msg, suggestedFix string
+	var msg, suggestedFix, code string
 	if len(body) > 0 {
-		if jsonErr := json.Unmarshal(body, &parsed); jsonErr == nil && parsed != nil {
-			if v, ok := parsed["error"].(string); ok {
-				msg = v
-			} else if v, ok := parsed["message"].(string); ok {
+		if jsonErr := json.Unmarshal(body, &parsed); jsonErr != nil {
+			parsed = nil
+		}
+	}
+	if resp.StatusCode == http.StatusRequestEntityTooLarge && parsed == nil {
+		// The hosting platform's front end, not the API: an HTML page for a
+		// request over its 32 MiB cap.
+		return newFileTooLargeError(-1, requestID)
+	}
+	if parsed != nil {
+		if v, ok := parsed["error"].(string); ok {
+			msg = v
+		} else if m, ok := parsed["error"].(map[string]interface{}); ok {
+			msg, _ = m["message"].(string)
+			code, _ = m["code"].(string)
+		}
+		if msg == "" {
+			if v, ok := parsed["message"].(string); ok {
 				msg = v
 			}
-			if v, ok := parsed["suggested_fix"].(string); ok {
-				suggestedFix = v
-			} else if v, ok := parsed["suggestedFix"].(string); ok {
-				suggestedFix = v
-			}
+		}
+		if v, ok := parsed["suggested_fix"].(string); ok {
+			suggestedFix = v
+		} else if v, ok := parsed["suggestedFix"].(string); ok {
+			suggestedFix = v
 		}
 	}
 	if msg == "" {
@@ -183,6 +254,7 @@ func raiseForResponse(resp *http.Response, body []byte) error {
 		e.Replayable = replayable
 		e.Details = parsed
 		e.SuggestedFix = suggestedFix
+		e.Code = code
 		return e
 	case 429:
 		e := newQuotaError(msg)
@@ -191,6 +263,7 @@ func raiseForResponse(resp *http.Response, body []byte) error {
 		e.Details = parsed
 		e.SuggestedFix = suggestedFix
 		e.Tier = tier
+		e.Code = code
 		return e
 	default:
 		return &DocParseError{
@@ -200,6 +273,7 @@ func raiseForResponse(resp *http.Response, body []byte) error {
 			Details:      parsed,
 			RequestID:    requestID,
 			Replayable:   replayable,
+			Code:         code,
 		}
 	}
 }

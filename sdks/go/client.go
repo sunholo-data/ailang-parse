@@ -322,7 +322,7 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 		// Try structured error: {error: {code, message, details, ...}, request_id: "..."}
 		// or legacy: {error: "CODE", message: "...", suggested_fix: "..."}
 		msg := outer.Error
-		var suggestedFix, requestID string
+		var suggestedFix, requestID, code string
 		var details map[string]interface{}
 
 		// Try new-style dict error envelope
@@ -347,18 +347,21 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 			}
 			if json.Unmarshal(data, &structured) == nil {
 				if structured.Message != "" {
+					// The error string is a code only when a separate
+					// message accompanies it.
+					code = outer.Error
 					msg = structured.Message
 				}
 				suggestedFix = structured.SuggestedFix
 			}
 		}
 		if details != nil || requestID != "" {
-			return nil, envelopeErrorFull(msg, suggestedFix, requestID, details)
+			return nil, withCode(envelopeErrorFull(msg, suggestedFix, requestID, details), code)
 		}
 		if suggestedFix != "" {
-			return nil, envelopeErrorWithFix(msg, suggestedFix)
+			return nil, withCode(envelopeErrorWithFix(msg, suggestedFix), code)
 		}
-		return nil, envelopeError(msg)
+		return nil, withCode(envelopeError(msg), code)
 	}
 	inner := []byte(outer.Result)
 	// If no result field, return the raw response (e.g. health, formats)
@@ -372,12 +375,13 @@ func (c *Client) unwrap(data []byte) ([]byte, error) {
 	}
 	if json.Unmarshal(inner, &innerObj) == nil && len(innerObj.Error) > 0 && string(innerObj.Error) != "null" {
 		var errObj struct {
+			Code         string                 `json:"code"`
 			Message      string                 `json:"message"`
 			SuggestedFix string                 `json:"suggested_fix"`
 			Details      map[string]interface{} `json:"details"`
 		}
 		if json.Unmarshal(innerObj.Error, &errObj) == nil && errObj.Message != "" {
-			return nil, envelopeErrorFull(errObj.Message, errObj.SuggestedFix, innerObj.RequestID, errObj.Details)
+			return nil, withCode(envelopeErrorFull(errObj.Message, errObj.SuggestedFix, innerObj.RequestID, errObj.Details), errObj.Code)
 		}
 		return nil, envelopeError(string(innerObj.Error))
 	}

@@ -8,7 +8,7 @@ from typing import List, Optional
 import requests
 
 from .types import Element, DocParseError, AuthError, QuotaError
-from .client import DocParse as _DocParse
+from .client import DocParse as _DocParse, _check_upload_size, _file_too_large_error, _json_body
 
 DEFAULT_BASE_URL = "https://docparse.ailang.sunholo.com"
 
@@ -33,6 +33,7 @@ class _GeneralApi:
         file_path = Path(file)
         if file_path.is_file():
             # Local file — upload via multipart (same as Unstructured)
+            _check_upload_size(file)
             with open(file, "rb") as f:
                 resp = self._session.post(
                     url,
@@ -52,6 +53,8 @@ class _GeneralApi:
             raise AuthError("Invalid or missing API key", 401)
         if resp.status_code == 429:
             raise QuotaError("Quota exceeded")
+        if resp.status_code == 413 and _json_body(resp) is None:
+            raise _file_too_large_error()
         if resp.status_code >= 400:
             raise DocParseError(f"API error: {resp.status_code}", resp.status_code)
 

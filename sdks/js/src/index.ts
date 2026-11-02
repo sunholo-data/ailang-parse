@@ -38,4 +38,4 @@ export type {
   DocParseOptions,
   DocParseErrorOpts, QuotaErrorOpts,
 } from "./types.js";
-export { DocParseError, AuthError, QuotaError } from "./types.js";
+export { DocParseError, AuthError, QuotaError, MAX_DIRECT_UPLOAD_BYTES, FILE_TOO_LARGE } from "./types.js";

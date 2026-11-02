@@ -62,6 +62,60 @@ res <- client$parse_url(
 )
 ```
 
+### PDF backends
+
+`$parse()`, `$parse_url()` and `$parse_file()` take `pdf_backend` (so do
+`$convert()` and `$convert_file()`). It only affects PDF sources:
+
+| `pdf_backend` | How the PDF is read | Billed as |
+|---|---|---|
+| `""` (default) | server default, currently `pdftotext` | a standard request |
+| `"pdftotext"` | text layer, deterministic | a standard request |
+| `"poppler"` | structure from poppler: headings, lists, tables, pictures, header/footer | a standard request |
+| `"ai"` | page images are sent to Google Gemini via Vertex AI; needed for scanned or image-only PDFs | an **AI request** (counts against the AI quota) |
+
+```r
+res <- client$parse_file("scan.pdf", pdf_backend = "ai")
+res <- client$parse_url("https://example.com/report.pdf", pdf_backend = "poppler")
+```
+
+<!-- PENDING(capabilities): this sentence relies on the server listing the AI
+model and processing region in GET /api/v1/capabilities. Do not name a model
+or region here. -->
+The model and processing region used for `"ai"` are listed by
+`GET /api/v1/capabilities`.
+
+### File size limits
+
+| | Free | Pro | Business |
+|---|---|---|---|
+| Per-file limit | 10 MB | 25 MB | 50 MB |
+| Direct upload (`$parse_file()`, `$convert_file()`) | 10 MB | 25 MB | **32 MB** |
+| `source_url` / `$parse_url()` | 10 MB | 25 MB | 50 MB |
+| `POST /api/v1/upload/url` + `gcs_ref` | — | — | 50 MB |
+
+Direct upload is limited to 32 MB (32 MiB, 33,554,432 bytes) by the hosting
+platform on every tier. A request above that never reaches the API, so the
+SDK checks the size first and stops with an `ailang_docparse_error` whose
+`code` is `"FILE_TOO_LARGE"`, without sending anything. If the platform
+rejects an upload anyway (HTTP 413 with an HTML page), the SDK raises the
+same error.
+
+Larger files (Business, up to 50 MB) go by URL instead:
+
+```r
+res <- tryCatch(
+  client$parse_file("big.pdf"),
+  ailang_docparse_error = function(e) {
+    if (!identical(e$code, "FILE_TOO_LARGE")) stop(e)
+    # A signed or public https URL; the server fetches it.
+    client$parse_url(signed_url)
+    # Or, on Business: POST /api/v1/upload/url, PUT the file to the
+    # returned upload_url, then client$parse("", gcs_ref = "gs://...")
+  }
+)
+```
+
 ### Output formats
 
 ```r
@@ -187,6 +241,7 @@ tryCatch(
   ailang_quota_error = function(e) message("quota: ", e$tier, " ", e$used, "/", e$limit),
   ailang_docparse_error = function(e) {
     message("api error: ", conditionMessage(e))
+    message("  code: ", e$code)              # e.g. "FILE_TOO_LARGE"
     message("  suggested fix: ", e$suggested_fix)
     message("  details: ", e$details)       # Structured error details
     message("  request_id: ", e$request_id) # For support/debugging

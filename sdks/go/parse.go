@@ -18,25 +18,43 @@ import (
 type ParseOptions struct {
 	OutputFormat string // "blocks" (default), "markdown", "html", "markdown+metadata", "a2ui", "a2ui+editable"
 	SourceURL    string // URL to fetch and parse (instead of a local file path)
+
+	// GCSRef is the gs:// ref returned by POST /api/v1/upload/url (Business
+	// tier): the route for files over the 32 MiB direct-upload limit.
+	// Parse only.
+	GCSRef string
+
+	// PDFBackend picks how a PDF is read: "" (server default, pdftotext),
+	// "pdftotext", "poppler", or "ai". "ai" sends page images to Google
+	// Gemini via Vertex AI — for scanned or image-only PDFs — and is billed
+	// as an AI request. Ignored for non-PDF sources; not validated here, so
+	// a new backend does not need an SDK release.
+	PDFBackend string
 }
 
 // Parse parses a document file and returns structured blocks.
 func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOptions) (*ParseResult, error) {
 	format := "blocks"
-	var sourceURL string
+	var o ParseOptions
 	if len(opts) > 0 {
-		if opts[0].OutputFormat != "" {
-			format = opts[0].OutputFormat
+		o = opts[0]
+		if o.OutputFormat != "" {
+			format = o.OutputFormat
 		}
-		sourceURL = opts[0].SourceURL
 	}
 
 	body := map[string]string{
 		"filepath":     filePath,
 		"outputFormat": format,
 	}
-	if sourceURL != "" {
-		body["sourceUrl"] = sourceURL
+	if o.SourceURL != "" {
+		body["sourceUrl"] = o.SourceURL
+	}
+	if o.GCSRef != "" {
+		body["gcsRef"] = o.GCSRef
+	}
+	if o.PDFBackend != "" {
+		body["pdfBackend"] = o.PDFBackend
 	}
 	if c.APIKey != "" {
 		body["apiKey"] = c.APIKey
@@ -80,12 +98,20 @@ func (c *Client) Parse(ctx context.Context, filePath string, opts ...ParseOption
 }
 
 // ParseURL is a convenience method that parses a document at a remote URL.
-func (c *Client) ParseURL(ctx context.Context, url string, outputFormat string) (*ParseResult, error) {
-	opts := ParseOptions{
+//
+// The server fetches the URL (HTTPS only) and enforces the tier's file-size
+// limit (Free: 10 MB, Pro: 25 MB, Business: 50 MB). This is the route for
+// files over the 32 MiB direct-upload limit of ParseFile. Of opts, only
+// PDFBackend is used.
+func (c *Client) ParseURL(ctx context.Context, url string, outputFormat string, opts ...ParseOptions) (*ParseResult, error) {
+	o := ParseOptions{
 		OutputFormat: outputFormat,
 		SourceURL:    url,
 	}
-	return c.Parse(ctx, "", opts)
+	if len(opts) > 0 {
+		o.PDFBackend = opts[0].PDFBackend
+	}
+	return c.Parse(ctx, "", o)
 }
 
 // buildParseResult builds a ParseResult from the inner unwrapped bytes.
@@ -121,12 +147,21 @@ func buildParseResult(inner []byte, format string) (*ParseResult, error) {
 
 // ParseFile uploads a local file and parses it. Returns structured blocks.
 //
-// Uses multipart/form-data to upload the file directly to the API.
-// Works on all tiers (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+// Uses multipart/form-data to upload the file directly to the API. Works on
+// all tiers, up to the tier's file-size limit (Free: 10 MB, Pro: 25 MB) and
+// never above 32 MiB: the hosting platform caps a direct upload at
+// MaxDirectUploadBytes on every tier. A larger file returns a *DocParseError
+// with Code == CodeFileTooLarge before anything is sent; use ParseURL or
+// ParseOptions.GCSRef for it (Business: up to 50 MB). Of opts, OutputFormat
+// and PDFBackend are used.
 func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOptions) (*ParseResult, error) {
 	format := "blocks"
-	if len(opts) > 0 && opts[0].OutputFormat != "" {
-		format = opts[0].OutputFormat
+	var pdfBackend string
+	if len(opts) > 0 {
+		if opts[0].OutputFormat != "" {
+			format = opts[0].OutputFormat
+		}
+		pdfBackend = opts[0].PDFBackend
 	}
 
 	f, err := os.Open(path)
@@ -134,6 +169,11 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
+	if st, err := f.Stat(); err == nil {
+		if err := checkUploadSize(st.Size()); err != nil {
+			return nil, err
+		}
+	}
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -146,6 +186,9 @@ func (c *Client) ParseFile(ctx context.Context, path string, opts ...ParseOption
 		return nil, fmt.Errorf("copy file data: %w", err)
 	}
 	writer.WriteField("outputFormat", format)
+	if pdfBackend != "" {
+		writer.WriteField("pdfBackend", pdfBackend)
+	}
 	if c.APIKey != "" {
 		writer.WriteField("apiKey", c.APIKey)
 	}

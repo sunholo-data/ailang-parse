@@ -55,8 +55,59 @@ from ._credentials import (
 from .types import (
     DocParseError, AuthError, QuotaError,
     ParseResult, ConvertResult, ResponseMeta, HealthResult, FormatsResult,
-    RetryPolicy,
+    RetryPolicy, MAX_DIRECT_UPLOAD_BYTES, FILE_TOO_LARGE,
 )
+
+
+_LARGE_FILE_ROUTES = (
+    "For larger files, pass a signed or public https URL with parse_url() "
+    "(or source_url=); the server fetches it, up to your tier's file-size "
+    "limit. On Business, POST /api/v1/upload/url, PUT the file to the "
+    "returned upload_url, then pass its gcs_ref to parse(gcs_ref=...)."
+)
+
+
+def _file_too_large_error(size_bytes: Optional[int] = None,
+                          **kwargs: Any) -> DocParseError:
+    """The structured error for an upload over the platform's request cap.
+
+    ``size_bytes`` is ``None`` when the SDK did not measure the upload — a
+    413 page that came back from the hosting platform's front end.
+    """
+    if size_bytes is None:
+        lead = "Upload rejected by the hosting platform (HTTP 413)."
+    else:
+        lead = f"File is {size_bytes} bytes."
+    details: Dict[str, Any] = {"limit_bytes": MAX_DIRECT_UPLOAD_BYTES}
+    if size_bytes is not None:
+        details["size_bytes"] = size_bytes
+    return DocParseError(
+        f"{lead} Direct uploads are limited to 32 MiB "
+        f"({MAX_DIRECT_UPLOAD_BYTES} bytes) by the hosting platform on "
+        f"every tier. {_LARGE_FILE_ROUTES}",
+        status_code=413,
+        code=FILE_TOO_LARGE,
+        suggested_fix=_LARGE_FILE_ROUTES,
+        details=details,
+        **kwargs,
+    )
+
+
+def _check_upload_size(*paths: str) -> None:
+    """Raise FILE_TOO_LARGE before sending a multipart upload whose files
+    exceed :data:`MAX_DIRECT_UPLOAD_BYTES` together. Cloud Run rejects such
+    a request with an HTML 413 page before it reaches the API."""
+    total = sum(os.path.getsize(p) for p in paths if p)
+    if total > MAX_DIRECT_UPLOAD_BYTES:
+        raise _file_too_large_error(total)
+
+
+def _json_body(resp: "requests.Response") -> Optional[Dict[str, Any]]:
+    try:
+        body = resp.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return body if isinstance(body, dict) else None
 
 
 class DocParse:
@@ -131,14 +182,15 @@ class DocParse:
         if resp.status_code < 400:
             return
         meta = ResponseMeta.from_headers(dict(resp.headers))
-        try:
-            body = resp.json()
-            if not isinstance(body, dict):
-                body = None
-        except (ValueError, json.JSONDecodeError):
-            body = None
+        body = _json_body(resp)
+        if resp.status_code == 413 and body is None:
+            # The hosting platform's front end, not the API: an HTML page
+            # for a request over its 32 MiB cap.
+            raise _file_too_large_error(request_id=meta.request_id)
         msg = (body or {}).get("error") or (body or {}).get("message") or resp.text
+        code = ""
         if isinstance(msg, dict):
+            code = msg.get("code", "") or ""
             msg = msg.get("message", str(msg))
         suggested = (body or {}).get("suggested_fix", "") or \
                     (body or {}).get("suggestedFix", "")
@@ -148,6 +200,7 @@ class DocParse:
             suggested_fix=suggested,
             details=body,
             replayable=meta.replayable,
+            code=code,
         )
         if resp.status_code == 401:
             raise AuthError(msg or "Invalid or missing API key", **common)
@@ -194,7 +247,8 @@ class DocParse:
     # ── Core API methods ──
 
     def parse(self, filepath: str, output_format: str = "blocks",
-              source_url: str = "") -> ParseResult:
+              source_url: str = "", pdf_backend: str = "",
+              gcs_ref: str = "") -> ParseResult:
         """Parse a document by sample ID, server-side filepath, or signed URL.
 
         For uploading local files, use :meth:`parse_file` instead.
@@ -207,6 +261,15 @@ class DocParse:
             source_url: HTTPS signed URL (GCS, S3, etc.). When provided, the
                 server fetches the document from this URL instead of reading
                 a local file.
+            pdf_backend: How a PDF is read. ``""`` (server default,
+                ``pdftotext``), ``"pdftotext"``, ``"poppler"``, or ``"ai"``.
+                ``"ai"`` sends page images to Google Gemini via Vertex AI —
+                use it for scanned or image-only PDFs; it is billed as an AI
+                request. Ignored for non-PDF sources. Not validated here, so
+                a new backend does not need an SDK release.
+            gcs_ref: ``gs://`` reference returned by
+                ``POST /api/v1/upload/url`` (Business tier) — the route for
+                files over the 32 MiB direct-upload limit.
         """
         url = self.base_url + "/api/v1/parse"
         body: Dict[str, Any] = {"filepath": filepath, "outputFormat": output_format}
@@ -214,6 +277,10 @@ class DocParse:
             body["apiKey"] = self.api_key
         if source_url:
             body["sourceUrl"] = source_url
+        if gcs_ref:
+            body["gcsRef"] = gcs_ref
+        if pdf_backend:
+            body["pdfBackend"] = pdf_backend
         resp = self._post(url, json=body, timeout=self.timeout)
         self._raise_for_response(resp)
         meta = ResponseMeta.from_headers(dict(resp.headers))
@@ -221,12 +288,15 @@ class DocParse:
         result.response_meta = meta
         return result
 
-    def parse_url(self, url: str, output_format: str = "blocks") -> ParseResult:
+    def parse_url(self, url: str, output_format: str = "blocks",
+                  pdf_backend: str = "") -> ParseResult:
         """Parse a document from a signed URL (GCS, S3, Azure Blob, etc.).
 
         The server fetches the document from the URL — no local file needed.
         The URL must be HTTPS and the server enforces tier-based size limits
-        (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+        (Free: 10 MB, Pro: 25 MB, Business: 50 MB). This is the route for
+        files over the 32 MiB direct-upload limit of :meth:`parse_file`.
+        ``pdf_backend`` is as in :meth:`parse`.
 
         Usage::
 
@@ -236,10 +306,12 @@ class DocParse:
             )
             print(result.markdown)
         """
-        return self.parse(filepath="", output_format=output_format, source_url=url)
+        return self.parse(filepath="", output_format=output_format,
+                          source_url=url, pdf_backend=pdf_backend)
 
     def parse_gs_uri(self, gs_uri: str, *, ttl: int = 900,
                      output_format: str = "blocks",
+                     pdf_backend: str = "",
                      credentials: Optional[Any] = None,
                      service_account_email: Optional[str] = None) -> ParseResult:
         """Sign a ``gs://`` URI and parse the referenced document.
@@ -274,6 +346,7 @@ class DocParse:
             gs_uri: ``gs://bucket/key`` reference to a document.
             ttl: Signed URL lifetime in seconds (default 900 = 15 min).
             output_format: Same as :meth:`parse`.
+            pdf_backend: Same as :meth:`parse`.
             credentials: Optional ``google.auth.credentials.Credentials``.
                 When ``None`` (default), ADC is used via
                 ``google.auth.default()``.
@@ -359,25 +432,39 @@ class DocParse:
             method="GET",
             **sign_kwargs,
         )
-        return self.parse_url(signed, output_format=output_format)
+        return self.parse_url(signed, output_format=output_format,
+                              pdf_backend=pdf_backend)
 
-    def parse_file(self, filepath: str, output_format: str = "blocks") -> ParseResult:
+    def parse_file(self, filepath: str, output_format: str = "blocks",
+                   pdf_backend: str = "") -> ParseResult:
         """Upload a local file and parse it. Returns structured blocks.
 
         Uses multipart/form-data to upload the file directly to the API.
-        Works on all tiers (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+        Works on all tiers, up to the tier's file-size limit (Free: 10 MB,
+        Pro: 25 MB) and never above 32 MiB: the hosting platform caps a
+        direct upload at 32 MiB on every tier. A larger file raises
+        :class:`DocParseError` with ``code == "FILE_TOO_LARGE"`` before
+        anything is sent; use :meth:`parse_url` or ``parse(gcs_ref=...)``
+        for it (Business: up to 50 MB).
+
+        ``pdf_backend`` is as in :meth:`parse`.
 
         Usage::
 
             result = client.parse_file("report.docx")
             print(result.blocks)
+            scanned = client.parse_file("scan.pdf", pdf_backend="ai")
         """
         url = self.base_url + "/api/v1/parse"
+        _check_upload_size(filepath)
+        data: Dict[str, Any] = {"outputFormat": output_format, "apiKey": self.api_key}
+        if pdf_backend:
+            data["pdfBackend"] = pdf_backend
         with open(filepath, "rb") as f:
             resp = self._post(
                 url,
                 files={"filepath": (Path(filepath).name, f)},
-                data={"outputFormat": output_format, "apiKey": self.api_key},
+                data=data,
                 timeout=self.timeout,
             )
         self._raise_for_response(resp)
@@ -448,7 +535,12 @@ class DocParse:
         ``reference_doc`` is a path to a local template .docx, uploaded
         alongside the source file — the CLI's ``--reference-doc`` (DOCX
         target only). ``reference_section`` and ``table_style`` are as in
-        :meth:`convert`.
+        :meth:`convert`, ``pdf_backend`` as in :meth:`parse`.
+
+        Like :meth:`parse_file`, the upload (source plus template) is
+        capped at 32 MiB by the hosting platform; above that this raises
+        ``FILE_TOO_LARGE`` without sending — use :meth:`convert` with
+        ``source_url`` or ``gcs_ref``.
 
         Usage::
 
@@ -457,6 +549,7 @@ class DocParse:
                                  reference_doc="letterhead.docx").save("offer.docx")
         """
         url = self.base_url + "/api/v1/convert"
+        _check_upload_size(filepath, reference_doc)
         data: Dict[str, Any] = {"target": target, "apiKey": self.api_key}
         if pdf_backend:
             data["pdfBackend"] = pdf_backend
@@ -674,13 +767,13 @@ class DocParse:
     @classmethod
     def _raise_envelope_error(cls, msg: str, suggested_fix: str = "",
                               details: Optional[Dict[str, Any]] = None,
-                              request_id: str = "") -> None:
+                              request_id: str = "", code: str = "") -> None:
         """Raise AuthError for auth-like messages, otherwise DocParseError."""
         if cls._is_auth_error_message(msg):
             raise AuthError(msg, 401, suggested_fix=suggested_fix,
-                            details=details, request_id=request_id)
+                            details=details, request_id=request_id, code=code)
         raise DocParseError(msg, suggested_fix=suggested_fix,
-                            details=details, request_id=request_id)
+                            details=details, request_id=request_id, code=code)
 
     @classmethod
     def _unwrap(cls, outer: Dict[str, Any]) -> Dict[str, Any]:
@@ -691,7 +784,10 @@ class DocParse:
                 # Check for structured error with message + suggested_fix
                 suggested = outer.get("suggested_fix", "")
                 msg = outer.get("message", err)
-                cls._raise_envelope_error(msg, suggested_fix=suggested)
+                # Legacy shape {error: "CODE", message: "..."}: the string is
+                # the code only when a separate message accompanies it.
+                code = err if "message" in outer else ""
+                cls._raise_envelope_error(msg, suggested_fix=suggested, code=code)
             if isinstance(err, dict):
                 # Structured error envelope: {error: {code, message, details, ...}, request_id}
                 msg = err.get("message", str(err))
@@ -699,7 +795,8 @@ class DocParse:
                 details = err.get("details")
                 request_id = outer.get("request_id", "")
                 cls._raise_envelope_error(msg, suggested_fix=suggested,
-                                          details=details, request_id=request_id)
+                                          details=details, request_id=request_id,
+                                          code=err.get("code", "") or "")
             # Unknown error shape — return as-is for caller handling
             return outer
         result_str = outer.get("result", "")
@@ -718,7 +815,8 @@ class DocParse:
                 details = err.get("details")
                 request_id = inner.get("request_id", "")
                 cls._raise_envelope_error(msg, suggested_fix=suggested,
-                                          details=details, request_id=request_id)
+                                          details=details, request_id=request_id,
+                                          code=err.get("code", "") or "")
             else:
                 cls._raise_envelope_error(str(err))
         return inner
