@@ -322,6 +322,48 @@ pure func pfRunLength(keys: [string], p: string -> bool) -> int =
   }
 
 -- =====================================================================
+-- Pages as slides
+-- =====================================================================
+
+-- Group a PDF's blocks into one slide per page, for PPTX and ODP output.
+-- Pages are delimited by the page-break markers decodeAdapterDocPages
+-- emits; each page's blocks become a SectionBlock("slide"). Header and
+-- footer sections are dropped: a deck's master carries its own footer and
+-- slide number. Blocks with no markers at all come back unchanged, so the
+-- generator's pagination spreads them over as many slides as they need.
+export pure func pdfPagesAsSlides(blocks: [Block]) -> [Block] =
+  if any(\b. pfIsSectionOf(b, "page-break"), blocks)
+  then map(\g. mkSection("slide", g), filter(\g. listLength(g) > 0, pfPageGroups(blocks, [], [])))
+  else filter(\b. not pfIsSectionOf(b, "header") && not pfIsSectionOf(b, "footer"), blocks)
+
+-- Pages in order, each page's blocks in order. `cur` is the open page,
+-- reversed; `acc` the finished pages, reversed.
+pure func pfPageGroups(blocks: [Block], cur: [Block], acc: [[Block]]) -> [[Block]] =
+  match blocks {
+    [] => reverse(reverse(cur) :: acc),
+    b :: rest =>
+      if pfIsSectionOf(b, "page-break") then pfPageGroups(rest, [], reverse(cur) :: acc)
+      else if pfIsSectionOf(b, "header") || pfIsSectionOf(b, "footer") then pfPageGroups(rest, cur, acc)
+      else pfPageGroups(rest, b :: cur, acc)
+  }
+
+-- Slide shape for the inline tests: "S[...]" per slide.
+export pure func pdfSlidesShape(spec: string) -> string
+  tests [
+    ("1;p:1|h:Title|t:Intro|p:2|h:Next|t:More", "S[h:Title,t:Intro]|S[h:Next,t:More]"),
+    ("1;h:Before|p:1|h:A|p:2|p:3|h:C", "S[h:Before]|S[h:A]|S[h:C]"),
+    ("1;h:No|t:markers", "h:No|t:markers")
+  ]
+{
+  let at = find(spec, ";");
+  let blocks = map(pfSpecBlock, split(substring(spec, at + 1, length(spec)), "|"));
+  join("|", map(\b. match b {
+    SectionBlock(s) => if s.kind == "slide" then "S[${join(",", map(pfShapeBlock, s.blocks))}]" else pfShapeBlock(b),
+    _ => pfShapeBlock(b)
+  }, pdfPagesAsSlides(blocks)))
+}
+
+-- =====================================================================
 -- Test surface
 -- =====================================================================
 
