@@ -95,6 +95,34 @@ lines:
 
 `odp_generator.ail` gets the same estimate and split (one `draw:page` per slide).
 
+### 3b. Diagram slides become a picture of the page (ruling, 2026-11-02)
+
+Measured on M2's output: `pandoc_basic.pdf` page 2 is a Venn diagram drawn with vector shapes.
+A PDF reader sees only its labels, so reflowing it into title and body produces fragments
+("diagram BRAINS", a two-column "table" of circle labels) and loses the circles. Decks are full
+of slides like this.
+
+**Hybrid** (user ruling): text slides are rebuilt as editable title + body in the template.
+A slide that looks like a diagram is placed as a picture of the PDF page instead, rendered with
+`pdftoppm`, which is already in poppler-utils, so there is no new dependency. Its text goes into
+the speaker notes, where it stays searchable and editable.
+
+The adapter decides per page and tags the page's blocks with `layout: "diagram"`. A page is a
+diagram when:
+
+- most of its text lines are short fragments (under ~5 words) that are not list items, table
+  cells or headings;
+- the fragments spread over three or more columns that do not snap into a table;
+- the page has no paragraph longer than ~2 lines;
+
+and it is not a table, which `_pp_table` claims first. The rendered page image comes through the
+existing image protocol, with an image budget, and `pdfPagesAsSlides` builds that slide as
+[title heading, page picture] + notes(text).
+
+Rejected: keeping the original layout (text boxes over a text-free page render) needs
+Ghostscript `-dFILTERTEXT` or MuPDF, a new dependency that is not in the hosted image, and
+templates would matter little.
+
 ### 4. Templates
 
 `--reference-doc deck.pptx` already carries theme, masters and layouts (`pptx_template.ail`,
@@ -117,11 +145,9 @@ content. It is rebuilt by `docs/scripts/build-pdf-to-powerpoint-assets.sh`.
 
 ## Open questions
 
-1. **Keep the original positions?** A deck PDF is spatial. A "layout" mode could place each
-   block where it sat on the PDF page, scaled to the slide, instead of reflowing into title and
-   body. That gives a closer match to the original, but templates matter less. Recommendation:
-   reflow (title + body) first, which is consistent with the template story; layout mode is a
-   follow-up if people ask.
+1. ~~Keep the original positions?~~ Ruled 2026-11-02: hybrid (§3b). Reflow text slides; diagram
+   slides become a page picture with their text in the notes. A full layout mode stays a
+   follow-up, because it needs Ghostscript or MuPDF.
 2. **Bind to placeholders?** Real title and body placeholders would make "Reset slide" and
    outline view work, but it rebases every PPTX golden (`pptx_template.ail` notes). Not in this
    release.

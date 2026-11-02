@@ -14,8 +14,9 @@ fits is the guard. The rest is additive.
   templates, and `pdf-to-powerpoint.html`. Other formats later.
 - Same process as v0.54.0: design doc → sprint plan → milestones → PR for review before it goes
   live.
-- Open question 1 (reflow vs keep positions): reflow, per the design doc recommendation;
-  layout mode is a follow-up.
+- Diagram slides (design doc §3b): **hybrid**. Text slides are reflowed. Diagram-like pages
+  become a picture of the page (pdftoppm), with their text in the speaker notes. This is new
+  milestone M3b, after M3.
 
 ## Registry reuse
 
@@ -68,6 +69,19 @@ fits is the guard. The rest is additive.
     pptx) shows identical output for content that fits;
   - the 40-block document renders with every block on a slide (PNG check);
   - `--check`, `--test` and `--prove` pass.
+
+### M3b: Diagram slides as page pictures (~200 LOC)
+
+- adapter (poppler): per-page diagram detection (short scattered fragments over 3+ columns that
+  are not a table, no paragraphs). Such a page's blocks are tagged `layout: "diagram"`, and the
+  page is rendered with `pdftoppm` into an image block, within the image budget.
+- `pdfPagesAsSlides`: a diagram page becomes [first heading, page picture], with its text as
+  slide notes (`SectionBlock("notes")`, which `pptxSplitBySlides` already attaches).
+- **Acceptance**:
+  - unit tests on a synthetic diagram page and on a synthetic text slide (not flagged);
+  - `pandoc_basic.pdf` page 2 → a picture slide with its labels in the notes, and pages 1, 3 and
+    4 → editable slides;
+  - the v0.54.0 proposal pages are never flagged.
 
 ### M4: ODP pagination (~150 LOC)
 
