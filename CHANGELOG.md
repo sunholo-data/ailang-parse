@@ -9,7 +9,7 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## Unreleased
+## [v0.55.0](https://github.com/sunholo-data/ailang-parse/compare/v0.54.0...v0.55.0) — 2026-11-02
 
 ### Added
 
@@ -32,6 +32,13 @@ separately — see `sdks/` for per-SDK changelogs.
   `pdf-to-powerpoint.html` page with example PowerPoint templates built in
   AILANG (`docs/scripts/pdf_to_powerpoint_templates.ail`).
 
+- XLSX: hyperlink targets are kept. Explicit worksheet relationships and
+  internal destinations become `TableCell.runs[].href` on the right sheet and
+  cell, in native and browser parsing; URL-shaped text and HYPERLINK formulas
+  are not inferred as links. Hyperlink metadata is bounded (5000 records,
+  100 ranges) with warnings for missing targets. OfficeDocBench composite
+  97.70% → 98.08% (`challenge_hyperlinks.xlsx` 66.67% → 100%). (#116)
+
 ### Changed
 
 - PPTX/ODP output of content too long for one slide (Markdown, DOCX, busy
@@ -43,6 +50,14 @@ separately — see `sdks/` for per-SDK changelogs.
   stay with their item, and symbol-font arrows and bullets map to Unicode.
 
 ---
+
+### Fixed
+
+- Package consumers (docparse, the hosted API) can load ailang_parse again:
+  `pdf_furniture` (0.54.0) and `pptx_layout` were missing from `[exports]`, so
+  importing the orchestrator failed with `LDR001 module not found`; the CLI
+  was unaffected. CI now checks that every module an exported module imports
+  is exported (`docs/scripts/check-exports.py`).
 
 ## [v0.54.0](https://github.com/sunholo-data/ailang-parse/compare/v0.53.0...v0.54.0) — 2026-11-02
 
