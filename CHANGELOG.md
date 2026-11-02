@@ -32,6 +32,13 @@ separately — see `sdks/` for per-SDK changelogs.
   `pdf-to-powerpoint.html` page with example PowerPoint templates built in
   AILANG (`docs/scripts/pdf_to_powerpoint_templates.ail`).
 
+- XLSX: hyperlink targets are kept. Explicit worksheet relationships and
+  internal destinations become `TableCell.runs[].href` on the right sheet and
+  cell, in native and browser parsing; URL-shaped text and HYPERLINK formulas
+  are not inferred as links. Hyperlink metadata is bounded (5000 records,
+  100 ranges) with warnings for missing targets. OfficeDocBench composite
+  97.70% → 98.08% (`challenge_hyperlinks.xlsx` 66.67% → 100%). (#116)
+
 ### Changed
 
 - PPTX/ODP output of content too long for one slide (Markdown, DOCX, busy
