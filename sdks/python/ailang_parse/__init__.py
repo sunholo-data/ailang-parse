@@ -33,7 +33,7 @@ from .types import (
     Chunk, ChunkMetadata, FlattenPolicy, DEFAULT_FLATTEN_POLICY,
 )
 
-__version__ = "0.13.1"
+__version__ = "0.14.0"
 __all__ = [
     "DocParse",
     "UnstructuredClient",
