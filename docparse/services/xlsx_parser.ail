@@ -9,6 +9,8 @@ import std/string (contains, length, trim, stringToInt, join, startsWith, endsWi
 import std/list (map, flatMap, filter, nth, length as listLength, concat, take, reverse, foldl, foldlE, mapE, flatMapE, any, dedup, sortBy)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup, size as mapSize, fromList as mapFromList, values as mapValues)
 import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, spanCell, mergedCell, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection, mkNamedSection, withCellColours)
+import docparse/services/xlsx_refs (XlsxMerge, xlsxCellRefCol, xlsxCellRefRow, xlsxRowRefCol, xlsxParseMergeRef)
+import docparse/services/xlsx_hyperlinks (XlsxLink, XlsxLinks, xlsxEmptyLinks, xlsxHyperlinkRels, xlsxFoldLink, xlsxApplyLinks)
 import docparse/services/colour (normaliseHex, applyTint, parseTint, indexedColour, themeSlotName)
 import docparse/services/zip_extract (readCoreProperties, findSheetEntries, readZipEntry, findXlsxCommentEntries, findXlsxThreadedEntries, findXlsxPersonEntries)
 
@@ -69,6 +71,14 @@ export func parseXlsxWithWarnings(filepath: string) -> XlsxParsed ! {FS} {
   }
   else parsed.blocks;
   { blocks: blocks, warnings: parsed.warnings }
+}
+
+func xlsxLoadLinks(filepath: string, entry: string) -> XlsxLinks ! {FS} {
+  let initial = xlsxEmptyLinks(xlsxHyperlinkRels(readZipEntry(filepath, xlsxSheetRelsPath(entry))));
+  match scanFoldStep(filepath, entry, "hyperlink", initial, xlsxFoldLink) {
+    Ok(acc) => acc,
+    Err(_) => { initial | warnings: ["worksheet hyperlinks could not be read"] }
+  }
 }
 
 -- === Cell comments (ECMA-376 §18.7) ======================================
@@ -396,96 +406,6 @@ pure func xlsxFoldRow(acc: { rows: [[TableCell]], count: int, ss: Map[int, strin
 -- Deleted by e9de665 along with 277 other lines of this module. Restored, but
 -- adapted: the row walk has since been rewritten to stream via parseFold, so
 -- merges ride in the fold accumulator instead of being passed down a list walk.
-type XlsxMerge = {startCol: int, endCol: int, startRow: int, endRow: int}
-
--- One lookup, not a 26-way if/else: every == there is a dictionary dispatch
--- in the interpreter, and this now runs for every cell of every row.
-pure func xlsxSingleColIndex(c: string) -> int
-  tests [("A", 0), ("B", 1), ("D", 3), ("Z", 25), ("a", 0), ("1", 0)]
-{
-  let i = find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c);
-  if i < 0 || length(c) != 1 then 0 else i
-}
-
--- Bijective base-26: "A" -> 0, "Z" -> 25, "AA" -> 26, "XFD" -> 16383 (Excel's
--- last column). Anything that would land past XFD is clamped to it, so a
--- malformed ref cannot make the gap filler below emit an unbounded row.
-pure func xlsxColToIndex(col: string) -> int
-  tests [("A", 0), ("B", 1), ("Z", 25), ("AA", 26), ("AB", 27), ("AZ", 51), ("ZZ", 701), ("AAA", 702), ("XFD", 16383)]
-{
-  let n = xlsxColToNumber(col, 0, 0);
-  if n < 1 then 0 else if n > 16384 then 16383 else n - 1
-}
-
-pure func xlsxColToNumber(col: string, i: int, acc: int) -> int =
-  if i >= length(col) || acc > 16384 then acc
-  else xlsxColToNumber(col, i + 1, acc * 26 + xlsxSingleColIndex(substring(col, i, i + 1)) + 1)
-
-pure func xlsxIsColLetter(c: string) -> bool =
-  length(c) == 1 && find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) >= 0
-
-pure func xlsxColLetterCount(ref: string, i: int) -> int =
-  if i < length(ref) && xlsxIsColLetter(substring(ref, i, i + 1))
-  then xlsxColLetterCount(ref, i + 1)
-  else i
-
--- Split a cell ref into its column letters: "B3" -> "B", "AB12" -> "AB"
-pure func xlsxCellRefColStr(ref: string) -> string
-  tests [("A1", "A"), ("B3", "B"), ("D12", "D"), ("AA5", "AA"), ("AAA7", "AAA"), ("", "A")]
-{
-  let n = xlsxColLetterCount(ref, 0);
-  if n == 0 then "A" else substring(ref, 0, n)
-}
-
-pure func xlsxCellRefCol(ref: string) -> int
-  tests [("A1", 0), ("B3", 1), ("D1", 3), ("E2", 4)]
-{
-  xlsxColToIndex(xlsxCellRefColStr(ref))
-}
-
--- Column of a cell ref on a known row, without the general letter walk:
--- "AB12" on row 12 has length 4 - 2 digits = 2 letters, read with two
--- charAt calls. This runs for every cell, and the general parser (a
--- recursive walk with a substring per character) roughly doubled the time
--- of a dense 5k-row sheet. Anything that does not check out as letters
--- followed by exactly this row number falls back to xlsxCellRefCol.
-pure func xlsxRowRefCol(ref: string, rowNum: int) -> int
-  tests [(("A12", 12), 0), (("T5000", 5000), 19), (("AB3", 3), 27), (("AAA7", 7), 702), (("B9", 10), 1), (("", 1), 0)]
-{
-  let n = length(ref) - length(intToStr(rowNum));
-  if rowNum > 0 && (n == 1 || n == 2) && endsWith(ref, intToStr(rowNum)) then {
-    let hi = xlsxLetterAt(ref, 0);
-    if n == 1 then hi
-    else {
-      let lo = xlsxLetterAt(ref, 1);
-      if hi < 0 || lo < 0 then xlsxCellRefCol(ref) else (hi + 1) * 26 + lo
-    }
-  }
-  else xlsxCellRefCol(ref)
-}
-
--- 0..25 for A..Z, -1 otherwise. Caller guarantees i is in range.
-pure func xlsxLetterAt(s: string, i: int) -> int {
-  let k = charCode(charAt(s, i)) - 65;
-  if k < 0 || k > 25 then -1 else k
-}
-
-pure func xlsxCellRefRow(ref: string) -> int
-  tests [("A1", 1), ("B3", 3), ("D12", 12)]
-{
-  let colStr = xlsxCellRefColStr(ref);
-  getOrElse(stringToInt(substring(ref, length(colStr), length(ref))), 0)
-}
-
--- "A1:D1" -> region. A bare "A9" is a 1x1 region.
-pure func xlsxParseMergeRef(ref: string) -> XlsxMerge {
-  let parts = split(ref, ":");
-  let startRef = getOrElse(nth(parts, 0), "A1");
-  let endRef = getOrElse(nth(parts, 1), startRef);
-  { startCol: xlsxCellRefCol(startRef), endCol: xlsxCellRefCol(endRef),
-    startRow: xlsxCellRefRow(startRef), endRow: xlsxCellRefRow(endRef) }
-}
-
 pure func xlsxParseMergeNodes(nodes: [XmlNode]) -> [XlsxMerge] =
   map(\n. xlsxParseMergeRef(getOrElse(getAttr(n, "ref"), "")), nodes)
 
@@ -619,8 +539,16 @@ pure func xlsxBuildRowWithMerges(cells: [XmlNode], ss: Map[int, string], styles:
     }
   }
 
+-- row/@r is optional; an explicit first cell reference still identifies
+-- the source row (including leading blanks) when the row attribute is absent.
 pure func xlsxRowNumber(row: XmlNode) -> int =
-  getOrElse(stringToInt(getOrElse(getAttr(row, "r"), "0")), 0)
+  match getAttr(row, "r") {
+    Some(r) => getOrElse(stringToInt(r), 0),
+    None => match findFirst(row, "c") {
+      Some(c) => xlsxCellRefRow(getOrElse(getAttr(c, "r"), "")),
+      None => 0
+    }
+  }
 
 -- Extract text from each <si> element
 -- Handles both <si><t>text</t></si> and <si><r><t>text</t></r></si> (rich text)
@@ -788,15 +716,17 @@ func xlsxParseOneSheet(filepath: string, entry: string, sharedStrings: Map[int, 
   let comments = xlsxSheetCommentRecords(filepath, commentParts, persons);
   let refs = filter(\r. length(r) > 0, dedup(map(\c. c.ref, comments)));
   let streamed = xlsxStreamSheet(filepath, entry, sharedStrings, styles, refs);
-  let blocks = xlsxSheetBlocks(streamed.rows, sheetName);
+  let links = xlsxLoadLinks(filepath, entry);
+  let linked = xlsxApplyLinks(streamed.rows, streamed.positions, links, sheetName);
+  let blocks = xlsxSheetBlocks(linked.rows, sheetName);
   let wrapped = map(\c. xlsxWrapComment(xlsxCommentBlock(c, streamed.texts)), comments);
   let condFmt = xlsxConditionalFormats(filepath, entry);
   let cleanName = xlsxCleanSheetName(sheetName);
   { blocks: concat(blocks, wrapped),
-    warnings: concat(concat(xlsxCondFmtWarning(cleanName, condFmt),
+    warnings: concat(linked.warnings, concat(concat(xlsxCondFmtWarning(cleanName, condFmt),
                             concat(xlsxFlagWarnings(cleanName, streamed.flags),
                                    xlsxNoValueWarning(cleanName, streamed.noValue))),
-                     map(\g. xlsxGapWarning(cleanName, g), streamed.gaps)) }
+                     map(\g. xlsxGapWarning(cleanName, g), streamed.gaps))) }
 }
 
 -- A formula the workbook carries without a cached result: the cell keeps its
@@ -808,6 +738,7 @@ pure func xlsxNoValueWarning(sheet: string, count: int) -> [string] =
 -- Fold-accumulator record for streaming one worksheet out of the ZIP.
 type XlsxStreamFold = {
   rows: [[TableCell]],
+  positions: [int],
   count: int,
   ss: Map[int, string],
   -- Carried in the accumulator for the same reason ss is: a closure over it
@@ -833,17 +764,17 @@ type XlsxStreamFold = {
 -- <row>. Returns rows in document order plus the displayed text of any cell
 -- referenced by a comment. The sheet XML string is never materialised.
 func xlsxStreamSheet(filepath: string, entry: string, ss: Map[int, string], styles: Map[int, XlsxXfColour], refs: [string])
-    -> { rows: [[TableCell]], texts: [(string, string)], flags: [string], gaps: [(int, int)], noValue: int } ! {FS} {
+    -> { rows: [[TableCell]], positions: [int], texts: [(string, string)], flags: [string], gaps: [(int, int)], noValue: int } ! {FS} {
   let merges = match scanFoldStep(filepath, entry, "mergeCell", { merges: [], count: 0 }, xlsxFoldMerge) {
     Ok(acc) => reverse(acc.merges),
     Err(_) => []
   };
   match scanFoldStep(filepath, entry, "row",
-    { rows: [], count: 0, ss: ss, styles: styles, flagged: xlsxAnyFlagged(styles), flags: [],
+    { rows: [], positions: [], count: 0, ss: ss, styles: styles, flagged: xlsxAnyFlagged(styles), flags: [],
       merges: merges, refs: refs, texts: [], lastRow: 0, gaps: [], noValue: 0 },
     xlsxFoldRowStep) {
-    Ok(acc) => { rows: reverse(acc.rows), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps), noValue: acc.noValue },
-    Err(_) => { rows: [], texts: [], flags: [], gaps: [], noValue: 0 }
+    Ok(acc) => { rows: reverse(acc.rows), positions: reverse(acc.positions), texts: acc.texts, flags: acc.flags, gaps: reverse(acc.gaps), noValue: acc.noValue },
+    Err(_) => { rows: [], positions: [], texts: [], flags: [], gaps: [], noValue: 0 }
   }
 }
 
@@ -902,7 +833,7 @@ pure func xlsxMaxRowGap() -> int = 100
 -- a gap, a missing r= or a backwards r= takes the general path.
 pure func xlsxPlaceRow(acc: XlsxStreamFold, cells: [TableCell], rowNum: int) -> XlsxStreamFold =
   if rowNum == acc.lastRow + 1
-  then { acc | rows: cells :: acc.rows, count: acc.count + 1, lastRow: rowNum }
+  then { acc | rows: cells :: acc.rows, positions: rowNum :: acc.positions, count: acc.count + 1, lastRow: rowNum }
   else xlsxPlaceRowGap(acc, cells, rowNum)
 
 pure func xlsxPlaceRowGap(acc: XlsxStreamFold, cells: [TableCell], rowNum: int) -> XlsxStreamFold {
@@ -916,9 +847,17 @@ pure func xlsxPlaceRowGap(acc: XlsxStreamFold, cells: [TableCell], rowNum: int) 
   then { acc | count: 5000, lastRow: r, gaps: gaps }
   else {
     let filled = if fill == 0 then acc.rows else xlsxBlankRows(acc.merges, acc.lastRow + 1, fill, acc.rows);
-    { acc | rows: cells :: filled, count: acc.count + fill + 1, lastRow: r, gaps: gaps }
+    -- Zero identifies a collapsed separator, never a real source row.
+    -- Keep an explicit source position even if layout repaired row order.
+    let positions = if gap > xlsxMaxRowGap() then 0 :: acc.positions
+      else xlsxBlankPositions(acc.lastRow + 1, fill, acc.positions);
+    { acc | rows: cells :: filled, positions: (if rowNum > 0 then rowNum else r) :: positions, count: acc.count + fill + 1, lastRow: r, gaps: gaps }
   }
 }
+
+pure func xlsxBlankPositions(from: int, n: int, positions: [int]) -> [int] =
+  if n <= 0 then positions
+  else xlsxBlankPositions(from + 1, n - 1, from :: positions)
 
 -- Blank rows to insert for a gap of `gap` missing rows.
 pure func xlsxGapFill(gap: int, bound: int) -> int
@@ -1007,26 +946,31 @@ pure func xlsxSheetBlocks(parsedRows: [[TableCell]], sheetName: string) -> [Bloc
 -- Kept for API compatibility; the in-package parse path uses xlsxStreamSheet
 -- so the XML string is never materialised. Emits a HeadingBlock with the
 -- sheet name followed by the table data.
-export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetName: string) -> [Block] ! {} {
-  if length(xml) == 0 then []
+export func parseSheetXml(xml: string, sharedStrings: Map[int, string], sheetName: string) -> [Block] ! {} =
+  parseSheetXmlWithRels(xml, sharedStrings, sheetName, "").blocks
+
+-- Relationship-aware pure entry point used by the browser. Keep the original
+-- three-argument entry point for callers without a worksheet .rels part.
+export pure func parseSheetXmlWithRels(xml: string, sharedStrings: Map[int, string], sheetName: string, relsXml: string) -> XlsxParsed {
+  if length(xml) == 0 then { blocks: [], warnings: [] }
   else {
-    -- Same streaming row fold as the ZIP path, but over a held string; no
-    -- comment pass here, so the anchor refs are empty.
     let merges = match parseElements(xml, "mergeCell", 500) {
-      Ok(nodes) => xlsxParseMergeNodes(nodes),
-      Err(_) => []
+      Ok(nodes) => xlsxParseMergeNodes(nodes), Err(_) => []
     };
-    -- No styles.xml here (the caller hands over one sheet's XML), so cells
-    -- carry no colour on this path.
-    let foldResult = parseFoldStep(sanitizeXml(xml), "row",
-      { rows: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
-        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [], noValue: 0 },
-      xlsxFoldRowStep);
-    let parsedRows = match foldResult {
-      Ok(acc2) => reverse(acc2.rows),
-      Err(_) => []
+    let folded = match parseFoldStep(sanitizeXml(xml), "row",
+      { rows: [], positions: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
+        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [], noValue: 0 }, xlsxFoldRowStep) {
+      Ok(acc) => acc,
+      Err(_) => { rows: [], positions: [], count: 0, ss: sharedStrings, styles: emptyMap(), flagged: false, flags: [],
+        merges: merges, refs: [], texts: [], lastRow: 0, gaps: [], noValue: 0 }
     };
-    xlsxSheetBlocks(parsedRows, sheetName)
+    let links = match parseFoldStep(sanitizeXml(xml), "hyperlink", xlsxEmptyLinks(xlsxHyperlinkRels(relsXml)), xlsxFoldLink) {
+      Ok(acc) => acc, Err(_) => xlsxEmptyLinks(emptyMap())
+    };
+    let linked = xlsxApplyLinks(reverse(folded.rows), reverse(folded.positions), links, sheetName);
+    { blocks: xlsxSheetBlocks(linked.rows, sheetName),
+      warnings: concat(linked.warnings, concat(xlsxNoValueWarning(sheetName, folded.noValue),
+        map(\g. xlsxGapWarning(sheetName, g), reverse(folded.gaps)))) }
   }
 }
 

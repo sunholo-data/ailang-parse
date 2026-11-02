@@ -41,7 +41,7 @@
     return el && el.src ? el.src.replace(/js\/wasm-demo\.js.*$/, '') : '';
   })();
 
-  var WASM_BINARY_URL = ASSET_BASE + 'wasm/ailang.wasm?v=v0.54.15';
+  var WASM_BINARY_URL = ASSET_BASE + 'wasm/ailang.wasm?v=v0.54.18';
   var MODULE_BASE = ASSET_BASE + 'ailang/';
   var MAX_FILE_SIZE = 20 * 1024 * 1024;
   var MAX_XML_SIZE = 5 * 1024 * 1024;
@@ -88,9 +88,11 @@
     { name: 'docparse/services/pptx_parser', path: 'docparse/services/pptx_parser.ail', formats: ['pptx'] },
     { name: 'docparse/services/browser_pptx', path: 'docparse/services/browser_pptx.ail', formats: ['pptx'],
       binds: ['parsePptxSlide', 'orderPptxSlides', 'pptxNotesPartFor', 'parsePptxNotes'] },
+    { name: 'docparse/services/xlsx_refs', path: 'docparse/services/xlsx_refs.ail', formats: ['xlsx'] },
+    { name: 'docparse/services/xlsx_hyperlinks', path: 'docparse/services/xlsx_hyperlinks.ail', formats: ['xlsx'] },
     { name: 'docparse/services/xlsx_parser', path: 'docparse/services/xlsx_parser.ail', formats: ['xlsx'] },
     { name: 'docparse/services/browser_xlsx', path: 'docparse/services/browser_xlsx.ail', formats: ['xlsx'],
-      binds: ['parseXlsxSheet', 'orderXlsxSheets'] },
+      binds: ['parseXlsxSheet', 'parseXlsxSheetWithRels', 'orderXlsxSheets'] },
     // html_layout before html_parser, which imports it (page-layout HTML:
     // EDGAR filings); html_parser before eml_parser and epub_parser — both import it
     { name: 'docparse/services/html_layout', path: 'docparse/services/html_layout.ail', formats: ['html', 'eml', 'epub'] },
@@ -1014,11 +1016,19 @@
       setStatus('Parsing sheet ' + (i + 1) + '/' + sheets.length + '...');
       var xml = await zip.file(sheets[i].part).async('string');
       if (xml.length <= MAX_XML_SIZE) {
-        var r = engine.call('parseXlsxSheet', xml, ssXml, sheets[i].name);
+        var relsXml = await xlsxSheetRelsXml(zip, sheets[i].part);
+        var r = engine.call('parseXlsxSheetWithRels', xml, ssXml, sheets[i].name, relsXml);
         if (r.success) allBlocks = allBlocks.concat(safeJsonParse(r.result, []));
       }
     }
     return allBlocks;
+  }
+
+  async function xlsxSheetRelsXml(zip, part) {
+    var slash = part.lastIndexOf('/');
+    var path = part.slice(0, slash + 1) + '_rels/' + part.slice(slash + 1) + '.rels';
+    var entry = zip.file(path);
+    return entry ? await entry.async('string') : '';
   }
 
   // Worksheets as [{name, part}] in the workbook's TAB order with their real
@@ -1491,7 +1501,8 @@
       for (var i = 0; i < Math.min(sheetEntries.length, MAX_SHEETS); i++) {
         var xml = await zip.file(sheetEntries[i].part).async('string');
         if (xml && engine) {
-          var r = engine.call('parseXlsxSheet', xml, ssXml, sheetEntries[i].name);
+          var relsXml = await xlsxSheetRelsXml(zip, sheetEntries[i].part);
+          var r = engine.call('parseXlsxSheetWithRels', xml, ssXml, sheetEntries[i].name, relsXml);
           if (r.success) {
             var sheetBlocks = safeJsonParse(r.result, []);
             // The tab label is the name the parser settled on (a part-name
