@@ -9,6 +9,18 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.55.4](https://github.com/sunholo-data/ailang-parse/compare/v0.55.3...v0.55.4) — 2026-11-02
+
+v0.55.3 was tagged but never reached the registry. The publish job compiles with AILANG `dev`,
+which after v0.56.1 rejects an effectful lambda passed to the pure `map` (#1958 M2). That
+check refused `docs/scripts/pdf_to_powerpoint_templates.ail`. This release has the same
+package code as v0.55.3, including gemini_files 0.2.2, and is its first registry release.
+
+### Fixed
+
+- `docs/scripts/pdf_to_powerpoint_templates.ail` reads archive entries with a plain recursion
+  instead of an effectful lambda inside `map`. It compiles on AILANG v0.56.1 and on `dev` HEAD.
+
 ## [v0.55.3](https://github.com/sunholo-data/ailang-parse/compare/v0.55.2...v0.55.3) — 2026-11-02
 
 ### Fixed

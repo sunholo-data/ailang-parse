@@ -22,7 +22,6 @@ import std/zip (listEntries, readEntry, createArchive)
 import std/result (Ok, Err)
 import std/io (println, exit)
 import std/env (getEnvOr)
-import std/list (map)
 import std/string (replace, find, substring, length, concat)
 
 type Look = {
@@ -105,9 +104,22 @@ func transform(name: string, content: string, l: Look) -> string =
   else if name == "ppt/presentation.xml" then presentation(content, l)
   else content
 
+-- Read and transform each archive entry. A plain recursion rather than a
+-- lambda passed to map: the lambda reads the archive (an effect), and AILANG
+-- after v0.56.1 (#1958 M2, effect rows open/closed) rejects an effectful
+-- lambda passed to the pure map, which blocked the v0.55.3 registry publish.
+func buildEntries(basePath: string, names: [string], l: Look) -> [{name: string, content: string}] ! {FS} =
+  match names {
+    [] => [],
+    n :: rest => {
+      let content = match readEntry(basePath, n) { Ok(c) => c, Err(_) => "" };
+      {name: n, content: transform(n, content, l)} :: buildEntries(basePath, rest, l)
+    }
+  }
+
 func build(basePath: string, dir: string, l: Look) -> () ! {FS, IO} {
   let names = match listEntries(basePath) { Ok(ns) => ns, Err(e) => { println(e); exit(1); [] } };
-  let entries = map(\n. {name: n, content: transform(n, match readEntry(basePath, n) { Ok(c) => c, Err(_) => "" }, l)}, names);
+  let entries = buildEntries(basePath, names, l);
   match createArchive("${dir}/${l.slug}-reference.pptx", entries) {
     Ok(_) => println("Built ${l.slug}-reference.pptx"),
     Err(e) => { println(e); exit(1) }
