@@ -115,9 +115,12 @@ DocParse <- R6::R6Class(
     #'   new target must not require an SDK release.
     #' @param source_url Fetch the source from this URL instead of a path.
     #' @param gcs_ref \code{gs://bucket/path}, Business tier only.
-    #' @param pdf_backend One of \code{"" pdftotext docling liteparse ai}.
-    #' @param reference_doc Style the generated document (DOCX target only)
-    #'   after a template's theme, fonts, headers/footers and page setup —
+    #' @param pdf_backend One of \code{"" pdftotext poppler docling liteparse ai}
+    #'   (docling and liteparse are self-host only). A PDF converted to pptx or
+    #'   odp is read one slide per page when this is empty or \code{poppler}.
+    #' @param reference_doc Style the generated document after a template: a
+    #'   .docx for a docx target (theme, fonts, headers/footers, page setup),
+    #'   a .pptx for a pptx target (theme, masters, layouts) —
     #'   the CLI's \code{--reference-doc}. A URL or \code{gs://} ref here,
     #'   not a local path; for a local template use \code{convert_file}.
     #' @param reference_section Which of the template's sections supplies

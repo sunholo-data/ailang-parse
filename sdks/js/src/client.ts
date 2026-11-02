@@ -206,13 +206,16 @@ export class DocParse {
    * console.log((await client.convert("notes.md", { target: "html" })).text());
    * ```
    *
-   * `referenceDoc` styles the generated document (DOCX target only) after a
-   * template's theme, fonts, headers/footers and page setup — the CLI's
+   * `referenceDoc` styles the generated document after a template — a `.docx`
+   * for a docx target (theme, fonts, headers/footers, page setup), a `.pptx`
+   * for a pptx target (theme, masters, layouts) — the CLI's
    * `--reference-doc`. It takes a URL or `gs://` ref here, not a local path
    * (no multipart convert exists in this SDK yet). `referenceSection` picks
    * which of the template's sections supplies the page setup (1-based; omit
    * for the template's last section). `tableStyle` binds generated tables to
-   * one of the template's table styles and requires `referenceDoc`.
+   * one of the template's table styles and requires `referenceDoc`; it and
+   * `referenceSection` are DOCX-only. A PDF converted to pptx/odp is read one
+   * slide per page unless `pdfBackend` names a backend other than `poppler`.
    */
   async convert(filepath: string, opts: { target: string; sourceUrl?: string; gcsRef?: string; pdfBackend?: string; referenceDoc?: string; referenceSection?: number; tableStyle?: string }): Promise<ConvertResult> {
     const url = this.baseUrl + "/api/v1/convert";
