@@ -20,12 +20,16 @@ type ConvertOptions struct {
 	// a new target must not require an SDK release.
 	Target string
 
-	SourceURL  string // fetch the source from this URL instead of a path
-	GCSRef     string // gs://bucket/path, Business tier only
-	PDFBackend string // "", pdftotext, docling, liteparse, ai
+	SourceURL string // fetch the source from this URL instead of a path
+	GCSRef    string // gs://bucket/path, Business tier only
+	// PDFBackend: "", pdftotext, poppler, docling, liteparse, ai. A PDF
+	// converted to pptx/odp is read one slide per page when this is "" or
+	// poppler. docling and liteparse are self-host only.
+	PDFBackend string
 
-	// ReferenceDoc styles the generated document (DOCX target only) after a
-	// template's theme, fonts, headers/footers and page setup — the CLI's
+	// ReferenceDoc styles the generated document after a template — a .docx
+	// for a docx target (theme, fonts, headers/footers, page setup), a .pptx
+	// for a pptx target (theme, masters, layouts) — the CLI's
 	// --reference-doc. A URL or gs:// ref here, not a local path (this
 	// method has no multipart upload).
 	ReferenceDoc string

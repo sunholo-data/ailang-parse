@@ -398,14 +398,17 @@ class DocParse:
         ``markdown``/``htm``/``quarto`` aliased), so it is deliberately not
         validated here — a new target must not require an SDK release.
 
-        ``reference_doc`` styles the generated document (DOCX target only)
-        after a template's theme, fonts, headers/footers and page setup — the
+        ``reference_doc`` styles the generated document after a template — a
+        ``.docx`` for a docx target (theme, fonts, headers/footers, page
+        setup), a ``.pptx`` for a pptx target (theme, masters, layouts) — the
         CLI's ``--reference-doc``. Here it takes a URL or ``gs://`` ref, not a
         local path; for a local template use :meth:`convert_file`.
         ``reference_section`` picks which of the template's sections supplies
         the page setup (1-based; omit for the template's last section).
         ``table_style`` binds generated tables to one of the template's table
-        styles and requires ``reference_doc``.
+        styles and requires ``reference_doc``; it and ``reference_section``
+        are DOCX-only. A PDF converted to pptx/odp is read one slide per page
+        unless ``pdf_backend`` names a backend other than ``poppler``.
 
         For uploading a local file use :meth:`convert_file`.
 
