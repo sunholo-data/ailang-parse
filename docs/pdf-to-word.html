@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF to Word, in Your Own Template — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Turn a PDF back into an editable Word document styled by your own template. Reading the PDF is the lossy step; AILANG Parse recovers headings, lists, tables and running headers from any PDF backend, then writes the DOCX deterministically.">
+<meta property="og:title" content="PDF to Word, in Your Own Template — AILANG Parse">
+<meta property="og:description" content="Reading the PDF is the lossy step. See what AILANG Parse recovers from it, with the source PDF and the generated Word documents embedded side by side.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/ailang-parse/pdf-to-word.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* ---- Pipeline: where the loss happens ---- */
+.p2w-flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 24px 0 8px;
+  align-items: stretch;
+}
+.p2w-step {
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 12px 10px;
+  background: var(--surface, #fff);
+  position: relative;
+}
+.p2w-step-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-primary);
+}
+.p2w-step-note {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.p2w-step--loss {
+  border-color: rgba(217, 119, 6, 0.45);
+  background: rgba(217, 119, 6, 0.06);
+}
+.p2w-step--loss .p2w-step-name { color: #b45309; }
+.p2w-step--ours {
+  border-color: rgba(5, 150, 105, 0.4);
+  background: rgba(5, 150, 105, 0.05);
+}
+.p2w-step--ours .p2w-step-name { color: #047857; }
+.p2w-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+}
+.p2w-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.p2w-legend .l-loss::before { background: rgba(217, 119, 6, 0.5); }
+.p2w-legend .l-ours::before { background: rgba(5, 150, 105, 0.45); }
+@media (max-width: 760px) {
+  .p2w-flow { grid-template-columns: 1fr; }
+}
+
+/* ---- Live viewer: source PDF next to the Word output ---- */
+.p2w-viewer {
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin: 20px 0 8px;
+}
+.p2w-viewer-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--dp-blue-border);
+  background: var(--dp-blue-faded, rgba(37, 99, 235, 0.04));
+}
+.p2w-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.p2w-tab {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dp-blue-border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.p2w-tab[aria-selected="true"] {
+  background: var(--dp-blue);
+  border-color: var(--dp-blue);
+  color: #fff;
+}
+.p2w-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.p2w-pane { min-width: 0; }
+.p2w-pane + .p2w-pane { border-left: 1px solid var(--dp-blue-border); }
+.p2w-pane-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dp-blue-border);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.p2w-pane-label a { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.p2w-pane iframe {
+  display: block;
+  width: 100%;
+  height: 620px;
+  border: 0;
+  background: #e5e7eb;
+}
+@media (max-width: 760px) {
+  .p2w-panes { grid-template-columns: 1fr; }
+  .p2w-pane + .p2w-pane { border-left: 0; border-top: 1px solid var(--dp-blue-border); }
+  .p2w-pane iframe { height: 480px; }
+}
+
+/* ---- Screenshot pairs ---- */
+.p2w-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 20px 0 8px;
+}
+.p2w-shot { margin: 0; }
+.p2w-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: #fff;
+}
+.p2w-shot figcaption {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.p2w-shot figcaption b { color: var(--text-primary); }
+
+/* ---- Recovered structure (rendered from the real parse JSON) ---- */
+.p2w-struct {
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin: 16px 0 8px;
+  max-height: 560px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.p2w-struct-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dotted var(--dp-blue-border);
+}
+.p2w-struct-row:last-child { border-bottom: 0; }
+.p2w-kind {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  align-self: start;
+  justify-self: start;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(100, 116, 139, 0.12);
+  color: var(--text-secondary);
+}
+.p2w-kind--h { background: rgba(37, 99, 235, 0.1); color: var(--dp-blue); }
+.p2w-kind--table { background: rgba(5, 150, 105, 0.1); color: #047857; }
+.p2w-kind--list { background: rgba(124, 58, 237, 0.1); color: #6d28d9; }
+.p2w-kind--furn { background: rgba(217, 119, 6, 0.12); color: #b45309; }
+.p2w-struct-body { min-width: 0; overflow-wrap: anywhere; }
+.p2w-struct-body .h1 { font-weight: 700; font-size: 15px; }
+.p2w-struct-body .h2 { font-weight: 600; padding-left: 14px; }
+.p2w-struct-body .h3 { font-weight: 600; padding-left: 28px; }
+.p2w-struct table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.p2w-struct th, .p2w-struct td {
+  border: 1px solid var(--dp-blue-border);
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.p2w-struct th { font-weight: 600; background: var(--dp-blue-faded, rgba(37, 99, 235, 0.04)); }
+.p2w-struct ul, .p2w-struct ol { margin: 0; padding-left: 18px; }
+.p2w-struct .b { font-weight: 700; }
+.p2w-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin: 8px 0 24px;
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Is converting a PDF back to Word lossless?", "acceptedAnswer": {"@type": "Answer", "text": "No conversion from PDF can be: a PDF records where glyphs are drawn, not which paragraph is a heading, a list item or a table cell. Reading the PDF is the lossy step. AILANG Parse recovers that structure from layout (font size, alignment, repetition across pages) and then writes the Word document deterministically, so nothing further is lost after the read."}},
+    {"@type": "Question", "name": "Do I need a Word template?", "acceptedAnswer": {"@type": "Answer", "text": "No, but it gives the best result. Without one you get a clean, editable DOCX with real headings, lists, tables and the PDF's running header and footer. With --reference-doc, the styles, fonts, page setup, header and footer come from your own .docx, so the output looks like your house style rather than an approximation of the PDF."}},
+    {"@type": "Question", "name": "Which PDF backend should I use?", "acceptedAnswer": {"@type": "Answer", "text": "For born-digital PDFs such as reports, proposals and contracts, use --pdf-backend poppler: it recovers headings, lists and tables with no extra installs. Use docling for scanned PDFs and complex layouts, and ai for handwriting or visually complex pages. Every backend feeds the same pipeline, including header/footer handling and the template."}},
+    {"@type": "Question", "name": "Does PDF to Word work on scanned PDFs?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use --pdf-backend docling, which runs OCR locally; without a backend flag, a PDF with no text layer is sent to docling automatically. The result goes through the same conversion and template as any other PDF."}},
+    {"@type": "Question", "name": "Is my PDF uploaded anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Not with the CLI and the local backends (pdftotext, poppler, docling, liteparse): parsing and Word generation run on your machine. Only --pdf-backend ai sends pages to the AI provider you configure, and it is never chosen automatically."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">PDF to Word, <span class="dp-accent">in your own template</span></h1>
+    <p class="subtitle reveal reveal-delay-1">Turn a PDF back into an editable Word document &mdash; real headings, lists and tables, styled by a <code>.docx</code> you already have. Reading the PDF is where information is lost, so that is where the work goes.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#lossy-step" class="active">The Lossy Step</a>
+        <a href="#example">Live Example</a>
+        <a href="#structure">Recovered Structure</a>
+        <a href="#recover">What We Recover</a>
+        <a href="#limits">What a PDF Can&rsquo;t Give Back</a>
+        <a href="#backends">Choosing a Backend</a>
+        <a href="#run">Run It</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="lossy-step">The lossy step is reading the PDF</h2>
+      <p>A Word document knows that a line is a heading, that three lines are a list, that a grid is a table and that a line at the top of every page is a running header. Producing a PDF throws all of that away and keeps only where each glyph is drawn. Getting a Word document back means working that structure out again from the page.</p>
+
+      <div class="p2w-flow">
+        <div class="p2w-step">
+          <div class="p2w-step-name">Word original</div>
+          <div class="p2w-step-note">Styles, heading levels, lists, tables, header and footer.</div>
+        </div>
+        <div class="p2w-step">
+          <div class="p2w-step-name">PDF</div>
+          <div class="p2w-step-note">Positioned glyphs and fonts. The structure is gone.</div>
+        </div>
+        <div class="p2w-step p2w-step--loss">
+          <div class="p2w-step-name">Read the PDF</div>
+          <div class="p2w-step-note">Recover structure from layout. Any PDF backend.</div>
+        </div>
+        <div class="p2w-step p2w-step--ours">
+          <div class="p2w-step-name">Blocks</div>
+          <div class="p2w-step-note">Headings, lists, tables, one header and footer.</div>
+        </div>
+        <div class="p2w-step p2w-step--ours">
+          <div class="p2w-step-name">Word, your style</div>
+          <div class="p2w-step-note">Written directly as OOXML, styled by your template.</div>
+        </div>
+      </div>
+      <div class="p2w-legend">
+        <span class="l-loss">where information is lost, and recovered</span>
+        <span class="l-ours">deterministic: nothing further is lost</span>
+      </div>
+
+      <p>Everything after the read is exact: the same blocks always produce the same document, and <a href="document-generation.html#reference-doc">the template merge</a> carries your styles, fonts, page setup, header and footer across byte for byte. So the quality of a PDF-to-Word conversion is decided at one place, the read, and that is where AILANG Parse spends its effort.</p>
+
+      <h2 id="example">Live example</h2>
+      <p>The source is one of our own <a href="templates.html">proposal templates</a>, exported to PDF. On the left is that PDF; on the right, the Word document AILANG Parse generated from it, opened as a rendered page. Switch the template to see the same recovered content in another house style, or with no template at all.</p>
+
+      <div class="p2w-viewer">
+        <div class="p2w-viewer-bar">
+          <div class="p2w-tabs" role="tablist" aria-label="Output template">
+            <button class="p2w-tab" role="tab" aria-selected="true" data-out="ailang-style">AILANG template</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="holosun-style">Holosun template</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="no-template">No template</button>
+          </div>
+        </div>
+        <div class="p2w-panes">
+          <div class="p2w-pane">
+            <div class="p2w-pane-label">Source PDF <a href="templates/output/ailang-proposal.pdf">open</a></div>
+            <iframe src="templates/output/ailang-proposal.pdf#view=FitH" title="Source PDF: AILANG proposal" loading="lazy"></iframe>
+          </div>
+          <div class="p2w-pane">
+            <div class="p2w-pane-label">Generated Word document <span><a id="p2w-docx" href="assets/pdf-to-word/proposal-ailang-style.docx" download>.docx</a> &middot; <a id="p2w-pdf" href="assets/pdf-to-word/proposal-ailang-style.pdf">rendered</a></span></div>
+            <iframe id="p2w-out" src="assets/pdf-to-word/proposal-ailang-style.pdf#view=FitH" title="Generated Word document, rendered" loading="lazy"></iframe>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text-secondary)">The right-hand pane is the generated <code>.docx</code> rendered to PDF by LibreOffice so a browser can show it. Download the <code>.docx</code> to open it in Word. If your browser does not show PDFs inline, the screenshots below are the same pages.</p>
+
+      <div class="p2w-shots">
+        <figure class="p2w-shot">
+          <img src="assets/pdf-to-word/source-p3.jpg" alt="Page 3 of the source PDF: Scope and delivery, two tables and a bulleted list" width="745" height="1053" loading="lazy">
+          <figcaption><b>Source PDF</b>, page 3.</figcaption>
+        </figure>
+        <figure class="p2w-shot">
+          <img src="assets/pdf-to-word/ailang-style-p3.jpg" alt="The same page as a generated Word document in the AILANG template" width="745" height="1053" loading="lazy">
+          <figcaption><b>Word, AILANG template.</b> Headings at their levels, both tables in the template&rsquo;s table style, the list as a Word list.</figcaption>
+        </figure>
+        <figure class="p2w-shot">
+          <img src="assets/pdf-to-word/holosun-style-p3.jpg" alt="The same content as a generated Word document in the Holosun template" width="745" height="1053" loading="lazy">
+          <figcaption><b>Word, Holosun template.</b> Same content; the header, footer and styling now come from a different company&rsquo;s template.</figcaption>
+        </figure>
+      </div>
+
+      <div class="p2w-shots">
+        <figure class="p2w-shot">
+          <img src="assets/pdf-to-word/source-p1.jpg" alt="Page 1 of the source PDF" width="745" height="1053" loading="lazy">
+          <figcaption><b>Source PDF</b>, page 1.</figcaption>
+        </figure>
+        <figure class="p2w-shot">
+          <img src="assets/pdf-to-word/ailang-style-p1.jpg" alt="Page 1 as a generated Word document in the AILANG template, with bold labels kept" width="745" height="1053" loading="lazy">
+          <figcaption><b>Word, AILANG template.</b> Bold labels (&ldquo;Prepared by:&rdquo;) stay bold; the PDF&rsquo;s running header and footer are not repeated in the body.</figcaption>
+        </figure>
+        <figure class="p2w-shot">
+          <img src="assets/pdf-to-word/no-template-p1.jpg" alt="The generated Word document with no template: plain styles, with the PDF's header and footer as real Word header and footer" width="745" height="1053" loading="lazy">
+          <figcaption><b>Word, no template.</b> Plain styles, and the PDF&rsquo;s own header and footer become real Word header and footer parts.</figcaption>
+        </figure>
+      </div>
+
+      <h2 id="structure">The recovered structure</h2>
+      <p>This is what the read produced &mdash; loaded below from the actual parse output of the PDF above, not retyped. Every Word document on this page was generated from exactly these blocks.</p>
+      <div class="p2w-struct" id="p2w-struct" aria-live="polite">Loading the parse output&hellip;</div>
+      <div class="p2w-downloads">
+        <a href="assets/pdf-to-word/proposal.blocks.json">proposal.blocks.json</a>
+        <a href="assets/pdf-to-word/proposal-ailang-style.docx" download>proposal-ailang-style.docx</a>
+        <a href="assets/pdf-to-word/proposal-holosun-style.docx" download>proposal-holosun-style.docx</a>
+        <a href="assets/pdf-to-word/proposal-no-template.docx" download>proposal-no-template.docx</a>
+      </div>
+
+      <h2 id="recover">What we recover</h2>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>In the Word document</th><th>How it is read back from the PDF</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Heading levels</td><td>Font sizes ranked into tiers relative to the body text; bold rows slightly larger than the body count too. Numbered headings (&ldquo;1. Overview&rdquo;) stay headings, not lists.</td></tr>
+          <tr><td>Paragraphs</td><td>Lines rejoined into paragraphs using the document&rsquo;s own line spacing, so the PDF&rsquo;s hard line breaks disappear and paragraph breaks stay.</td></tr>
+          <tr><td>Lists</td><td>Bullet and number markers, with nesting from indentation. Ordered lists stay ordered.</td></tr>
+          <tr><td>Tables</td><td>Rows whose cells snap to shared columns. Wrapped cell text is folded back into its cell; stacked tables with different columns stay separate; prose set in two columns is read column by column, not mistaken for a table.</td></tr>
+          <tr><td>Running header, footer, page numbers</td><td>Lines that recur at the top or bottom of the pages become one header and one footer. With a template, yours replaces them; without one, they become the document&rsquo;s header and footer.</td></tr>
+          <tr><td>Bold, italic, links</td><td>Kept as inline formatting on the words that carried it.</td></tr>
+          <tr><td>Text</td><td>Taken from the layer that reads glyphs a PDF draws twice as one letter, so &ldquo;The&rdquo; does not come back as &ldquo;Thee&rdquo;.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="limits">What a PDF can&rsquo;t give back</h2>
+      <p>Some of what was in the original never reached the PDF, and no reader can recover it:</p>
+      <ul>
+        <li><b>Style names.</b> The PDF shows a 20pt bold line, not &ldquo;Heading 2&rdquo;. Levels are relative: if a document&rsquo;s only heading was a Heading 2, it comes back as the top level.</li>
+        <li><b>Page breaks you inserted.</b> A PDF records where pages ended, not why. The Word document repaginates in its template.</li>
+        <li><b>Formatting that looks like nothing.</b> If headings were set in the same size and weight as body text, the PDF carries no sign they were headings.</li>
+        <li><b>Merged cells</b> are recovered as best the column layout allows; a cell spanning several columns may come back split.</li>
+        <li><b>Images.</b> Logos and figures are not carried into the Word document. A template brings its own logo.</li>
+      </ul>
+      <p>When you still have the original <code>.docx</code>, <a href="docx-parsing.html">parse that instead</a> &mdash; it is lossless. This page is for when the PDF is all you have.</p>
+
+      <h2 id="backends">Choosing a backend</h2>
+      <p>Different PDFs need different readers, and AILANG Parse works with all of them. Whichever backend reads the PDF, its output goes through the same pipeline: page furniture is separated from the body, the blocks are written as OOXML, and your template is applied. Changing backend is one flag.</p>
+
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Backend</th><th>Use it for</th><th>Needs</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>poppler</code></td><td>Born-digital PDFs &mdash; reports, proposals, contracts, anything exported from Word. Headings, lists, tables, header and footer. The usual choice for PDF to Word.</td><td>poppler only</td></tr>
+          <tr><td><code>docling</code></td><td>Scanned PDFs (OCR) and complex layouts. Without a <code>--pdf-backend</code> flag, a PDF with no text layer is sent here automatically.</td><td>local Python package</td></tr>
+          <tr><td><code>pdftotext</code></td><td>The default for parsing: the most complete plain text, layout kept as it is. For conversion it still gets a proper header and footer.</td><td>poppler only</td></tr>
+          <tr><td><code>liteparse</code></td><td>Fast text with headings from font size, when tables don&rsquo;t matter.</td><td>local Python package</td></tr>
+          <tr><td><code>ai</code></td><td>Handwriting and visually complex pages. Opt-in, never automatic.</td><td>an AI provider key</td></tr>
+        </tbody>
+      </table>
+
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Not sure? Start with <code>--pdf-backend poppler</code>. If it reports that the PDF has no text, it is a scan: use <code>--pdf-backend docling</code>, or leave the flag off and the default reader moves to <code>docling</code> by itself. Try another backend when a document looks wrong &mdash; the rest of the command stays the same. For how the backends compare on parsing, see <a href="pdf-parsing.html#local-backends">PDF Parsing</a>.</div>
+      </div>
+
+      <h2 id="run">Run it</h2>
+      <pre><code class="language-bash"># PDF to Word, styled by your own template
+docparse report.pdf --pdf-backend poppler \
+  --convert report.docx \
+  --reference-doc house-style.docx
+
+# Bind tables to a table style from the template
+docparse report.pdf --pdf-backend poppler --convert report.docx \
+  --reference-doc house-style.docx --table-style "Grid Table 4"
+
+# No template: plain styles, the PDF's header and footer kept as Word's
+docparse report.pdf --pdf-backend poppler --convert report.docx
+
+# A scanned PDF: same command, read with OCR
+docparse scan.pdf --pdf-backend docling --convert scan.docx --reference-doc house-style.docx</code></pre>
+
+      <p>The same read also converts to ODT, PPTX, HTML, Markdown and Quarto &mdash; change the extension after <code>--convert</code>. Any existing <code>.docx</code> works as a reference doc; the <a href="templates.html">proposal templates</a> are a worked example. Install the CLI from the <a href="docs.html">docs</a>.</p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>Is converting a PDF back to Word lossless?</summary>
+          <div class="dp-faq-answer"><p>No conversion from PDF can be: a PDF records where glyphs are drawn, not which paragraph is a heading, a list item or a table cell. Reading the PDF is the lossy step. AILANG Parse recovers that structure from layout and then writes the Word document deterministically, so nothing further is lost after the read.</p></div>
+        </details>
+        <details>
+          <summary>Do I need a Word template?</summary>
+          <div class="dp-faq-answer"><p>No, but it gives the best result. Without one you get a clean, editable DOCX with real headings, lists, tables and the PDF&rsquo;s header and footer. With <code>--reference-doc</code>, styles, fonts, page setup, header and footer come from your own <code>.docx</code>.</p></div>
+        </details>
+        <details>
+          <summary>Which PDF backend should I use?</summary>
+          <div class="dp-faq-answer"><p><code>poppler</code> for born-digital PDFs, <code>docling</code> for scans and complex layouts, <code>ai</code> for handwriting. They all feed the same pipeline, so switching is one flag. See <a href="#backends">Choosing a backend</a>.</p></div>
+        </details>
+        <details>
+          <summary>Does it work on scanned PDFs?</summary>
+          <div class="dp-faq-answer"><p>Yes. Use <code>--pdf-backend docling</code>, which runs OCR locally; without a backend flag, a PDF with no text layer is sent to <code>docling</code> automatically. The result goes through the same conversion and template as any other PDF.</p></div>
+        </details>
+        <details>
+          <summary>Is my PDF uploaded anywhere?</summary>
+          <div class="dp-faq-answer"><p>Not with the CLI and the local backends: parsing and Word generation run on your machine. Only <code>--pdf-backend ai</code> sends pages to the AI provider you configure, and it is never chosen automatically.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+// Template switcher for the generated-document pane.
+(function () {
+  var tabs = document.querySelectorAll('.p2w-tab');
+  var frame = document.getElementById('p2w-out');
+  var docx = document.getElementById('p2w-docx');
+  var pdf = document.getElementById('p2w-pdf');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var name = tab.getAttribute('data-out');
+      tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t === tab)); });
+      var base = 'assets/pdf-to-word/proposal-' + name;
+      frame.src = base + '.pdf#view=FitH';
+      docx.href = base + '.docx';
+      pdf.href = base + '.pdf';
+    });
+  });
+})();
+
+// Recovered structure, rendered from the real parse output.
+(function () {
+  var mount = document.getElementById('p2w-struct');
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function cell(c) { return esc(c && typeof c === 'object' ? c.text : c); }
+  function runs(b) {
+    if (!b.runs || !b.runs.length) return esc(b.text);
+    return b.runs.map(function (r) {
+      var t = esc(r.text);
+      if (r.bold) t = '<span class="b">' + t + '</span>';
+      if (r.href) t = '<span title="' + esc(r.href) + '" style="text-decoration:underline">' + t + '</span>';
+      return t;
+    }).join('');
+  }
+  function row(kind, cls, body) {
+    return '<div class="p2w-struct-row"><span class="p2w-kind ' + cls + '">' + kind +
+      '</span><div class="p2w-struct-body">' + body + '</div></div>';
+  }
+  function render(blocks) {
+    return blocks.map(function (b) {
+      var t = (b.type || '').toLowerCase();
+      if (t === 'section' && (b.kind === 'header' || b.kind === 'footer')) {
+        var lines = (b.blocks || []).map(function (x) { return esc(x.text); }).join(' &middot; ');
+        return row(b.kind, 'p2w-kind--furn', lines);
+      }
+      if (t === 'section') return render(b.blocks || []);
+      if (t === 'heading') {
+        var lvl = Math.min(3, Math.max(1, b.level || 1));
+        return row('H' + lvl, 'p2w-kind--h', '<div class="h' + lvl + '">' + esc(b.text) + '</div>');
+      }
+      if (t === 'table') {
+        var head = '<tr>' + (b.headers || []).map(function (h) { return '<th>' + cell(h) + '</th>'; }).join('') + '</tr>';
+        var body = (b.rows || []).map(function (r) {
+          return '<tr>' + r.map(function (c) { return '<td>' + cell(c) + '</td>'; }).join('') + '</tr>';
+        }).join('');
+        return row('table', 'p2w-kind--table', '<table>' + head + body + '</table>');
+      }
+      if (t === 'list') {
+        var tag = b.ordered ? 'ol' : 'ul';
+        return row(b.ordered ? 'list 1.' : 'list', 'p2w-kind--list', '<' + tag + '>' +
+          (b.items || []).map(function (i) { return '<li>' + esc(i) + '</li>'; }).join('') + '</' + tag + '>');
+      }
+      return row('text', '', runs(b));
+    }).join('');
+  }
+  fetch('assets/pdf-to-word/proposal.blocks.json')
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (d) { mount.innerHTML = render((d.document && d.document.blocks) || []); })
+    .catch(function () {
+      mount.innerHTML = 'Could not load the parse output here. <a href="assets/pdf-to-word/proposal.blocks.json">Open proposal.blocks.json</a> instead.';
+    });
+})();
+
+// Sidebar active link tracking on scroll
+(function () {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function (link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function (s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
