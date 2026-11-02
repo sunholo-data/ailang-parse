@@ -24,7 +24,7 @@ echo   The wrapper needs the AILANG sources beside it. Reinstall from: 1>&2
 echo     https://ailang.sunholo.com/docparse/ 1>&2
 exit /b 1
 :found_root
-set "DEFAULT_AI_MODEL=gemini-3.8-flash"
+set "DEFAULT_AI_MODEL=gemini-3.5-flash-lite"
 
 :: Supported extensions for folder scanning
 set "SUPPORTED_EXTS=docx pptx xlsx odt odp ods html htm md csv epub eml mbox pdf png jpg jpeg gif bmp webp tiff tif mp3 wav ogg flac mp4 mov avi mkv"
@@ -221,7 +221,7 @@ echo.
 echo Options:
 echo   --describe        Enable AI image descriptions
 echo   --summarize       Enable AI document summary
-echo   --ai MODEL        AI model (default: gemini-3.8-flash)
+echo   --ai MODEL        AI model (default: gemini-3.5-flash-lite)
 echo   --verify          Enable runtime contract verification
 echo   --budget-report   Show capability budget usage after run
 echo   --output-dir DIR  Copy output files to DIR after parsing

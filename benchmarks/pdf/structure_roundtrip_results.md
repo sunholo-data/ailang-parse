@@ -2,9 +2,10 @@
 
 `benchmarks/pdf/structure_roundtrip.py`, run 2026-11-02 on macOS (poppler 26.08,
 LibreOffice for rendering, docling 2.113 with the pypdfium text backend,
-liteparse 2.6, ai = gemini-2.5-flash). Ten of our own DOCX documents are rendered
-to PDF, each backend parses the PDF, and the result is scored against the source
-DOCX.
+liteparse 2.6, ai = gemini-3.5-flash-lite — the hosted default moved off
+gemini-2.5-flash on 2026-07-21, see `tests/verify_pricing.ail` in the
+docparse repo). Ten of our own DOCX documents are rendered to PDF, each
+backend parses the PDF, and the result is scored against the source DOCX.
 
 | Backend | heading recall | heading level | table count | table cells F1 | list recall | furniture leak | text Jaccard |
 |---|---|---|---|---|---|---|---|
@@ -12,7 +13,12 @@ DOCX.
 | **poppler** | 80% | 75% | **100%** | **83%** | 75% | 2 | 80% |
 | docling | 80% | 70% | 78% | 69% | 75% | 2 | 84% |
 | liteparse | 80% | 75% | 0% | 0% | 52% | 0 | 87% |
-| ai | 96% | 45% | 89% | 66% | 42% | 2 | 82% |
+| ai | 100% | 75% | 89% | 81% | 100% | 8 | 84% |
+
+The `ai` row is a live model call, not cached — a second run the same day
+scored 100%/92%/86%/79%/100%/4/81% on the same files. Treat the `ai` row as
+a band (roughly 75-92% heading level, 4-8 furniture leak) rather than a
+fixed number; the other four backends are deterministic and don't vary.
 
 Furniture leak is the total number of source header/footer lines found in the
 PDF parse's body text across all ten documents (0 is right).

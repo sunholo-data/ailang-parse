@@ -293,7 +293,7 @@ else: print('')
 
 if echo "$PARSE_PDF_ERR_MSG" | grep -qi "ai\|model\|AI_UNAVAILABLE"; then
   info "AI not configured on this server (expected for dev instances)"
-  info "PDF parsing works when server has --ai gemini-3.8-flash"
+  info "PDF parsing works when server has --ai gemini-3.5-flash-lite"
   info "All 12 deterministic formats (Office/Web/Text) work without AI"
 elif [ -n "$PARSE_PDF_ERR_MSG" ] && [ "$PARSE_PDF_ERR_MSG" != "" ]; then
   fail "Parse error: $PARSE_PDF_ERR_MSG"

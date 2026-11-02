@@ -88,7 +88,7 @@ def run_ailang_gemini(pdf: Path) -> tuple[str, list[str], float]:
     start = time.time()
     cmd = [
         "ailang", "run", "--entry", "main", "--caps", "IO,FS,Env,AI",
-        "--ai", "gemini-3.8-flash",
+        "--ai", "gemini-3.5-flash-lite",
         "docparse/main.ail", str(pdf),
     ]
     # main.ail writes beside the caller by default; pin it to AILANG_OUT_DIR.

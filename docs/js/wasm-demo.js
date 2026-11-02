@@ -488,7 +488,7 @@
 
   // ── Gemini AI handler ──
   function createGeminiHandler(apiKey) {
-    var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
+    var GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
     return async function (input) {
       try {
         var parsed = JSON.parse(input);

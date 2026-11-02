@@ -28,5 +28,5 @@ COPY --from=builder /root/.ailang/ /root/.ailang/
 
 # CLI-only: parse files via volume mount
 # Usage: docker run -v $(pwd):/data docparse /data/file.docx
-# AI:    docker run -e GOOGLE_API_KEY=... -v $(pwd):/data docparse --ai gemini-3.8-flash /data/file.pdf
+# AI:    docker run -e GOOGLE_API_KEY=... -v $(pwd):/data docparse --ai gemini-3.5-flash-lite /data/file.pdf
 ENTRYPOINT ["ailang", "run", "--entry", "main", "--caps", "IO,FS,Env", "docparse/main.ail"]

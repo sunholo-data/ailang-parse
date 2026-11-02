@@ -60,7 +60,7 @@ These are essential — `ailang prompt` is the complete language spec, `ailang d
 ./bin/docparse report.docx --convert report.qmd
 
 # AI document generation
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.8-flash \
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.5-flash-lite \
   docparse/main.ail --generate report.docx --prompt "Q1 sales report with revenue table"
 
 # Dev commands
@@ -80,5 +80,5 @@ ailang run --entry main --caps IO,FS,Env docparse/main.ail data/test_files/sampl
 
 # With AI (PDF/images)
 GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI \
-  --ai gemini-3.8-flash docparse/main.ail document.pdf
+  --ai gemini-3.5-flash-lite docparse/main.ail document.pdf
 ```

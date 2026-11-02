@@ -92,7 +92,7 @@ def run_ailang(
 
     cmd = ["ailang", "run", "--entry", "main", "--no-budgets", "--caps", caps]
     if needs_ai:
-        cmd += ["--ai", "gemini-3.8-flash"]
+        cmd += ["--ai", "gemini-3.5-flash-lite"]
 
     # Must use relative path — AILANG resolves module paths from cwd
     cmd.append("docparse/main.ail")
