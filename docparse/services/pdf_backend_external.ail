@@ -33,11 +33,11 @@ module docparse/services/pdf_backend_external
 -- (fileExists + assetPath); every caller — the orchestrator's full ladder —
 -- already declared {FS, Process}.
 
-import std/json (decode, getArray, getString, getInt, getBool, getNumber, asString, asArray, asNumber, getOr)
+import std/json (decode, getArray, getString, getInt, getBool, getNumber, getObject, asString, asArray, asNumber, getOr)
 import std/option (Some, None, getOrElse)
 import std/list (map, any, length as listLength)
 import std/result (Result, Ok, Err)
-import std/string (length as strLength, join)
+import std/string (length as strLength, join, contains)
 import std/fs (fileExists)
 import std/package (assetPath)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
@@ -47,7 +47,31 @@ import docparse/services/pdf_annotations (PdfWord)
 -- Output bundle from an external backend run.
 export type ExternalDocResult = {
   metadata: DocMetadata,
-  blocks: [Block]
+  blocks: [Block],
+  textLayer: PdfTextLayer
+}
+
+-- What a text-layer backend (pdftotext, poppler, liteparse) found on each
+-- page: the adapter's "textLayer" audit. `textlessPages` are the 1-based pages
+-- with no text of their own (only lines repeated on other pages, such as a
+-- stamp or page number) that are pictures of a page. `known` is false when no
+-- audit ran (docling, an adapter without it); nothing is concluded then.
+export type PdfTextLayer = {
+  known: bool,
+  pages: int,
+  textlessPages: [int],
+  distinctWords: int
+}
+
+-- A PDF read that did not produce a document. `code` is the orchestrator's
+-- error code: "pdf_text_layer_sparse" (a scan with no OCR text; `message` is
+-- final, carries no file path and goes to callers verbatim) or
+-- "pdf_backend_failed" (the backend broke; `message` is its raw reason).
+-- `textLayer` is the audit behind a sparse verdict (unknown otherwise).
+export type PdfFailure = {
+  code: string,
+  message: string,
+  textLayer: PdfTextLayer
 }
 
 -- =====================================================================
@@ -262,6 +286,125 @@ pure func decodeMetadata(j: Json) -> DocMetadata = {
   }
 }
 
+-- =====================================================================
+-- Text-layer verdict (pure)
+-- =====================================================================
+
+export pure func pdfTextLayerUnknown() -> PdfTextLayer =
+  {known: false, pages: 0, textlessPages: [], distinctWords: 0}
+
+pure func decodeTextLayer(doc: Json) -> PdfTextLayer =
+  match getObject(doc, "textLayer") {
+    None => pdfTextLayerUnknown(),
+    Some(t) => {
+      known: true,
+      pages: pdfBackendNonNeg(getOrElse(getInt(t, "pages"), 0)),
+      textlessPages: map(pdfBackendJsonInt, getOrElse(getArray(t, "textlessPages"), [])),
+      distinctWords: getOrElse(getInt(t, "distinctWords"), 0)
+    }
+  }
+
+pure func pdfBackendNonNeg(n: int) -> int
+  ensures { result >= 0 }
+=
+  if n < 0 then 0 else n
+
+-- Pages that carry text of their own.
+export pure func pdfPagesWithText(pages: int, textless: int) -> int
+  requires { pages >= 0 && textless >= 0 }
+  ensures { result >= 0 && result <= pages }
+=
+  if textless >= pages then 0 else pages - textless
+
+-- The document is a scan when (nearly) every page is: at most one page in
+-- ten has text of its own. A 78-page scan with a stamp on every page has 0;
+-- a deck or report with a few picture pages is far above it and gets a
+-- warning naming them instead (pdfTextLayerPartialPages).
+export pure func pdfTextLayerSparseCore(pages: int, textless: int) -> bool
+  requires { pages >= 0 && textless >= 0 }
+  ensures { result == false || pages > 0 }
+=
+  pages > 0 && pdfPagesWithText(pages, textless) * 10 <= pages
+
+export pure func pdfTextLayerSparse(t: PdfTextLayer) -> bool =
+  t.known && pdfTextLayerSparseCore(t.pages, listLength(t.textlessPages))
+
+-- Textless pages of a document that is NOT a scan as a whole: these succeed,
+-- with a warning naming the pages.
+export pure func pdfTextLayerPartialPages(t: PdfTextLayer) -> [int] =
+  if t.known && pdfTextLayerSparse(t) == false then t.textlessPages else []
+
+-- The machine-readable head of the sparse message. Stable: callers parse it.
+export pure func pdfTextLayerStats(t: PdfTextLayer) -> string =
+  "pages=${show(t.pages)} pages_with_text=${show(pdfPagesWithText(t.pages, listLength(t.textlessPages)))} distinct_words=${show(t.distinctWords)}"
+
+-- How to read a scan, for a CLI user and an API caller alike.
+pure func pdfOcrRemedy() -> string =
+  "an OCR backend: docling (local, free; CLI --pdf-backend docling) or ai (external, paid; CLI --pdf-backend ai, API pdfBackend \"ai\")."
+
+-- The pdf_text_layer_sparse message: statistics first, then what happened and
+-- what to do. Never the file path: the hosted API returns it to callers as is.
+-- `tried` is "" or a sentence about OCR already attempted (the default ladder).
+export pure func pdfTextLayerSparseMessage(t: PdfTextLayer, tried: string) -> string = {
+  let withText = pdfPagesWithText(t.pages, listLength(t.textlessPages));
+  "${pdfTextLayerStats(t)}: the PDF's text layer is nearly empty. ${show(withText)} of ${show(t.pages)} pages have text of their own beyond lines repeated across pages (a stamp, header or page number), ${show(t.distinctWords)} distinct words in all, so the pages are most likely scanned images with no OCR text and a text extractor would return them blank. ${tried}Parse it with ${pdfOcrRemedy()}"
+}
+
+-- The warning for a partly scanned document, or "" when there is nothing to
+-- say. Same shape: statistics first.
+export pure func pdfTextLayerPartialWarning(t: PdfTextLayer) -> string =
+  match pdfTextLayerPartialPages(t) {
+    [] => "",
+    ps => "textless_pages=${pdfPageRanges(ps)} pages=${show(t.pages)}: ${show(listLength(ps))} of ${show(t.pages)} PDF pages are images with no text of their own (likely scanned), so their content is missing from this output. To read them, parse it with ${pdfOcrRemedy()}"
+  }
+
+-- Page numbers as ranges: [1,2,3,5,7,8] -> "1-3,5,7-8".
+export pure func pdfPageRanges(ps: [int]) -> string =
+  match ps {
+    [] => "",
+    p :: rest => pdfPageRangesFrom(p, p, rest)
+  }
+
+pure func pdfPageRangesFrom(start: int, end: int, rest: [int]) -> string =
+  match rest {
+    [] => pdfPageRange(start, end),
+    p :: more =>
+      if p == end + 1 then pdfPageRangesFrom(start, p, more)
+      else "${pdfPageRange(start, end)},${pdfPageRangesFrom(p, p, more)}"
+  }
+
+pure func pdfPageRange(start: int, end: int) -> string =
+  if start == end then show(start) else "${show(start)}-${show(end)}"
+
+-- One-line verdict for an adapter JSON document, for the inline tests:
+-- "sparse:<stats>", "partial:<ranges>", "ok" or "unknown".
+export pure func pdfTextLayerVerdictShape(src: string) -> string
+  tests [
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":78,\"textlessPages\":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78],\"distinctWords\":23}}", "sparse:pages=78 pages_with_text=0 distinct_words=23"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":10,\"textlessPages\":[1,2,3,4,5,6,7,8,9],\"distinctWords\":40}}", "sparse:pages=10 pages_with_text=1 distinct_words=40"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":10,\"textlessPages\":[1,2,3,4,5,6,7,8],\"distinctWords\":40}}", "partial:1-8"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":6,\"textlessPages\":[5,6],\"distinctWords\":105}}", "partial:5-6"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":32,\"textlessPages\":[3,7,8,9,24],\"distinctWords\":216}}", "partial:3,7-9,24"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":8,\"textlessPages\":[],\"distinctWords\":50}}", "ok"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":1,\"textlessPages\":[1],\"distinctWords\":0}}", "sparse:pages=1 pages_with_text=0 distinct_words=0"),
+    ("{\"blocks\":[],\"textLayer\":{\"pages\":0,\"textlessPages\":[],\"distinctWords\":0}}", "ok"),
+    ("{\"blocks\":[]}", "unknown")
+  ]
+{
+  match decode(src) {
+    Err(e) => "err:${e}",
+    Ok(j) => {
+      let t = decodeTextLayer(j);
+      if t.known == false then "unknown"
+      else if pdfTextLayerSparse(t) then "sparse:${pdfTextLayerStats(t)}"
+      else match pdfTextLayerPartialPages(t) {
+        [] => "ok",
+        ps => "partial:${pdfPageRanges(ps)}"
+      }
+    }
+  }
+}
+
 -- Decode the adapter's JSON document object into an ExternalDocResult.
 -- Pure: takes an already-decoded Json, no exec, no IO. Page boundaries are
 -- dropped; see decodeAdapterDocPages.
@@ -278,7 +421,7 @@ export pure func decodeAdapterDocPages(doc: Json, keepPages: bool) -> ExternalDo
   let blocks = if keepPages then decodeBlocksPaged(blocksArr, 0) else decodeBlocks(blocksArr);
   let metaJson = getOr(doc, "metadata", doc);
   let meta = decodeMetadata(metaJson);
-  {metadata: meta, blocks: blocks}
+  {metadata: meta, blocks: blocks, textLayer: decodeTextLayer(doc)}
 }
 
 -- =====================================================================
@@ -300,26 +443,54 @@ export type PdfParseOutcome = {
 -- 3 (`ai`) costs money and is therefore never automatic — the caller must ask
 -- for it explicitly.
 --
--- Escalation only applies when the caller took the default. An explicit
--- `--pdf-backend docling|liteparse|ai` is a decision, not a starting point, and
--- is left alone. (Note `liteparse` is NOT an OCR fallback: it infers headings
--- from font sizes in the existing text layer and fails on scans exactly as
--- pdftotext does.)
-export func parsePdfWithFallback(backend: string, filepath: string, projectRoot: string)
-    -> Result[PdfParseOutcome, string] ! {FS, Process} =
-  match parsePdfViaBackend(backend, filepath, projectRoot) {
-    Ok(res) => Ok({doc: res, backendUsed: backend}),
-    Err(firstErr) =>
-      if backend != "pdftotext" then Err(firstErr)
-      else match parsePdfViaBackend("docling", filepath, projectRoot) {
-        Ok(res) => Ok({doc: res, backendUsed: "docling"}),
-        Err(ocrErr) =>
+-- "Sees nothing" includes a text layer that is all stamp: pdftotext failing
+-- the text-layer audit (pdf_text_layer_sparse) escalates exactly like
+-- pdftotext extracting nothing. Before, a stamp on every scanned page was
+-- enough text to stop the ladder at tier 1 with a hollow success.
+--
+-- The failure keeps its kind: a scan that docling could not read either is
+-- still pdf_text_layer_sparse (with the page statistics), anything else is
+-- pdf_backend_failed.
+export func parsePdfLadder(filepath: string, projectRoot: string)
+    -> Result[PdfParseOutcome, PdfFailure] ! {FS, Process} =
+  match parsePdfChecked("pdftotext", filepath, projectRoot) {
+    Ok(res) => Ok({doc: res, backendUsed: "pdftotext"}),
+    Err(first) => match parsePdfChecked("docling", filepath, projectRoot) {
+      Ok(res) => Ok({doc: res, backendUsed: "docling"}),
+      Err(ocr) =>
+        if first.code == "pdf_text_layer_sparse"
+          -- Still a scan: rebuild the path-free message with what OCR did,
+          -- never quoting docling's own error, which can name the file.
+          then Err({first | message: pdfTextLayerSparseMessage(first.textLayer, "${pdfDoclingOutcome(ocr.message)} ")})
           -- Name the fix. This message reads as "your PDF is broken", but by far
           -- the most common cause is that docling was never installed: the
           -- escalation above is automatic, so a scanned PDF hits it on the
           -- DEFAULT backend, not only when someone asks for docling by name.
-          Err("no text layer (pdftotext: ${firstErr}) and OCR found nothing (docling: ${ocrErr}) — if docling is not installed, run: docparse --install-backends")
-      }
+          else Err({code: "pdf_backend_failed", textLayer: pdfTextLayerUnknown(),
+                    message: "no text layer (pdftotext: ${first.message}) and OCR found nothing (docling: ${ocr.message}) — if docling is not installed, run: docparse --install-backends"})
+    }
+  }
+
+-- One sentence on the automatic docling attempt, path-free.
+pure func pdfDoclingOutcome(doclingErr: string) -> string =
+  if contains(doclingErr, "not installed")
+    then "Automatic OCR with docling was not possible: docling is not installed here (to install it locally: docparse --install-backends)."
+    else "Automatic OCR with docling was tried and found no text either."
+
+-- The ladder with a string error, for callers that only report it (EML
+-- attachments). `backend` other than "pdftotext" is used as given: an explicit
+-- `--pdf-backend docling|liteparse|ai` is a decision, not a starting point.
+-- (Note `liteparse` is NOT an OCR fallback: it infers headings from font sizes
+-- in the existing text layer and fails on scans exactly as pdftotext does.)
+export func parsePdfWithFallback(backend: string, filepath: string, projectRoot: string)
+    -> Result[PdfParseOutcome, string] ! {FS, Process} =
+  if backend == "pdftotext" then match parsePdfLadder(filepath, projectRoot) {
+    Ok(o) => Ok(o),
+    Err(f) => Err(f.message)
+  }
+  else match parsePdfChecked(backend, filepath, projectRoot) {
+    Ok(res) => Ok({doc: res, backendUsed: backend}),
+    Err(f) => Err(f.message)
   }
 
 -- Fetch word positions for a PDF via the adapter's "words" backend
@@ -358,7 +529,31 @@ pure func decodeWord(j: Json) -> PdfWord = {
 -- sees is composed by the caller (orchestrator.orchPdf): docling (local,
 -- free; --install-backends if missing) first, --pdf-backend ai (external,
 -- paid) only as an explicit last resort.
-export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {FS, Process} = {
+export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {FS, Process} =
+  match parsePdfChecked(backend, filepath, projectRoot) {
+    Ok(res) => Ok(res),
+    Err(f) => Err(f.message)
+  }
+
+-- One backend, with the text-layer audit applied. A text layer that is
+-- (nearly) all stamp is a failure with its own code, ahead of the zero-block
+-- check: a scan with no text at all is reported as a scan, not as a backend
+-- that broke. Backends that do not audit (docling) are never judged by it.
+export func parsePdfChecked(backend: string, filepath: string, projectRoot: string)
+    -> Result[ExternalDocResult, PdfFailure] ! {FS, Process} =
+  match pdfRunBackend(backend, filepath, projectRoot) {
+    Err(e) => Err({code: "pdf_backend_failed", message: e, textLayer: pdfTextLayerUnknown()}),
+    Ok(res) =>
+      if pdfTextLayerSparse(res.textLayer)
+        then Err({code: "pdf_text_layer_sparse", message: pdfTextLayerSparseMessage(res.textLayer, ""),
+                  textLayer: res.textLayer})
+      else if listLength(res.blocks) == 0
+        then Err({code: "pdf_backend_failed", message: "backend '${backend}' extracted 0 blocks from ${filepath}",
+                  textLayer: res.textLayer})
+      else Ok(res)
+  }
+
+func pdfRunBackend(backend: string, filepath: string, projectRoot: string) -> Result[ExternalDocResult, string] ! {FS, Process} = {
   -- Resolve the adapter and the uv project WITHOUT depending on the caller's
   -- working directory (see backendLayout): the installed shim deliberately
   -- leaves you in your own cwd, where neither the historical relative adapter
@@ -370,13 +565,8 @@ export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: s
   -- pure JSON the bridge parses.
   match runJson("uv", layout.uvArgs ++ ["python", layout.adapter, backend, filepath]) {
     Err(e) => Err(formatError(e)),
-    Ok(doc) => {
-      -- pdftotext keeps its parse output exactly as before v0.55.0: no page
-      -- markers. Every other backend marks its pages.
-      let res = decodeAdapterDocPages(doc, backend != "pdftotext");
-      if listLength(res.blocks) == 0
-        then Err("backend '${backend}' extracted 0 blocks from ${filepath}")
-        else Ok(res)
-    }
+    -- pdftotext keeps its parse output exactly as before v0.55.0: no page
+    -- markers. Every other backend marks its pages.
+    Ok(doc) => Ok(decodeAdapterDocPages(doc, backend != "pdftotext"))
   }
 }

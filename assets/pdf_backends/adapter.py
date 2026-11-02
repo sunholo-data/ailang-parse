@@ -27,6 +27,17 @@ Every block may also carry:
 Omitted fields keep their old meaning, so a backend that emits none of them
 (pdftotext) produces byte-identical output to before they existed.
 
+The text-layer backends (pdftotext, poppler, poppler-slides, liteparse) also
+report what their text layer holds, page by page, as a top-level object:
+
+    "textLayer": {"pages": int, "textlessPages": [int], "distinctWords": int}
+
+`textlessPages` are the 1-based pages with no text of their own: nothing but
+lines that also appear on other pages (a stamp, running header, page number),
+on a page that is a picture (see _text_layer). AILANG decides from it whether
+the document is a scan with no OCR (pdf_text_layer_sparse) or only partly one
+(a warning). It is never turned into blocks, so it changes no parse output.
+
 All errors print "ERR: <message>" to stderr and exit 1 (AILANG checks
 Result[ProcessOutput, ProcessError] for non-zero exit).
 """
@@ -36,11 +47,13 @@ from __future__ import annotations
 import contextlib
 import html
 import json
+import math
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 def _empty_meta() -> dict:
@@ -191,7 +204,8 @@ def run_pdftotext(pdf: Path) -> dict:
     blocks = _blocks_from_plaintext(proc.stdout)
     meta = _empty_meta()
     meta["pageCount"] = _pdf_page_count(pdf)
-    return {"metadata": meta, "blocks": blocks}
+    return {"metadata": meta, "blocks": blocks,
+            "textLayer": _text_layer(_pdftotext_pages(proc.stdout), lambda: _picture_pages(pdf))}
 
 
 def _rank_levels(sizes: list[float], max_levels: int = 3, step: float = 0.75) -> dict[float, int]:
@@ -497,7 +511,8 @@ def run_liteparse(pdf: Path) -> dict:
 
     meta = _empty_meta()
     meta["pageCount"] = getattr(result, "num_pages", 0) or len(result.pages)
-    return {"metadata": meta, "blocks": blocks}
+    return {"metadata": meta, "blocks": blocks,
+            "textLayer": _text_layer([page.text or "" for page in result.pages], lambda: _picture_pages(pdf))}
 
 
 def run_words(pdf: Path) -> dict:
@@ -1294,7 +1309,122 @@ def run_poppler(pdf: Path, slides: bool = False) -> dict:
         blocks, pages = _poppler_blocks(bbox.stdout, html_xml, load_image, slide_tools)
     meta = _empty_meta()
     meta["pageCount"] = pages or _pdf_page_count(pdf)
-    return {"metadata": meta, "blocks": blocks}
+    page_text = ["\n".join(" ".join(w["text"] for w in line["words"]) for line in page["lines"])
+                 for page in _pp_parse_bbox(bbox.stdout)]
+    return {"metadata": meta, "blocks": blocks,
+            "textLayer": _text_layer(page_text, lambda: _picture_pages(pdf))}
+
+
+# ---------------------------------------------------------------------------
+# Text-layer audit: is there real text here, or a scan with a stamp on it?
+# ---------------------------------------------------------------------------
+#
+# A scanned PDF often carries a little text: a stamp, a Bates number or a page
+# number laid over every page image. That is enough to defeat "did we extract
+# any blocks?" (2026-11-02: 78 page scans with one identical 123-character
+# stamp each parsed to 156 blocks of 92% whitespace and 23 distinct words, and
+# a clause extractor ran on blank pages). Counting characters per page is not
+# enough either: a slide deck has little text per page. What separates them is
+# whether a page has text of its OWN, so the audit drops every line that also
+# appears on another page and measures what is left.
+#
+# Dropping repeated lines alone would also empty a PDF of identical pages (four
+# copies of a form). A scan is a picture of a page, so a page whose own text is
+# gone only counts as textless when an image covers most of it. The image
+# check is one `pdfimages -list` (no image is decoded), run only when some page
+# is a candidate. A document with no text at all needs no image check.
+#
+# Measured over 363 local PDFs (papers, reports, slide decks, figures): the
+# documents called sparse were image-only decks and a logo with no text at all
+# (refused before this audit too), one scanned journal article with a
+# copyright line on every page (40 of 41 pages textless), and one figure whose
+# only text is a 4-character label over a picture filling its page. No deck
+# or text document was flagged, in whole or in part.
+
+_TL_MIN_CHARS = 12      # non-whitespace characters of its own a page needs to count as text
+                        # (a stamp-only scan has 0; "Risks - Vendor lock-in" on a slide has 19)
+_TL_SCAN_COVER = 0.5    # share of the page an image must cover to make it a picture of a page
+_TL_REPEAT_SHARE = 0.4  # without image data: a line on this share of pages (and 2+) is furniture
+_TL_LETTER = re.compile(r"[^\W\d_]")
+_TL_WORD = re.compile(r"[^\W\d_]+")
+
+
+def _pdftotext_pages(text: str) -> list[str]:
+    """pdftotext ends every page with a form feed, so N pages split into N+1
+    parts, the last one empty."""
+    parts = text.split("\f")
+    return parts[:-1] if len(parts) > 1 else parts
+
+
+def _tl_chars(line: str) -> int:
+    return sum(1 for ch in line if not ch.isspace())
+
+
+def _text_layer(pages: list[str], picture_pages: Callable[[], set[int] | None]) -> dict:
+    """Page-by-page audit of a text layer. `picture_pages` returns the pages an
+    image covers, or None when that cannot be told (no pdfimages); it is called
+    at most once, and only when some page has no text of its own.
+
+    A line is repeated when its key (lower case, whitespace collapsed, digit
+    runs as '#', so "Page 3 of 78" matches "Page 4 of 78") has a letter in it
+    and appears on two or more pages. Number-only lines never count as
+    repeated: rows of figures in a statement are content, however alike.
+    """
+    keyed = [[(_pp_key(ln), _tl_chars(ln)) for ln in page.splitlines() if ln.strip()] for page in pages]
+    on_pages = Counter(k for page in keyed for k in {k for k, _ in page})
+
+    def own_chars(need: int) -> list[int]:
+        repeated = {k for k, c in on_pages.items() if c >= need and _TL_LETTER.search(k)}
+        return [sum(c for k, c in page if k not in repeated) for page in keyed]
+
+    words = len({w.lower() for page in pages for w in _TL_WORD.findall(page)})
+    stats = {"pages": len(pages), "textlessPages": [], "distinctWords": words}
+    if not any(keyed):
+        # No text at all: every page is textless, whatever is drawn on it. (This
+        # is the case the empty guard in main() always refused.)
+        stats["textlessPages"] = list(range(1, len(pages) + 1))
+        return stats
+    if all(c >= _TL_MIN_CHARS for c in own_chars(2)):
+        return stats
+    pictures = picture_pages()
+    own = own_chars(2) if pictures is not None else \
+        own_chars(max(2, math.ceil(len(pages) * _TL_REPEAT_SHARE)))
+    stats["textlessPages"] = [n for n, c in enumerate(own, 1)
+                              if c < _TL_MIN_CHARS and (pictures is None or n in pictures)]
+    return stats
+
+
+def _picture_pages(pdf: Path) -> set[int] | None:
+    """Pages most of whose area is covered by images, from `pdfimages -list`
+    (displayed size = pixels / ppi) and `pdfinfo` page sizes. None when either
+    tool is missing or fails, so the caller can fall back to text alone."""
+    try:
+        listing = subprocess.run(["pdfimages", "-list", str(pdf)],
+                                 capture_output=True, text=True, check=False)
+        info = subprocess.run(["pdfinfo", "-f", "1", "-l", "1000000", str(pdf)],
+                              capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    if listing.returncode != 0 or info.returncode != 0:
+        return None
+    sizes = {}
+    for line in info.stdout.splitlines():
+        m = re.match(r"Page\s+(\d+)\s+size:\s+([\d.]+)\s+x\s+([\d.]+)", line)
+        if m:
+            sizes[int(m.group(1))] = float(m.group(2)) * float(m.group(3))
+    covered: Counter = Counter()
+    # page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio
+    for line in listing.stdout.splitlines()[2:]:
+        f = line.split()
+        if len(f) < 14 or f[2] != "image":
+            continue
+        try:
+            page, w, h, xppi, yppi = int(f[0]), int(f[3]), int(f[4]), float(f[12]), float(f[13])
+        except ValueError:
+            continue
+        if xppi > 0 and yppi > 0:
+            covered[page] += (w / xppi * 72) * (h / yppi * 72)
+    return {p for p, area in covered.items() if sizes.get(p) and area >= _TL_SCAN_COVER * sizes[p]}
 
 
 BACKENDS = {
@@ -1331,6 +1461,11 @@ def _has_substance(blocks: list[dict]) -> bool:
         if _PLACEHOLDER_RE.sub("", b.get("text", "")).strip():
             return True
     return False
+
+
+def _text_layer_all_textless(layer: Any) -> bool:
+    return isinstance(layer, dict) and layer.get("pages", 0) > 0 \
+        and len(layer.get("textlessPages") or []) >= layer["pages"]
 
 
 def main() -> int:
@@ -1379,7 +1514,12 @@ def main() -> int:
     # That is a non-empty block list, so a naive count sails through this guard
     # and the caller indexes "<!-- image -->" as the document's content — a
     # silent empty success wearing a success exit code. Judge on substance.
-    if backend not in NON_BLOCK_BACKENDS and not _has_substance(doc.get("blocks") or []):
+    #
+    # Except a text layer the audit found empty on every page: that is a scan,
+    # and AILANG reports it as one (pdf_text_layer_sparse, with the page
+    # statistics) rather than as a backend that broke.
+    if backend not in NON_BLOCK_BACKENDS and not _has_substance(doc.get("blocks") or []) \
+            and not _text_layer_all_textless(doc.get("textLayer")):
         print(
             f"ERR: backend '{backend}' extracted no content (0 blocks) from "
             f"{pdf.name} (no text layer?).",

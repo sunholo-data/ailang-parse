@@ -521,6 +521,12 @@ jobs:
       - name: Run failure check (failed parses must not write output)
         run: uv run benchmarks/failure_check.py
 
+      # A scanned PDF with a stamp on every page parsed to blank pages and
+      # returned success (2026-11-02). Synthetic scans, a partly scanned
+      # document, a slide deck and repeated form pages, built on the fly.
+      - name: Scanned PDFs fail as pdf_text_layer_sparse, decks and forms do not
+        run: python3 benchmarks/check_pdf_text_layer.py --verbose
+
       # Every document used to write its images to docparse-img-<N> with N
       # restarting at 0, so documents in one batch (or concurrent API requests)
       # overwrote each other's files and an earlier document's `src` named a
