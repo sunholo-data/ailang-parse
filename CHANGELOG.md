@@ -9,7 +9,11 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## Unreleased
+## [v0.55.2](https://github.com/sunholo-data/ailang-parse/compare/v0.55.1...v0.55.2) — 2026-11-02
+
+Scanned PDFs fail loudly instead of parsing as blank pages. Callers that
+branched on `pdf_backend_failed` for a PDF with no text at all now see
+`pdf_text_layer_sparse` for it.
 
 ### Fixed
 
