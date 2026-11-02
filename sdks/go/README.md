@@ -107,6 +107,63 @@ fmt.Println(result.Metadata.Title)   // Document title
 fmt.Println(result.Summary.Tables)   // Number of tables
 ```
 
+## PDF Backends
+
+`Parse`, `ParseURL` and `ParseFile` take `ParseOptions.PDFBackend` (and
+`Convert` takes `ConvertOptions.PDFBackend`). It only affects PDF sources:
+
+| `PDFBackend` | How the PDF is read | Billed as |
+|---|---|---|
+| `""` (default) | server default, currently `pdftotext` | a standard request |
+| `"pdftotext"` | text layer, deterministic | a standard request |
+| `"poppler"` | structure from poppler: headings, lists, tables, pictures, header/footer | a standard request |
+| `"ai"` | page images are sent to Google Gemini via Vertex AI; needed for scanned or image-only PDFs | an **AI request** (counts against the AI quota) |
+
+```go
+scanned, err := client.ParseFile(ctx, "scan.pdf", docparse.ParseOptions{PDFBackend: "ai"})
+report, err := client.ParseURL(ctx, "https://example.com/report.pdf", "blocks",
+	docparse.ParseOptions{PDFBackend: "poppler"})
+```
+
+`ParseURL`'s trailing `ParseOptions` is optional, so existing three-argument
+calls compile unchanged.
+
+<!-- PENDING(capabilities): this sentence relies on the server listing the AI
+model and processing region in GET /api/v1/capabilities. Do not name a model
+or region here. -->
+The model and processing region used for `"ai"` are listed by
+`GET /api/v1/capabilities`.
+
+## File Size Limits
+
+| | Free | Pro | Business |
+|---|---|---|---|
+| Per-file limit | 10 MB | 25 MB | 50 MB |
+| Direct upload (`ParseFile`, compat `Partition`) | 10 MB | 25 MB | **32 MB** |
+| `SourceURL` / `ParseURL` | 10 MB | 25 MB | 50 MB |
+| `POST /api/v1/upload/url` + `gcs_ref` | — | — | 50 MB |
+
+Direct upload is limited to 32 MB (`docparse.MaxDirectUploadBytes`,
+33,554,432 bytes) by the hosting platform on every tier. A request above that
+never reaches the API, so the SDK checks the size first and returns a
+`*docparse.DocParseError` with `Code == docparse.CodeFileTooLarge`
+(`"FILE_TOO_LARGE"`) without sending anything. If the platform rejects an
+upload anyway (HTTP 413 with an HTML page), the SDK returns the same error.
+
+Larger files (Business, up to 50 MB) go by URL instead:
+
+```go
+result, err := client.ParseFile(ctx, "big.pdf")
+var dpe *docparse.DocParseError
+if errors.As(err, &dpe) && dpe.Code == docparse.CodeFileTooLarge {
+	// A signed or public https URL; the server fetches it.
+	result, err = client.ParseURL(ctx, signedURL, "blocks")
+	// Or, on Business: POST /api/v1/upload/url, PUT the file to the
+	// returned upload_url, then:
+	result, err = client.Parse(ctx, "", docparse.ParseOptions{GCSRef: "gs://..."})
+}
+```
+
 ## Response Metadata
 
 Every parse result includes quota and request metadata from response headers:
@@ -222,6 +279,7 @@ if err != nil {
 		fmt.Println("Quota exceeded")
 	case errors.As(err, &parseErr):
 		fmt.Printf("API error: %s\n", parseErr.Message)
+		fmt.Printf("  code: %s\n", parseErr.Code)              // e.g. "FILE_TOO_LARGE"
 		fmt.Printf("  suggested fix: %s\n", parseErr.SuggestedFix)
 		fmt.Printf("  details: %v\n", parseErr.Details)    // Structured error details
 		fmt.Printf("  request ID: %s\n", parseErr.RequestID) // For support/debugging

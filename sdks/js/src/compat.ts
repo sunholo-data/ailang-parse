@@ -1,7 +1,7 @@
 /** Unstructured API compatibility — drop-in replacement for unstructured-client. */
 
 import type { Element } from "./types.js";
-import { DocParseError, AuthError, QuotaError } from "./types.js";
+import { DocParseError, AuthError, QuotaError, fileTooLargeError, checkUploadSize } from "./types.js";
 
 /** Detect auth-related error messages from server-side envelope errors. */
 function isAuthErrorMessage(msg: string): boolean {
@@ -57,8 +57,9 @@ class GeneralApi {
     }
 
     if (isLocalFile) {
-      const { readFileSync } = await import("fs");
+      const { readFileSync, statSync } = await import("fs");
       const { basename } = await import("path");
+      checkUploadSize(statSync(opts.file).size);
       const fileData = readFileSync(opts.file);
       const blob = new Blob([fileData]);
       const form = new FormData();
@@ -76,6 +77,9 @@ class GeneralApi {
 
     if (resp.status === 401) throw new AuthError();
     if (resp.status === 429) throw new QuotaError("Quota exceeded");
+    if (resp.status === 413 && !(resp.headers.get("content-type") || "").includes("json")) {
+      throw fileTooLargeError();
+    }
     if (!resp.ok) throw new DocParseError(`API error: ${resp.status}`, resp.status);
 
     const outer = await resp.json();

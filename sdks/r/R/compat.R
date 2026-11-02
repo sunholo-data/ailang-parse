@@ -69,6 +69,7 @@ UnstructuredClient <- R6::R6Class(
       }
 
       if (file.exists(file)) {
+        .check_upload_size(list(file))
         req <- httr2::req_body_multipart(
           req,
           files    = curl::form_file(file, name = basename(file)),

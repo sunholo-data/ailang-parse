@@ -120,9 +120,10 @@ def stubbed_parse_url(monkeypatch):
     without making an HTTP call."""
     captured = {}
 
-    def fake_parse_url(self, url, output_format="blocks"):
+    def fake_parse_url(self, url, output_format="blocks", pdf_backend=""):
         captured["url"] = url
         captured["output_format"] = output_format
+        captured["pdf_backend"] = pdf_backend
         from ailang_parse import ParseResult
         return ParseResult(status="ok", text=url)
 
@@ -229,3 +230,13 @@ class TestParseGsUriBranches:
         client.parse_gs_uri("gs://bucket/k.pdf", credentials=creds, ttl=300)
 
         assert calls[0]["expiration"] == timedelta(seconds=300)
+
+    def test_pdf_backend_propagates_to_parse_url(self, stubbed_storage, stubbed_parse_url):
+        creds = SimpleNamespace(
+            signer=SimpleNamespace(key="K"),
+            service_account_email="sa@p.iam.gserviceaccount.com",
+            valid=True,
+        )
+        client = DocParse(api_key="dp_x")
+        client.parse_gs_uri("gs://bucket/k.pdf", credentials=creds, pdf_backend="ai")
+        assert stubbed_parse_url["pdf_backend"] == "ai"

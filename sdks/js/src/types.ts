@@ -8,6 +8,8 @@ export interface DocParseErrorOpts {
   details?: Record<string, unknown> | null;
   requestId?: string;
   replayable?: boolean;
+  /** Machine-readable error code, e.g. `"FILE_TOO_LARGE"`. */
+  code?: string;
 }
 
 export class DocParseError extends Error {
@@ -16,6 +18,11 @@ export class DocParseError extends Error {
   details: Record<string, unknown> | null;
   requestId: string;
   replayable: boolean;
+  /**
+   * Machine-readable error code from the API's structured error envelope
+   * (e.g. `"FILE_TOO_LARGE"`), or `""` when the server sent none.
+   */
+  code: string;
   /**
    * Backwards-compatible: `new DocParseError("msg")`,
    * `new DocParseError("msg", 500)`, or
@@ -33,14 +40,54 @@ export class DocParseError extends Error {
       this.details = statusOrOpts.details ?? null;
       this.requestId = statusOrOpts.requestId ?? "";
       this.replayable = statusOrOpts.replayable ?? false;
+      this.code = statusOrOpts.code ?? "";
     } else {
       this.statusCode = statusOrOpts;
       this.suggestedFix = suggestedFix;
       this.details = details;
       this.requestId = requestId;
       this.replayable = false;
+      this.code = "";
     }
   }
+}
+
+/**
+ * Largest request body the hosting platform (Cloud Run, HTTP/1) accepts.
+ * A direct multipart upload above this never reaches the API, on any tier.
+ */
+export const MAX_DIRECT_UPLOAD_BYTES = 32 * 1024 * 1024;
+
+/** `DocParseError.code` for a file too large to upload or parse. */
+export const FILE_TOO_LARGE = "FILE_TOO_LARGE";
+
+const LARGE_FILE_ROUTES =
+  "For larger files, pass a signed or public https URL with parseUrl() " +
+  "(or the sourceUrl option); the server fetches it, up to your tier's " +
+  "file-size limit. On Business, POST /api/v1/upload/url, PUT the file to " +
+  "the returned upload_url, then pass its gcs_ref as parse(\"\", fmt, { gcsRef }).";
+
+/**
+ * The structured error for an upload over the platform's request cap.
+ * `sizeBytes` is undefined when the SDK did not measure the upload — a 413
+ * page that came back from the hosting platform's front end.
+ */
+export function fileTooLargeError(sizeBytes?: number, requestId = ""): DocParseError {
+  const lead = sizeBytes === undefined
+    ? "Upload rejected by the hosting platform (HTTP 413)."
+    : `File is ${sizeBytes} bytes.`;
+  const details: Record<string, unknown> = { limit_bytes: MAX_DIRECT_UPLOAD_BYTES };
+  if (sizeBytes !== undefined) details.size_bytes = sizeBytes;
+  return new DocParseError(
+    `${lead} Direct uploads are limited to 32 MiB (${MAX_DIRECT_UPLOAD_BYTES} bytes) ` +
+    `by the hosting platform on every tier. ${LARGE_FILE_ROUTES}`,
+    { statusCode: 413, code: FILE_TOO_LARGE, suggestedFix: LARGE_FILE_ROUTES, details, requestId },
+  );
+}
+
+/** Throw FILE_TOO_LARGE before sending an upload whose size exceeds the cap. */
+export function checkUploadSize(sizeBytes: number): void {
+  if (sizeBytes > MAX_DIRECT_UPLOAD_BYTES) throw fileTooLargeError(sizeBytes);
 }
 
 export class AuthError extends DocParseError {

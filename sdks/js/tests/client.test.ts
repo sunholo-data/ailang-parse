@@ -26,6 +26,8 @@ let lastRequestBody: any = null;
 // entry; the last entry repeats once exhausted. `requestCount` counts requests.
 let mockResponses: Array<{ status: number; body: any; headers?: Record<string, string> }> | null = null;
 let requestCount = 0;
+// When set, served verbatim as text/html instead of JSON (front-end error pages).
+let mockRawBody: string | null = null;
 
 function setMock(status: number, body: any, headers: Record<string, string> = {}) {
   mockStatus = status;
@@ -33,6 +35,7 @@ function setMock(status: number, body: any, headers: Record<string, string> = {}
   mockHeaders = headers;
   mockResponses = null;
   requestCount = 0;
+  mockRawBody = null;
 }
 
 function setMockQueue(responses: Array<{ status: number; body: any; headers?: Record<string, string> }>) {
@@ -56,9 +59,9 @@ before(async () => {
         const r = mockResponses[Math.min(requestCount - 1, mockResponses.length - 1)];
         status = r.status; body = r.body; extraHeaders = r.headers ?? {};
       }
-      const responseBody = JSON.stringify(body);
+      const responseBody = mockRawBody ?? JSON.stringify(body);
       const hdrs: Record<string, string> = {
-        "Content-Type": "application/json",
+        "Content-Type": mockRawBody !== null ? "text/html; charset=UTF-8" : "application/json",
         "Content-Length": Buffer.byteLength(responseBody).toString(),
         ...extraHeaders,
       };
@@ -873,5 +876,151 @@ describe("convert", () => {
     const c = new DocParse({ apiKey: "dp_test", baseUrl });
     await c.convert("x.docx", { target: "MARKDOWN" });
     assert.equal(lastRequestBody.target, "MARKDOWN");
+  });
+});
+
+// ── pdfBackend on parse entry points ──
+
+const OK_PARSE = {
+  result: JSON.stringify({
+    status: "ok", filename: "doc.pdf", format: "pdf",
+    blocks: [], metadata: {}, summary: { totalBlocks: 0 },
+  }),
+};
+
+async function tempFile(name: string, size: number | Buffer): Promise<string> {
+  const { mkdtempSync, writeFileSync, truncateSync } = await import("fs");
+  const { join } = await import("path");
+  const { tmpdir } = await import("os");
+  const p = join(mkdtempSync(join(tmpdir(), "ailang-parse-test-")), name);
+  if (typeof size === "number") {
+    writeFileSync(p, "");
+    truncateSync(p, size); // sparse: no real disk use
+  } else {
+    writeFileSync(p, size);
+  }
+  return p;
+}
+
+describe("pdfBackend", () => {
+  it("parse sends pdfBackend and gcsRef", async () => {
+    setMock(200, OK_PARSE);
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parse("", "blocks", { pdfBackend: "ai", gcsRef: "gs://b/big.pdf" });
+    assert.equal(lastRequestBody.pdfBackend, "ai");
+    assert.equal(lastRequestBody.gcsRef, "gs://b/big.pdf");
+  });
+
+  it("parse omits pdfBackend by default", async () => {
+    setMock(200, OK_PARSE);
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parse("sample_pdf");
+    assert.equal("pdfBackend" in lastRequestBody, false);
+    assert.equal("gcsRef" in lastRequestBody, false);
+  });
+
+  it("parseUrl sends pdfBackend", async () => {
+    setMock(200, OK_PARSE);
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parseUrl("https://example.com/scan.pdf", "blocks", { pdfBackend: "poppler" });
+    assert.equal(lastRequestBody.pdfBackend, "poppler");
+    assert.equal(lastRequestBody.sourceUrl, "https://example.com/scan.pdf");
+  });
+
+  it("parseFile sends pdfBackend as a form field", async () => {
+    setMock(200, OK_PARSE);
+    const local = await tempFile("scan.pdf", Buffer.from("%PDF-1.4"));
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parseFile(local, "blocks", { pdfBackend: "ai" });
+    assert.match(String(lastRequestBody), /name="pdfBackend"\r\n\r\nai\r\n/);
+  });
+
+  it("parseFile omits pdfBackend by default", async () => {
+    setMock(200, OK_PARSE);
+    const local = await tempFile("doc.pdf", Buffer.from("%PDF-1.4"));
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parseFile(local);
+    assert.equal(String(lastRequestBody).includes('name="pdfBackend"'), false);
+  });
+});
+
+// ── Uploads over the platform's 32 MiB request cap ──
+
+describe("FILE_TOO_LARGE", () => {
+  it("exports the cap", async () => {
+    const mod = await import("../src/index.ts");
+    assert.equal(mod.MAX_DIRECT_UPLOAD_BYTES, 33554432);
+    assert.equal(mod.FILE_TOO_LARGE, "FILE_TOO_LARGE");
+  });
+
+  it("parseFile over the cap throws before sending", async () => {
+    setMock(200, OK_PARSE);
+    const big = await tempFile("big.pdf", 33554432 + 1);
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(() => c.parseFile(big), (e: any) => {
+      assert.ok(e instanceof DocParseError);
+      assert.equal(e.code, "FILE_TOO_LARGE");
+      assert.equal(e.statusCode, 413);
+      assert.equal(e.details.size_bytes, 33554433);
+      assert.equal(e.details.limit_bytes, 33554432);
+      assert.match(e.message, /parseUrl/);
+      assert.match(e.message, /\/api\/v1\/upload\/url/);
+      return true;
+    });
+    assert.equal(requestCount, 0);
+  });
+
+  it("parseFile at exactly the cap is sent", async () => {
+    setMock(200, OK_PARSE);
+    const ok = await tempFile("ok.pdf", 33554432);
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await c.parseFile(ok);
+    assert.equal(requestCount, 1);
+  });
+
+  it("HTML 413 from the front end becomes FILE_TOO_LARGE", async () => {
+    setMock(413, {});
+    mockRawBody = "<!DOCTYPE html><html><title>Error 413 (Request Entity Too Large)!!1</title></html>";
+    const local = await tempFile("doc.pdf", Buffer.from("%PDF-1.4"));
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(() => c.parseFile(local), (e: any) => {
+      assert.ok(e instanceof DocParseError);
+      assert.equal(e.code, "FILE_TOO_LARGE");
+      assert.equal(e.statusCode, 413);
+      assert.equal(/<html/i.test(e.message), false);
+      assert.match(e.message, /sourceUrl/);
+      return true;
+    });
+  });
+
+  it("JSON 413 from the API keeps its own message and code", async () => {
+    setMock(413, { error: { code: "FILE_TOO_LARGE", message: "File exceeds your tier limit (10 MB)" } });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(() => c.parse("sample_pdf"), (e: any) => {
+      assert.equal(e.code, "FILE_TOO_LARGE");
+      assert.match(e.message, /tier limit/);
+      return true;
+    });
+  });
+
+  it("compat partition over the cap throws before sending", async () => {
+    setMock(200, {});
+    const big = await tempFile("big.docx", 33554432 + 1);
+    const uc = new UnstructuredClient({ serverUrl: baseUrl, apiKey: "dp_test" });
+    await assert.rejects(() => uc.general.partition({ file: big }), (e: any) => {
+      assert.equal(e.code, "FILE_TOO_LARGE");
+      return true;
+    });
+    assert.equal(requestCount, 0);
+  });
+
+  it("structured envelope code is exposed", async () => {
+    setMock(200, { error: { code: "FILE_TOO_LARGE", message: "too big" }, request_id: "r1" });
+    const c = new DocParse({ apiKey: "dp_test", baseUrl });
+    await assert.rejects(() => c.parse("x"), (e: any) => {
+      assert.equal(e.code, "FILE_TOO_LARGE");
+      assert.equal(e.requestId, "r1");
+      return true;
+    });
   });
 });

@@ -4,7 +4,7 @@
  */
 
 import type { ParseResult, ConvertResult, HealthResult, FormatsResult, DocParseOptions, ResponseMeta, RetryPolicy } from "./types.js";
-import { DocParseError, AuthError, QuotaError } from "./types.js";
+import { DocParseError, AuthError, QuotaError, fileTooLargeError, checkUploadSize } from "./types.js";
 import { KeyManager } from "./keys.js";
 
 // @ts-ignore — plain JS sibling module, no .d.ts
@@ -126,10 +126,19 @@ export class DocParse {
     } catch {
       /* network read failed — fall back to status-only */
     }
+    if (resp.status === 413 && (body === null || typeof body !== "object")) {
+      // The hosting platform's front end, not the API: an HTML page for a
+      // request over its 32 MiB cap.
+      throw fileTooLargeError(undefined, meta.requestId);
+    }
     let msg: string | undefined;
+    let code = "";
     if (body && typeof body === "object") {
       msg = body.error || body.message;
-      if (msg && typeof msg === "object") msg = (msg as any).message || JSON.stringify(msg);
+      if (msg && typeof msg === "object") {
+        code = (msg as any).code || "";
+        msg = (msg as any).message || JSON.stringify(msg);
+      }
     }
     if (!msg) msg = text || `HTTP ${resp.status}`;
     const suggestedFix: string =
@@ -139,6 +148,7 @@ export class DocParse {
       suggestedFix,
       details: body,
       replayable: meta.replayable,
+      code,
     };
     if (resp.status === 401) {
       throw new AuthError(msg || "Invalid or missing API key", common);
@@ -168,12 +178,24 @@ export class DocParse {
   /** Parse a document by sample ID or server-side filepath. Returns structured blocks.
    *  For uploading local files, use {@link parseFile} instead.
    *  `outputFormat`: `"blocks"` (default), `"markdown"`, `"html"`, `"markdown+metadata"`,
-   *  `"a2ui"`, or `"a2ui+editable"`. A2UI formats return an adjacency-list in `result.nodes`. */
-  async parse(filepath: string, outputFormat = "blocks", opts?: { sourceUrl?: string }): Promise<ParseResult> {
+   *  `"a2ui"`, or `"a2ui+editable"`. A2UI formats return an adjacency-list in `result.nodes`.
+   *
+   *  Options:
+   *  - `sourceUrl` — HTTPS signed/public URL the server fetches instead of a path.
+   *  - `gcsRef` — `gs://` ref returned by `POST /api/v1/upload/url` (Business tier),
+   *    the route for files over the 32 MiB direct-upload limit.
+   *  - `pdfBackend` — how a PDF is read: `""` (server default, `pdftotext`),
+   *    `"pdftotext"`, `"poppler"`, or `"ai"`. `"ai"` sends page images to Google
+   *    Gemini via Vertex AI — for scanned or image-only PDFs — and is billed as an
+   *    AI request. Ignored for non-PDF sources; not validated here, so a new
+   *    backend does not need an SDK release. */
+  async parse(filepath: string, outputFormat = "blocks", opts?: { sourceUrl?: string; gcsRef?: string; pdfBackend?: string }): Promise<ParseResult> {
     const url = this.baseUrl + "/api/v1/parse";
     const body: Record<string, string> = { filepath, outputFormat };
     if (this.apiKey) body.apiKey = this.apiKey;
     if (opts?.sourceUrl) body.sourceUrl = opts.sourceUrl;
+    if (opts?.gcsRef) body.gcsRef = opts.gcsRef;
+    if (opts?.pdfBackend) body.pdfBackend = opts.pdfBackend;
 
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.apiKey) headers["x-api-key"] = this.apiKey;
@@ -266,34 +288,49 @@ export class DocParse {
     };
   }
 
-  /** Parse a document from a URL. Convenience wrapper around {@link parse}. */
-  async parseUrl(url: string, outputFormat = "blocks"): Promise<ParseResult> {
-    return this.parse("", outputFormat, { sourceUrl: url });
+  /**
+   * Parse a document from a URL. Convenience wrapper around {@link parse}.
+   *
+   * The server fetches the URL (HTTPS only) and enforces the tier's file-size
+   * limit (Free: 10 MB, Pro: 25 MB, Business: 50 MB). This is the route for
+   * files over the 32 MiB direct-upload limit of {@link parseFile}.
+   * `pdfBackend` is as in {@link parse}.
+   */
+  async parseUrl(url: string, outputFormat = "blocks", opts?: { pdfBackend?: string }): Promise<ParseResult> {
+    return this.parse("", outputFormat, { sourceUrl: url, pdfBackend: opts?.pdfBackend });
   }
 
   /**
    * Upload a local file and parse it. Returns structured blocks.
    *
    * Uses multipart/form-data to upload the file directly to the API.
-   * Works on all tiers (Free: 10 MB, Pro: 25 MB, Business: 50 MB).
+   * Works on all tiers, up to the tier's file-size limit (Free: 10 MB,
+   * Pro: 25 MB) and never above 32 MiB: the hosting platform caps a direct
+   * upload at 32 MiB on every tier. A larger file throws `DocParseError` with
+   * `code === "FILE_TOO_LARGE"` before anything is sent; use {@link parseUrl}
+   * or `parse("", fmt, { gcsRef })` for it (Business: up to 50 MB).
+   * `pdfBackend` is as in {@link parse}.
    *
    * @example
    * ```ts
    * const result = await client.parseFile("report.docx");
    * console.log(result.blocks);
+   * const scanned = await client.parseFile("scan.pdf", "markdown", { pdfBackend: "ai" });
    * ```
    */
-  async parseFile(filepath: string, outputFormat = "blocks"): Promise<ParseResult> {
+  async parseFile(filepath: string, outputFormat = "blocks", opts?: { pdfBackend?: string }): Promise<ParseResult> {
     const url = this.baseUrl + "/api/v1/parse";
     // Detect Node.js vs browser
     const isNode = typeof process !== "undefined" && process.versions?.node;
+    const pdfBackend = opts?.pdfBackend || "";
 
     // Build a fresh FormData per attempt — fetch consumes the body, so a retry
     // must re-create it. (Node: re-wrap the file bytes; browser: re-append the File.)
     let makeForm: () => FormData;
     if (isNode) {
-      const { readFileSync } = await import("fs");
+      const { readFileSync, statSync } = await import("fs");
       const { basename } = await import("path");
+      checkUploadSize(statSync(filepath).size);
       const fileData = readFileSync(filepath);
       const name = basename(filepath);
       makeForm = () => {
@@ -301,14 +338,19 @@ export class DocParse {
         form.append("filepath", new Blob([fileData]), name);
         form.append("outputFormat", outputFormat);
         if (this.apiKey) form.append("apiKey", this.apiKey);
+        if (pdfBackend) form.append("pdfBackend", pdfBackend);
         return form;
       };
     } else {
+      // Browser: `filepath` is a File/Blob.
+      const size = (filepath as any)?.size;
+      if (typeof size === "number") checkUploadSize(size);
       makeForm = () => {
         const form = new FormData();
         form.append("filepath", filepath as any);
         form.append("outputFormat", outputFormat);
         if (this.apiKey) form.append("apiKey", this.apiKey);
+        if (pdfBackend) form.append("pdfBackend", pdfBackend);
         return form;
       };
     }
@@ -535,10 +577,10 @@ export class DocParse {
   /** Throw AuthError for auth-like messages, otherwise DocParseError. */
   private static _raiseEnvelopeError(
     msg: string, suggestedFix = "",
-    details: Record<string, unknown> = {}, requestId = "",
+    details: Record<string, unknown> = {}, requestId = "", code = "",
   ): never {
-    if (DocParse._isAuthErrorMessage(msg)) throw new AuthError(msg);
-    throw new DocParseError(msg, 0, suggestedFix, details, requestId);
+    if (DocParse._isAuthErrorMessage(msg)) throw new AuthError(msg, { code });
+    throw new DocParseError(msg, { suggestedFix, details, requestId, code });
   }
 
   /** Unwrap serve-api response envelope. */
@@ -547,7 +589,10 @@ export class DocParse {
       if (typeof outer.error === "string") {
         const suggested = outer.suggested_fix || "";
         const msg = outer.message || outer.error;
-        DocParse._raiseEnvelopeError(msg, suggested);
+        // Legacy shape {error: "CODE", message: "..."}: the string is the
+        // code only when a separate message accompanies it.
+        const code = outer.message ? outer.error : "";
+        DocParse._raiseEnvelopeError(msg, suggested, {}, "", code);
       }
       if (typeof outer.error === "object") {
         const err = outer.error;
@@ -555,7 +600,7 @@ export class DocParse {
         const suggested = err.suggested_fix || "";
         const details = err.details || {};
         const requestId = outer.request_id || "";
-        DocParse._raiseEnvelopeError(msg, suggested, details, requestId);
+        DocParse._raiseEnvelopeError(msg, suggested, details, requestId, err.code || "");
       }
       // Unknown error shape — return for caller handling
       return outer;
@@ -572,7 +617,7 @@ export class DocParse {
           const suggested = err.suggested_fix || "";
           const details = err.details || {};
           const requestId = inner.request_id || "";
-          DocParse._raiseEnvelopeError(msg, suggested, details, requestId);
+          DocParse._raiseEnvelopeError(msg, suggested, details, requestId, err.code || "");
         }
         DocParse._raiseEnvelopeError(String(err));
       }

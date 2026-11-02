@@ -19,11 +19,14 @@ class MockHandler(BaseHTTPRequestHandler):
     response_body = {}
     response_headers = {}  # extra headers to include in every response
     last_request_body = None  # captured POST body (bytes)
+    raw_body = None  # bytes served verbatim (non-JSON) instead of response_body
+    request_count = 0
 
     def do_GET(self):
         self._respond()
 
     def do_POST(self):
+        MockHandler.request_count += 1
         length = int(self.headers.get("Content-Length", 0))
         if length:
             MockHandler.last_request_body = self.rfile.read(length)
@@ -32,9 +35,12 @@ class MockHandler(BaseHTTPRequestHandler):
         self._respond()
 
     def _respond(self):
-        body = json.dumps(self.response_body).encode()
+        if self.raw_body is not None:
+            body, ctype = self.raw_body, "text/html; charset=UTF-8"
+        else:
+            body, ctype = json.dumps(self.response_body).encode(), "application/json"
         self.send_response(self.response_status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         for k, v in self.response_headers.items():
             self.send_header(k, v)
@@ -61,6 +67,8 @@ def _set_response(status=200, body=None, headers=None):
     MockHandler.response_body = body or {}
     MockHandler.response_headers = headers or {}
     MockHandler.last_request_body = None
+    MockHandler.raw_body = None
+    MockHandler.request_count = 0
 
 
 # ── _build_parse_result unit tests ──
@@ -712,3 +720,159 @@ class TestResponseMetaCapture:
         assert r.response_meta.tier == ""
         assert r.response_meta.quota_remaining_day == -1
         assert r.response_meta.replayable is False
+
+
+# ── pdf_backend on parse entry points ──
+
+_OK_PARSE = {"result": json.dumps({
+    "status": "ok", "filename": "doc.pdf", "format": "pdf",
+    "blocks": [], "metadata": {}, "summary": {"totalBlocks": 0},
+})}
+
+
+class TestParsePdfBackend:
+    def test_parse_sends_pdf_backend(self, mock_server):
+        _set_response(200, _OK_PARSE)
+        DocParse(api_key="dp_test", base_url=mock_server).parse(
+            "sample_pdf", pdf_backend="ai")
+        assert json.loads(MockHandler.last_request_body)["pdfBackend"] == "ai"
+
+    def test_parse_omits_pdf_backend_by_default(self, mock_server):
+        _set_response(200, _OK_PARSE)
+        DocParse(api_key="dp_test", base_url=mock_server).parse("sample_pdf")
+        body = json.loads(MockHandler.last_request_body)
+        assert "pdfBackend" not in body
+        assert "gcsRef" not in body
+
+    def test_parse_sends_gcs_ref(self, mock_server):
+        _set_response(200, _OK_PARSE)
+        DocParse(api_key="dp_test", base_url=mock_server).parse(
+            "", gcs_ref="gs://bucket/uploads/big.pdf")
+        assert json.loads(MockHandler.last_request_body)["gcsRef"] == \
+            "gs://bucket/uploads/big.pdf"
+
+    def test_parse_url_sends_pdf_backend(self, mock_server):
+        _set_response(200, _OK_PARSE)
+        DocParse(api_key="dp_test", base_url=mock_server).parse_url(
+            "https://example.com/scan.pdf", pdf_backend="poppler")
+        body = json.loads(MockHandler.last_request_body)
+        assert body["pdfBackend"] == "poppler"
+        assert body["sourceUrl"] == "https://example.com/scan.pdf"
+
+    def test_parse_file_sends_pdf_backend_form_field(self, mock_server, tmp_path):
+        _set_response(200, _OK_PARSE)
+        local = tmp_path / "scan.pdf"
+        local.write_bytes(b"%PDF-1.4")
+        DocParse(api_key="dp_test", base_url=mock_server).parse_file(
+            str(local), pdf_backend="ai")
+        raw = MockHandler.last_request_body
+        assert b'name="pdfBackend"' in raw
+        assert b"\r\n\r\nai\r\n" in raw
+
+    def test_parse_file_omits_pdf_backend_by_default(self, mock_server, tmp_path):
+        _set_response(200, _OK_PARSE)
+        local = tmp_path / "doc.pdf"
+        local.write_bytes(b"%PDF-1.4")
+        DocParse(api_key="dp_test", base_url=mock_server).parse_file(str(local))
+        assert b'name="pdfBackend"' not in MockHandler.last_request_body
+
+
+# ── Uploads over the platform's 32 MiB request cap ──
+
+def _sparse_file(path, size):
+    with open(path, "wb") as f:
+        f.truncate(size)
+    return str(path)
+
+
+class TestFileTooLarge:
+    def test_constant(self):
+        from ailang_parse import MAX_DIRECT_UPLOAD_BYTES, FILE_TOO_LARGE
+        assert MAX_DIRECT_UPLOAD_BYTES == 33554432
+        assert FILE_TOO_LARGE == "FILE_TOO_LARGE"
+
+    def test_parse_file_over_cap_raises_before_sending(self, mock_server, tmp_path):
+        _set_response(200, _OK_PARSE)
+        big = _sparse_file(tmp_path / "big.pdf", 33554432 + 1)
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        with pytest.raises(DocParseError) as ei:
+            c.parse_file(big)
+        e = ei.value
+        assert e.code == "FILE_TOO_LARGE"
+        assert e.status_code == 413
+        assert e.details["size_bytes"] == 33554433
+        assert e.details["limit_bytes"] == 33554432
+        assert "parse_url" in str(e) and "/api/v1/upload/url" in str(e)
+        assert "gcs_ref" in e.suggested_fix
+        assert MockHandler.request_count == 0
+
+    def test_parse_file_at_cap_is_sent(self, mock_server, tmp_path):
+        _set_response(200, _OK_PARSE)
+        ok = _sparse_file(tmp_path / "ok.pdf", 33554432)
+        DocParse(api_key="dp_test", base_url=mock_server).parse_file(ok)
+        assert MockHandler.request_count == 1
+
+    def test_convert_file_counts_reference_doc(self, mock_server, tmp_path):
+        _set_response(200, {})
+        src = _sparse_file(tmp_path / "src.md", 20 * 1024 * 1024)
+        tpl = _sparse_file(tmp_path / "tpl.docx", 20 * 1024 * 1024)
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        with pytest.raises(DocParseError) as ei:
+            c.convert_file(src, target="docx", reference_doc=tpl)
+        assert ei.value.code == "FILE_TOO_LARGE"
+        assert MockHandler.request_count == 0
+
+    def test_html_413_becomes_structured_error(self, mock_server, tmp_path):
+        """Google's front end answers an oversize request with an HTML 413
+        page; the SDK must not surface a JSON decode error or raw HTML."""
+        _set_response(413)
+        MockHandler.raw_body = (b"<!DOCTYPE html><html><title>Error 413 "
+                                b"(Request Entity Too Large)!!1</title></html>")
+        local = tmp_path / "doc.pdf"
+        local.write_bytes(b"%PDF-1.4")
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        with pytest.raises(DocParseError) as ei:
+            c.parse_file(str(local))
+        e = ei.value
+        assert e.code == "FILE_TOO_LARGE"
+        assert e.status_code == 413
+        assert "<html" not in str(e).lower()
+        assert "source_url" in str(e)
+
+    def test_json_413_keeps_server_error(self, mock_server):
+        """A 413 the API itself sent (JSON) keeps its own message and code."""
+        _set_response(413, {"error": {"code": "FILE_TOO_LARGE",
+                                      "message": "File exceeds your tier limit (10 MB)"}})
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        with pytest.raises(DocParseError) as ei:
+            c.parse("sample_pdf")
+        assert ei.value.code == "FILE_TOO_LARGE"
+        assert "tier limit" in str(ei.value)
+
+    def test_compat_partition_over_cap(self, mock_server, tmp_path):
+        from ailang_parse.compat import UnstructuredClient
+        _set_response(200, {})
+        big = _sparse_file(tmp_path / "big.docx", 33554432 + 1)
+        c = UnstructuredClient(server_url=mock_server, api_key="dp_test")
+        with pytest.raises(DocParseError) as ei:
+            c.general.partition(file=big)
+        assert ei.value.code == "FILE_TOO_LARGE"
+        assert MockHandler.request_count == 0
+
+
+class TestEnvelopeErrorCode:
+    def test_structured_envelope_code_is_exposed(self, mock_server):
+        _set_response(200, {"error": {"code": "FILE_TOO_LARGE",
+                                      "message": "too big"}, "request_id": "r1"})
+        c = DocParse(api_key="dp_test", base_url=mock_server)
+        with pytest.raises(DocParseError) as ei:
+            c.parse("x")
+        assert ei.value.code == "FILE_TOO_LARGE"
+        assert ei.value.request_id == "r1"
+
+    def test_legacy_envelope_code_is_exposed(self, mock_server):
+        _set_response(200, {"error": "AUTH_REQUIRED", "message": "key needed"})
+        c = DocParse(api_key="", base_url=mock_server)
+        with pytest.raises(DocParseError) as ei:
+            c.parse("x")
+        assert ei.value.code == "AUTH_REQUIRED"

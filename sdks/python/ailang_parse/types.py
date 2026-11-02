@@ -15,13 +15,25 @@ class DocParseError(Exception):
     """
     def __init__(self, message: str, status_code: int = 0, suggested_fix: str = "",
                  details: Optional[Dict[str, Any]] = None, request_id: str = "",
-                 replayable: bool = False):
+                 replayable: bool = False, code: str = ""):
         super().__init__(message)
         self.status_code = status_code
         self.suggested_fix = suggested_fix
         self.details = details
         self.request_id = request_id
         self.replayable = replayable
+        #: Machine-readable error code from the API's structured error
+        #: envelope (e.g. ``"FILE_TOO_LARGE"``), or ``""`` when the server
+        #: sent none.
+        self.code = code
+
+
+#: Largest request body the hosting platform (Cloud Run, HTTP/1) accepts.
+#: A direct multipart upload above this never reaches the API, on any tier.
+MAX_DIRECT_UPLOAD_BYTES = 32 * 1024 * 1024
+
+#: ``DocParseError.code`` for a file too large to upload or parse.
+FILE_TOO_LARGE = "FILE_TOO_LARGE"
 
 
 class AuthError(DocParseError):
