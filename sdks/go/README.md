@@ -128,11 +128,11 @@ report, err := client.ParseURL(ctx, "https://example.com/report.pdf", "blocks",
 `ParseURL`'s trailing `ParseOptions` is optional, so existing three-argument
 calls compile unchanged.
 
-<!-- PENDING(capabilities): this sentence relies on the server listing the AI
-model and processing region in GET /api/v1/capabilities. Do not name a model
-or region here. -->
 The model and processing region used for `"ai"` are listed by
-`GET /api/v1/capabilities`.
+`GET /api/v1/capabilities` under `ai_processing`.
+
+A scanned PDF read with a text backend (the default) fails with error code
+`PDF_TEXT_LAYER_SPARSE` instead of returning blank pages; retry it with `PDFBackend: "ai"`.
 
 ## File Size Limits
 
