@@ -330,6 +330,62 @@ class Poppler(unittest.TestCase):
         self.assertEqual([(i["width"], i["height"]) for i in images], [(480, 360)])
         self.assertEqual(adapter._docling_blocks(items), [])
 
+    def diagram_page(self):
+        title = [(50, 40, 300, 70, "Our three teams", 24, True)]
+        labels = [(80, 150, 160, 162, "Sales", 10, False), (300, 150, 380, 162, "Product", 10, False),
+                  (520, 150, 590, 162, "Ops", 10, False), (80, 250, 170, 262, "Leads in", 10, False),
+                  (300, 260, 400, 272, "Roadmap", 10, False), (520, 280, 590, 292, "Support", 10, False)]
+        return poppler_xml([title + labels])
+
+    def slide_tools(self, coverage):
+        calls = []
+        return calls, {"coverage": lambda pno, page, t, i: coverage,
+                       "render": lambda pno, top, bottom: calls.append((pno, round(top), round(bottom))) or b"\x89PNG diagram"}
+
+    def test_diagram_page_becomes_title_picture_and_notes(self):
+        bbox, html = self.diagram_page()
+        calls, tools = self.slide_tools(0.3)
+        blocks, _ = adapter._poppler_blocks(bbox, html, None, tools)
+        self.assertEqual([(b["kind"], b.get("region", "body")) for b in blocks][:2], [("heading", "body"), ("image", "body")])
+        self.assertEqual(blocks[0]["text"], "Our three teams")
+        notes = [b["text"] for b in blocks if b.get("region") == "notes"]
+        self.assertIn("Sales", " ".join(notes))
+        self.assertEqual(calls[0][0], 1)
+        self.assertGreater(calls[0][1], 70)   # cropped below the title
+
+    def test_undrawn_page_is_not_a_diagram(self):
+        bbox, html = self.diagram_page()
+        _, tools = self.slide_tools(0.0)
+        blocks, _ = adapter._poppler_blocks(bbox, html, None, tools)
+        self.assertFalse(any(b["kind"] == "image" or b.get("region") == "notes" for b in blocks))
+
+    def test_drawn_table_stays_a_table(self):
+        rows = [(60, 100 + i * 20, 120, 112 + i * 20, w, 10, i == 0) for i, w in enumerate(["Name", "Ann", "Bob"])] + \
+               [(220, 100 + i * 20, 280, 112 + i * 20, w, 10, i == 0) for i, w in enumerate(["Age", "23", "31"])] + \
+               [(380, 100 + i * 20, 440, 112 + i * 20, w, 10, i == 0) for i, w in enumerate(["City", "Oslo", "Rome"])]
+        bbox, html = poppler_xml([[(50, 40, 300, 70, "A table", 24, True)] + rows])
+        _, tools = self.slide_tools(0.3)
+        blocks, _ = adapter._poppler_blocks(bbox, html, None, tools)
+        self.assertTrue(any(b["kind"] == "table" for b in blocks))
+        self.assertFalse(any(b["kind"] == "image" for b in blocks))
+
+    def test_symbol_font_glyphs_mapped(self):
+        line = {"words": [{"text": "Provider"}, {"text": "\uf0e0"}, {"text": "LLMs"}]}
+        self.assertEqual(adapter._pp_line_text(line), "Provider → LLMs")
+
+    def test_ppm_coverage(self):
+        # 10x10 white page with a 3x3 black square in the middle band.
+        w = h = 10
+        px = bytearray(b"\xff" * (w * h * 3))
+        for y in range(4, 7):
+            for x in range(4, 7):
+                i = (y * w + x) * 3
+                px[i:i + 3] = b"\x00\x00\x00"
+        ppm = b"P6\n10 10\n255\n" + bytes(px)
+        cov = adapter._pp_ppm_coverage(ppm, 100.0, 100.0, [])
+        self.assertAlmostEqual(cov, 9 / 90, places=3)       # the bottom row is the footer band
+        self.assertEqual(adapter._pp_ppm_coverage(ppm, 100.0, 100.0, [(40, 40, 70, 70)]), 0.0)
+
     def test_key_matches_ailang_normalisation(self):
         # Mirrors pdfFurnitureKey's inline tests in pdf_furniture.ail.
         self.assertEqual(adapter._pp_key("Holosun ApS · CVR 44 324687 · ailang.sunholo.com"),

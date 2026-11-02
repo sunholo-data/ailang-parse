@@ -1,7 +1,7 @@
 module docparse/services/odp_generator
 
 import std/string (length, intToStr)
-import std/list (foldl, flatMap, length as listLength)
+import std/list (foldl, flatMap, map, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/list (concat)
 import std/result (Ok, Err)
@@ -11,6 +11,7 @@ import docparse/services/odf_text (odfEncodeText)
 import docparse/services/odf_runs (odfCollectRunStyles, odfRunsToXml)
 import docparse/services/image_size (imageExtentEmu, ImageExtent)
 import docparse/services/image_embed (embedIsBinaryPayload)
+import docparse/services/pptx_layout (odpFitsGrid, odpPaginate, odpFlowEmu, pptxFlatten, odpGridEmu)
 import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFrame, odfImgFrameStyle, odfImgNsMissing, odfImgManifest, odfImgByteEntries, odfImgTextEntries)
 
 -- ODP Generator — converts Block ADT to a valid .odp file.
@@ -20,8 +21,9 @@ import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFram
 export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS}
   ensures { length(result) > 0 }
 {
-  let slides = odpCollectSlides(doc.blocks);
-  let body = odpSlidesAcc(slides, 1, {xml: "", pics: [], shift: 0});
+  let laid = odpLayoutSlides(odpCollectSlides(doc.blocks));
+  let slides = map(\l. l.blocks, laid);
+  let body = odpSlidesAcc(laid, 1, {xml: "", pics: [], shift: 0, flow: false});
   let pics = body.pics;
   let contentXml = odpBuildContent(slides, body);
   let stylesXml = odpMinimalStyles();
@@ -47,7 +49,19 @@ export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS
 }
 
 -- The body XML and the picture parts it places, threaded through the walk.
-type OdpBody = {xml: string, pics: [OdfImgPart], shift: int}
+type OdpBody = {xml: string, pics: [OdfImgPart], shift: int, flow: bool}
+
+-- A slide's blocks and whether they are flowed (see pptx_layout's ODP part).
+type OdpSlide = {blocks: [Block], flow: bool}
+
+-- Slides that fit ODP's 3 cm grid are kept as they were (byte-identical);
+-- the rest are paginated, and their text frames push the frames after them
+-- down by their estimated overhang, as pictures already did.
+pure func odpLayoutSlides(slides: [[Block]]) -> [OdpSlide] =
+  flatMap(\sl.
+    if odpFitsGrid(sl) then [{blocks: sl, flow: false}]
+    else map(\chunk. {blocks: chunk, flow: true}, odpPaginate(sl)),
+    slides)
 
 -- Pictures sit 2cm in from the left and are at most 22cm wide, as the text
 -- frames are; the slide is 25.4cm x 19.05cm.
@@ -56,12 +70,13 @@ pure func odpImgMaxCx() -> int = 7920000
 pure func odpSlideHeight() -> int = 6858000
 
 -- Slides in order. Each slide's page XML and its pictures are threaded.
-pure func odpSlidesAcc(slides: [[Block]], idx: int, acc: OdpBody) -> OdpBody =
+pure func odpSlidesAcc(slides: [OdpSlide], idx: int, acc: OdpBody) -> OdpBody =
   match slides {
     [] => acc,
     slide :: rest =>
-      let page = odpSlideAcc(slide, 1, {xml: "", pics: acc.pics, shift: 0}) in
-      let next = {xml: "${acc.xml}<draw:page draw:name=\"Slide${intToStr(idx)}\" draw:style-name=\"dp1\">${page.xml}</draw:page>", pics: page.pics, shift: 0} in
+      let blocks = if slide.flow then pptxFlatten(slide.blocks) else slide.blocks in
+      let page = odpSlideAcc(blocks, 1, {xml: "", pics: acc.pics, shift: 0, flow: slide.flow}) in
+      let next = {xml: "${acc.xml}<draw:page draw:name=\"Slide${intToStr(idx)}\" draw:style-name=\"dp1\">${page.xml}</draw:page>", pics: page.pics, shift: 0, flow: false} in
       odpSlidesAcc(rest, idx + 1, next)
   }
 
@@ -81,17 +96,24 @@ pure func odpBlockAcc(block: Block, frameIdx: int, acc: OdpBody) -> OdpBody =
       then odpImageAcc(i.data, i.mime, i.description, i.width, i.height, frameIdx, acc)
       else odpAppendXml(acc, odpBlockToFrame(block, frameIdx, acc.shift)),
     SectionBlock(s) => odpSlideAcc(s.blocks, frameIdx, acc),
-    _ => odpAppendXml(acc, odpBlockToFrame(block, frameIdx, acc.shift))
+    _ => odpGrow(odpAppendXml(acc, odpBlockToFrame(block, frameIdx, acc.shift)), block)
   }
+
+-- In a flowed slide the next frame starts where this one ends (its
+-- estimated height plus a gap), not on the 3 cm grid: a tall frame pushes the
+-- rest down, a one-line label lets them move up. In a slide that fits,
+-- nothing moves.
+pure func odpGrow(acc: OdpBody, block: Block) -> OdpBody =
+  if acc.flow then {acc | shift: acc.shift + odpFlowEmu(block) - odpGridEmu()} else acc
 
 -- The string-only view of a slide's frames. Pictures are not carried by it, so
 -- it is only for the section arm of odpBlockToFrame, which odpBlockAcc never
 -- reaches with a section.
 pure func odpSlideContent(blocks: [Block], frameIdx: int) -> string =
-  odpSlideAcc(blocks, frameIdx, {xml: "", pics: [], shift: 0}).xml
+  odpSlideAcc(blocks, frameIdx, {xml: "", pics: [], shift: 0, flow: false}).xml
 
 pure func odpAppendXml(acc: OdpBody, xml: string) -> OdpBody =
-  {xml: "${acc.xml}${xml}", pics: acc.pics, shift: acc.shift}
+  {xml: "${acc.xml}${xml}", pics: acc.pics, shift: acc.shift, flow: acc.flow}
 
 -- A picture frame in the same column and row as a text frame at frameIdx. A
 -- picture too tall for the rest of the slide is scaled down, aspect kept.
@@ -105,7 +127,7 @@ pure func odpImageAcc(data: string, mime: string, description: string, wantW: in
   -- pushes the frames after it down by the excess, so nothing lands on it.
   let overhang = ext.cy + 180000 - 1080000;
   let grown = if overhang > 0 then acc.shift + overhang else acc.shift;
-  {xml: "${acc.xml}${odfImgFrame(attrs, part.name, description)}", pics: part :: acc.pics, shift: grown}
+  {xml: "${acc.xml}${odfImgFrame(attrs, part.name, description)}", pics: part :: acc.pics, shift: grown, flow: acc.flow}
 }
 
 -- Keeps a picture above the bottom edge (half a centimetre kept clear), scaling

@@ -1,0 +1,421 @@
+module docparse/services/pptx_layout
+
+-- Slide layout for PPTX and ODP output: how tall each block is on a slide,
+-- whether a slide's blocks fit the generator's fixed slots, and how to spread
+-- blocks that do not over as many slides as they need.
+--
+-- The generator places block n at (n + 1) * 1200000 EMU with fixed box
+-- heights. Five blocks fit before the bottom of a 6858000 EMU slide; a sixth,
+-- or a paragraph taller than its box, ran off the slide and could not be seen
+-- (v0.53.0 slide pagination design, absorbed into v0.55.0 PDF to PowerPoint).
+--
+-- A slide whose blocks fit those slots keeps them, so every existing deck is
+-- byte-identical. Anything else is laid out by flow: blocks stacked from the
+-- top margin by estimated height, continuing on further slides that repeat
+-- the title with "(cont.)". A list taller than a slide is split by items, a
+-- table by rows with its header repeated, a long paragraph at sentences.
+--
+-- Estimates only need to be conservative: a slide that ends a little short is
+-- fine, one that overflows is the bug this module exists for.
+
+import std/list (map, filter, foldl, reverse, take, drop, flatMap, concat, length as listLength)
+import std/string (length, split, join, trim, endsWith, substring, stringToInt, concat as strConcat)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, InlineRun, mkText, simpleCell)
+import std/option (getOrElse)
+import docparse/services/image_size (imageExtentEmu)
+
+-- =====================================================================
+-- Geometry (EMU; 914400 per inch, 12700 per point)
+-- =====================================================================
+
+export pure func pptxSlideHeightEmu() -> int = 6858000
+export pure func pptxSlotEmu() -> int = 1200000
+export pure func pptxColumnEmu() -> int = 8229600
+export pure func pptxFlowTopEmu() -> int = 457200
+export pure func pptxFlowGapEmu() -> int = 120000
+
+-- Height available to flowed content: the slide less a top and bottom margin.
+export pure func pptxUsableEmu() -> int
+  ensures { result > 0 }
+{
+  pptxSlideHeightEmu() - 2 * pptxFlowTopEmu()
+}
+
+-- Lines a run of text takes in a box: characters at an average glyph width
+-- of 0.55 em, so a 9 in column holds ~64 characters at 18 pt and ~41 at 28 pt.
+-- Never less than one line.
+export pure func pptxLines(chars: int, widthEmu: int, pointSize: int) -> int
+  ensures { result >= 1 }
+  tests [((64, 8229600, 18), 1), ((65, 8229600, 18), 2), ((0, 8229600, 18), 1), ((200, 8229600, 28), 5)]
+{
+  let glyph = pointSize * 12700 * 55 / 100;
+  let perLine = if glyph > 0 && widthEmu > 182880 then (widthEmu - 182880) / glyph else 1;
+  let per = if perLine < 1 then 1 else perLine;
+  let lines = (chars + per - 1) / per;
+  if lines < 1 then 1 else lines
+}
+
+-- One line's height at a point size (1.2 line spacing) in EMU.
+pure func pptxLineEmu(pointSize: int) -> int = pointSize * 12700 * 12 / 10
+
+-- Box insets top + bottom (DrawingML default 0.05 in each).
+pure func pptxInsetsEmu() -> int = 91440
+
+-- =====================================================================
+-- Height estimate per block
+-- =====================================================================
+
+export pure func pptxEstimateEmu(b: Block) -> int =
+  match b {
+    HeadingBlock(h) => pptxLines(length(h.text), pptxColumnEmu(), 28) * pptxLineEmu(28) + pptxInsetsEmu(),
+    TextBlock(t) => pptxLines(length(t.text), pptxColumnEmu(), 18) * pptxLineEmu(18) + pptxInsetsEmu(),
+    ListBlock(l) => pptxListEmu(l.items) + pptxInsetsEmu(),
+    TableBlock(t) => pptxTableEmu(t.headers, t.rows),
+    -- Never taller than a slide with a title above it.
+    ImageBlock(i) => pptxMinInt((imageExtentEmu(i.data, i.mime, pptxColumnEmu(), i.width, i.height)).cy,
+                                pptxUsableEmu() - 700000),
+    SectionBlock(s) => foldl(\acc x. acc + pptxEstimateEmu(x), 0, s.blocks),
+    _ => 400000
+  }
+
+-- Each item at 18 pt behind a bullet ("• " or "12. ").
+pure func pptxListEmu(items: [string]) -> int =
+  foldl(\acc item. acc + pptxLines(length(item) + 3, pptxColumnEmu(), 18) * pptxLineEmu(18), 0, items)
+
+-- A row is as tall as its tallest wrapped cell, and never shorter than the
+-- generator's 370840 EMU row. Cells are set at pptxTableFlowPt.
+pure func pptxTableEmu(headers: [TableCell], rows: [[TableCell]]) -> int {
+  let colW = pptxColumnEmu() / pptxTableCols(headers, rows);
+  let pt = pptxTableFlowPt(headers, rows);
+  let all = if listLength(headers) > 0 then headers :: rows else rows;
+  foldl(\acc r. acc + pptxRowEmu(r, colW, pt), 0, all)
+}
+
+pure func pptxTableCols(headers: [TableCell], rows: [[TableCell]]) -> int {
+  let cols = if listLength(headers) > 0 then listLength(headers)
+    else foldl(\m r. if listLength(r) > m then listLength(r) else m, 1, rows);
+  if cols > 0 then cols else 1
+}
+
+-- Font size for a flowed table: 18 pt up to four columns, then scaled down
+-- (never below 10 pt). At 18 pt an 11-column table holds ~4 characters per
+-- line, so one row with a long note is taller than the slide.
+export pure func pptxTableFlowPt(headers: [TableCell], rows: [[TableCell]]) -> int =
+  pptxTableFontPt(pptxTableCols(headers, rows))
+
+export pure func pptxTableFontPt(cols: int) -> int
+  ensures { result >= 10 && result <= 18 }
+  tests [(1, 18), (4, 18), (5, 14), (7, 10), (11, 10)]
+{
+  if cols <= 4 then 18
+  else if 18 * 4 / cols < 10 then 10
+  else 18 * 4 / cols
+}
+
+pure func pptxRowEmu(cells: [TableCell], colW: int, pt: int) -> int {
+  let tallest = foldl(\m c. pptxMaxInt(m, pptxLines(length(c.text), colW, pt) * pptxLineEmu(pt) + pptxInsetsEmu()), 0, cells);
+  pptxMaxInt(tallest, 370840)
+}
+
+pure func pptxMaxInt(a: int, b: int) -> int = if a > b then a else b
+
+pure func pptxMinInt(a: int, b: int) -> int = if a < b then a else b
+
+-- =====================================================================
+-- Does a slide fit the fixed slots?
+-- =====================================================================
+
+-- True when the generator's slot geometry shows every block: block i at
+-- (i + 1) * slot, no taller than its slot, and above the slide's bottom edge.
+export pure func pptxFitsSlots(blocks: [Block]) -> bool =
+  pptxFitsFrom(pptxFlatten(blocks), 1)
+
+pure func pptxFitsFrom(blocks: [Block], slot: int) -> bool =
+  match blocks {
+    [] => true,
+    b :: rest =>
+      let h = pptxEstimateEmu(b) in
+      pptxSlotFits(slot, h) && pptxFitsFrom(rest, slot + 1)
+  }
+
+-- Arithmetic core of the slot test.
+export pure func pptxSlotFits(slot: int, heightEmu: int) -> bool
+  ensures { result == false || slot * 1200000 + heightEmu <= 6858000 }
+{
+  heightEmu <= 1200000 && slot * 1200000 + heightEmu <= 6858000
+}
+
+-- Sections other than slides are transparent on a slide: their children are
+-- what is placed.
+export pure func pptxFlatten(blocks: [Block]) -> [Block] =
+  flatMap(\b. match b {
+    SectionBlock(s) => if s.kind == "header" || s.kind == "footer" then [] else pptxFlatten(s.blocks),
+    _ => [b]
+  }, blocks)
+
+-- =====================================================================
+-- Pagination
+-- =====================================================================
+
+-- Spread one slide's blocks over as many slides as they need. The first
+-- heading is the slide's title and is repeated, marked "(cont.)", on each
+-- continuation. Never returns an empty list, and every block, or every piece
+-- of a split block, appears exactly once.
+export pure func pptxPaginate(blocks: [Block]) -> [[Block]] {
+  let flat = pptxFlatten(blocks);
+  let title = match flat {
+    HeadingBlock(h) :: _ => [HeadingBlock({text: "${h.text} (cont.)", level: h.level, runs: []})],
+    _ => []
+  };
+  let pieces = flatMap(\b. pptxSplitTall(b, pptxUsableEmu()), flat);
+  let pages = pptxFill(pieces, title, [], 0, []);
+  match pages {
+    [] => [[]],
+    _ => pages
+  }
+}
+
+-- Greedy fill. `cur` is the open slide reversed, `used` its height so far,
+-- `acc` finished slides reversed.
+pure func pptxFill(blocks: [Block], title: [Block], cur: [Block], used: int, acc: [[Block]]) -> [[Block]] =
+  match blocks {
+    [] => reverse(if listLength(cur) > 0 then reverse(cur) :: acc else acc),
+    b :: rest =>
+      let h = pptxEstimateEmu(b) + pptxFlowGapEmu() in
+      if listLength(cur) == 0 || used + h <= pptxUsableEmu()
+      then pptxFill(rest, title, b :: cur, used + h, acc)
+      else
+        -- Keep a heading with what follows it: a heading that would end this
+        -- slide moves to the next one, unless it is all the slide holds.
+        -- A slide left holding only the repeated title is not kept.
+        let carried = match cur {
+          HeadingBlock(_) :: earlier => if listLength(earlier) > 0 then {move: pptxHead(cur), keep: earlier} else {move: [], keep: cur},
+          _ => {move: [], keep: cur}
+        } in
+        let start = concat(carried.move, reverse(title)) in
+        let startUsed = foldl(\a t. a + pptxEstimateEmu(t) + pptxFlowGapEmu(), 0, start) in
+        let finished = if listLength(carried.keep) > listLength(title) || listLength(acc) == 0
+          then reverse(carried.keep) :: acc else acc in
+        pptxFill(rest, title, b :: start, startUsed + h, finished)
+  }
+
+pure func pptxHead(xs: [Block]) -> [Block] =
+  match xs {
+    [] => [],
+    x :: _ => [x]
+  }
+
+-- A block taller than `budget` split into pieces that fit: lists by items,
+-- tables by rows (each piece repeats the header), text at sentence ends.
+-- Anything else is returned whole; pictures are scaled at render time.
+export pure func pptxSplitTall(b: Block, budget: int) -> [Block] =
+  if pptxEstimateEmu(b) <= budget then [b]
+  else match b {
+    ListBlock(l) => pptxSplitList(l.items, l.itemRuns, l.itemLevels, l.ordered, budget * 3 / 4),
+    TableBlock(t) => pptxSplitTable(t.headers, t.rows, t.caption, budget * 3 / 4),
+    TextBlock(t) =>
+      if listLength(t.runs) > 0 then [b]
+      else map(\s. mkText(s, t.style, t.level), pptxSentenceChunks(t.text, budget * 3 / 4)),
+    _ => [b]
+  }
+
+-- Items in runs that fit the budget; runs and levels follow their items.
+pure func pptxSplitList(items: [string], runs: [[InlineRun]], levels: [int], ordered: bool, budget: int) -> [Block] {
+  let n = pptxTakeFitting(map(\i. pptxLines(length(i) + 3, pptxColumnEmu(), 18) * pptxLineEmu(18), items), budget, 0);
+  let k = if n < 1 then 1 else n;
+  let piece = ListBlock({items: take(k, items),
+                         ordered: ordered,
+                         itemRuns: if listLength(runs) == listLength(items) then take(k, runs) else [],
+                         itemLevels: if listLength(levels) == listLength(items) then take(k, levels) else []});
+  if k >= listLength(items) then [piece]
+  else piece :: pptxSplitList(drop(k, items),
+                              if listLength(runs) == listLength(items) then drop(k, runs) else [],
+                              if listLength(levels) == listLength(items) then drop(k, levels) else [],
+                              ordered, budget)
+}
+
+pure func pptxSplitTable(headers: [TableCell], rows: [[TableCell]], caption: string, budget: int) -> [Block] {
+  let colW = pptxColumnEmu() / pptxTableCols(headers, rows);
+  let pt = pptxTableFlowPt(headers, rows);
+  let headH = if listLength(headers) > 0 then pptxRowEmu(headers, colW, pt) else 0;
+  let n = pptxTakeFitting(map(\r. pptxRowEmu(r, colW, pt), rows), budget - headH, 0);
+  let k = if n < 1 then 1 else n;
+  let piece = TableBlock({rows: take(k, rows), headers: headers, caption: caption});
+  if k >= listLength(rows) then [piece]
+  else piece :: pptxSplitTable(headers, drop(k, rows), caption, budget)
+}
+
+-- How many leading heights fit within the budget.
+export pure func pptxTakeFitting(heights: [int], budget: int, used: int) -> int
+  ensures { result >= 0 }
+=
+  match heights {
+    [] => 0,
+    h :: rest => if used + h > budget then 0 else 1 + pptxTakeFitting(rest, budget, used + h)
+  }
+
+-- Text cut at sentence ends ("." followed by a space) into pieces that fit.
+pure func pptxSentenceChunks(text: string, budget: int) -> [string] {
+  let sentences = filter(\s. length(trim(s)) > 0, map(\s. "${trim(s)}.", split(text, ". ")));
+  let fixed = pptxFixLast(sentences, endsWith(trim(text), "."));
+  pptxGroupSentences(fixed, budget, "", [])
+}
+
+-- split on ". " re-adds a full stop to every piece; take it off the last one
+-- when the text did not end with one.
+pure func pptxFixLast(sentences: [string], endedWithStop: bool) -> [string] =
+  if endedWithStop then sentences
+  else match reverse(sentences) {
+    [] => [],
+    last :: rest =>
+      let trimmed = if endsWith(last, ".") then pptxDropLastChar(last) else last in
+      reverse(trimmed :: rest)
+  }
+
+pure func pptxDropLastChar(s: string) -> string = substring(s, 0, length(s) - 1)
+
+pure func pptxGroupSentences(sentences: [string], budget: int, cur: string, acc: [string]) -> [string] =
+  match sentences {
+    [] => reverse(if length(cur) > 0 then cur :: acc else acc),
+    s :: rest =>
+      let next = if length(cur) == 0 then s else "${cur} ${s}" in
+      let h = pptxLines(length(next), pptxColumnEmu(), 18) * pptxLineEmu(18) + pptxInsetsEmu() in
+      if length(cur) > 0 && h > budget
+      then pptxGroupSentences(rest, budget, s, cur :: acc)
+      else pptxGroupSentences(rest, budget, next, acc)
+  }
+
+-- =====================================================================
+-- ODP: the same fill on ODP's grid
+-- =====================================================================
+--
+-- odp_generator places frame n at n * 3 cm (1080000 EMU) on a 19.05 cm slide;
+-- frames auto-grow, so a tall one overlapped the next and the sixth ran off
+-- the bottom. A slide fits when it has at most five frames and none outgrows
+-- its slot (tables get 4 cm). Otherwise blocks are filled greedily, each
+-- taking max(its height, one slot), with the same split and "(cont.)" rules.
+
+export pure func odpGridEmu() -> int = 1080000
+
+export pure func odpFitsGrid(blocks: [Block]) -> bool {
+  let flat = pptxFlatten(blocks);
+  listLength(flat) <= 5 && foldl(\ok b. ok && pptxEstimateEmu(b) <= odpSlotRoom(b), true, flat)
+}
+
+pure func odpSlotRoom(b: Block) -> int =
+  match b {
+    TableBlock(_) => 1440000,
+    ImageBlock(_) => 6858000,
+    _ => odpGridEmu() - 180000
+  }
+
+-- The room one block takes on a flowed ODP slide: its height and a gap,
+-- never less than 1.4 cm.
+export pure func odpFlowEmu(b: Block) -> int = pptxMaxInt(pptxEstimateEmu(b) + 180000, 500000)
+
+export pure func odpPaginate(blocks: [Block]) -> [[Block]] {
+  let flat = pptxFlatten(blocks);
+  let title = match flat {
+    HeadingBlock(h) :: _ => [HeadingBlock({text: "${h.text} (cont.)", level: h.level, runs: []})],
+    _ => []
+  };
+  let pieces = flatMap(\b. pptxSplitTall(b, 4500000), flat);
+  let pages = odpFill(pieces, title, [], 0, []);
+  match pages {
+    [] => [[]],
+    _ => pages
+  }
+}
+
+-- Room on an ODP slide below the first grid row, half a centimetre clear.
+pure func odpUsableEmu() -> int = 6858000 - odpGridEmu() - 180000
+
+pure func odpFill(blocks: [Block], title: [Block], cur: [Block], used: int, acc: [[Block]]) -> [[Block]] =
+  match blocks {
+    [] => reverse(if listLength(cur) > 0 then reverse(cur) :: acc else acc),
+    b :: rest =>
+      let h = odpFlowEmu(b) in
+      if listLength(cur) == 0 || used + h <= odpUsableEmu()
+      then odpFill(rest, title, b :: cur, used + h, acc)
+      else
+        let carried = match cur {
+          HeadingBlock(_) :: earlier => if listLength(earlier) > 0 then {move: pptxHead(cur), keep: earlier} else {move: [], keep: cur},
+          _ => {move: [], keep: cur}
+        } in
+        let start = concat(carried.move, reverse(title)) in
+        let startUsed = foldl(\a t. a + odpFlowEmu(t), 0, start) in
+        let finished = if listLength(carried.keep) > listLength(title) || listLength(acc) == 0
+          then reverse(carried.keep) :: acc else acc in
+        odpFill(rest, title, b :: start, startUsed + h, finished)
+  }
+
+-- Slide count for ODP specs, same notation as pptxPaginateShape.
+export pure func odpPaginateShape(spec: string) -> string
+  tests [
+    ("h|t:50|t:50|t:50", "fits|1"),
+    ("h|t:50|t:50|t:50|t:50|t:50", "flow|1"),
+    ("h|l:40", "flow|4")
+  ]
+{
+  let blocks = map(pptxSpecBlock, split(spec, "|"));
+  if odpFitsGrid(blocks) then "fits|1"
+  else "flow|${show(listLength(odpPaginate(blocks)))}"
+}
+
+-- =====================================================================
+-- Test surface
+-- =====================================================================
+
+-- "n blocks of kind k" specs: "h" heading, "t:N" paragraph of N chars,
+-- "l:N" list of N one-line items, "r:N" table of N rows; rendered as the
+-- slide count and per-slide kinds.
+export pure func pptxPaginateShape(spec: string) -> string
+  tests [
+    ("h|t:50|t:50|t:50", "fits|1"),
+    -- Six blocks overflow the five slots but fit one flowed slide.
+    ("h|t:50|t:50|t:50|t:50|t:50", "flow|1|h,t,t,t,t,t"),
+    ("h|t:900|t:900|t:900", "flow|3|h,t/h,t/h,t"),
+    ("h|l:40", "flow|3|h,l/h,l/h,l"),
+    ("h|r:30", "flow|3|h,r/h,r/h,r"),
+    -- ~2400 chars of text: split at sentences, one piece per slide.
+    ("t:2000", "flow|3|t/t/t"),
+    -- A heading that would end a slide moves to the next with its text.
+    ("h|t:900|h|t:900", "flow|2|h,t/h,h,t")
+  ]
+{
+  let blocks = map(pptxSpecBlock, split(spec, "|"));
+  if pptxFitsSlots(blocks) then "fits|1"
+  else {
+    let pages = pptxPaginate(blocks);
+    "flow|${show(listLength(pages))}|${join("/", map(\p. join(",", map(pptxKind, p)), pages))}"
+  }
+}
+
+pure func pptxKind(b: Block) -> string =
+  match b {
+    HeadingBlock(_) => "h",
+    TextBlock(_) => "t",
+    ListBlock(_) => "l",
+    TableBlock(_) => "r",
+    _ => "?"
+  }
+
+pure func pptxSpecBlock(s: string) -> Block {
+  let parts = split(s, ":");
+  let kind = match parts { k :: _ => k, [] => "" };
+  let n = match parts { _ :: v :: _ => getOrElse(stringToInt(v), 0), _ => 0 };
+  if kind == "h" then HeadingBlock({text: "Title", level: 1, runs: []})
+  else if kind == "t" then mkText(pptxRepeatChar("x", n), "normal", 0)
+  else if kind == "l" then ListBlock({items: map(\i. "item", pptxRange(n)), ordered: false, itemRuns: [], itemLevels: []})
+  else if kind == "r" then TableBlock({rows: map(\i. [pptxCell("a"), pptxCell("b")], pptxRange(n)), headers: [pptxCell("H1"), pptxCell("H2")], caption: ""})
+  else mkText(s, "normal", 0)
+}
+
+pure func pptxCell(t: string) -> TableCell = simpleCell(t)
+
+pure func pptxRange(n: int) -> [int] = if n <= 0 then [] else n :: pptxRange(n - 1)
+
+pure func pptxRepeatChar(c: string, n: int) -> string =
+  if n <= 0 then "" else
+  -- Words, so sentence splitting and wrapping see ordinary text.
+  strConcat(map(\i. if i % 10 == 0 then "x. " else "x", pptxRange(n)))
