@@ -1,0 +1,139 @@
+module scripts/pdf_to_word_templates
+
+-- Three example reference documents for docs/pdf-to-word.html: the same
+-- recovered PDF content, styled three different ways, to show that switching
+-- house style is one --reference-doc flag.
+--
+-- A reference document only has to carry the design: styles, page setup,
+-- header and footer. docparse discards its body. Each table style here is
+-- named "Table", the name docparse binds generated tables to by default, so
+-- no --table-style flag is needed.
+--
+-- Fonts are ones Word ships and LibreOffice has metric-compatible stand-ins
+-- for (Cambria/Caladea, Arial/Liberation Sans, Calibri/Carlito), so the
+-- page's LibreOffice renders show what Word shows.
+--
+-- Run from docs/:
+--   ailang run --quiet --entry main --caps IO,FS scripts/pdf_to_word_templates.ail
+
+import std/fs (mkdirAll)
+import std/zip (createArchive)
+import std/result (Ok, Err)
+import std/io (println, exit)
+import std/string (concat)
+
+type Look = {
+  slug: string,
+  body: string,      -- body font
+  head: string,      -- heading font
+  ink: string,       -- body text colour
+  accent: string,    -- headings and rules
+  muted: string,     -- header and footer text
+  h1: string,        -- heading 1 run properties beyond font/colour/size
+  h1Size: int,
+  h1Para: string,    -- heading 1 paragraph properties (borders, alignment)
+  h2Size: int,
+  h3: string,        -- heading 3 run properties
+  tableHead: string, -- first-row run and cell properties
+  tableBorders: string,
+  header: string,    -- w:hdr body
+  footer: string     -- w:ftr body
+}
+
+pure func ns() -> string =
+  "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+
+pure func decl() -> string = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+
+pure func fonts(f: string) -> string = "<w:rFonts w:ascii=\"${f}\" w:hAnsi=\"${f}\" w:cs=\"${f}\"/>"
+
+pure func styles(l: Look) -> string =
+  concat(["${decl()}<w:styles ${ns()}>",
+  "<w:docDefaults><w:rPrDefault><w:rPr>${fonts(l.body)}<w:color w:val=\"${l.ink}\"/><w:sz w:val=\"21\"/><w:lang w:val=\"en-GB\"/></w:rPr></w:rPrDefault>",
+  "<w:pPrDefault><w:pPr><w:spacing w:after=\"150\" w:line=\"300\" w:lineRule=\"auto\"/><w:widowControl/></w:pPr></w:pPrDefault></w:docDefaults>",
+  "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>",
+  "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>",
+  "<w:pPr><w:keepNext/><w:keepLines/>${l.h1Para}<w:spacing w:before=\"360\" w:after=\"200\"/><w:outlineLvl w:val=\"0\"/></w:pPr>",
+  "<w:rPr>${fonts(l.head)}${l.h1}<w:color w:val=\"${l.accent}\"/><w:sz w:val=\"${show(l.h1Size)}\"/></w:rPr></w:style>",
+  "<w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>",
+  "<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before=\"280\" w:after=\"120\"/><w:outlineLvl w:val=\"1\"/></w:pPr>",
+  "<w:rPr>${fonts(l.head)}<w:b/><w:color w:val=\"${l.accent}\"/><w:sz w:val=\"${show(l.h2Size)}\"/></w:rPr></w:style>",
+  "<w:style w:type=\"paragraph\" w:styleId=\"Heading3\"><w:name w:val=\"heading 3\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/>",
+  "<w:pPr><w:keepNext/><w:spacing w:before=\"200\" w:after=\"100\"/><w:outlineLvl w:val=\"2\"/></w:pPr>",
+  "<w:rPr>${fonts(l.head)}${l.h3}<w:color w:val=\"${l.accent}\"/><w:sz w:val=\"24\"/></w:rPr></w:style>",
+  "<w:style w:type=\"paragraph\" w:styleId=\"ListParagraph\"><w:name w:val=\"List Paragraph\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:after=\"80\"/><w:ind w:left=\"360\"/></w:pPr></w:style>",
+  "<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"${l.accent}\"/><w:u w:val=\"single\"/></w:rPr></w:style>",
+  "<w:style w:type=\"table\" w:styleId=\"Table\"><w:name w:val=\"Table\"/><w:pPr><w:spacing w:before=\"0\" w:after=\"40\" w:line=\"260\" w:lineRule=\"auto\"/></w:pPr>",
+  "<w:rPr><w:sz w:val=\"19\"/></w:rPr><w:tblPr><w:tblBorders>${l.tableBorders}</w:tblBorders>",
+  "<w:tblCellMar><w:top w:w=\"100\" w:type=\"dxa\"/><w:left w:w=\"120\" w:type=\"dxa\"/><w:bottom w:w=\"100\" w:type=\"dxa\"/><w:right w:w=\"120\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr>",
+  "<w:tblStylePr w:type=\"firstRow\">${l.tableHead}</w:tblStylePr></w:style></w:styles>"
+  ])
+
+pure func document() -> string =
+  concat(["${decl()}<w:document ${ns()}><w:body><w:p><w:r><w:t>Reference styles for AILANG Parse --reference-doc.</w:t></w:r></w:p>",
+  "<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rHeader\"/><w:footerReference w:type=\"default\" r:id=\"rFooter\"/>",
+  "<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1900\" w:right=\"1300\" w:bottom=\"1400\" w:left=\"1300\" w:header=\"600\" w:footer=\"600\"/></w:sectPr></w:body></w:document>"
+  ])
+
+pure func pageField(size: int, colour: string) -> string =
+  "<w:fldSimple w:instr=\"PAGE\"><w:r><w:rPr><w:sz w:val=\"${show(size)}\"/><w:color w:val=\"${colour}\"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>"
+
+pure func entries(l: Look) -> [{name: string, content: string}] = [
+  {name: "[Content_Types].xml", content: "${decl()}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/><Override PartName=\"/word/header.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/><Override PartName=\"/word/footer.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/></Types>"},
+  {name: "_rels/.rels", content: "${decl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rDoc\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>"},
+  {name: "word/_rels/document.xml.rels", content: "${decl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/><Relationship Id=\"rHeader\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header.xml\"/><Relationship Id=\"rFooter\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer.xml\"/></Relationships>"},
+  {name: "word/document.xml", content: document()},
+  {name: "word/styles.xml", content: styles(l)},
+  {name: "word/header.xml", content: "${decl()}<w:hdr ${ns()}>${l.header}</w:hdr>"},
+  {name: "word/footer.xml", content: "${decl()}<w:ftr ${ns()}>${l.footer}</w:ftr>"}
+]
+
+-- Serif, navy and gold: a firm's report.
+pure func classic() -> Look = {
+  slug: "classic", body: "Cambria", head: "Cambria", ink: "222222", accent: "1F3A5F", muted: "6B7280",
+  h1: "<w:smallCaps/><w:spacing w:val=\"20\"/>", h1Size: 52,
+  h1Para: "<w:jc w:val=\"center\"/><w:pBdr><w:bottom w:val=\"double\" w:sz=\"6\" w:space=\"8\" w:color=\"B08D57\"/></w:pBdr>",
+  h2Size: 30, h3: "<w:i/>",
+  tableHead: "<w:rPr><w:b/><w:color w:val=\"FFFFFF\"/></w:rPr><w:tcPr><w:shd w:val=\"clear\" w:fill=\"1F3A5F\"/></w:tcPr>",
+  tableBorders: "<w:top w:val=\"single\" w:sz=\"6\" w:color=\"1F3A5F\"/><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"1F3A5F\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"D6DCE4\"/>",
+  header: "<w:p><w:pPr><w:jc w:val=\"right\"/><w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"6\" w:color=\"B08D57\"/></w:pBdr></w:pPr><w:r><w:rPr><w:smallCaps/><w:spacing w:val=\"30\"/><w:color w:val=\"1F3A5F\"/><w:sz w:val=\"20\"/></w:rPr><w:t>«Company name»</w:t></w:r></w:p>",
+  footer: "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:sz w:val=\"16\"/><w:color w:val=\"6B7280\"/></w:rPr><w:t xml:space=\"preserve\">— </w:t></w:r>${pageField(16, "6B7280")}<w:r><w:rPr><w:sz w:val=\"16\"/><w:color w:val=\"6B7280\"/></w:rPr><w:t xml:space=\"preserve\"> —</w:t></w:r></w:p>"
+}
+
+-- Sans-serif with a violet band: a product company.
+pure func modern() -> Look = {
+  slug: "modern", body: "Arial", head: "Arial", ink: "1F2937", accent: "6D28D9", muted: "6B7280",
+  h1: "<w:b/>", h1Size: 56,
+  h1Para: "<w:pBdr><w:left w:val=\"single\" w:sz=\"36\" w:space=\"10\" w:color=\"6D28D9\"/></w:pBdr>",
+  h2Size: 32, h3: "<w:b/>",
+  tableHead: "<w:rPr><w:b/><w:color w:val=\"6D28D9\"/></w:rPr><w:tcPr><w:shd w:val=\"clear\" w:fill=\"EDE9FE\"/></w:tcPr>",
+  tableBorders: "<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"E5E7EB\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"E5E7EB\"/>",
+  header: "<w:p><w:pPr><w:shd w:val=\"clear\" w:fill=\"6D28D9\"/><w:spacing w:before=\"60\" w:after=\"60\"/><w:ind w:left=\"0\"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val=\"FFFFFF\"/><w:sz w:val=\"20\"/></w:rPr><w:t xml:space=\"preserve\"> «Company name»</w:t></w:r></w:p>",
+  footer: "<w:p><w:pPr><w:tabs><w:tab w:val=\"right\" w:pos=\"9300\"/></w:tabs></w:pPr><w:r><w:rPr><w:sz w:val=\"16\"/><w:color w:val=\"6B7280\"/></w:rPr><w:t>«Company name» · Confidential</w:t><w:tab/></w:r>${pageField(16, "6D28D9")}</w:p>"
+}
+
+-- Black and white, letter-spaced capitals, rules only where needed.
+pure func minimal() -> Look = {
+  slug: "minimal", body: "Calibri", head: "Calibri", ink: "111111", accent: "111111", muted: "8A8A8A",
+  h1: "<w:caps/><w:spacing w:val=\"60\"/>", h1Size: 36,
+  h1Para: "",
+  h2Size: 24, h3: "<w:caps/><w:spacing w:val=\"30\"/>",
+  tableHead: "<w:rPr><w:caps/><w:spacing w:val=\"20\"/><w:sz w:val=\"16\"/></w:rPr><w:tcPr><w:tcBorders><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"111111\"/></w:tcBorders></w:tcPr>",
+  tableBorders: "<w:top w:val=\"single\" w:sz=\"6\" w:color=\"111111\"/><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"111111\"/>",
+  header: "<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr><w:r><w:rPr><w:caps/><w:spacing w:val=\"40\"/><w:sz w:val=\"15\"/><w:color w:val=\"8A8A8A\"/></w:rPr><w:t>«Company name»</w:t></w:r></w:p>",
+  footer: "<w:p><w:pPr><w:jc w:val=\"right\"/></w:pPr>${pageField(15, "8A8A8A")}</w:p>"
+}
+
+func build(dir: string, l: Look) -> () ! {FS, IO} =
+  match createArchive("${dir}/${l.slug}-reference.docx", entries(l)) {
+    Ok(_) => println("Built ${l.slug}-reference.docx"),
+    Err(e) => { println(e); exit(1) }
+  }
+
+export func main() -> () ! {FS, IO} {
+  let dir = "assets/pdf-to-word/templates";
+  mkdirAll(dir);
+  build(dir, classic());
+  build(dir, modern());
+  build(dir, minimal())
+}

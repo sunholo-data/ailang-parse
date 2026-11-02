@@ -157,6 +157,15 @@
   stroke: var(--dp-blue); fill: none;
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
+/* Benchmark history */
+.dp-history-score { font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+.dp-history-bar { position: relative; width: 120px; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.dp-history-bar span { position: absolute; top: 0; left: 0; height: 100%; background: var(--dp-blue); border-radius: 4px; }
+.dp-history-break td {
+  background: var(--dp-blue-faded); color: var(--text-secondary); font-size: 12px; font-style: italic;
+  text-align: center; padding: 8px 14px; border-bottom: 1px solid var(--dp-blue-border);
+}
+@media (max-width: 600px) { .dp-history-bar { width: 60px; } }
 
 @media (max-width: 900px) {
   .dp-bench-stats { grid-template-columns: repeat(2, 1fr); }
@@ -468,6 +477,28 @@
 
   <hr class="dp-divider">
 
+  <!-- Benchmark History -->
+  <section class="dp-bench-section reveal" id="benchmark-history">
+    <h2>A living benchmark</h2>
+    <p>OfficeDocBench isn't graded once and left alone. It gets re-run as AILANG Parse changes, and the benchmark itself keeps getting harder &mdash; more files, stricter scoring, source-verified ground truth. Every public score is below, including the ones that went down.</p>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <table class="dp-results-table">
+      <thead><tr><th>Date</th><th>Corpus</th><th>Composite</th><th></th><th>What changed</th></tr></thead>
+      <tbody>
+        <tr><td>2026-04-07</td><td>v1 &middot; 69 files</td><td class="dp-history-score">93.9%</td><td><div class="dp-history-bar"><span style="width:93.9%"></span></div></td><td>First public OfficeDocBench run.</td></tr>
+        <tr><td>2026-04-13</td><td>v1 &middot; 69 files</td><td class="dp-history-score">92.2%</td><td><div class="dp-history-bar"><span style="width:92.2%"></span></div></td><td>Added a ninth adapter (LiteParse) and fairness fixes to the harness.</td></tr>
+        <tr><td>2026-08-11</td><td>v1 &middot; 69 files</td><td class="dp-history-score">92.6%</td><td><div class="dp-history-bar"><span style="width:92.6%"></span></div></td><td>Scoring fix: stopped penalising structurally-correct output that didn't verbatim-match the ground truth.</td></tr>
+        <tr><td>2026-09-22</td><td>v1 &middot; 69 files</td><td class="dp-history-score">92.3%</td><td><div class="dp-history-bar"><span style="width:92.3%"></span></div></td><td>Routine re-run ahead of the v2 rebuild.</td></tr>
+        <tr class="dp-history-break"><td colspan="5">OfficeDocBench v2 &mdash; new corpus, new protocol. Scores below are not directly comparable to v1 above.</td></tr>
+        <tr style="font-weight:600"><td>2026-10-23</td><td>v2 &middot; 87 files</td><td class="dp-history-score">97.7%</td><td><div class="dp-history-bar"><span style="width:97.7%"></span></div></td><td>+18 regression fixtures, ground truth source-verified against original Office XML, 8 scoring dimensions.</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted)">v1 and v2 use different scoring protocols and corpora &mdash; read each block as its own series, not one continuous line. Every run above is reproducible: clone <a href="https://github.com/sunholo-data/ailang-parse/tree/main/benchmarks/officedocbench">the benchmark folder on GitHub</a> and <a href="#run-benchmarks">run it yourself</a>.</p>
+  </section>
+
+  <hr class="dp-divider">
+
   <!-- Performance -->
   <section class="dp-bench-section reveal">
     <h2 id="performance">Parsing times and configuration</h2>
@@ -530,7 +561,7 @@
       </div>
       <div class="dp-ailang-card">
         <h4>AI as an Effect</h4>
-        <p>PDF and image parsing use AILANG's <code>AI</code> effect &mdash; the model is pluggable (<code>--ai gemini-2.5-flash</code>, <code>--ai claude-haiku</code>, <code>--ai granite-docling</code>). Office parsing doesn't use AI at all: it's deterministic XML extraction. The benchmark scores reflect the code, not the model.</p>
+        <p>PDF and image parsing use AILANG's <code>AI</code> effect &mdash; the model is pluggable (<code>--ai gemini-3.8-flash</code>, <code>--ai claude-haiku</code>, <code>--ai granite-docling</code>). Office parsing doesn't use AI at all: it's deterministic XML extraction. The benchmark scores reflect the code, not the model.</p>
       </div>
     </div>
 
@@ -702,7 +733,7 @@ export pure func detectFormat(ext: string) -> string
 
     <div class="dp-bench-callout">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Recommended:</strong> <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-input);padding:1px 6px;border-radius:3px">gemini-2.5-flash</code> &mdash; best balance of accuracy and cost. Ollama models score low due to structured JSON output limitations.</div>
+      <div><strong>Recommended:</strong> <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-input);padding:1px 6px;border-radius:3px">gemini-3.8-flash</code> &mdash; the current default, replacing <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-input);padding:1px 6px;border-radius:3px">gemini-2.5-flash</code> (deprecated). The table above was measured against 2.5 Flash and hasn't been re-run on 3.8 yet. Ollama models score low due to structured JSON output limitations.</div>
     </div>
   </section>
 

@@ -9,7 +9,7 @@
 
 Universal document parsing **and generation** in [AILANG](https://github.com/sunholo-data/ailang). Extracts structured content from DOCX, PPTX, XLSX, PDF, and image files into JSON and markdown — and writes documents back out in 9 formats. To author a document, write Markdown and convert it; see [Writing documents in Markdown](#writing-documents-in-markdown).
 
-**Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs** default to the deterministic `pdftotext` backend (poppler) — also no AI, no cloud — with `docling` and `liteparse` as local alternatives escalating automatically to local `docling` OCR for scanned/image-only PDFs. Pluggable AI (Gemini, Claude, local Ollama) is available via `--pdf-backend ai` but is never chosen automatically. **Images** delegate to whatever AI model you plug in. AILANG Parse is AI-agnostic: swap `--pdf-backend`/`--ai` to change the backend, zero code changes.
+**Office formats** (DOCX, PPTX, XLSX) use deterministic XML parsing — no AI, no cloud, instant results. **PDFs** default to the deterministic `pdftotext` backend (poppler) — also no AI, no cloud — with `poppler` (headings, lists, tables and header/footer from the same tools, no installs), `docling` and `liteparse` as local alternatives escalating automatically to local `docling` OCR for scanned/image-only PDFs. Pluggable AI (Gemini, Claude, local Ollama) is available via `--pdf-backend ai` but is never chosen automatically. **Images** delegate to whatever AI model you plug in. AILANG Parse is AI-agnostic: swap `--pdf-backend`/`--ai` to change the backend, zero code changes.
 
 ## Install
 
@@ -99,7 +99,7 @@ docparse report.docx describe        # AI image descriptions
 docparse report.docx summarize       # AI document summary
 docparse contract.pdf                # PDF: deterministic pdftotext (default)
 docparse scan.pdf                    # Scanned PDF: escalates to local docling OCR
-docparse scan.pdf --pdf-backend ai --ai gemini-2.5-flash  # External AI (paid), opt-in only
+docparse scan.pdf --pdf-backend ai --ai gemini-3.8-flash  # External AI (paid), opt-in only
 
 # Format conversion
 docparse report.docx --convert output.html
@@ -108,7 +108,7 @@ docparse notes.md --convert slides.pptx
 docparse notes.md --convert offer.docx --reference-doc letterhead.docx
 
 # AI document generation
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.8-flash \
   docparse/main.ail --generate report.docx --prompt "Q1 sales report with tables"
 ```
 
@@ -280,8 +280,7 @@ decidable fragment.
 AILANG Parse uses AILANG's AI effect — any model AILANG supports works:
 
 ```bash
-docparse scan.pdf --ai gemini-2.5-flash          # Google (default; fast)
-docparse scan.pdf --ai gemini-3-flash-preview    # Google (slower; thinking model)
+docparse scan.pdf --ai gemini-3.8-flash          # Google (default; fast)
 docparse scan.pdf --ai granite-docling           # Local Ollama (free)
 docparse scan.pdf --ai claude-haiku-4-5          # Anthropic
 ```

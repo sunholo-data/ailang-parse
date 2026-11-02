@@ -14,7 +14,7 @@ uv run benchmarks/run_benchmarks.py --suite office
 uv run benchmarks/run_benchmarks.py --suite stress
 
 # PDF benchmark (needs AI backend)
-uv run benchmarks/run_benchmarks.py --suite pdf --ai gemini-2.5-flash
+uv run benchmarks/run_benchmarks.py --suite pdf --ai gemini-3.8-flash
 
 # Competitor comparison (requires: uv pip install -e '.[competitors]')
 uv run benchmarks/run_benchmarks.py --competitors              # all

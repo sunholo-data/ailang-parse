@@ -7,10 +7,10 @@ Prerequisites:
 
 Usage:
     # Generate predictions first
-    uv run benchmarks/omnidocbench/adapter.py --ai gemini-2.5-flash --demo
+    uv run benchmarks/omnidocbench/adapter.py --ai gemini-3.8-flash --demo
 
     # Then evaluate
-    uv run benchmarks/omnidocbench/run_omnidocbench.py --model gemini-2.5-flash --demo
+    uv run benchmarks/omnidocbench/run_omnidocbench.py --model gemini-3.8-flash --demo
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ RESULTS_BASE = Path(__file__).parent / "results"
 
 def main():
     parser = argparse.ArgumentParser(description="Run OmniDocBench evaluation")
-    parser.add_argument("--model", default="gemini-2.5-flash",
+    parser.add_argument("--model", default="gemini-3.8-flash",
                         help="Model name (must match adapter output dir)")
     parser.add_argument("--demo", action="store_true",
                         help="Use demo config (18 images)")
