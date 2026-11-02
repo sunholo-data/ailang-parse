@@ -10,7 +10,9 @@ XML documents. All text is invented.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -391,6 +393,122 @@ class Poppler(unittest.TestCase):
         self.assertEqual(adapter._pp_key("Holosun ApS · CVR 44 324687 · ailang.sunholo.com"),
                          "holosun aps · cvr # · ailang.sunholo.com")
         self.assertEqual(adapter._pp_key("Page 3 of 12"), "page # of #")
+
+
+STAMP = "RECEIVED BY THE ARCHIVE OF NORTHWOOD - CERTIFIED TRUE COPY - FILE NO. 2031-554210"
+
+
+def scan(n: int, total: int) -> str:
+    """pdftotext -layout of a scanned page: the stamp and a page number."""
+    return f"{' ' * 60}Page {n} of {total}\n\n\n\n{STAMP}\n"
+
+
+class TextLayer(unittest.TestCase):
+    """The text-layer audit behind pdf_text_layer_sparse (2026-11-02 incident:
+    every page a scan plus one identical stamp line)."""
+
+    def audit(self, pages, pictures=None, calls=None):
+        def picture_pages():
+            if calls is not None:
+                calls.append(1)
+            return set(range(1, len(pages) + 1)) if pictures is None else pictures
+        return adapter._text_layer(pages, picture_pages)
+
+    def test_pdftotext_pages_split_on_form_feeds(self):
+        self.assertEqual(adapter._pdftotext_pages("a\fb\f\f"), ["a", "b", ""])
+        self.assertEqual(adapter._pdftotext_pages("no feeds"), ["no feeds"])
+
+    def test_stamp_on_every_scanned_page_is_textless(self):
+        tl = self.audit([scan(n, 78) for n in range(1, 79)])
+        self.assertEqual((tl["pages"], tl["textlessPages"]), (78, list(range(1, 79))))
+        self.assertLess(tl["distinctWords"], 20)
+
+    def test_no_text_at_all_needs_no_image_check(self):
+        calls = []
+        tl = self.audit(["", "  \n", ""], calls=calls)
+        self.assertEqual(tl["textlessPages"], [1, 2, 3])
+        self.assertEqual(calls, [])
+
+    def test_slide_deck_is_not_textless(self):
+        # Little text per page, but its own on every page; a repeated footer
+        # and full-bleed pictures on every slide do not change that.
+        slides = [("Quarterly roadmap", "Ship the field app"), ("Why now", "Paper backlog doubled"),
+                  ("Pilot results", "41% faster filing"), ("Risks", "Vendor lock-in")]
+        pages = [f"{t}\n  - {b}\n\nNorthwood - internal - {n}\n" for n, (t, b) in enumerate(slides, 1)]
+        self.assertEqual(self.audit(pages)["textlessPages"], [])
+
+    def test_identical_pages_without_pictures_are_text(self):
+        form = "APPLICATION FOR A PARKING PERMIT\nApplicant name: ______\nSignature: ____\n"
+        calls = []
+        tl = self.audit([form] * 4, pictures=set(), calls=calls)
+        self.assertEqual(tl["textlessPages"], [])
+        self.assertEqual(calls, [1])        # asked, because every line repeats
+
+    def test_partial_scan_names_only_the_scanned_pages(self):
+        text = [f"Chapter {n}\nThe survey of parcel {n} found the markers intact and the lane clear.\n"
+                for n in range(1, 5)]
+        tl = self.audit(text + [scan(5, 6), scan(6, 6)], pictures={5, 6})
+        self.assertEqual(tl["textlessPages"], [5, 6])
+
+    def test_numbers_only_rows_are_content(self):
+        # Rows of figures normalise alike ("# # #") but are a statement's content.
+        rows = ["2031  4,551.20  118.00  4,433.20", "2032  4,433.20  120.10  4,313.10"]
+        pages = ["\n".join(rows[i % 2] for i in range(3)) + "\n" for _ in range(3)]
+        self.assertEqual(self.audit(pages)["textlessPages"], [])
+
+    def test_without_image_data_a_line_must_repeat_widely(self):
+        # A heading shared by two of ten pages is not furniture when no image
+        # data says those pages are pictures.
+        words = ["alder", "birch", "cedar", "dogwood", "elm", "fir", "ginkgo", "hazel"]
+        pages = [f"The {w} stand on this parcel was surveyed and tagged.\n" for w in words]
+        pages += ["Appendix tables and figures (scanned)\n", "Appendix tables and figures (scanned)\n"]
+        tl = adapter._text_layer(pages, lambda: None)
+        self.assertEqual(tl["textlessPages"], [])
+        tl = adapter._text_layer([scan(n, 10) for n in range(1, 11)], lambda: None)
+        self.assertEqual(len(tl["textlessPages"]), 10)
+
+    def test_all_textless_guard(self):
+        self.assertTrue(adapter._text_layer_all_textless({"pages": 2, "textlessPages": [1, 2]}))
+        self.assertFalse(adapter._text_layer_all_textless({"pages": 2, "textlessPages": [2]}))
+        self.assertFalse(adapter._text_layer_all_textless({"pages": 0, "textlessPages": []}))
+        self.assertFalse(adapter._text_layer_all_textless(None))
+
+
+@unittest.skipUnless(shutil.which("pdftotext") and shutil.which("pdfimages"), "needs poppler")
+class TextLayerFixtures(unittest.TestCase):
+    """The audit end to end on synthetic PDFs (benchmarks/pdf/text_layer_fixtures.py)."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "text_layer_fixtures", _ADAPTER.parent.parent.parent / "benchmarks" / "pdf" / "text_layer_fixtures.py")
+        fx = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fx)
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.paths = fx.write_fixtures(Path(cls.tmp.name))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def layer(self, name, backend="pdftotext"):
+        return adapter.BACKENDS[backend](self.paths[name])["textLayer"]
+
+    def test_scanned(self):
+        for backend in ("pdftotext", "poppler"):
+            self.assertEqual(self.layer("scanned.pdf", backend)["textlessPages"], [1, 2, 3, 4, 5, 6])
+
+    def test_partial(self):
+        self.assertEqual(self.layer("partial.pdf")["textlessPages"], [5, 6])
+
+    def test_slides_and_forms_are_not_flagged(self):
+        for name in ("slides.pdf", "forms.pdf"):
+            for backend in ("pdftotext", "poppler"):
+                self.assertEqual(self.layer(name, backend)["textlessPages"], [], f"{name} via {backend}")
+
+    def test_picture_pages(self):
+        self.assertEqual(adapter._picture_pages(self.paths["partial.pdf"]), {5, 6})
+        self.assertEqual(adapter._picture_pages(self.paths["slides.pdf"]), {3})   # full-bleed background
 
 
 if __name__ == "__main__":

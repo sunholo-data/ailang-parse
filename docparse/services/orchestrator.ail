@@ -83,7 +83,7 @@ import docparse/services/rtf_parser (parseRtf)
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
-import docparse/services/pdf_backend_external (parsePdfViaBackend, parsePdfWithFallback, fetchPdfWords)
+import docparse/services/pdf_backend_external (parsePdfChecked, parsePdfLadder, parsePdfWithFallback, fetchPdfWords, pdfTextLayerPartialWarning, PdfTextLayer)
 import docparse/services/pdf_furniture (pdfFurnitureApply)
 import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocks, annotationsAsBlocksAnchored)
 import docparse/services/direct_ai_parser (
@@ -884,23 +884,34 @@ func orchPdf(filepath: string, opts: ParseOptions)
     -- "PDF extraction failed: …" and counted the file as parsed, so a batch of
     -- nine reported 9/9 while one document was gone. An Err exits 1, writes no
     -- output file, and is counted as a failure by `ailang run --batch`.
-    if explicit then match parsePdfViaBackend(backend, filepath, opts.projectRoot) {
+    --
+    -- A text layer that is (nearly) all stamp fails here too, as
+    -- pdf_text_layer_sparse: the caller chose a text extractor and the PDF has
+    -- no text to extract. Escalating would override the choice; returning the
+    -- stamp as the document is the hollow success this code exists to stop.
+    if explicit then match parsePdfChecked(backend, filepath, opts.projectRoot) {
       Ok(ext) => {
         let ann = orchPdfAnnotations(filepath, opts.projectRoot);
         let blocks = orchPdfFurniture(backend, ext.blocks, ext.metadata.pageCount);
         Ok(mkOutcome("pdf", filepath, ext.metadata,
           concat(blocks, ann.blocks),
           concat(["Parsed PDF (${backend}): ${show(countBlocks(blocks))} blocks"], ann.notes),
-          ann.warnings, 0))
+          concat(orchPdfTextLayerWarnings(ext.textLayer), ann.warnings), 0))
       },
-      Err(msg) => Err(orchParseError("pdf_backend_failed",
-        "PDF backend '${backend}' failed on ${filepath}: ${msg}. For scanned/image-only PDFs with no text layer, retry with --pdf-backend docling (local, free; if it is not installed, run: docparse --install-backends), or --pdf-backend ai (external, paid) as a last resort."))
+      Err(f) =>
+        if f.code == "pdf_text_layer_sparse" then Err(orchParseError(f.code, f.message))
+        else Err(orchParseError("pdf_backend_failed",
+          "PDF backend '${backend}' failed on ${filepath}: ${f.message}. For scanned/image-only PDFs with no text layer, retry with --pdf-backend docling (local, free; if it is not installed, run: docparse --install-backends), or --pdf-backend ai (external, paid) as a last resort."))
     }
     -- The DEFAULT: the free ladder pdftotext -> docling, never AI. docling is
-    -- local and free, so escalating to it needs no permission (parsePdfWithFallback
+    -- local and free, so escalating to it needs no permission (parsePdfLadder
     -- owns the ladder and names --install-backends when docling is missing);
     -- ai costs money and must be asked for explicitly.
-    else match parsePdfWithFallback("pdftotext", filepath, opts.projectRoot) {
+    --
+    -- A scanned text layer escalates like a missing one (parsePdfLadder); if
+    -- docling cannot read it either, it fails as pdf_text_layer_sparse. A
+    -- partly scanned document succeeds with a warning naming its pages.
+    else match parsePdfLadder(filepath, opts.projectRoot) {
       Ok(fb) => {
         let ann = orchPdfAnnotations(filepath, opts.projectRoot);
         let blocks = orchPdfFurniture(fb.backendUsed, fb.doc.blocks, fb.doc.metadata.pageCount);
@@ -908,13 +919,20 @@ func orchPdf(filepath: string, opts: ParseOptions)
           concat(blocks, ann.blocks),
           concat([if fb.backendUsed == "pdftotext"
             then "Parsed PDF (pdftotext): ${show(countBlocks(blocks))} blocks"
-            else "PDF backend 'pdftotext' found no text; recovered via ${fb.backendUsed} (${show(countBlocks(blocks))} blocks)"], ann.notes),
-          ann.warnings, 0))
+            else "PDF backend 'pdftotext' found no usable text layer; recovered via ${fb.backendUsed} (${show(countBlocks(blocks))} blocks)"], ann.notes),
+          concat(orchPdfTextLayerWarnings(fb.doc.textLayer), ann.warnings), 0))
       },
-      Err(fbErr) =>
-        Err(orchParseError("pdf_backend_failed",
-          "PDF extraction failed on ${filepath}: ${fbErr} You can also retry with --pdf-backend ai (external, paid) as a last resort."))
+      Err(f) =>
+        if f.code == "pdf_text_layer_sparse" then Err(orchParseError(f.code, f.message))
+        else Err(orchParseError("pdf_backend_failed",
+          "PDF extraction failed on ${filepath}: ${f.message} You can also retry with --pdf-backend ai (external, paid) as a last resort."))
     }
+}
+
+-- The partly-scanned warning, when there is one.
+pure func orchPdfTextLayerWarnings(t: PdfTextLayer) -> [string] = {
+  let w = pdfTextLayerPartialWarning(t);
+  if length(w) == 0 then [] else [w]
 }
 
 -- Page furniture (running header, footer, page numbers) moved out of the body
@@ -1037,7 +1055,10 @@ func orchEmlParseAttachment(filepath: string, ext: string, projectRoot: string)
         if outcome.backendUsed != "pdftotext"
         then println("    (no text layer — recovered via ${outcome.backendUsed} OCR)")
         else ();
-        outcome.doc.blocks
+        -- A partly scanned attachment says so in its own blocks, the same
+        -- way the workbook branch above carries its warnings.
+        concat(outcome.doc.blocks,
+               map(\w. mkText(w, "warning", 0), orchPdfTextLayerWarnings(outcome.doc.textLayer)))
       },
       Err(msg) => {
         println("    Warning: PDF attachment not readable: ${msg}");

@@ -9,6 +9,41 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **A scanned PDF no longer parses as a hollow success.** A PDF whose every
+  page is a scan with the same stamp laid over it (78 pages, one ~123-character
+  stamp each) parsed with pdftotext to 156 blocks, 92% whitespace and 23
+  distinct words, and returned success: the stamp was enough text to get past
+  "were any blocks extracted?". The text-layer backends (pdftotext, poppler,
+  liteparse) now report what each page holds, and a page counts as textless
+  when, after dropping every line that also appears on another page (digits
+  normalised, so "Page 3 of 78" repeats), fewer than 12 non-whitespace
+  characters are left and an image covers at least half of it (one
+  `pdfimages -list`, run only when some page is a candidate). When at most one
+  page in ten has text, the document is a scan:
+  - default backend: escalates to docling, as a PDF with no text layer did;
+    if docling cannot read it either, the parse fails;
+  - explicit `--pdf-backend pdftotext|poppler|liteparse` (the hosted API always
+    passes one): fails, with no escalation.
+
+  The failure has its own code, `pdf_text_layer_sparse` (a backend that
+  breaks is still `pdf_backend_failed`), and a message that starts with
+  `pages=N pages_with_text=N distinct_words=N: `, names the remedy
+  (`--pdf-backend docling`, local and free, or `--pdf-backend ai` /
+  `pdfBackend "ai"`, paid) and never the file path. A PDF with no text at all
+  now reports this code too, where it used to be `pdf_backend_failed`. This
+  covers `--convert` from a PDF, which reads it through the same path.
+- A partly scanned PDF still succeeds, with a warning that starts
+  `textless_pages=5-6 pages=6: ` and names the pages whose content is missing.
+  Slide decks (little text per page, but their own) and repeated form pages
+  (identical text, no page images) are not flagged; across 363 local PDFs the
+  only documents flagged were scans, image-only decks and figures.
+  `benchmarks/check_pdf_text_layer.py` checks all of these on synthetic PDFs
+  built by `benchmarks/pdf/text_layer_fixtures.py` (CI).
+
 ## [v0.55.1](https://github.com/sunholo-data/ailang-parse/compare/v0.55.0...v0.55.1) — 2026-11-02
 
 v0.55.0 was tagged but never reached the registry: the registry validator's
