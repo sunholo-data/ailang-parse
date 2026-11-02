@@ -707,8 +707,13 @@ def _pp_style_words(page: dict, html_page: dict | None) -> None:
                 w.update(size=round((w["y1"] - w["y0"]) * 0.85, 1), bold=False, italic=False, href="")
 
 
+# Symbol-font glyphs decks use for bullets and arrows land in Unicode's
+# private-use area; show them as the characters they draw.
+_PP_PUA = str.maketrans({"\uf0e0": "→", "\uf0e8": "→", "\uf0b7": "•", "\uf0a7": "▪", "\uf0d8": "➢", "\uf0fc": "✓"})
+
+
 def _pp_line_text(line: dict) -> str:
-    return " ".join(w["text"] for w in line["words"])
+    return " ".join(w["text"] for w in line["words"]).translate(_PP_PUA)
 
 
 def _pp_line_size(line: dict) -> float:
@@ -888,9 +893,160 @@ def _pp_furniture_keys(pages: list[dict]) -> dict[str, set[str]]:
     return out
 
 
-def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None) -> tuple[list[dict], int]:
+_PP_DIAGRAM_COVERAGE = 0.04   # drawn share of the page that makes it a picture (text slides measure 0.0)
+_PP_DIAGRAM_SHORT = 0.6        # share of text fragments of five words or fewer
+
+
+def _pp_is_margin_furniture(row: list[dict], page: dict, furniture: dict[str, set[str]]) -> str:
+    """'header' / 'footer' when the row is recurring page furniture, else ''."""
+    top, bottom = min(l["y0"] for l in row), max(l["y1"] for l in row)
+    keys = [_pp_key(_pp_line_text(l)) for l in row]
+    if bottom <= page["h"] * _PP_MARGIN and all(k in furniture["header"] for k in keys):
+        return "header"
+    if top >= page["h"] * (1 - _PP_MARGIN) and all(k in furniture["footer"] for k in keys):
+        return "footer"
+    return ""
+
+
+def _pp_diagram_page(page: dict, pno: int, rows: list, furniture: dict, heading_size, ranks: dict,
+                     html_page: dict | None, slides: dict, budget: list) -> list[dict] | None:
+    """A slide page drawn as a diagram, as [title, picture of the page below
+    the title, its text as notes]; None for an ordinary page.
+
+    A PDF keeps shapes (circles, arrows, boxes) as vector drawing, so a reader
+    sees only their labels: reflowed, a Venn diagram became 'diagram BRAINS'
+    and a two-column table of circle labels. A page is a diagram when its
+    text is mostly short fragments AND a real share of it is drawn: the page
+    rendered at low resolution has ink outside every text line and picture.
+    """
+    body = [r for r in rows if not _pp_is_margin_furniture(r, page, furniture)]
+    if not body:
+        return None
+    title_rows: list = []
+    for r in body:
+        size = heading_size(r)
+        if size and (not title_rows or abs(size - heading_size(title_rows[0])) < 0.6):
+            title_rows.append(r)
+        else:
+            break
+    rest = body[len(title_rows):]
+    # A title that wraps can share its second row with a label beside it
+    # ("diagram" next to "BRAINS"): a title-sized line in the next row that
+    # starts under the title is the title's.
+    if title_rows and rest:
+        size0 = heading_size(title_rows[0])
+        x0 = min(l["x0"] for l in title_rows[0])
+        nxt = rest[0]
+        wrap = [l for l in nxt if abs(_pp_line_size(l) - size0) < 0.6 and abs(l["x0"] - x0) <= 20]
+        if wrap:
+            title_rows.append(wrap)
+            others = [l for l in nxt if l not in wrap]
+            rest = ([others] if others else []) + rest[1:]
+    frags = [l for r in rest for l in r]
+    if len(frags) < 3:
+        return None
+    words = [len(_pp_line_text(l).split()) for l in frags]
+    short = sum(1 for w in words if w <= 5) / len(frags)
+    bullets = sum(1 for r in rest if _pp_bullet(r)) / max(len(rest), 1)
+    if short < _PP_DIAGRAM_SHORT or max(words) >= 15 or bullets >= 0.5:
+        return None
+    # A table draws its borders too, but its rows nearly all hold several
+    # aligned cells; read it as a table, not a picture.
+    multi = [r for r in rest if len(r) >= 2]
+    if len(multi) >= 2 and len(multi) >= 0.8 * len(rest):
+        read = _pp_table(multi, page["w"])
+        if read and read[0] == "table":
+            return None
+    text_boxes = [(l["x0"], l["y0"], l["x1"], l["y1"]) for r in body for l in r]
+    scale = (html_page["h"] / page["h"]) if html_page and page["h"] else 0.0
+    image_boxes = [(im["x0"] / scale, im["y0"] / scale, im["x1"] / scale, im["y1"] / scale)
+                   for im in (html_page or {}).get("images", [])] if scale else []
+    try:
+        coverage = slides["coverage"](pno, page, text_boxes, image_boxes)
+    except Exception:
+        return None
+    if coverage < _PP_DIAGRAM_COVERAGE:
+        return None
+
+    out: list[dict] = []
+    top = page["h"] * _PP_MARGIN
+    if title_rows:
+        title = " ".join(_pp_line_text(l) for r in title_rows for l in r)
+        out.append(_placed(_heading(title, ranks.get(heading_size(title_rows[0]), 1)), pno))
+        # Crop below the title, unless other content starts beside a wrapped
+        # title line: then below its first line, so the drawing's top is kept.
+        title_bottom = max(l["y1"] for l in title_rows[-1])
+        first_other = min((l["y0"] for r in rest for l in r), default=title_bottom)
+        top = (title_bottom if first_other >= title_bottom
+               else max(l["y1"] for l in title_rows[0])) + 4
+    bottom = page["h"] * (1 - _PP_MARGIN)
+    import base64
+    try:
+        png = slides["render"](pno, top, bottom)
+    except Exception:
+        png = None
+    if png and len(png) <= budget[0]:
+        budget[0] -= len(png)
+        out.append(_placed(_image(base64.b64encode(png).decode("ascii"), "image/png",
+                                  round(page["w"] * 96 / 72), round((bottom - top) * 96 / 72),
+                                  "Diagram from page %d" % pno), pno))
+    for r in rest:
+        out.append(_placed(_text("  ".join(_pp_line_text(l) for l in r)), pno, "notes"))
+    # Page furniture stays tagged, as on any page.
+    for r in rows:
+        region = _pp_is_margin_furniture(r, page, furniture)
+        if region:
+            for l in r:
+                out.append(_placed(_text(_pp_line_text(l)), pno, region))
+    return out
+
+
+def _pp_ppm_coverage(ppm: bytes, page_w: float, page_h: float, boxes: list) -> float:
+    """Share of a page's pixels that differ from its background colour,
+    outside the given boxes (points) and the header/footer bands. `ppm` is a
+    binary P6 render of the whole page."""
+    head = ppm.split(maxsplit=4)
+    if len(head) < 5 or head[0] != b"P6":
+        return 0.0
+    w, h, data = int(head[1]), int(head[2]), head[4]
+    if w <= 0 or h <= 0 or len(data) < w * h * 3:
+        return 0.0
+    sx, sy = w / page_w, h / page_h
+    masked = bytearray(w * h)
+    for (x0, y0, x1, y1) in boxes:
+        for y in range(max(0, int(y0 * sy) - 1), min(h, int(y1 * sy) + 2)):
+            row = y * w
+            for x in range(max(0, int(x0 * sx) - 1), min(w, int(x1 * sx) + 2)):
+                masked[row + x] = 1
+    band_top, band_bottom = int(h * _PP_MARGIN), int(h * (1 - _PP_MARGIN))
+    counts: dict = {}
+    for i in range(0, w * h * 3, 3 * 7):
+        key = (data[i] >> 4, data[i + 1] >> 4, data[i + 2] >> 4)
+        counts[key] = counts.get(key, 0) + 1
+    bg = max(counts.items(), key=lambda kv: kv[1])[0]
+    bg_rgb = [c * 16 + 8 for c in bg]
+    drawn = total = 0
+    for y in range(band_top, band_bottom):
+        for x in range(w):
+            p = y * w + x
+            total += 1
+            if masked[p]:
+                continue
+            i = p * 3
+            if max(abs(data[i] - bg_rgb[0]), abs(data[i + 1] - bg_rgb[1]), abs(data[i + 2] - bg_rgb[2])) > 40:
+                drawn += 1
+    return drawn / total if total else 0.0
+
+
+def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
+                    slides: dict | None = None) -> tuple[list[dict], int]:
     """`load_image(src) -> bytes` reads an image pdftohtml extracted; without
-    it, images are left out."""
+    it, images are left out.
+
+    `slides` (slide conversion only) enables diagram pages: a dict with
+    `coverage(pno, page, text_boxes, image_boxes) -> float`, the share of the
+    page drawn outside text and pictures, and `render(pno, top_pt, bottom_pt)
+    -> bytes | None`, a PNG of that band of the page."""
     pages = _pp_parse_bbox(bbox_xml)
     html_pages = _pp_parse_html(html_xml or "")
     budget = [_PP_IMAGE_BUDGET]
@@ -991,6 +1147,13 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None) -> tup
                     flush_all()
                     blocks.append(_placed(block, pno))
 
+        if slides:
+            diagram = _pp_diagram_page(page, pno, rows, furniture, heading_size, ranks,
+                                       html_pages[pi] if pi < len(html_pages) else None, slides, budget)
+            if diagram is not None:
+                blocks.extend(diagram)
+                continue
+
         prev_bottom = None
         for row in rows:
             emit_images_above(min(l["y0"] for l in row))
@@ -1017,13 +1180,20 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None) -> tup
                     blocks.append(_placed(_text(_pp_line_text(l)), pno, region))
                 continue
 
+            # A bullet glyph makes a list item at any size (deck bullets are
+            # large); a numbered row that is heading-sized is a heading
+            # ("1. Overview"), which is why headings are tried before numbers.
+            bullet = _pp_bullet(row)
+            if items and not bullet and len(row) == 1 and row[0]["x0"] > min(item_x) + 4 and gap < height:
+                # Wrapped continuation of the last list item, at any size.
+                items[-1] = (f"{items[-1][0]} {text}", 0)
+                continue
             size = heading_size(row)
-            if size:
+            if size and not (bullet and not bullet[1]):
                 flush_all()
                 blocks.append(_placed(_heading(text, ranks.get(size, 3)), pno))
                 continue
 
-            bullet = _pp_bullet(row)
             if bullet:
                 flush_para()
                 flush_table()
@@ -1067,10 +1237,14 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None) -> tup
     return blocks, len(pages)
 
 
-def run_poppler(pdf: Path) -> dict:
+def run_poppler(pdf: Path, slides: bool = False) -> dict:
     """Structured blocks from poppler alone: headings by font size, lists,
     tables from aligned columns, paragraphs reflowed, page furniture tagged.
-    Needs only poppler-utils (pdftotext, pdftohtml) and the stdlib."""
+    Needs only poppler-utils (pdftotext, pdftohtml, pdftoppm) and the stdlib.
+
+    `slides` (backend "poppler-slides", chosen by the CLI when converting a
+    PDF to PPTX/ODP) also turns diagram pages into a picture of the page with
+    their text as speaker notes."""
     bbox = subprocess.run(["pdftotext", "-bbox-layout", str(pdf), "-"],
                           capture_output=True, text=True, check=False)
     if bbox.returncode != 0:
@@ -1096,7 +1270,28 @@ def run_poppler(pdf: Path) -> dict:
                 raise ValueError("image outside the extraction directory")
             return path.read_bytes()
 
-        blocks, pages = _poppler_blocks(bbox.stdout, html_xml, load_image)
+        slide_tools = None
+        if slides:
+            def coverage(pno: int, page: dict, text_boxes: list, image_boxes: list) -> float:
+                out = Path(tmp) / f"cov-{pno}"
+                subprocess.run(["pdftoppm", "-r", "24", "-f", str(pno), "-l", str(pno), "-singlefile",
+                                str(pdf), str(out)], capture_output=True, check=True)
+                ppm = (Path(tmp) / f"cov-{pno}.ppm").read_bytes()
+                return _pp_ppm_coverage(ppm, page["w"], page["h"], text_boxes + image_boxes)
+
+            def render(pno: int, top_pt: float, bottom_pt: float) -> bytes | None:
+                dpi = 110
+                out = Path(tmp) / f"diagram-{pno}"
+                page_w = next(p["w"] for i, p in enumerate(_pp_parse_bbox(bbox.stdout)) if i + 1 == pno)
+                subprocess.run(["pdftoppm", "-r", str(dpi), "-f", str(pno), "-l", str(pno), "-singlefile",
+                                "-png", "-x", "0", "-y", str(int(top_pt * dpi / 72)),
+                                "-W", str(int(page_w * dpi / 72)), "-H", str(int((bottom_pt - top_pt) * dpi / 72)),
+                                str(pdf), str(out)], capture_output=True, check=True)
+                return (Path(tmp) / f"diagram-{pno}.png").read_bytes()
+
+            slide_tools = {"coverage": coverage, "render": render}
+
+        blocks, pages = _poppler_blocks(bbox.stdout, html_xml, load_image, slide_tools)
     meta = _empty_meta()
     meta["pageCount"] = pages or _pdf_page_count(pdf)
     return {"metadata": meta, "blocks": blocks}
@@ -1105,6 +1300,7 @@ def run_poppler(pdf: Path) -> dict:
 BACKENDS = {
     "pdftotext": run_pdftotext,
     "poppler": run_poppler,
+    "poppler-slides": lambda pdf: run_poppler(pdf, slides=True),
     "docling": run_docling,
     "liteparse": run_liteparse,
     "words": run_words,

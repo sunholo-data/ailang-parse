@@ -333,8 +333,21 @@ pure func pfRunLength(keys: [string], p: string -> bool) -> int =
 -- generator's pagination spreads them over as many slides as they need.
 export pure func pdfPagesAsSlides(blocks: [Block]) -> [Block] =
   if any(\b. pfIsSectionOf(b, "page-break"), blocks)
-  then map(\g. mkSection("slide", g), filter(\g. listLength(g) > 0, pfPageGroups(blocks, [], [])))
+  then flatMap(pfSlideWithNotes, filter(\g. listLength(g) > 0, pfPageGroups(blocks, [], [])))
   else filter(\b. not pfIsSectionOf(b, "header") && not pfIsSectionOf(b, "footer"), blocks)
+
+-- One page as a slide, followed by its speaker notes when it has any: the
+-- page's "notes" sections (a diagram page's labels) gathered into one
+-- SectionBlock("notes") right after the slide, where the PPTX and ODP
+-- generators attach notes to the slide before them.
+pure func pfSlideWithNotes(page: [Block]) -> [Block] {
+  let notes = flatMap(\b. match b {
+    SectionBlock(s) => if s.kind == "notes" then s.blocks else [],
+    _ => []
+  }, page);
+  let body = filter(\b. not pfIsSectionOf(b, "notes"), page);
+  if listLength(notes) > 0 then [mkSection("slide", body), mkSection("notes", notes)] else [mkSection("slide", body)]
+}
 
 -- Pages in order, each page's blocks in order. `cur` is the open page,
 -- reversed; `acc` the finished pages, reversed.
@@ -352,13 +365,17 @@ export pure func pdfSlidesShape(spec: string) -> string
   tests [
     ("1;p:1|h:Title|t:Intro|p:2|h:Next|t:More", "S[h:Title,t:Intro]|S[h:Next,t:More]"),
     ("1;h:Before|p:1|h:A|p:2|p:3|h:C", "S[h:Before]|S[h:A]|S[h:C]"),
-    ("1;h:No|t:markers", "h:No|t:markers")
+    ("1;h:No|t:markers", "h:No|t:markers"),
+    ("1;p:1|h:Diagram|n:label one|n:label two|p:2|h:Text|t:Body", "S[h:Diagram]|N[label one,label two]|S[h:Text,t:Body]")
   ]
 {
   let at = find(spec, ";");
   let blocks = map(pfSpecBlock, split(substring(spec, at + 1, length(spec)), "|"));
   join("|", map(\b. match b {
-    SectionBlock(s) => if s.kind == "slide" then "S[${join(",", map(pfShapeBlock, s.blocks))}]" else pfShapeBlock(b),
+    SectionBlock(s) =>
+      if s.kind == "slide" then "S[${join(",", map(pfShapeBlock, s.blocks))}]"
+      else if s.kind == "notes" then "N[${join(",", map(pfShapeText, s.blocks))}]"
+      else pfShapeBlock(b),
     _ => pfShapeBlock(b)
   }, pdfPagesAsSlides(blocks)))
 }
@@ -411,6 +428,7 @@ export pure func pdfFurnitureIdempotent(spec: string) -> bool
 
 pure func pfSpecBlock(s: string) -> Block =
   if startsWith(s, "p:") then mkNamedSection("page-break", substring(s, 2, length(s)), [])
+  else if startsWith(s, "n:") then mkSection("notes", [mkText(substring(s, 2, length(s)), "normal", 0)])
   else if startsWith(s, "h:") then mkHeading(substring(s, 2, length(s)), 2)
   else if startsWith(s, "t:") then mkText(substring(s, 2, length(s)), "normal", 0)
   else mkText(s, "normal", 0)

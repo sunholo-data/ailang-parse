@@ -71,7 +71,9 @@ export pure func pptxEstimateEmu(b: Block) -> int =
     TextBlock(t) => pptxLines(length(t.text), pptxColumnEmu(), 18) * pptxLineEmu(18) + pptxInsetsEmu(),
     ListBlock(l) => pptxListEmu(l.items) + pptxInsetsEmu(),
     TableBlock(t) => pptxTableEmu(t.headers, t.rows),
-    ImageBlock(i) => (imageExtentEmu(i.data, i.mime, pptxColumnEmu(), i.width, i.height)).cy,
+    -- Never taller than a slide with a title above it.
+    ImageBlock(i) => pptxMinInt((imageExtentEmu(i.data, i.mime, pptxColumnEmu(), i.width, i.height)).cy,
+                                pptxUsableEmu() - 700000),
     SectionBlock(s) => foldl(\acc x. acc + pptxEstimateEmu(x), 0, s.blocks),
     _ => 400000
   }
@@ -116,6 +118,8 @@ pure func pptxRowEmu(cells: [TableCell], colW: int, pt: int) -> int {
 }
 
 pure func pptxMaxInt(a: int, b: int) -> int = if a > b then a else b
+
+pure func pptxMinInt(a: int, b: int) -> int = if a < b then a else b
 
 -- =====================================================================
 -- Does a slide fit the fixed slots?

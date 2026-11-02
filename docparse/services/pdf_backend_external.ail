@@ -104,11 +104,12 @@ func backendLayout(projectRoot: string, backend: string) -> {adapter: string, uv
 -- located on the page (poppler, docling). It is wrapped in a header/footer
 -- SectionBlock here, one per occurrence; pdf_furniture merges the occurrences
 -- into the single header and footer section a document has. Untagged blocks
--- (every pdftotext block) decode exactly as before.
+-- (every pdftotext block) decode exactly as before. `region: "notes"` is a
+-- slide's speaker notes (a diagram page's labels, poppler-slides).
 pure func decodeBlock(j: Json) -> Block = {
   let inner = decodeInnerBlock(j);
   let region = getOrElse(getString(j, "region"), "body");
-  if region == "header" || region == "footer" then mkSection(region, [inner]) else inner
+  if region == "header" || region == "footer" || region == "notes" then mkSection(region, [inner]) else inner
 }
 
 pure func decodeInnerBlock(j: Json) -> Block = {

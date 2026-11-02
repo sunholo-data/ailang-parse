@@ -284,13 +284,17 @@ func printNotes(notes: [string]) -> () ! {IO} =
 -- Returns false on hard failure instead of exit()ing: in batch mode an exit()
 -- here would kill every remaining file, so parseFiles collects the count and
 -- main exits non-zero once the whole batch has had its turn.
--- Converting a PDF to slides with no backend chosen reads it with poppler:
--- the default pdftotext keeps no page boundaries, and one PDF page per slide
--- needs them. An explicit --pdf-backend is always respected.
+-- Converting a PDF to slides reads it with poppler's slide mode
+-- ("poppler-slides"): the default pdftotext keeps no page boundaries, and one
+-- PDF page per slide needs them; slide mode also turns diagram pages into a
+-- picture of the page with their labels as speaker notes. Used when no
+-- backend is chosen or poppler is; any other explicit --pdf-backend is
+-- respected.
 pure func slideConvertOptions(filepath: string, convertTarget: string, opts: ParseOptions) -> ParseOptions {
   let target = getExtension(convertTarget);
-  if getExtension(filepath) == "pdf" && (target == "pptx" || target == "odp") && length(opts.pdfBackend) == 0
-    then {opts | pdfBackend: "poppler"}
+  if getExtension(filepath) == "pdf" && (target == "pptx" || target == "odp")
+       && (length(opts.pdfBackend) == 0 || opts.pdfBackend == "poppler")
+    then {opts | pdfBackend: "poppler-slides"}
     else opts
 }
 
