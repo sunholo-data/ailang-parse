@@ -509,8 +509,429 @@ def run_words(pdf: Path) -> dict:
     return {"metadata": _empty_meta(), "blocks": [], "words": words}
 
 
+# ---------------------------------------------------------------------------
+# poppler: structure from the poppler output we already ship
+# ---------------------------------------------------------------------------
+#
+# Same binaries as the pdftotext backend (poppler-utils), read for structure:
+#
+#   pdftotext -bbox-layout   text + geometry: every line and word with its box,
+#                            in PDF points. Its text is the reliable one: it
+#                            drops glyphs a PDF draws twice at one position.
+#   pdftohtml -xml           style: font size, <b>/<i>, <a href> per text run.
+#                            Its text is NOT used: it keeps those duplicate
+#                            glyphs ("diffeerent", "Thee" on ailang-proposal).
+#
+# Words take their style from the pdftohtml run whose box contains the word's
+# centre. Lines are then grouped into visual rows and each row classified as
+# page furniture, a list item, part of a table, a heading, or paragraph text.
+# The core (_poppler_blocks) is pure over the two XML strings so it can be
+# tested without poppler.
+
+import xml.etree.ElementTree as _ET
+
+_PP_MARGIN = 0.09          # top/bottom share of the page where furniture sits
+_PP_HEADING_RATIO = 1.15   # size over body size that makes a heading
+_PP_BULLETS = set("•▪◦‣∙·●○■□–-*")
+_PP_NUMBERED = re.compile(r"^\(?(\d{1,3}|[a-zA-Z]|[ivxIVX]{1,4})[.)]$")
+
+
+def _pp_strip_ns(xml_text: str) -> str:
+    return re.sub(r'\sxmlns="[^"]+"', "", xml_text, count=1)
+
+
+def _pp_key(text: str) -> str:
+    """Same normalisation as pdf_furniture.ail's pdfFurnitureKey: lower case,
+    whitespace collapsed, digit runs (and spaces between digits) -> '#'."""
+    t = " ".join(text.lower().split())
+    t = re.sub(r"\d[\d ]*\d|\d", "#", t)
+    return t
+
+
+def _pp_parse_bbox(xml_text: str) -> list[dict]:
+    """Pages from `pdftotext -bbox-layout`: [{w, h, lines: [line]}], each line
+    {x0, y0, x1, y1, words: [{x0, y0, x1, y1, text}]} in points."""
+    if "<doc" not in xml_text:
+        return []
+    body = xml_text[xml_text.index("<doc"):xml_text.rindex("</doc>") + 6]
+    root = _ET.fromstring(_pp_strip_ns(body))
+    pages = []
+    for page in root.iter("page"):
+        lines = []
+        for line in page.iter("line"):
+            words = [{"x0": float(w.get("xMin")), "y0": float(w.get("yMin")),
+                      "x1": float(w.get("xMax")), "y1": float(w.get("yMax")),
+                      "text": w.text or ""} for w in line.iter("word") if (w.text or "").strip()]
+            if words:
+                lines.append({"x0": min(w["x0"] for w in words), "y0": min(w["y0"] for w in words),
+                              "x1": max(w["x1"] for w in words), "y1": max(w["y1"] for w in words),
+                              "words": words})
+        pages.append({"w": float(page.get("width")), "h": float(page.get("height")), "lines": lines})
+    return pages
+
+
+def _pp_parse_html(xml_text: str) -> list[dict]:
+    """Pages from `pdftohtml -xml`: [{h, runs: [{x0, y0, x1, y1, size, bold,
+    italic, href}]}]. Coordinates are pdftohtml's pixels; the caller scales."""
+    if not xml_text or "<pdf2xml" not in xml_text:
+        return []
+    root = _ET.fromstring(xml_text[xml_text.index("<pdf2xml"):])
+    fonts: dict[str, dict] = {}
+    pages = []
+    for page in root.iter("page"):
+        for spec in page.iter("fontspec"):
+            fam = (spec.get("family") or "").lower()
+            fonts[spec.get("id")] = {"size": float(spec.get("size") or 0),
+                                     "bold": "bold" in fam or "black" in fam or "heavy" in fam,
+                                     "italic": "italic" in fam or "oblique" in fam}
+        runs = []
+        for t in page.iter("text"):
+            font = fonts.get(t.get("font"), {"size": 0.0, "bold": False, "italic": False})
+            full = "".join(t.itertext()).strip()
+            bold_text = "".join("".join(b.itertext()) for b in t.iter("b")).strip()
+            ital_text = "".join("".join(i.itertext()) for i in t.iter("i")).strip()
+            href = next((a.get("href") for a in t.iter("a") if a.get("href")), "")
+            x0, y0 = float(t.get("left")), float(t.get("top"))
+            runs.append({"x0": x0, "y0": y0, "x1": x0 + float(t.get("width")),
+                         "y1": y0 + float(t.get("height")), "size": font["size"],
+                         "bold": font["bold"] or (bool(full) and bold_text == full),
+                         "italic": font["italic"] or (bool(full) and ital_text == full),
+                         "href": href if href.startswith(("http://", "https://", "mailto:")) else ""})
+        pages.append({"h": float(page.get("height") or 0), "runs": runs})
+    return pages
+
+
+def _pp_style_words(page: dict, html_page: dict | None) -> None:
+    """Give every word size/bold/italic/href from the pdftohtml run holding
+    its centre. Without pdftohtml, size falls back to the word box height."""
+    scale = (html_page["h"] / page["h"]) if html_page and page["h"] else 0.0
+    runs = []
+    if scale > 0:
+        for r in html_page["runs"]:
+            runs.append({**r, "x0": r["x0"] / scale, "y0": r["y0"] / scale,
+                         "x1": r["x1"] / scale, "y1": r["y1"] / scale, "size": r["size"] / scale})
+    for line in page["lines"]:
+        for w in line["words"]:
+            cx, cy = (w["x0"] + w["x1"]) / 2, (w["y0"] + w["y1"]) / 2
+            hit = next((r for r in runs if r["x0"] - 1 <= cx <= r["x1"] + 1 and r["y0"] - 1 <= cy <= r["y1"] + 1), None)
+            if hit:
+                w.update(size=round(hit["size"], 1), bold=hit["bold"], italic=hit["italic"], href=hit["href"])
+            else:
+                w.update(size=round((w["y1"] - w["y0"]) * 0.85, 1), bold=False, italic=False, href="")
+
+
+def _pp_line_text(line: dict) -> str:
+    return " ".join(w["text"] for w in line["words"])
+
+
+def _pp_line_size(line: dict) -> float:
+    weights: dict[float, int] = {}
+    for w in line["words"]:
+        weights[w["size"]] = weights.get(w["size"], 0) + len(w["text"])
+    return max(weights.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+
+def _pp_line_bold(line: dict) -> bool:
+    chars = sum(len(w["text"]) for w in line["words"])
+    return chars > 0 and sum(len(w["text"]) for w in line["words"] if w["bold"]) >= 0.8 * chars
+
+
+def _pp_runs(words: list[dict]) -> list[dict]:
+    """Inline runs for a paragraph, or [] when it carries no formatting
+    worth keeping (all plain, or all bold the way a heading is)."""
+    runs: list[dict] = []
+    for w in words:
+        style = (w["bold"], w["italic"], w["href"])
+        if runs and (runs[-1]["bold"], runs[-1]["italic"], runs[-1]["href"]) == style:
+            runs[-1]["text"] += " " + w["text"]
+        else:
+            if runs:
+                runs[-1]["text"] += " "
+            runs.append({"text": w["text"], "bold": w["bold"], "italic": w["italic"], "href": w["href"]})
+    if len(runs) == 1 and not runs[0]["href"]:
+        return []
+    return [{k: v for k, v in r.items() if v or k == "text"} for r in runs]
+
+
+def _pp_rows(lines: list[dict]) -> list[list[dict]]:
+    """Group lines into visual rows (vertical overlap), left to right."""
+    rows: list[list[dict]] = []
+    for line in sorted(lines, key=lambda l: (l["y0"], l["x0"])):
+        cy, h = (line["y0"] + line["y1"]) / 2, line["y1"] - line["y0"]
+        if rows:
+            last = rows[-1]
+            ly0, ly1 = min(l["y0"] for l in last), max(l["y1"] for l in last)
+            if abs(cy - (ly0 + ly1) / 2) <= 0.5 * min(h, ly1 - ly0):
+                last.append(line)
+                continue
+        rows.append([line])
+    return [sorted(r, key=lambda l: l["x0"]) for r in rows]
+
+
+def _pp_bullet(row: list[dict]) -> tuple[bool, bool, list[dict]] | None:
+    """(is_item, ordered, content_lines) when the row is a list item: a lone
+    bullet or number glyph left of the text, or text that starts with one."""
+    first = row[0]
+    marker = _pp_line_text(first)
+    if len(row) >= 2 and (marker in _PP_BULLETS or _PP_NUMBERED.match(marker)):
+        return True, bool(_PP_NUMBERED.match(marker)), row[1:]
+    words = first["words"]
+    if len(words) >= 2 and (words[0]["text"] in _PP_BULLETS or _PP_NUMBERED.match(words[0]["text"])):
+        rest = {**first, "words": words[1:], "x0": words[1]["x0"]}
+        return True, bool(_PP_NUMBERED.match(words[0]["text"])), [rest] + row[1:]
+    return None
+
+
+def _pp_table(rows: list[list[dict]], page_w: float) -> tuple[str, Any] | None:
+    """Read consecutive multi-segment rows. Returns ("table", block) when the
+    segments fall into shared columns (columns from the rows with the most
+    segments; each segment lands in a distinct column), ("columns", [text per
+    column]) when they are prose set in columns, else None."""
+    counts = [len(r) for r in rows]
+    k = max(counts)
+    if k < 2 or len(rows) < 2:
+        return None
+    full = [r for r in rows if len(r) == k]
+    cols = [(min(r[j]["x0"] for r in full), max(r[j]["x1"] for r in full)) for j in range(k)]
+    if any(cols[j][1] > cols[j + 1][0] + 2 for j in range(k - 1)):
+        return None
+    grid = []
+    for r in rows:
+        cells = [""] * k
+        for seg in r:
+            mid = (seg["x0"] + seg["x1"]) / 2
+            j = min(range(k), key=lambda c: 0 if cols[c][0] - 2 <= mid <= cols[c][1] + 2
+                    else min(abs(mid - cols[c][0]), abs(mid - cols[c][1])))
+            if cells[j]:
+                return None
+            cells[j] = _pp_line_text(seg)
+        grid.append(cells)
+    # Prose set in columns is not a table: every column is wide and the cells
+    # are sentences. A real table has at least one narrow (label) column.
+    lengths = [len(c) for row in grid for c in row if c]
+    all_wide = all(c1 - c0 > 0.28 * page_w for c0, c1 in cols)
+    if lengths and sum(lengths) / len(lengths) > 30 and all_wide:
+        return "columns", [" ".join(row[j] for row in grid if row[j]) for j in range(k)]
+    if lengths and sum(lengths) / len(lengths) > 60:
+        return None
+    return "table", _table(grid[1:], grid[0])
+
+
+def _pp_line_gap(pages: list[dict]) -> float:
+    """The document's gap between lines of one paragraph: the low end of the
+    gaps between consecutive single-line rows of the same size. Paragraph
+    spacing is larger (measured 2.5pt vs 10.5pt on ailang-proposal, 5.9pt vs
+    9.6pt on multipage_spec), so a gap well above this starts a paragraph."""
+    gaps = []
+    for page in pages:
+        rows = _pp_rows(page["lines"])
+        for a, b in zip(rows, rows[1:]):
+            if len(a) == 1 and len(b) == 1 and abs(_pp_line_size(a[0]) - _pp_line_size(b[0])) <= 0.6:
+                gap = b[0]["y0"] - a[0]["y1"]
+                if -2 <= gap <= 1.5 * (a[0]["y1"] - a[0]["y0"]):
+                    gaps.append(gap)
+    if not gaps:
+        return 3.0
+    gaps.sort()
+    return gaps[len(gaps) // 5]
+
+
+def _pp_furniture_keys(pages: list[dict]) -> dict[str, set[str]]:
+    """Normalised keys of margin lines that recur on 2+ pages, by region."""
+    seen: dict[tuple[str, str], set[int]] = {}
+    for pi, page in enumerate(pages):
+        for line in page["lines"]:
+            region = ("header" if line["y1"] <= page["h"] * _PP_MARGIN
+                      else "footer" if line["y0"] >= page["h"] * (1 - _PP_MARGIN) else "")
+            if region:
+                seen.setdefault((region, _pp_key(_pp_line_text(line))), set()).add(pi)
+    out: dict[str, set[str]] = {"header": set(), "footer": set()}
+    for (region, key), on in seen.items():
+        if len(on) >= 2:
+            out[region].add(key)
+    return out
+
+
+def _poppler_blocks(bbox_xml: str, html_xml: str | None) -> tuple[list[dict], int]:
+    pages = _pp_parse_bbox(bbox_xml)
+    html_pages = _pp_parse_html(html_xml or "")
+    for i, page in enumerate(pages):
+        _pp_style_words(page, html_pages[i] if i < len(html_pages) else None)
+    all_lines = [l for p in pages for l in p["lines"]]
+    if not all_lines:
+        return [], len(pages)
+    weights: dict[float, int] = {}
+    for line in all_lines:
+        size = _pp_line_size(line)
+        weights[size] = weights.get(size, 0) + sum(len(w["text"]) for w in line["words"])
+    body = max(weights.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+    furniture = _pp_furniture_keys(pages)
+
+    def heading_size(row: list[dict]) -> float | None:
+        # Every segment must be heading-sized: "1." + "Overview" at 16pt is a
+        # numbered heading, while a small "•" beside the text is a list item.
+        text = " ".join(_pp_line_text(l) for l in row)
+        if len(text) > 150 or not any(c.isalpha() for c in text):
+            return None
+        if min(_pp_line_size(l) for l in row) >= body * _PP_HEADING_RATIO:
+            return max(_pp_line_size(l) for l in row)
+        return None
+
+    line_gap = _pp_line_gap(pages)
+
+    head_sizes = [heading_size(r) for p in pages for r in _pp_rows(p["lines"])]
+    ranks = _rank_levels([s for s in head_sizes if s])
+
+    blocks: list[dict] = []
+    for pi, page in enumerate(pages):
+        pno = pi + 1
+        rows = _pp_rows(page["lines"])
+        para: list[dict] = []        # lines of the open paragraph
+        items: list[tuple[str, int]] = []
+        item_x: list[float] = []
+        ordered = [False]
+        table_rows: list[list[dict]] = []
+
+        def flush_para():
+            if para:
+                words = [w for l in para for w in l["words"]]
+                text = " ".join(w["text"] for w in words)
+                text = re.sub(r"(\w)- (\w)", r"\1\2", text) if any(l is not para[-1] and _pp_line_text(l).endswith("-") for l in para) else text
+                runs = _pp_runs(words)
+                block = _text(text)
+                if runs:
+                    block["runs"] = runs
+                blocks.append(_placed(block, pno))
+                para.clear()
+
+        def flush_items():
+            if items:
+                base = min(item_x)
+                levels = [0 if x - base < 8 else 1 for x in item_x]
+                blocks.append(_placed(_list([t for t, _ in items], ordered[0], levels), pno))
+                items.clear()
+                item_x.clear()
+
+        def flush_table():
+            if table_rows:
+                read = _pp_table(table_rows, page["w"])
+                if read and read[0] == "table":
+                    blocks.append(_placed(read[1], pno))
+                elif read:
+                    for column_text in read[1]:
+                        blocks.append(_placed(_text(column_text), pno))
+                else:
+                    for r in table_rows:
+                        blocks.append(_placed(_text("  ".join(_pp_line_text(l) for l in r)), pno))
+                table_rows.clear()
+
+        def flush_all():
+            flush_para()
+            flush_items()
+            flush_table()
+
+        # Right edge of the page's text column: a paragraph line that stops
+        # well short of it ended its paragraph, however close the next line.
+        single = [r[0] for r in rows if len(r) == 1]
+        col_left = min((l["x0"] for l in single), default=0.0)
+        col_right = max((l["x1"] for l in single), default=page["w"])
+        short_line = 0.15 * max(col_right - col_left, 1.0)
+
+        prev_bottom = None
+        for row in rows:
+            text = " ".join(_pp_line_text(l) for l in row)
+            top, bottom = min(l["y0"] for l in row), max(l["y1"] for l in row)
+            height = bottom - top
+            gap = (top - prev_bottom) if prev_bottom is not None else 0.0
+            prev_bottom = bottom
+            key = _pp_key(text)
+            region = ("header" if bottom <= page["h"] * _PP_MARGIN and key in furniture["header"]
+                      else "footer" if top >= page["h"] * (1 - _PP_MARGIN) and key in furniture["footer"]
+                      else "")
+            if not region and len(row) > 1:
+                # A margin row like "Company ... 3" splits into a recurring part
+                # and a page number: judge the pieces.
+                parts = [_pp_key(_pp_line_text(l)) for l in row]
+                for reg in ("header", "footer"):
+                    in_margin = bottom <= page["h"] * _PP_MARGIN if reg == "header" else top >= page["h"] * (1 - _PP_MARGIN)
+                    if in_margin and all(p in furniture[reg] for p in parts):
+                        region = reg
+            if region:
+                flush_all()
+                for l in row:
+                    blocks.append(_placed(_text(_pp_line_text(l)), pno, region))
+                continue
+
+            size = heading_size(row)
+            if size:
+                flush_all()
+                blocks.append(_placed(_heading(text, ranks.get(size, 3)), pno))
+                continue
+
+            bullet = _pp_bullet(row)
+            if bullet:
+                flush_para()
+                flush_table()
+                _, is_ordered, content = bullet
+                if not items:
+                    ordered[0] = is_ordered
+                items.append((" ".join(_pp_line_text(l) for l in content), 0))
+                item_x.append(row[0]["x0"])
+                continue
+            if items and len(row) == 1 and row[0]["x0"] > min(item_x) + 4 and gap < height:
+                # Wrapped continuation of the last list item.
+                items[-1] = (f"{items[-1][0]} {text}", 0)
+                continue
+            flush_items()
+
+            if len(row) >= 2:
+                flush_para()
+                if table_rows and gap > 3 * height:
+                    flush_table()
+                table_rows.append(row)
+                continue
+            flush_table()
+
+            line = row[0]
+            if para:
+                last = para[-1]
+                same_size = abs(_pp_line_size(last) - _pp_line_size(line)) <= 0.6
+                aligned = abs(line["x0"] - para[0]["x0"]) <= 4 or abs(line["x0"] - last["x0"]) <= 4
+                indented = line["x0"] > last["x0"] + 4
+                close = gap <= line_gap + 0.25 * (last["y1"] - last["y0"])
+                ended = last["x1"] < col_right - short_line
+                if ended or indented or not (same_size and aligned and close):
+                    flush_para()
+            para.append(line)
+        flush_all()
+    return blocks, len(pages)
+
+
+def run_poppler(pdf: Path) -> dict:
+    """Structured blocks from poppler alone: headings by font size, lists,
+    tables from aligned columns, paragraphs reflowed, page furniture tagged.
+    Needs only poppler-utils (pdftotext, pdftohtml) and the stdlib."""
+    bbox = subprocess.run(["pdftotext", "-bbox-layout", str(pdf), "-"],
+                          capture_output=True, text=True, check=False)
+    if bbox.returncode != 0:
+        raise RuntimeError(f"pdftotext -bbox-layout exited {bbox.returncode}: {bbox.stderr.strip()}")
+    html_xml = None
+    try:
+        html = subprocess.run(["pdftohtml", "-xml", "-i", "-stdout", "-q", str(pdf)],
+                              capture_output=True, text=True, check=False)
+        if html.returncode == 0:
+            html_xml = html.stdout
+    except FileNotFoundError:
+        pass  # geometry-only: sizes from word boxes, no bold or links
+    blocks, pages = _poppler_blocks(bbox.stdout, html_xml)
+    meta = _empty_meta()
+    meta["pageCount"] = pages or _pdf_page_count(pdf)
+    return {"metadata": meta, "blocks": blocks}
+
+
 BACKENDS = {
     "pdftotext": run_pdftotext,
+    "poppler": run_poppler,
     "docling": run_docling,
     "liteparse": run_liteparse,
     "words": run_words,

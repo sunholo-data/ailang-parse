@@ -130,5 +130,132 @@ class Liteparse(unittest.TestCase):
         self.assertEqual(levels, {"Big": 1, "Medium": 2})
 
 
+# --- poppler -----------------------------------------------------------------
+
+PAGE_W, PAGE_H, SCALE = 600.0, 800.0, 1.5
+
+
+def poppler_xml(pages: list[list[tuple]]) -> tuple[str, str]:
+    """Both poppler outputs for invented pages. Each line is
+    (x0, y0, x1, y1, text, size, bold[, href]) in points; words are spread
+    evenly across the line box. pdftohtml coordinates use its 1.5x scale."""
+    bbox = ['<doc>']
+    html = ['<?xml version="1.0"?><pdf2xml>']
+    for pi, lines in enumerate(pages):
+        bbox.append(f'<page width="{PAGE_W}" height="{PAGE_H}"><flow><block>')
+        html.append(f'<page number="{pi + 1}" top="0" left="0" height="{PAGE_H * SCALE}" width="{PAGE_W * SCALE}">')
+        fonts = {}
+        for (x0, y0, x1, y1, text, size, bold, *rest) in lines:
+            href = rest[0] if rest else ""
+            words = text.split()
+            step = (x1 - x0) / len(words)
+            bbox.append(f'<line xMin="{x0}" yMin="{y0}" xMax="{x1}" yMax="{y1}">')
+            for i, w in enumerate(words):
+                bbox.append(f'<word xMin="{x0 + i * step}" yMin="{y0}" xMax="{x0 + (i + 1) * step - 2}" yMax="{y1}">{w}</word>')
+            bbox.append('</line>')
+            fid = fonts.setdefault((size, bold), str(len(fonts)))
+            html.append(f'<fontspec id="{fid}" size="{size * SCALE}" family="{"Sans-Bold" if bold else "Sans"}" color="#000"/>')
+            inner = f'<a href="{href}">{text}</a>' if href else text
+            html.append(f'<text top="{y0 * SCALE}" left="{x0 * SCALE}" width="{(x1 - x0) * SCALE}" '
+                        f'height="{(y1 - y0) * SCALE}" font="{fid}">{inner}</text>')
+        bbox.append('</block></flow></page>')
+        html.append('</page>')
+    bbox.append('</doc>')
+    html.append('</pdf2xml>')
+    return "".join(bbox), "".join(html)
+
+
+def page_body(n: int) -> list[tuple]:
+    return [
+        (50, 20, 200, 30, "ACME QUARTERLY", 8, False),            # running header
+        (50, 60, 300, 84, f"Part {n} title", 20, True),
+        (50, 100, 550, 112, "First line of a paragraph that runs the full width of", 10, False),
+        (50, 114, 300, 126, "the column and then stops.", 10, False),
+        (50, 140, 550, 152, "A second paragraph that also runs the full width of the", 10, False),
+        (50, 154, 200, 166, "column here.", 10, False),
+        (60, 180, 66, 190, "•", 10, False), (80, 180, 300, 192, "first point", 10, False),
+        (60, 196, 66, 206, "•", 10, False), (80, 196, 300, 208, "second point", 10, False),
+        (50, 230, 300, 244, "A subsection", 14, True),
+        (60, 260, 120, 272, "Region", 10, True), (200, 260, 240, 272, "Q1", 10, True), (300, 260, 340, 272, "Q2", 10, True),
+        (60, 280, 120, 292, "North", 10, False), (200, 280, 240, 292, "10", 10, False), (300, 280, 340, 292, "12", 10, False),
+        (60, 300, 120, 312, "South", 10, False), (200, 300, 240, 312, "7", 10, False), (300, 300, 340, 312, "9", 10, False),
+        (50, 330, 300, 342, "See the site for more.", 10, False, "https://acme.test"),
+        (50, 760, 250, 770, "Acme Ltd · acme.test", 8, False),     # running footer
+        (540, 760, 550, 770, str(n), 8, False),                   # page number
+    ]
+
+
+class Poppler(unittest.TestCase):
+    def blocks(self, pages=None):
+        bbox, html = poppler_xml(pages or [page_body(1), page_body(2)])
+        blocks, count = adapter._poppler_blocks(bbox, html)
+        return blocks, count
+
+    def body(self):
+        return [b for b in self.blocks()[0] if b.get("region", "body") == "body" and b.get("page") == 1]
+
+    def test_page_count(self):
+        self.assertEqual(self.blocks()[1], 2)
+
+    def test_heading_levels_by_size(self):
+        heads = [(b["text"], b["level"]) for b in self.body() if b["kind"] == "heading"]
+        self.assertEqual(heads, [("Part 1 title", 1), ("A subsection", 2)])
+
+    def test_paragraphs_reflowed_and_separated(self):
+        texts = [b["text"] for b in self.body() if b["kind"] == "text"]
+        self.assertEqual(texts[:2], [
+            "First line of a paragraph that runs the full width of the column and then stops.",
+            "A second paragraph that also runs the full width of the column here."])
+
+    def test_bullet_list(self):
+        lists = [b for b in self.body() if b["kind"] == "list"]
+        self.assertEqual([(l["items"], l["ordered"]) for l in lists], [(["first point", "second point"], False)])
+
+    def test_table_from_aligned_columns(self):
+        tables = [b for b in self.body() if b["kind"] == "table"]
+        self.assertEqual(len(tables), 1)
+        self.assertEqual(tables[0]["headers"], ["Region", "Q1", "Q2"])
+        self.assertEqual(tables[0]["rows"], [["North", "10", "12"], ["South", "7", "9"]])
+
+    def test_link_run(self):
+        para = next(b for b in self.body() if b["kind"] == "text" and b["text"].startswith("See the site"))
+        self.assertEqual({r.get("href") for r in para["runs"]}, {"https://acme.test"})
+
+    def test_furniture_tagged_only_when_repeated(self):
+        blocks = self.blocks()[0]
+        tagged = sorted({(b["region"], b["text"]) for b in blocks if b.get("region")})
+        self.assertEqual(tagged, [("footer", "1"), ("footer", "2"), ("footer", "Acme Ltd · acme.test"),
+                                  ("header", "ACME QUARTERLY")])
+        single = self.blocks([page_body(1)])[0]
+        self.assertFalse(any(b.get("region") for b in single))
+
+    def test_numbered_heading_is_not_a_list(self):
+        page = [(50, 60, 70, 80, "1.", 16, True), (75, 60, 200, 80, "Overview", 16, True),
+                (50, 100, 550, 112, "Body text at the body size, long enough to set it.", 10, False),
+                (50, 114, 550, 126, "More body text at the body size so it dominates.", 10, False)]
+        blocks = self.blocks([page])[0]
+        self.assertEqual(blocks[0]["kind"], "heading")
+        self.assertEqual(blocks[0]["text"], "1. Overview")
+
+    def test_two_column_prose_is_not_a_table(self):
+        left = "This is a long line of left column prose for the test"
+        right = "and this is a long line of right column prose as well"
+        page = [(50, 100 + i * 14, 290, 112 + i * 14, left, 10, False) for i in range(3)] + \
+               [(310, 100 + i * 14, 550, 112 + i * 14, right, 10, False) for i in range(3)]
+        blocks = self.blocks([page])[0]
+        self.assertFalse(any(b["kind"] == "table" for b in blocks))
+
+    def test_geometry_only_without_pdftohtml(self):
+        bbox, _ = poppler_xml([page_body(1), page_body(2)])
+        blocks, _ = adapter._poppler_blocks(bbox, None)
+        self.assertTrue(any(b["kind"] == "heading" and b["text"] == "Part 1 title" for b in blocks))
+
+    def test_key_matches_ailang_normalisation(self):
+        # Mirrors pdfFurnitureKey's inline tests in pdf_furniture.ail.
+        self.assertEqual(adapter._pp_key("Holosun ApS · CVR 44 324687 · ailang.sunholo.com"),
+                         "holosun aps · cvr # · ailang.sunholo.com")
+        self.assertEqual(adapter._pp_key("Page 3 of 12"), "page # of #")
+
+
 if __name__ == "__main__":
     unittest.main()
