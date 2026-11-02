@@ -250,7 +250,7 @@ docparse your-file.docx</code></pre>
 
       <p>Generate documents with AI:</p>
       <pre><code class="language-bash" data-src="examples/cli/ai-parse.sh"># Generate a DOCX report from a prompt
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.8-flash \
   docparse/main.ail --generate report.docx --prompt "Q1 sales report with revenue table"</code></pre>
 
       <h2 id="install">Install AILANG</h2>
@@ -329,11 +329,11 @@ docparse *.eml</code></pre>
       <h3>Google (Vertex AI / AI Studio)</h3>
       <pre><code class="language-bash"># Via Application Default Credentials (Cloud Run, GKE)
 GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI \
-  --ai gemini-2.5-flash docparse/main.ail document.pdf
+  --ai gemini-3.8-flash docparse/main.ail document.pdf
 
 # Via API key (local development)
 GOOGLE_API_KEY="your-key" ailang run --entry main --caps IO,FS,Env,AI \
-  --ai gemini-2.5-flash docparse/main.ail document.pdf</code></pre>
+  --ai gemini-3.8-flash docparse/main.ail document.pdf</code></pre>
 
       <h3>Anthropic (Claude)</h3>
       <pre><code class="language-bash">ANTHROPIC_API_KEY="sk-ant-..." ailang run --entry main --caps IO,FS,Env,AI \
@@ -349,21 +349,21 @@ ailang run --entry main --caps IO,FS,Env,AI \
 
       <h3>Audio &amp; Video</h3>
       <pre><code class="language-bash"># Transcribe audio — returns transcription, speaker count, language
-./bin/docparse recording.mp3 --ai gemini-2.5-flash
+./bin/docparse recording.mp3 --ai gemini-3.8-flash
 
 # Extract video content — visual scenes, tables, transcription
-./bin/docparse presentation.mp4 --ai gemini-2.5-flash
+./bin/docparse presentation.mp4 --ai gemini-3.8-flash
 
 # Convert audio transcription to DOCX
-./bin/docparse interview.wav --ai gemini-2.5-flash --convert transcript.docx
+./bin/docparse interview.wav --ai gemini-3.8-flash --convert transcript.docx
 
 # Convert video content to HTML report
-./bin/docparse tutorial.mp4 --ai gemini-2.5-flash --convert report.html</code></pre>
+./bin/docparse tutorial.mp4 --ai gemini-3.8-flash --convert report.html</code></pre>
       <p style="font-size:13px;color:var(--text-secondary)">Audio formats: WAV, MP3, AIFF, AAC, OGG, FLAC. Video formats: MP4, MOV, AVI, WebM, WMV, MPEG, MPG, FLV, 3GPP.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Recommended model:</strong> <code>gemini-2.5-flash</code> &mdash; best balance of accuracy (92% on PDF benchmark) and cost. Ollama models score lower (0-3%) due to structured JSON output limitations.</div>
+        <div><strong>Recommended model:</strong> <code>gemini-3.8-flash</code> &mdash; the current default, replacing <code>gemini-2.5-flash</code> (deprecated). The 92% PDF-benchmark figure was measured against 2.5 Flash and hasn't been re-run on 3.8 yet. Ollama models score lower (0-3%) due to structured JSON output limitations.</div>
       </div>
 
       <h2 id="sdks">SDKs (API, not local)</h2>
@@ -465,7 +465,7 @@ docker run -v $(pwd):/data docparse /data/report.docx
 
 # Parse with AI (pass your API key)
 docker run -e GOOGLE_API_KEY="your-key" \
-  -v $(pwd):/data docparse --ai gemini-2.5-flash /data/document.pdf</code></pre>
+  -v $(pwd):/data docparse --ai gemini-3.8-flash /data/document.pdf</code></pre>
 
       <p>The image builds AILANG from source, installs all dependencies, and uses an <code>ENTRYPOINT</code> for direct CLI parsing. No API server included &mdash; this is for local batch processing in containers.</p>
 

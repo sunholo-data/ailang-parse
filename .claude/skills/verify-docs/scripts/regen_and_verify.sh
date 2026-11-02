@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/../../../.."
 
 EXAMPLES_DIR="data/examples"
-AI_MODEL="${AI_MODEL:-gemini-2.5-flash}"
+AI_MODEL="${AI_MODEL:-gemini-3.8-flash}"
 
 echo "=== Regenerate & Verify Documents ==="
 echo "AI Model: $AI_MODEL"

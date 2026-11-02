@@ -1,0 +1,173 @@
+# Sprint Plan: PDF to PowerPoint (v0.55.0)
+
+**Design doc**: [v0_55_0_pdf_to_powerpoint.md](v0_55_0_pdf_to_powerpoint.md)
+**Sprint ID**: M-PDF2PPTX
+**Branch**: `feat/pdf-to-powerpoint` (off `main` at a34aa31, after v0.54.0's #121)
+**Duration**: ~4 working days, 7 milestones
+**Status**: ✅ Executed 2026-11-02 (M1–M7 and M3b). See Outcome at the end.
+**Risk**: Medium. Pagination touches every PPTX/ODP output, so byte identity for content that
+fits is the guard. The rest is additive.
+**AILANG prompt version loaded**: v0.16.8 (loaded this session).
+
+## Rulings (user, 2026-11-02)
+
+- Scope is **PowerPoint first**: engine work (page = slide, slide fitting), 2–3 PowerPoint
+  templates, and `pdf-to-powerpoint.html`. Other formats later.
+- Same process as v0.54.0: design doc → sprint plan → milestones → PR for review before it goes
+  live.
+- Diagram slides (design doc §3b): **hybrid**. Text slides are reflowed. Diagram-like pages
+  become a picture of the page (pdftoppm), with their text in the speaker notes. This is new
+  milestone M3b, after M3.
+
+## Registry reuse
+
+| Milestone | Package | Action | Reason |
+|---|---|---|---|
+| M1–M7 | `sunholo/external_backend` | depend (already) | Unchanged adapter bridge |
+| M3–M4 | — | none | Slide layout is generator-internal; `ailang pkg search` (slide, layout, pptx) finds no layout package |
+
+## Milestones
+
+### M1: Page markers (~150 LOC)
+
+- `decodeAdapterDoc(doc, keepPages)`: a page change inserts
+  `mkNamedSection("page-break", "<n>", [])`. `parsePdfViaBackend` passes
+  `backend != "pdftotext"`.
+- adapter: pdftotext blocks carry `page`, split on `\f`. The parse path ignores it.
+- `pdf_furniture.ail`: a page-break marker is a transparent role, kept in place, neither body nor
+  furniture.
+- Check that an empty page-break renders as nothing in the md, html, odt and qmd writers; fix any
+  that print a label.
+- **Acceptance**:
+  - inline tests for marker insertion and for the furniture pass with markers, idempotence
+    included;
+  - pdftotext parse JSON byte-identical on the golden PDFs and the proposal;
+  - the v0.54.0 PDF → DOCX example renders unchanged (same page count and same text per page);
+  - `--check`, `--test` and `--prove` pass.
+
+### M2: Slides from pages (~120 LOC)
+
+- `pdfPagesAsSlides(blocks) -> [Block]`, pure, in `pdf_furniture.ail` (the page-structure
+  module): marker-delimited groups become `SectionBlock("slide", …)`, and header/footer
+  sections are dropped.
+- `main.ail writeOutputs`: a PDF converted to pptx or odp is grouped into slides. On pdftotext the
+  convert path keeps page tags.
+- **Acceptance**:
+  - inline tests;
+  - `pandoc_basic.pdf` (4 pages) → 4 slides and `poi_sampleshow.pdf` (2) → 2, with poppler and
+    with the default backend;
+  - parse JSON unchanged.
+
+### M3: PPTX layout and pagination (~450 LOC, new `pptx_layout.ail`)
+
+- Height estimator per block, geometry from the slide size, title-first, continuation slides
+  "(cont.)", text split at sentences, tables split by rows with a repeated header, pictures
+  shrunk.
+- Old geometry is kept for slides that fit, so goldens stay byte-identical.
+- **Acceptance**:
+  - inline tests for the estimator, the splitter and the fits-unchanged rule;
+  - a zip-entry comparison against HEAD for a fixture set (md, docx and pptx inputs converted to
+    pptx) shows identical output for content that fits;
+  - the 40-block document renders with every block on a slide (PNG check);
+  - `--check`, `--test` and `--prove` pass.
+
+### M3b: Diagram slides as page pictures (~200 LOC)
+
+- adapter (poppler): per-page diagram detection (short scattered fragments over 3+ columns that
+  are not a table, no paragraphs). Such a page's blocks are tagged `layout: "diagram"`, and the
+  page is rendered with `pdftoppm` into an image block, within the image budget.
+- `pdfPagesAsSlides`: a diagram page becomes [first heading, page picture], with its text as
+  slide notes (`SectionBlock("notes")`, which `pptxSplitBySlides` already attaches).
+- **Acceptance**:
+  - unit tests on a synthetic diagram page and on a synthetic text slide (not flagged);
+  - `pandoc_basic.pdf` page 2 → a picture slide with its labels in the notes, and pages 1, 3 and
+    4 → editable slides;
+  - the v0.54.0 proposal pages are never flagged.
+
+### M4: ODP pagination (~150 LOC)
+
+- The same estimator and split in `odp_generator.ail`, reusing `pptx_layout.ail`'s pure core.
+- **Acceptance**: the same fixture identity check for ODP, the PDF deck → ODP slide count, and a
+  render check.
+
+### M5: Slides round-trip benchmark (~250 LOC)
+
+- `benchmarks/pdf/slides_roundtrip.py`: our PPTX test decks → PDF (LibreOffice) → PPTX
+  (backends) → parse, scored on slide count, title recall, bullet recall, table cell F1,
+  picture count and overflow (must be 0).
+- Results file alongside.
+- **Acceptance**: it runs; poppler slide count is 100% on the decks; overflow is 0 for every
+  backend.
+
+### M6: PowerPoint templates (~250 LOC AILANG)
+
+- `docs/scripts/pdf_to_powerpoint_templates.ail` builds 2–3 reference decks from our base deck:
+  theme colours and fonts, plus a master background band or accent and a footer line. Fonts
+  have LibreOffice stand-ins.
+- **Acceptance**: each one applies through `--reference-doc` ("reference doc applied"), and the
+  renders show distinct looks in LibreOffice.
+
+### M7: Source deck, page, assets (~600 LOC HTML/CSS/JS + script)
+
+- A source deck of our own written as HTML slides and printed to PDF with headless Chrome.
+- `docs/scripts/build-pdf-to-powerpoint-assets.sh`: renders, PageMode patch, screenshots,
+  gallery thumbnails, path-leak check.
+- `docs/pdf-to-powerpoint.html` in the `pdf-to-word.html` shape: gallery first, live
+  side-by-side, recovered structure, limits, backends, run it, FAQ JSON-LD.
+- Links from `pdf-to-word.html`, `docs.html`, `llms.txt` and `pdf-parsing.html`; CHANGELOG
+  entry.
+- **Acceptance**:
+  - desktop and true-phone-width (iframe) screenshots read correctly;
+  - the doc checks pass;
+  - the Tailscale preview is registered for review.
+
+## Validation (every milestone)
+
+`./bin/docparse --check`, `--test`, `--prove`, `python3 -m unittest tests/test_pdf_adapter.py`,
+`python3 docs/scripts/check-module-list.py` (new modules in MODULES/TEST_MODULES via
+`assets/bin/docparse`, not the `bin/docparse` symlink), the pdftotext byte-identity check, and
+the PPTX/ODP golden identity check from M3 on.
+
+## Estimate
+
+| Milestone | LOC |
+|---|---|
+| M1 | 150 |
+| M2 | 120 |
+| M3 | 450 |
+| M4 | 150 |
+| M5 | 250 |
+| M6 | 250 |
+| M7 | 600 |
+| **Total** | **~1,970** |
+
+The v0.54.0 sprint landed ~1,350 LOC plus a site page in one day of focused work. This one is
+larger and riskier because of M3, so the estimate is 2–4 days.
+
+## Outcome (2026-11-02)
+
+All milestones landed on `feat/pdf-to-powerpoint`. Measured:
+
+- A 4-page test deck PDF comes back as 4 slides. Before, it came back as 1.
+- The diagram and SmartArt pages become pictures with their labels in the notes, and the
+  table page stays an editable table.
+- The slides benchmark (default, poppler slide mode): 94% slides, 100% titles, 96% text,
+  86% table cells, 0 overflow.
+- PPTX/ODP output that fits is byte-identical to main. Content that overflowed now continues
+  on further slides.
+
+Changes from the plan:
+
+- PDF → slides uses an internal `poppler-slides` mode instead of adding page tags to
+  pdftotext, so pdftotext parse output stays byte-identical.
+- Diagram detection measures drawn ink from a 24 dpi pdftoppm render, because text alone
+  cannot tell a Venn diagram from a table.
+- Flowed wide tables scale their font.
+- With a PPTX template, titles keep their size.
+
+Follow-ups:
+
+- 16:9 text column width: boxes are still 9 in wide.
+- Binding to placeholders.
+- ODP speaker notes for diagram slides: the ODP generator has no notes yet.
+- A publish exclude for docs-only `.ail` files, requested from AILANG core.

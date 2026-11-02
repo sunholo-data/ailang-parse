@@ -875,7 +875,7 @@ def main():
     print("Existing challenge files (not regenerated):")
     existing = ["challenge_footnotes.docx", "challenge_nested_lists.docx",
                 "challenge_speaker_notes.pptx", "challenge_formulas.xlsx",
-                "challenge_complex.html"]
+                "challenge_complex.html", "challenge_edgar_layout.html"]
     for f in existing:
         path = OUTPUT_DIR / f
         if path.exists():

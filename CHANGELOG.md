@@ -9,7 +9,109 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
-## [Unreleased]
+## Unreleased
+
+### Added
+
+- PDF to PowerPoint: converting a PDF to `pptx` or `odp` makes one slide per
+  PDF page. The PDF backends (all but `pdftotext`, whose parse output is
+  unchanged) mark page boundaries with empty `page-break` sections (the DOCX
+  and EDGAR HTML convention), and the CLI reads a PDF with poppler's slide
+  mode when converting to slides.
+- Diagram slides: a page that is mostly drawing with short text labels
+  (measured from a low-resolution `pdftoppm` render) becomes a picture of the
+  page below its title, with its labels in the speaker notes; a drawn table
+  stays an editable table.
+- `pptx_layout`: slides that would overflow are paginated. Blocks are stacked
+  by estimated height and continue onto slides that repeat the title with
+  "(cont.)"; lists split by items, tables by rows (header repeated), long text
+  at sentences; headings stay with what follows; wide flowed tables are set
+  smaller. ODP gets the same on its 3 cm grid. Slides that fit keep their exact
+  previous output.
+- `benchmarks/pdf/slides_roundtrip.py` and results, and the
+  `pdf-to-powerpoint.html` page with example PowerPoint templates built in
+  AILANG (`docs/scripts/pdf_to_powerpoint_templates.ail`).
+
+### Changed
+
+- PPTX/ODP output of content too long for one slide (Markdown, DOCX, busy
+  slides) spreads over as many slides as it needs instead of running off the
+  bottom.
+- With a PPTX `--reference-doc`, slide titles keep their size; only body text
+  size is left to the template (before, titles came out at body size).
+- poppler: a bullet glyph makes a list item at any size, wrapped list lines
+  stay with their item, and symbol-font arrows and bullets map to Unicode.
+
+---
+
+## [v0.54.0](https://github.com/sunholo-data/ailang-parse/compare/v0.53.0...v0.54.0) — 2026-11-02
+
+### Added
+
+- PDF: `--pdf-backend poppler` recovers document structure from the poppler
+  tools the default backend already uses, with no Python packages: headings
+  ranked by font size, bulleted and numbered lists, tables from aligned
+  columns (wrapped cells folded back, stacked tables kept apart, prose set in
+  columns read column by column), paragraphs reflowed, bold and links as
+  inline runs, and margin lines that recur across pages tagged as running
+  header/footer. Text comes from `pdftotext -bbox-layout`, style from
+  `pdftohtml -xml`. Pictures in the body (illustrations, photos, figures) are
+  carried as image blocks in their place, sized as they appeared on the page;
+  logos in the header/footer band, tiny decorations and full-page backgrounds
+  are left out, and a document's images are capped at 6 MB. Opt-in;
+  `pdftotext` is unchanged.
+- PDF: page furniture leaves the body. A new pure `pdf_furniture` pass moves
+  the running header, footer and page numbers into one header and one footer
+  section (which DOCX/ODT output writes as real header/footer parts, and which
+  a `--reference-doc` replaces with the template's own). It runs on the
+  poppler, docling, liteparse and ai backends, and on `--convert` of any PDF
+  to a document format; parse output from `pdftotext` is unchanged.
+- PDF adapter protocol: list and image blocks, inline runs, and a block's
+  page and header/footer region can now cross from the Python adapter.
+- `benchmarks/pdf/structure_roundtrip.py`: renders our own DOCX documents to
+  PDF and scores each backend's parse against the source (headings, tables,
+  lists, header/footer leakage, text).
+
+### Fixed
+
+- PDF (docling): the document is walked item by item instead of through its
+  Markdown export, so lists stay lists, page headers/footers are recognised,
+  and pictures no longer leave a literal `<!-- image -->` in the output: body
+  pictures are carried as images, by the same rules as the poppler backend.
+  Heading levels come from heading size when docling reports them all as one
+  level. Text is read with docling's pypdfium backend, which does not double
+  glyphs a PDF draws twice ("Thee", "Confidrm").
+- PDF (liteparse): headings were never detected with liteparse 2.x, which
+  renamed `textItems`/`fontSize`; both spellings are read, sizes rank into
+  heading levels, and bullet lines become lists.
+
+---
+
+## [v0.53.0](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.53.0) — 2026-10-26
+
+Also ships v0.52.2, which was versioned but never tagged.
+
+### Added
+
+- HTML: SEC EDGAR filings parse into a document instead of one block or a
+  line-per-block stream. A filing fetched from EDGAR's Archives keeps its SGML
+  envelope (`<DOCUMENT><TYPE>S-1…<TEXT>`) before `<html>`, which made the whole
+  page one text block; the envelope is now skipped. Filings laid out as print
+  pages (Workiva and similar: fixed-size page boxes, every line an absolutely
+  positioned `<div>` of positioned `<font>` fragments, no `<p>` or `<h1>`) are
+  read by the new `html_layout` module: lines regroup into paragraphs by line
+  pitch, headings come from font size and weight relative to the body font,
+  bullet runs become lists, footnotes stay separate notes, paragraphs split by
+  a page break (or by the page's footnotes) rejoin, the running header and
+  page number are dropped, and each page leaves an empty `page-break` section
+  named by its printed page number. Laid-out tables lose their column-width
+  sizing row, blank rows and empty spacer columns (spans narrowed to match,
+  with `{merged}` continuations so a spanning header row stays as wide as the
+  rows under it), and wrapped cell lines rejoin. On Anthropic's S-1 (14 MB,
+  421 pages): 20,554 blocks with no headings → 3,274 blocks with 676 headings,
+  129 lists and 421 page markers, in ~7 s (was ~5 s). Ordinary HTML is
+  unaffected: a page needs a fixed width and height in points.
+  Fixture: `challenge_edgar_layout.html` (invented content).
 
 ### Fixed
 
@@ -38,7 +140,7 @@ separately — see `sdks/` for per-SDK changelogs.
   diagnostics, images retain reading-order evidence, and formula notation
   accepts an optional leading `=`. Both source audits run in CI.
 
-## [v0.52.2](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.52.2) — 2026-10-22
+## v0.52.2 — 2026-10-22 (never tagged; ships in v0.53.0)
 
 ### Fixed
 

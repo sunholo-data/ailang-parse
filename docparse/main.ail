@@ -16,6 +16,7 @@ import docparse/services/xlsx_parser (parseXlsx, parseXlsxMetadata)
 import docparse/services/direct_ai_parser (parsePdf, parseDocumentImage, parseImage, parseAudio, parseVideo, parsePdfMetadata)
 import docparse/services/pdf_annotations (extractAnnotations, scanAnnotations, annotationsAsBlocksAnchored, Annotation)
 import docparse/services/pdf_backend_external (parsePdfViaBackend, parsePdfWithFallback, ExternalDocResult, PdfParseOutcome, fetchPdfWords)
+import docparse/services/pdf_furniture (pdfFurnitureApply, pdfPagesAsSlides)
 import docparse/services/layout_ai (describeImages, enhanceBlocks, inferTableStructure, cleanExtractedText, dirOf)
 import docparse/services/csv_parser (parseCsv)
 import docparse/services/markdown_parser (parseMarkdown)
@@ -74,7 +75,7 @@ import docparse/services/samples (samples, sampleResolvePath)
 --   ailang run --entry main --caps IO,FS,Env docparse/main.ail myfile.docx
 --
 -- Run (with AI image descriptions):
---   GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash docparse/main.ail myfile.docx describe
+--   GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.8-flash docparse/main.ail myfile.docx describe
 --
 -- Run (with contracts enforced):
 --   ailang run --entry main --caps IO,FS,Env --verify-contracts docparse/main.ail myfile.docx
@@ -283,10 +284,24 @@ func printNotes(notes: [string]) -> () ! {IO} =
 -- Returns false on hard failure instead of exit()ing: in batch mode an exit()
 -- here would kill every remaining file, so parseFiles collects the count and
 -- main exits non-zero once the whole batch has had its turn.
+-- Converting a PDF to slides reads it with poppler's slide mode
+-- ("poppler-slides"): the default pdftotext keeps no page boundaries, and one
+-- PDF page per slide needs them; slide mode also turns diagram pages into a
+-- picture of the page with their labels as speaker notes. Used when no
+-- backend is chosen or poppler is; any other explicit --pdf-backend is
+-- respected.
+pure func slideConvertOptions(filepath: string, convertTarget: string, opts: ParseOptions) -> ParseOptions {
+  let target = getExtension(convertTarget);
+  if getExtension(filepath) == "pdf" && (target == "pptx" || target == "odp")
+       && (length(opts.pdfBackend) == 0 || opts.pdfBackend == "poppler")
+    then {opts | pdfBackend: "poppler-slides"}
+    else opts
+}
+
 func runParse(filepath: string, opts: ParseOptions, outDir: string, doSummarize: bool, convertTarget: string,
               referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string)
   -> bool ! {IO, FS, AI, Env, Net, Process, Clock} {
-  match parseDocument(filepath, opts) {
+  match parseDocument(filepath, slideConvertOptions(filepath, convertTarget, opts)) {
     -- Hard failure: print, write NOTHING. The error text must never become the
     -- document — a caller that gets a file back cannot tell a parse from a
     -- failure, and `ailang run --batch` scores it as a success. The code says
@@ -588,8 +603,19 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
   if length(convertTarget) > 0 then {
     println("");
     let convertExt = getExtension(convertTarget);
+    -- A PDF's running header, footer and page numbers become the generated
+    -- document's header and footer instead of repeating in its body. Parse
+    -- output keeps pdftotext's blocks as they were; only the conversion
+    -- moves them (idempotent: backends that already did this are unchanged).
+    let furnished = if doc.format == "pdf" && convertExt != "xlsx" && convertExt != "ods"
+      then {doc | blocks: pdfFurnitureApply(doc.blocks, doc.metadata.pageCount)}
+      else doc;
+    -- PDF to slides: one PDF page per slide.
+    let cdoc = if doc.format == "pdf" && (convertExt == "pptx" || convertExt == "odp")
+      then {furnished | blocks: pdfPagesAsSlides(furnished.blocks)}
+      else furnished;
     if convertExt == "html" || convertExt == "htm" then {
-      match generateHtmlWithReference(doc, referenceDoc) {
+      match generateHtmlWithReference(cdoc, referenceDoc) {
         Err(e) => {
           println("Error generating HTML: ${e}");
           exit(1)
@@ -601,36 +627,36 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
       }
     }
     else if convertExt == "docx" then {
-      let msg = generateDocxWithReference(doc, convertTarget, referenceDoc, referenceSection, tableStyle);
+      let msg = generateDocxWithReference(cdoc, convertTarget, referenceDoc, referenceSection, tableStyle);
       emitGenerated(msg)
     }
     else if convertExt == "pptx" then {
-      let msg = generatePptxWithReference(doc, convertTarget, slideSize, referenceDoc);
+      let msg = generatePptxWithReference(cdoc, convertTarget, slideSize, referenceDoc);
       emitGenerated(msg)
     }
     else if convertExt == "xlsx" then {
-      let msg = generateXlsx(doc, convertTarget);
+      let msg = generateXlsx(cdoc, convertTarget);
       emitGenerated(msg)
     }
     else if convertExt == "odt" then {
-      let msg = generateOdtWithReference(doc, convertTarget, referenceDoc);
+      let msg = generateOdtWithReference(cdoc, convertTarget, referenceDoc);
       emitGenerated(msg)
     }
     else if convertExt == "odp" then {
-      let msg = generateOdp(doc, convertTarget);
+      let msg = generateOdp(cdoc, convertTarget);
       emitGenerated(msg)
     }
     else if convertExt == "ods" then {
-      let msg = generateOds(doc, convertTarget);
+      let msg = generateOds(cdoc, convertTarget);
       emitGenerated(msg)
     }
     else if convertExt == "md" then {
-      let md = renderMarkdown(doc);
+      let md = renderMarkdown(cdoc);
       writeFile(convertTarget, md);
       println("Converted to Markdown: ${convertTarget}")
     }
     else if convertExt == "qmd" then {
-      let qmd = generateQmd(doc);
+      let qmd = generateQmd(cdoc);
       writeFile(convertTarget, qmd);
       println("Converted to Quarto Markdown: ${convertTarget}")
     }

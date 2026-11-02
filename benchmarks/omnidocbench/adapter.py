@@ -5,8 +5,8 @@ Converts page images to markdown using DocParse's AI extraction pipeline,
 producing output compatible with OmniDocBench's md2md evaluation.
 
 Usage:
-    uv run benchmarks/omnidocbench/adapter.py --ai gemini-2.5-flash
-    uv run benchmarks/omnidocbench/adapter.py --ai gemini-2.5-flash --demo  # Demo subset only
+    uv run benchmarks/omnidocbench/adapter.py --ai gemini-3.8-flash
+    uv run benchmarks/omnidocbench/adapter.py --ai gemini-3.8-flash --demo  # Demo subset only
     uv run benchmarks/omnidocbench/adapter.py --ai ollama:granite3.2-vision
 """
 
@@ -132,8 +132,8 @@ def run_docparse(image_path: Path, ai_model: str) -> dict | None:
 
 def main():
     parser = argparse.ArgumentParser(description="DocParse OmniDocBench adapter")
-    parser.add_argument("--ai", default="gemini-2.5-flash",
-                        help="AI model for extraction (default: gemini-2.5-flash)")
+    parser.add_argument("--ai", default="gemini-3.8-flash",
+                        help="AI model for extraction (default: gemini-3.8-flash)")
     parser.add_argument("--demo", action="store_true",
                         help="Use demo subset only (18 images)")
     parser.add_argument("--output-dir",

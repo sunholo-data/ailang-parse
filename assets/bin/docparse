@@ -33,7 +33,7 @@ if [ ! -f "$PROJECT_DIR/$MAIN_AIL" ]; then
   echo "    curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh" >&2
   exit 1
 fi
-DEFAULT_AI_MODEL="gemini-2.5-flash"
+DEFAULT_AI_MODEL="gemini-3.8-flash"
 
 # Module list for --check and --test (relative to PROJECT_DIR)
 MODULES=(
@@ -47,6 +47,7 @@ MODULES=(
   docparse/services/xlsx_parser.ail
   docparse/services/direct_ai_parser.ail
   docparse/services/pdf_backend_external.ail
+  docparse/services/pdf_furniture.ail
   docparse/services/layout_ai.ail
   docparse/services/markdown_writer.ail
   docparse/services/console_report.ail
@@ -56,6 +57,7 @@ MODULES=(
   docparse/services/markdown_quote.ail
   docparse/services/markdown_table.ail
   docparse/services/markdown_parser.ail
+  docparse/services/html_layout.ail
   docparse/services/html_parser.ail
   docparse/services/epub_parser.ail
   docparse/services/odf_text.ail
@@ -99,6 +101,7 @@ MODULES=(
   docparse/services/odf_image.ail
   docparse/services/docx_template.ail
   docparse/services/pptx_generator.ail
+  docparse/services/pptx_layout.ail
   docparse/services/xlsx_generator.ail
   docparse/services/odt_generator.ail
   docparse/services/odp_generator.ail
@@ -145,6 +148,9 @@ TEST_MODULES=(
   docparse/services/odt_generator.ail
   docparse/services/odp_generator.ail
   docparse/services/ods_generator.ail
+  docparse/services/pdf_backend_external.ail
+  docparse/services/pdf_furniture.ail
+  docparse/services/pptx_layout.ail
 )
 
 usage() {
@@ -215,14 +221,16 @@ Options:
   --describe        Enable AI image descriptions
   --summarize       Enable AI document summary
   --pdf-backend B   PDF backend: pdftotext (default for text-layer PDFs),
+                    poppler (structure from poppler alone: headings,
+                    lists, tables, header/footer — no extra installs),
                     docling (local ML layout/OCR), liteparse (font-size
                     headings), ai (multimodal AI — external, paid).
                     Default: pdftotext, escalating automatically to docling
                     when the PDF has no text layer (scanned/image-only PDFs).
                     AI is never chosen automatically.
-  --ai MODEL        AI model (default: gemini-2.5-flash; gemini-3-flash-preview
-                    is supported but ~5x slower for PDF parsing due to thinking
-                    tokens — pass it explicitly only when reasoning helps)
+  --ai MODEL        AI model (default: gemini-3.8-flash; pass a higher-
+                    reasoning model explicitly only when it helps — it will
+                    be slower for PDF parsing due to thinking tokens)
   --verify          Enable runtime contract verification
   --budget-report   Show capability budget usage after run
   --output-dir DIR  Copy output files to DIR after parsing
@@ -644,9 +652,9 @@ while [ $# -gt 0 ]; do
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
-        pdftotext|ai|docling|liteparse) ;;
+        pdftotext|poppler|ai|docling|liteparse) ;;
         *)
-          echo "Error: --pdf-backend must be one of: pdftotext, ai, docling, liteparse (got: $PDF_BACKEND)" >&2
+          echo "Error: --pdf-backend must be one of: pdftotext, poppler, ai, docling, liteparse (got: $PDF_BACKEND)" >&2
           exit 2
           ;;
       esac

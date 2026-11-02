@@ -22,13 +22,13 @@ cd ailang-parse
 ./bin/docparse data/test_files/sample.docx
 
 # Parse with AI (PDF, images)
-GOOGLE_API_KEY="" ./bin/docparse document.pdf --ai gemini-2.5-flash
+GOOGLE_API_KEY="" ./bin/docparse document.pdf --ai gemini-3.8-flash
 
 # Convert between formats
 ./bin/docparse report.docx --convert output.html
 
 # Generate documents from prompts
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-2.5-flash \
+ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.8-flash \
   docparse/main.ail --generate report.docx --prompt "Q1 sales report with tables"
 ```
 
@@ -119,8 +119,7 @@ All formats return the same block structure:
 AILANG Parse uses AILANG's AI effect — any model AILANG supports works:
 
 ```bash
-./bin/docparse scan.pdf --ai gemini-2.5-flash          # Google (default; fast)
-./bin/docparse scan.pdf --ai gemini-3-flash-preview    # Google (slower; thinking model)
+./bin/docparse scan.pdf --ai gemini-3.8-flash          # Google (default; fast)
 ./bin/docparse scan.pdf --ai granite-docling           # Local Ollama (free)
 ./bin/docparse scan.pdf --ai claude-haiku-4-5          # Anthropic
 ```
