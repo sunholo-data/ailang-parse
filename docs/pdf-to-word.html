@@ -158,7 +158,44 @@
   border-bottom: 1px solid var(--dp-blue-border);
   background: var(--dp-blue-faded, rgba(37, 99, 235, 0.04));
 }
-.p2w-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.p2w-tabs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.p2w-viewer-bar { justify-content: flex-start; }
+.p2w-bar-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+.p2w-tab { display: inline-flex; align-items: center; gap: 6px; }
+.p2w-sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, var(--a) 0 50%, var(--b) 50% 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+.p2w-tab[aria-selected="true"] .p2w-sw { box-shadow: 0 0 0 1.5px #fff; }
+.p2w-tab:hover { border-color: var(--dp-blue); color: var(--text-primary); }
+.p2w-act {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dp-blue-border);
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--dp-blue) !important;
+  background: var(--bg-card, #fff);
+}
+.p2w-act:hover { border-color: var(--dp-blue); }
+.p2w-act--primary { background: var(--dp-blue); border-color: var(--dp-blue); color: #fff !important; }
 .p2w-tab {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -181,6 +218,7 @@
 .p2w-pane { min-width: 0; }
 .p2w-pane + .p2w-pane { border-left: 1px solid var(--dp-blue-border); }
 .p2w-pane-label {
+  align-items: center;
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
@@ -496,32 +534,33 @@
       <p>Everything after the read is exact: the same blocks always produce the same document, and <a href="document-generation.html#reference-doc">the template merge</a> carries your styles, fonts, page setup, header and footer across byte for byte. So the quality of a PDF-to-Word conversion is decided at one place, the read, and that is where AILANG Parse spends its effort.</p>
 
       <h2 id="example">Live example</h2>
-      <p>The source is one of our own <a href="templates.html">proposal templates</a>, exported to PDF. On the left is that PDF; on the right, the Word document AILANG Parse generated from it, opened as a rendered page. Switch the template to see the same recovered content in another house style, or with no template at all &mdash; or pick one from <a href="#templates">the gallery below</a>.</p>
+      <p>A real PDF on the left, the Word document generated from it on the right. Pick a template to restyle it.</p>
 
       <div class="p2w-viewer" id="viewer">
         <div class="p2w-viewer-bar">
+          <span class="p2w-bar-label">Template</span>
           <div class="p2w-tabs" role="tablist" aria-label="Output template">
-            <button class="p2w-tab" role="tab" aria-selected="true" data-out="ailang-style">AILANG</button>
-            <button class="p2w-tab" role="tab" aria-selected="false" data-out="holosun-style">Holosun</button>
-            <button class="p2w-tab" role="tab" aria-selected="false" data-out="sunholo-style">Sunholo</button>
-            <button class="p2w-tab" role="tab" aria-selected="false" data-out="classic-style">Classic</button>
-            <button class="p2w-tab" role="tab" aria-selected="false" data-out="modern-style">Modern</button>
-            <button class="p2w-tab" role="tab" aria-selected="false" data-out="minimal-style">Minimal</button>
-            <button class="p2w-tab" role="tab" aria-selected="false" data-out="no-template">No template</button>
+            <button class="p2w-tab" role="tab" aria-selected="true" data-out="ailang-style"><span class="p2w-sw" style="--a:#1F2D3A;--b:#E73C17"></span>AILANG</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="holosun-style"><span class="p2w-sw" style="--a:#314352;--b:#E73C17"></span>Holosun</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="sunholo-style"><span class="p2w-sw" style="--a:#314352;--b:#BD3012"></span>Sunholo</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="classic-style"><span class="p2w-sw" style="--a:#1F3A5F;--b:#B08D57"></span>Classic</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="modern-style"><span class="p2w-sw" style="--a:#6D28D9;--b:#EDE9FE"></span>Modern</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="minimal-style"><span class="p2w-sw" style="--a:#111111;--b:#FFFFFF"></span>Minimal</button>
+            <button class="p2w-tab" role="tab" aria-selected="false" data-out="no-template"><span class="p2w-sw" style="--a:#FFFFFF;--b:#9CA3AF"></span>No template</button>
           </div>
         </div>
         <div class="p2w-panes">
           <div class="p2w-pane">
-            <div class="p2w-pane-label">Source PDF <a href="templates/output/ailang-proposal.pdf">open</a></div>
+            <div class="p2w-pane-label">Source PDF <a class="p2w-act" href="templates/output/ailang-proposal.pdf" target="_blank" rel="noopener">Open PDF &#8599;</a></div>
             <iframe src="assets/pdf-to-word/source.pdf#view=FitH&amp;pagemode=none&amp;navpanes=0" title="Source PDF: AILANG proposal" loading="lazy"></iframe>
           </div>
           <div class="p2w-pane">
-            <div class="p2w-pane-label">Generated Word document <span><a id="p2w-docx" href="assets/pdf-to-word/proposal-ailang-style.docx" download>.docx</a> &middot; <a id="p2w-pdf" href="assets/pdf-to-word/proposal-ailang-style.pdf">rendered</a></span></div>
+            <div class="p2w-pane-label">Generated Word document <a class="p2w-act p2w-act--primary" id="p2w-docx" href="assets/pdf-to-word/proposal-ailang-style.docx" download>Download .docx &#8595;</a></div>
             <iframe id="p2w-out" src="assets/pdf-to-word/proposal-ailang-style.pdf#view=FitH&amp;pagemode=none&amp;navpanes=0" title="Generated Word document, rendered" loading="lazy"></iframe>
           </div>
         </div>
       </div>
-      <p style="font-size:12px;color:var(--text-secondary)">The right-hand pane is the generated <code>.docx</code> rendered to PDF by LibreOffice so a browser can show it. Download the <code>.docx</code> to open it in Word. If your browser does not show PDFs inline, the screenshots below are the same pages.</p>
+      <p style="font-size:12px;color:var(--text-secondary)">The Word document is shown rendered by LibreOffice, since browsers can&rsquo;t display <code>.docx</code>. No inline PDFs in your browser? The screenshots below are the same pages.</p>
 
       <div class="p2w-shots">
         <figure class="p2w-shot">
@@ -721,7 +760,6 @@ docparse scan.pdf --pdf-backend docling --convert scan.docx --reference-doc hous
   var tabs = document.querySelectorAll('.p2w-tab');
   var frame = document.getElementById('p2w-out');
   var docx = document.getElementById('p2w-docx');
-  var pdf = document.getElementById('p2w-pdf');
   document.querySelectorAll('.p2w-card-pick').forEach(function (card) {
     card.addEventListener('click', function () {
       var target = document.querySelector('.p2w-tab[data-out="' + card.getAttribute('data-out') + '"]');
@@ -740,7 +778,6 @@ docparse scan.pdf --pdf-backend docling --convert scan.docx --reference-doc hous
       // pagemode/navpanes: open without the viewer's bookmarks sidebar.
       frame.src = base + '.pdf#view=FitH&pagemode=none&navpanes=0';
       docx.href = base + '.docx';
-      pdf.href = base + '.pdf';
     });
   });
 })();
