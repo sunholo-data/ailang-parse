@@ -8,6 +8,9 @@ The shapes, each modelled on what the audit has to tell apart:
 
   scanned        every page is a picture of a page plus an identical stamp
                  line laid over it (the 2026-11-02 incident shape)
+  scanned_fragments  every page is a picture of a page plus a stamp drawn as
+                 dozens of 1-3 character pieces (rotated / letter-spaced
+                 text), several of them digits only
   scanned_blank  every page is a picture of a page, no text at all
   partial        four real text pages, then two scanned pages with a stamp
   slides         a slide deck: little text per page, but different on every
@@ -125,6 +128,17 @@ def _scan_page(n: int, total: int, stamp: bool = True) -> dict:
     return {"size": LETTER, "image": (0, 0, *LETTER), "lines": lines}
 
 
+# An invented certification stamp, cut into the 1-3 character pieces a rotated
+# or letter-spaced stamp comes out of pdftotext as.
+_STAMP_FRAGMENTS = ["Ce", "rt", "ifi", "ed", "co", "py", "No", "rth", "wo", "od",
+                    "12", "/0", "3/", "20", "31", "14", ":3", "0", "-", "7"]
+
+
+def _fragmented_scan_page() -> dict:
+    lines = [(40 + 9 * i, 120 + 22 * i, 8, frag) for i, frag in enumerate(_STAMP_FRAGMENTS)]
+    return {"size": LETTER, "image": (0, 0, *LETTER), "lines": lines}
+
+
 def _text_page(n: int, total: int) -> dict:
     body = [(72, 700 - 18 * i, 11, f"{_PROSE[(n + i) % len(_PROSE)]} Section {n}.{i}.")
             for i in range(10)]
@@ -164,12 +178,14 @@ _FORM = [
 def fixtures() -> dict[str, bytes]:
     scanned = [_scan_page(n, 6) for n in range(1, 7)]
     blank = [_scan_page(n, 4, stamp=False) for n in range(1, 5)]
+    fragmented = [_fragmented_scan_page() for _ in range(1, 7)]
     partial = [_text_page(n, 6) for n in range(1, 5)] + [_scan_page(n, 6) for n in (5, 6)]
     slides = [_slide_page(n, t, b, background=(n == 3)) for n, (t, b) in enumerate(_SLIDES, 1)]
     forms = [{"size": LETTER, "image": None,
               "lines": [(72, 720 - 30 * i, 12, t) for i, t in enumerate(_FORM)]} for _ in range(4)]
     return {
         "scanned.pdf": build_pdf(scanned),
+        "scanned_fragments.pdf": build_pdf(fragmented),
         "scanned_blank.pdf": build_pdf(blank),
         "partial.pdf": build_pdf(partial),
         "slides.pdf": build_pdf(slides),

@@ -1345,6 +1345,7 @@ _TL_MIN_CHARS = 12      # non-whitespace characters of its own a page needs to c
                         # (a stamp-only scan has 0; "Risks - Vendor lock-in" on a slide has 19)
 _TL_SCAN_COVER = 0.5    # share of the page an image must cover to make it a picture of a page
 _TL_REPEAT_SHARE = 0.4  # without image data: a line on this share of pages (and 2+) is furniture
+_TL_FRAGMENT_CHARS = 4  # a number-only line this short, on that share of pages, is a stamp fragment
 _TL_LETTER = re.compile(r"[^\W\d_]")
 _TL_WORD = re.compile(r"[^\W\d_]+")
 
@@ -1367,15 +1368,25 @@ def _text_layer(pages: list[str], picture_pages: Callable[[], set[int] | None]) 
 
     A line is repeated when its key (lower case, whitespace collapsed, digit
     runs as '#', so "Page 3 of 78" matches "Page 4 of 78") has a letter in it
-    and appears on two or more pages. Number-only lines never count as
-    repeated: rows of figures in a statement are content, however alike.
+    and appears on two or more pages. Number-only lines are content — rows of
+    figures in a statement normalise alike however different they are — with
+    one exception: a SHORT number-only fragment (at most _TL_FRAGMENT_CHARS
+    non-whitespace characters, like "/17" or ":30") whose exact text recurs on
+    a wide share of pages. A stamp drawn as rotated or letter-spaced text comes
+    out of pdftotext as dozens of such fragments per page; on the 2026-11-02
+    scan (78 pages) they left 32 characters on every page and hid the scan.
     """
-    keyed = [[(_pp_key(ln), _tl_chars(ln)) for ln in page.splitlines() if ln.strip()] for page in pages]
-    on_pages = Counter(k for page in keyed for k in {k for k, _ in page})
+    keyed = [[(_pp_key(ln), _tl_chars(ln), " ".join(ln.split())) for ln in page.splitlines() if ln.strip()]
+             for page in pages]
+    on_pages = Counter(k for page in keyed for k in {k for k, _, _ in page})
+    exact_on_pages = Counter(e for page in keyed for e in {e for k, c, e in page
+                                                          if c <= _TL_FRAGMENT_CHARS and not _TL_LETTER.search(k)})
+    fragments = {e for e, c in exact_on_pages.items()
+                 if c >= max(2, math.ceil(len(pages) * _TL_REPEAT_SHARE))}
 
     def own_chars(need: int) -> list[int]:
         repeated = {k for k, c in on_pages.items() if c >= need and _TL_LETTER.search(k)}
-        return [sum(c for k, c in page if k not in repeated) for page in keyed]
+        return [sum(c for k, c, e in page if k not in repeated and e not in fragments) for page in keyed]
 
     words = len({w.lower() for page in pages for w in _TL_WORD.findall(page)})
     stats = {"pages": len(pages), "textlessPages": [], "distinctWords": words}
