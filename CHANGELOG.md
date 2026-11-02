@@ -9,6 +9,19 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.55.3](https://github.com/sunholo-data/ailang-parse/compare/v0.55.2...v0.55.3) — 2026-11-02
+
+### Fixed
+
+- **`--pdf-backend ai` / `pdfBackend: "ai"` works for PDFs over ~375 KB on Vertex AI.**
+  Above that size the PDF is uploaded to `GCS_TEMP_BUCKET` and passed to Gemini as a
+  `gs://` reference. `sunholo/gemini_files` 0.2.1 stored the PDF's base64 *text* there,
+  because GCS ignores `Content-Transfer-Encoding` on a simple upload. Vertex refused it with
+  400 "Request contains an invalid argument". On the hosted API every such AI parse failed
+  in about 1.3s, for example on public 775 KB, 819 KB and 2.2 MB papers. Bumped to
+  gemini_files 0.2.2, which uploads the decoded bytes. Local runs with no
+  `GCS_TEMP_BUCKET` were never affected: they send the PDF inline.
+
 ## [v0.55.2](https://github.com/sunholo-data/ailang-parse/compare/v0.55.1...v0.55.2) — 2026-11-02
 
 Scanned PDFs fail loudly instead of parsing as blank pages. Callers that
