@@ -9,6 +9,41 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## Unreleased
+
+### Added
+
+- PDF to PowerPoint: converting a PDF to `pptx` or `odp` makes one slide per
+  PDF page. The PDF backends (all but `pdftotext`, whose parse output is
+  unchanged) mark page boundaries with empty `page-break` sections (the DOCX
+  and EDGAR HTML convention), and the CLI reads a PDF with poppler's slide
+  mode when converting to slides.
+- Diagram slides: a page that is mostly drawing with short text labels
+  (measured from a low-resolution `pdftoppm` render) becomes a picture of the
+  page below its title, with its labels in the speaker notes; a drawn table
+  stays an editable table.
+- `pptx_layout`: slides that would overflow are paginated. Blocks are stacked
+  by estimated height and continue onto slides that repeat the title with
+  "(cont.)"; lists split by items, tables by rows (header repeated), long text
+  at sentences; headings stay with what follows; wide flowed tables are set
+  smaller. ODP gets the same on its 3 cm grid. Slides that fit keep their exact
+  previous output.
+- `benchmarks/pdf/slides_roundtrip.py` and results, and the
+  `pdf-to-powerpoint.html` page with example PowerPoint templates built in
+  AILANG (`docs/scripts/pdf_to_powerpoint_templates.ail`).
+
+### Changed
+
+- PPTX/ODP output of content too long for one slide (Markdown, DOCX, busy
+  slides) spreads over as many slides as it needs instead of running off the
+  bottom.
+- With a PPTX `--reference-doc`, slide titles keep their size; only body text
+  size is left to the template (before, titles came out at body size).
+- poppler: a bullet glyph makes a list item at any size, wrapped list lines
+  stay with their item, and symbol-font arrows and bullets map to Unicode.
+
+---
+
 ## [v0.54.0](https://github.com/sunholo-data/ailang-parse/compare/v0.53.0...v0.54.0) — 2026-11-02
 
 ### Added
