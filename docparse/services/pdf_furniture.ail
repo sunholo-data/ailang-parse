@@ -34,7 +34,7 @@ import std/list (map, filter, foldl, reverse, sortBy, zip, any, flatMap, range, 
 import std/string (length, trim, toLower, words, join, foldChars, compare, split, find, startsWith, substring, stringToInt)
 import std/map (fromList as mapFromList, lookup as mapLookup)
 import std/option (Option, Some, None, getOrElse)
-import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, mkPara, mkSection, mkText, mkHeading)
+import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, mkPara, mkSection, mkNamedSection, mkText, mkHeading)
 
 -- =====================================================================
 -- Pure arithmetic core (Z3-verifiable)
@@ -108,6 +108,14 @@ export pure func pdfFurnitureIsPageNumberKey(key: string) -> bool
   key == "# / #" || key == "#/#" || key == "- # -"
 }
 
+-- Key of a top-level block: the marker sentinel for a page-break section, the
+-- normalised text for a candidate, "" for anything else. The sentinel cannot
+-- collide with a text key (normalised text never contains U+0001).
+pure func pfBlockKey(b: Block) -> string =
+  if pfIsSectionOf(b, "page-break") then pfMarkerKey() else pdfFurnitureKey(pfCandidateText(b))
+
+pure func pfMarkerKey() -> string = "\u{1}page-break"
+
 -- Text of a block that can be furniture: short paragraphs and headings only.
 -- Tables, lists and images are content however often they repeat.
 pure func pfCandidateText(b: Block) -> string =
@@ -147,7 +155,8 @@ pure func pfAllDigits(w: string) -> bool =
 -- =====================================================================
 
 -- One top-level body block with what the pass learned about it.
--- role: 0 body, 1 furniture line, 2 page number.
+-- role: 0 body, 1 furniture line, 2 page number, 3 page-break marker (kept in
+-- place and transparent: it neither ends a furniture run nor counts as body).
 type PfItem = {
   block: Block,
   key: string,
@@ -259,19 +268,21 @@ export pure func pdfFurnitureApply(blocks: [Block], pageCount: int) -> [Block] {
   let body = filter(\b. not pfIsSectionOf(b, "header") && not pfIsSectionOf(b, "footer"), blocks);
   let n = listLength(body);
   let threshold = pdfFurnitureThreshold(pageCount);
-  let keyed = zip(map(\b. pdfFurnitureKey(pfCandidateText(b)), body), range(0, n));
-  let stats = pfStats(filter(\p. match p { (k, _) => length(k) > 0 }, keyed));
+  let keyed = zip(map(pfBlockKey, body), range(0, n));
+  let stats = pfStats(filter(\p. match p { (k, _) => length(k) > 0 && k != pfMarkerKey() }, keyed));
   let statMap = mapFromList(map(\s. (s.key, s), stats));
   let pnCount = foldl(\acc s. if pdfFurnitureIsPageNumberKey(s.key) then acc + s.count else acc, 0, stats);
   -- Leading / trailing runs of repeated lines: where a running header and
   -- footer sit on a short document (see pdfFurnitureQualifies).
-  let repeats = \k. length(k) > 0 && (match mapLookup(statMap, k) { Some(st) => st.count >= threshold, None => false });
+  let repeats = \k. k == pfMarkerKey() ||
+    (length(k) > 0 && (match mapLookup(statMap, k) { Some(st) => st.count >= threshold, None => false }));
   let keys = map(\p. match p { (k, _) => k }, keyed);
   let lead = pfRunLength(keys, repeats);
   let trail = pfRunLength(reverse(keys), repeats);
   let items = map(\p. match p {
       (b, (k, i)) =>
-        let role = pfRole(k, mapLookup(statMap, k), threshold, pageCount, pnCount, n, lead, trail) in
+        let role = if k == pfMarkerKey() then 3
+          else pfRole(k, mapLookup(statMap, k), threshold, pageCount, pnCount, n, lead, trail) in
         {block: b, key: k, role: role, idx: i,
          beforeBody: false, afterBody: false, afterPn: false, beforePn: false}
     }, zip(body, keyed));
@@ -285,7 +296,7 @@ export pure func pdfFurnitureApply(blocks: [Block], pageCount: int) -> [Block] {
   let footerCopies = map(\it. it.block, filter(\it. not isHeaderKey(it.key), furn));
   let headers = pfDedupe(explicitHeaders ++ headerCopies, []);
   let footers = pfDedupe(explicitFooters ++ footerCopies, []);
-  let kept = map(\it. it.block, filter(\it. it.role == 0, marked));
+  let kept = map(\it. it.block, filter(\it. it.role == 0 || it.role == 3, marked));
   let withHeader = if listLength(headers) > 0 then mkSection("header", headers) :: kept else kept;
   if listLength(footers) > 0 then withHeader ++ [mkSection("footer", footers)] else withHeader
 }
@@ -330,7 +341,10 @@ export pure func pdfFurnitureShape(spec: string) -> string
     ("2;h:Intro|t:Notes:|t:First|h:Next|t:Notes:|t:Second",
      "h:Intro|t:Notes:|t:First|h:Next|t:Notes:|t:Second"),
     -- One page: nothing repeats, nothing changes.
-    ("1;h:Title|t:Only page|t:1", "h:Title|t:Only page|t:1")
+    ("1;h:Title|t:Only page|t:1", "h:Title|t:Only page|t:1"),
+    -- Page markers (p:N) stay in place and do not break header/footer runs.
+    ("2;p:1|t:ACME   REPORT|h:One|t:Body|t:Acme Ltd   1|p:2|t:ACME   REPORT|h:Two|t:Body two|t:Acme Ltd   2",
+     "H[ACME REPORT]|pb:1|h:One|t:Body|pb:2|h:Two|t:Body two|F[Acme Ltd]")
   ]
 {
   let at = find(spec, ";");
@@ -354,15 +368,18 @@ export pure func pdfFurnitureIdempotent(spec: string) -> bool
 }
 
 pure func pfSpecBlock(s: string) -> Block =
-  if startsWith(s, "h:") then mkHeading(substring(s, 2, length(s)), 2)
+  if startsWith(s, "p:") then mkNamedSection("page-break", substring(s, 2, length(s)), [])
+  else if startsWith(s, "h:") then mkHeading(substring(s, 2, length(s)), 2)
   else if startsWith(s, "t:") then mkText(substring(s, 2, length(s)), "normal", 0)
   else mkText(s, "normal", 0)
 
 pure func pfShapeBlock(b: Block) -> string =
   match b {
     SectionBlock(s) =>
-      let tag = if s.kind == "header" then "H" else if s.kind == "footer" then "F" else s.kind in
-      "${tag}[${join(",", map(pfShapeText, s.blocks))}]",
+      if s.kind == "page-break" then "pb:${s.name}"
+      else
+        let tag = if s.kind == "header" then "H" else if s.kind == "footer" then "F" else s.kind in
+        "${tag}[${join(",", map(pfShapeText, s.blocks))}]",
     HeadingBlock(h) => "h:${h.text}",
     TextBlock(t) => "t:${t.text}",
     _ => "?"

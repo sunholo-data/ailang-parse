@@ -41,7 +41,7 @@ import std/string (length as strLength, join)
 import std/fs (fileExists)
 import std/package (assetPath)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
-import docparse/types/document (mkHeading, mkHeadingRuns, mkText, mkTextRuns, mkListNested, mkImageFull, mkSection, plainRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, InlineRun, simpleCell)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkText, mkTextRuns, mkListNested, mkImageFull, mkSection, mkNamedSection, plainRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, InlineRun, simpleCell)
 import docparse/services/pdf_annotations (PdfWord)
 
 -- Output bundle from an external backend run.
@@ -207,6 +207,45 @@ pure func decodeBlocks(arr: [Json]) -> [Block]
 =
   map(decodeBlock, arr)
 
+-- Decode with a page-break marker before the first block of every page.
+-- Blocks with no page tag (0) never start a page.
+pure func decodeBlocksPaged(arr: [Json], lastPage: int) -> [Block]
+  ensures { listLength(result) >= listLength(arr) }
+=
+  match arr {
+    [] => [],
+    j :: rest =>
+      let page = getOrElse(getInt(j, "page"), 0) in
+      let block = decodeBlock(j) in
+      if page > 0 && page != lastPage
+      then mkNamedSection("page-break", show(page), []) :: block :: decodeBlocksPaged(rest, page)
+      else block :: decodeBlocksPaged(rest, lastPage)
+  }
+
+-- Shape of a paged decode, for the inline tests: "pb:N" for a marker, the
+-- block's kind otherwise.
+export pure func pdfBackendPagedShape(src: string) -> string
+  tests [
+    ("[{\"kind\":\"heading\",\"text\":\"A\",\"page\":1},{\"kind\":\"text\",\"text\":\"b\",\"page\":1},{\"kind\":\"text\",\"text\":\"c\",\"page\":2}]", "pb:1|heading|text|pb:2|text"),
+    ("[{\"kind\":\"text\",\"text\":\"untagged\"},{\"kind\":\"text\",\"text\":\"x\",\"page\":3}]", "text|pb:3|text"),
+    ("[{\"kind\":\"text\",\"text\":\"f\",\"page\":1,\"region\":\"footer\"}]", "pb:1|section"),
+    ("[]", "")
+  ]
+{
+  match decode(src) {
+    Err(e) => "err:${e}",
+    Ok(j) => {
+      let blocks = decodeBlocksPaged(getOrElse(asArray(j), []), 0);
+      join("|", map(\b. match b {
+        SectionBlock(s) => if s.kind == "page-break" then "pb:${s.name}" else "section",
+        HeadingBlock(_) => "heading",
+        TextBlock(_) => "text",
+        _ => "other"
+      }, blocks))
+    }
+  }
+}
+
 -- Decode metadata. Currently only pageCount is populated by adapters; title
 -- and author remain empty until backends expose richer metadata.
 pure func decodeMetadata(j: Json) -> DocMetadata = {
@@ -223,10 +262,19 @@ pure func decodeMetadata(j: Json) -> DocMetadata = {
 }
 
 -- Decode the adapter's JSON document object into an ExternalDocResult.
--- Pure: takes an already-decoded Json, no exec, no IO.
-export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult = {
+-- Pure: takes an already-decoded Json, no exec, no IO. Page boundaries are
+-- dropped; see decodeAdapterDocPages.
+export pure func decodeAdapterDoc(doc: Json) -> ExternalDocResult =
+  decodeAdapterDocPages(doc, false)
+
+-- Same, keeping page boundaries when `keepPages`: every block's adapter
+-- `page` tag starts a new page when it changes, and each page is preceded by
+-- an empty "page-break" section named by its page number — the marker the
+-- DOCX parser and html_layout already emit. Generators render it as nothing;
+-- conversion to slides groups on it (pdfPagesAsSlides).
+export pure func decodeAdapterDocPages(doc: Json, keepPages: bool) -> ExternalDocResult = {
   let blocksArr = getOrElse(getArray(doc, "blocks"), []);
-  let blocks = decodeBlocks(blocksArr);
+  let blocks = if keepPages then decodeBlocksPaged(blocksArr, 0) else decodeBlocks(blocksArr);
   let metaJson = getOr(doc, "metadata", doc);
   let meta = decodeMetadata(metaJson);
   {metadata: meta, blocks: blocks}
@@ -322,7 +370,9 @@ export func parsePdfViaBackend(backend: string, filepath: string, projectRoot: s
   match runJson("uv", layout.uvArgs ++ ["python", layout.adapter, backend, filepath]) {
     Err(e) => Err(formatError(e)),
     Ok(doc) => {
-      let res = decodeAdapterDoc(doc);
+      -- pdftotext keeps its parse output exactly as before v0.55.0: no page
+      -- markers. Every other backend marks its pages.
+      let res = decodeAdapterDocPages(doc, backend != "pdftotext");
       if listLength(res.blocks) == 0
         then Err("backend '${backend}' extracted 0 blocks from ${filepath}")
         else Ok(res)
