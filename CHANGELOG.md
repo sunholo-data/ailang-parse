@@ -9,6 +9,49 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## Unreleased
+
+### Added
+
+- PDF: `--pdf-backend poppler` recovers document structure from the poppler
+  tools the default backend already uses, with no Python packages: headings
+  ranked by font size, bulleted and numbered lists, tables from aligned
+  columns (wrapped cells folded back, stacked tables kept apart, prose set in
+  columns read column by column), paragraphs reflowed, bold and links as
+  inline runs, and margin lines that recur across pages tagged as running
+  header/footer. Text comes from `pdftotext -bbox-layout`, style from
+  `pdftohtml -xml`. Pictures in the body (illustrations, photos, figures) are
+  carried as image blocks in their place, sized as they appeared on the page;
+  logos in the header/footer band, tiny decorations and full-page backgrounds
+  are left out, and a document's images are capped at 6 MB. Opt-in;
+  `pdftotext` is unchanged.
+- PDF: page furniture leaves the body. A new pure `pdf_furniture` pass moves
+  the running header, footer and page numbers into one header and one footer
+  section (which DOCX/ODT output writes as real header/footer parts, and which
+  a `--reference-doc` replaces with the template's own). It runs on the
+  poppler, docling, liteparse and ai backends, and on `--convert` of any PDF
+  to a document format; parse output from `pdftotext` is unchanged.
+- PDF adapter protocol: list and image blocks, inline runs, and a block's
+  page and header/footer region can now cross from the Python adapter.
+- `benchmarks/pdf/structure_roundtrip.py`: renders our own DOCX documents to
+  PDF and scores each backend's parse against the source (headings, tables,
+  lists, header/footer leakage, text).
+
+### Fixed
+
+- PDF (docling): the document is walked item by item instead of through its
+  Markdown export, so lists stay lists, page headers/footers are recognised,
+  and pictures no longer leave a literal `<!-- image -->` in the output: body
+  pictures are carried as images, by the same rules as the poppler backend.
+  Heading levels come from heading size when docling reports them all as one
+  level. Text is read with docling's pypdfium backend, which does not double
+  glyphs a PDF draws twice ("Thee", "Confidrm").
+- PDF (liteparse): headings were never detected with liteparse 2.x, which
+  renamed `textItems`/`fontSize`; both spellings are read, sizes rank into
+  heading levels, and bullet lines become lists.
+
+---
+
 ## [v0.53.0](https://github.com/sunholo-data/ailang-parse/compare/v0.52.1...v0.53.0) — 2026-10-26
 
 Also ships v0.52.2, which was versioned but never tagged.

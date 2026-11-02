@@ -191,8 +191,8 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "The CLI offers four backends via --pdf-backend: pdftotext (poppler, deterministic plain text — the default), docling (IBM Docling, local ML layout — also the automatic fallback for scanned pages, ~5× faster than AI), liteparse (run-llama LiteParse, font-size heading inference), or ai (Gemini, Claude, OpenAI, or Ollama — opt-in only, never automatic). All produce the same structured JSON Block ADT."}},
-    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Local deterministic backends: pdftotext (default, poppler plain-text, highest character recall), Docling (structural ML extraction — the automatic local fallback when pdftotext finds no text layer, e.g. a scan), LiteParse (text + font-size headings). AI backends, opt-in only via --pdf-backend ai: Gemini, Claude, OpenAI, Ollama. Switch with --pdf-backend pdftotext|docling|liteparse|ai — no code changes."}},
+    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "The CLI offers five backends via --pdf-backend: pdftotext (poppler, deterministic plain text — the default), poppler (the same poppler tools read for headings, lists, tables and header/footer), docling (IBM Docling, local ML layout — also the automatic fallback for scanned pages, ~5× faster than AI), liteparse (run-llama LiteParse, font-size heading inference), or ai (Gemini, Claude, OpenAI, or Ollama — opt-in only, never automatic). All produce the same structured JSON Block ADT."}},
+    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Local deterministic backends: pdftotext (default, poppler plain-text, highest character recall), poppler (structure from the same poppler tools, no Python packages), Docling (structural ML extraction — the automatic local fallback when pdftotext finds no text layer, e.g. a scan), LiteParse (text + font-size headings). AI backends, opt-in only via --pdf-backend ai: Gemini, Claude, OpenAI, Ollama. Switch with --pdf-backend pdftotext|poppler|docling|liteparse|ai — no code changes."}},
     {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — that is the default, including for scanned PDFs. --pdf-backend pdftotext (poppler) needs no API key and runs offline; when it finds no text layer it escalates automatically to the local docling backend, as does liteparse if you choose it. AI is opt-in only (--pdf-backend ai) and, if you still want to stay fully local, --ai ollama/llama3.2-vision works offline too."}},
     {"@type": "Question", "name": "Do all PDFs require AI?", "acceptedAnswer": {"@type": "Answer", "text": "No — PDFs default to the pdftotext → docling ladder, never AI. Born-digital PDFs (papers, reports, invoices, contracts) parse cleanly with pdftotext; scanned or image-only PDFs escalate automatically to the local docling backend. AI (--pdf-backend ai) is opt-in only, for cases where you want cloud-model quality on handwriting or complex multimodal layouts."}},
     {"@type": "Question", "name": "Is the output format the same as Office parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. PDF parsing produces the same Block ADT (headings, text, tables, images) as DOCX, XLSX, and PPTX parsing. Your downstream code handles all formats identically."}},
@@ -280,12 +280,16 @@ ailang run --entry main --caps IO,FS,Env,AI --ai ollama/llama3.2-vision \
       </div>
 
       <h2 id="local-backends">Local Deterministic Backends <span class="dp-pill dp-pill-new">v0.19+</span></h2>
-      <p>The CLI dispatches PDF parsing to local backends instead of an AI provider. <strong>As of v0.21.0, <code>pdftotext</code> is the default</strong> — born-digital PDFs parse deterministically with no API key, no cost, and no network call. Three local options ship today:</p>
+      <p>The CLI dispatches PDF parsing to local backends instead of an AI provider. <strong>As of v0.21.0, <code>pdftotext</code> is the default</strong> — born-digital PDFs parse deterministically with no API key, no cost, and no network call. Four local options ship today:</p>
 
       <div class="dp-provider-grid">
         <div class="dp-provider-card">
           <h4>pdftotext <span class="dp-pill dp-pill-new">default</span></h4>
           <p>poppler <code>pdftotext -layout</code> — deterministic plain-text extraction with layout preserved. Highest character recall (the most complete text of any backend), instant, free, offline, zero Python ML dependencies. The reliable choice for born-digital documents — including the Mindworking-generated PDFs behind most Danish real-estate contracts (købsaftaler, salgsopstillinger, tilstandsrapporter). Returns no text for scanned/image-only PDFs, which then fail loudly pointing you at <code>--pdf-backend ai</code>.</p>
+        </div>
+        <div class="dp-provider-card">
+          <h4>poppler <span class="dp-pill">structure, no installs</span></h4>
+          <p>The same poppler tools as <code>pdftotext</code>, read for structure: headings ranked by font size, bulleted and numbered lists, tables from aligned columns, paragraphs reflowed, bold and links kept, and the running header, footer and page numbers separated from the body. Deterministic, instant, offline, no Python packages. The backend to use when converting a PDF back into a Word document.</p>
         </div>
         <div class="dp-provider-card">
           <h4>Docling <span class="dp-pill">structural</span></h4>
@@ -300,7 +304,7 @@ ailang run --entry main --caps IO,FS,Env,AI --ai ollama/llama3.2-vision \
       <p>Both run as Python subprocesses dispatched from inside AILANG via the <a href="https://github.com/sunholo-data/ailang-packages/tree/main/packages/external-backend"><code>sunholo/external_backend</code></a> package, with typed error handling and stderr capture. Selection is per call — there's no global config to drift.</p>
 
       <h3 id="local-install">Install</h3>
-      <p>The default <code>pdftotext</code> backend needs only poppler (<code>brew install poppler</code> / <code>apt install poppler-utils</code>), which ships with most systems. The <code>ai</code> backend works out of the box. <code>docling</code> and <code>liteparse</code> need their Python package installed in the same Python environment your CLI uses:</p>
+      <p>The default <code>pdftotext</code> backend and the <code>poppler</code> backend need only poppler (<code>brew install poppler</code> / <code>apt install poppler-utils</code>), which ships with most systems. The <code>ai</code> backend works out of the box. <code>docling</code> and <code>liteparse</code> need their Python package installed in the same Python environment your CLI uses:</p>
 
 <pre><code class="language-bash"># Docling (see <a href="https://github.com/docling-project/docling">docling-project/docling</a> for the full install matrix)
 uv pip install docling
@@ -318,6 +322,13 @@ uv pip install docling liteparse</code></pre>
 <pre><code class="language-bash"># pdftotext — default, deterministic, no API key, most complete text
 ./bin/docparse paper.pdf
 
+# poppler — headings, lists, tables, header/footer; same poppler, no installs
+./bin/docparse report.pdf --pdf-backend poppler
+
+# PDF back to Word, styled by your own template
+./bin/docparse report.pdf --pdf-backend poppler --convert report.docx \
+  --reference-doc house-style.docx
+
 # AI — opt-in only; scanned/image-only PDFs escalate to local docling by default
 ./bin/docparse scan.pdf --pdf-backend ai --ai gemini-3.8-flash
 
@@ -326,6 +337,8 @@ uv pip install docling liteparse</code></pre>
 
 # LiteParse — local, font-size heading inference
 ./bin/docparse paper.pdf --pdf-backend liteparse</code></pre>
+
+      <p>Converting a PDF back into a Word document in your own template? See <a href="pdf-to-word.html">PDF to Word</a> for a live example and which backend to pick.</p>
 
       <p>Output is the same <code>Block</code> ADT — your pipeline code doesn't change when you switch backend. When <code>--pdf-backend</code> is anything other than <code>ai</code>, AILANG drops the <code>AI</code> capability and swaps in <code>Process</code> — no API key required, no network calls.</p>
 

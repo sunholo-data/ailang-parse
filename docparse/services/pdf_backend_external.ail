@@ -33,15 +33,15 @@ module docparse/services/pdf_backend_external
 -- (fileExists + assetPath); every caller — the orchestrator's full ladder —
 -- already declared {FS, Process}.
 
-import std/json (getArray, getString, getInt, getNumber, asString, asArray, getOr)
+import std/json (decode, getArray, getString, getInt, getBool, getNumber, asString, asArray, asNumber, getOr)
 import std/option (Some, None, getOrElse)
-import std/list (map, length as listLength)
+import std/list (map, any, length as listLength)
 import std/result (Result, Ok, Err)
-import std/string (length as strLength)
+import std/string (length as strLength, join)
 import std/fs (fileExists)
 import std/package (assetPath)
 import pkg/sunholo/external_backend/runner (runJson, formatError, BackendError)
-import docparse/types/document (mkHeading, mkText, Block, TextBlock, HeadingBlock, TableBlock, TableCell, DocMetadata, simpleCell)
+import docparse/types/document (mkHeading, mkHeadingRuns, mkText, mkTextRuns, mkListNested, mkImageFull, mkSection, plainRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, TableCell, DocMetadata, InlineRun, simpleCell)
 import docparse/services/pdf_annotations (PdfWord)
 
 -- Output bundle from an external backend run.
@@ -99,12 +99,25 @@ func backendLayout(projectRoot: string, backend: string) -> {adapter: string, uv
   }
 
 -- Decode a single JSON block. Unknown "kind" values fall back to TextBlock.
+--
+-- A block tagged `region: "header" | "footer"` is page furniture the backend
+-- located on the page (poppler, docling). It is wrapped in a header/footer
+-- SectionBlock here, one per occurrence; pdf_furniture merges the occurrences
+-- into the single header and footer section a document has. Untagged blocks
+-- (every pdftotext block) decode exactly as before.
 pure func decodeBlock(j: Json) -> Block = {
+  let inner = decodeInnerBlock(j);
+  let region = getOrElse(getString(j, "region"), "body");
+  if region == "header" || region == "footer" then mkSection(region, [inner]) else inner
+}
+
+pure func decodeInnerBlock(j: Json) -> Block = {
   let kind = getOrElse(getString(j, "kind"), "text");
   let text = getOrElse(getString(j, "text"), "");
+  let runs = decodeRuns(getOrElse(getArray(j, "runs"), []));
   if kind == "heading" then {
     let lvl = getOrElse(getInt(j, "level"), 2);
-    mkHeading(text, lvl)
+    if listLength(runs) > 0 then mkHeadingRuns(text, lvl, runs) else mkHeading(text, lvl)
   }
   else if kind == "table" then {
     let caption = getOrElse(getString(j, "caption"), "");
@@ -117,12 +130,76 @@ pure func decodeBlock(j: Json) -> Block = {
       rowsJson);
     TableBlock({rows: rows, headers: headers, caption: caption})
   }
+  else if kind == "list" then {
+    let items = map(\i. getOrElse(asString(i), ""), getOrElse(getArray(j, "items"), []));
+    let levels = map(\l. pdfBackendJsonInt(l), getOrElse(getArray(j, "levels"), []));
+    -- itemLevels is parallel to items or empty (mkListNested's contract);
+    -- a flat list keeps it empty so it serialises as an ordinary list.
+    let keptLevels = if listLength(levels) == listLength(items) && any(\l. l > 0, levels)
+      then levels else [];
+    mkListNested(items, getOrElse(getBool(j, "ordered"), false), [], keptLevels)
+  }
+  else if kind == "image" then
+    mkImageFull(getOrElse(getString(j, "data"), ""),
+                getOrElse(getString(j, "description"), ""),
+                getOrElse(getString(j, "mime"), "image/png"),
+                getOrElse(getInt(j, "width"), 0),
+                getOrElse(getInt(j, "height"), 0), "", "", "")
   else {
     let style = getOrElse(getString(j, "style"), "Normal");
     let level = getOrElse(getInt(j, "level"), 0);
-    mkText(text, style, level)
+    if listLength(runs) > 0 then mkTextRuns(text, style, level, runs) else mkText(text, style, level)
   }
 }
+
+-- Inline runs: [{text, bold, italic, href}]. Absent fields are off, so an
+-- adapter only states the formatting it actually saw.
+pure func decodeRuns(arr: [Json]) -> [InlineRun]
+  ensures { listLength(result) == listLength(arr) }
+=
+  map(\r. {plainRun(getOrElse(getString(r, "text"), "")) |
+            bold: getOrElse(getBool(r, "bold"), false),
+            italic: getOrElse(getBool(r, "italic"), false),
+            href: getOrElse(getString(r, "href"), "")}, arr)
+
+pure func pdfBackendJsonInt(j: Json) -> int =
+  match asNumber(j) {
+    Some(n) => floatToInt(n),
+    None => 0
+  }
+
+-- One-line shape of a decoded adapter block, for the inline tests below.
+-- Exercises the whole decode path from JSON text, which is where the protocol
+-- actually breaks (a kind or field name typo decodes silently as text).
+export pure func pdfBackendDecodeShape(src: string) -> string
+  tests [
+    ("{\"kind\":\"list\",\"items\":[\"a\",\"b\"],\"ordered\":true,\"levels\":[0,1]}", "list:2:true:2"),
+    ("{\"kind\":\"list\",\"items\":[\"a\",\"b\"],\"levels\":[0,0]}", "list:2:false:0"),
+    ("{\"kind\":\"image\",\"data\":\"QUJD\",\"mime\":\"image/png\",\"width\":4,\"height\":2}", "image:image/png:4x2"),
+    ("{\"kind\":\"text\",\"text\":\"Acme\",\"region\":\"footer\",\"page\":3}", "section:footer[text:Acme:runs=0]"),
+    ("{\"kind\":\"heading\",\"text\":\"Intro\",\"level\":3,\"region\":\"body\"}", "heading:3:Intro"),
+    ("{\"kind\":\"text\",\"text\":\"site\",\"runs\":[{\"text\":\"site\",\"href\":\"https://x.test\",\"bold\":true}]}", "text:site:runs=1:https://x.test:true"),
+    ("{\"kind\":\"text\",\"text\":\"plain\"}", "text:plain:runs=0")
+  ]
+{
+  match decode(src) {
+    Err(e) => "err:${e}",
+    Ok(j) => pdfBackendBlockShape(decodeBlock(j))
+  }
+}
+
+pure func pdfBackendBlockShape(b: Block) -> string =
+  match b {
+    ListBlock(l) => "list:${show(listLength(l.items))}:${show(l.ordered)}:${show(listLength(l.itemLevels))}",
+    ImageBlock(i) => "image:${i.mime}:${show(i.width)}x${show(i.height)}",
+    SectionBlock(s) => "section:${s.kind}[${join(",", map(pdfBackendBlockShape, s.blocks))}]",
+    HeadingBlock(h) => "heading:${show(h.level)}:${h.text}",
+    TextBlock(t) => match t.runs {
+      [] => "text:${t.text}:runs=0",
+      r :: _ => "text:${t.text}:runs=${show(listLength(t.runs))}:${r.href}:${show(r.bold)}"
+    },
+    _ => "other"
+  }
 
 -- Decode a list of JSON blocks. Always preserves count (one Block per input).
 pure func decodeBlocks(arr: [Json]) -> [Block]
@@ -224,7 +301,7 @@ pure func decodeWord(j: Json) -> PdfWord = {
 }
 
 -- Run the external backend and return parsed result.
--- Backend names: "pdftotext", "docling", "liteparse" (must match adapter.py
+-- Backend names: "pdftotext", "poppler", "docling", "liteparse" (must match adapter.py
 -- BACKENDS). Failures are propagated as Err, never swallowed into an empty
 -- result: a backend that errors, exits non-zero, emits non-JSON, or extracts
 -- zero blocks is a hard failure the caller must surface (no silent 1-byte
