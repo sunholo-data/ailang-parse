@@ -9,6 +9,14 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [v0.55.5](https://github.com/sunholo-data/ailang-parse/compare/v0.55.4...v0.55.5) — 2026-11-02
+
+### Fixed
+
+- **sunholo/gemini_files 0.2.2 → 0.2.3.** 0.2.2 carried an unused `sunholo/http_helpers`
+  dependency, pinned at 0.1.5, which made the package unresolvable next to anything that pins
+  http_helpers 0.1.4 (DocParse's billing packages). 0.2.3 drops it. No code change.
+
 ## [v0.55.4](https://github.com/sunholo-data/ailang-parse/compare/v0.55.3...v0.55.4) — 2026-11-02
 
 v0.55.3 was tagged but never reached the registry. The publish job compiles with AILANG `dev`,
