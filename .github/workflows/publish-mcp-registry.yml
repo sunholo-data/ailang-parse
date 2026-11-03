@@ -1,0 +1,86 @@
+name: Publish to MCP Registry
+
+# Publishes server.json (io.github.sunholo-data/parse) to the MCP Registry for
+# an SDK version already on npm and PyPI.
+#
+# Called by publish-sdks.yml after the npm and PyPI jobs, and runnable by hand
+# to (re)publish the listing for an existing version without cutting a new SDK
+# release:
+#
+#   gh workflow run publish-mcp-registry.yml -f version=0.14.0
+#
+# The version comes from the tag (or the input) and is stamped into
+# server.json here. Until 2026-11-03 the job required server.json to be bumped
+# by hand to match the tag; sdk-v0.14.0 shipped to npm/PyPI/Go/R with
+# server.json still at 0.13.1, so the listing stayed on 0.13.1.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: SDK version (no leading v), already published to npm and PyPI
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SDK version (no leading v), already published to npm and PyPI
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Publish to MCP Registry
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # GitHub OIDC for mcp-publisher auth
+      contents: read
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check the version is semver
+        run: |
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::version must be X.Y.Z, got '$VERSION'"; exit 1; }
+
+      - name: Stamp server.json with the version
+        run: |
+          jq --arg v "$VERSION" '.version = $v | .packages |= map(.version = $v)' server.json > server.json.new
+          mv server.json.new server.json
+          jq '{version, packages: [.packages[] | {registryType, identifier, version}]}' server.json
+
+      - name: Wait for the packages and their mcp-name markers
+        run: |
+          # The registry checks that each package exists at this version and
+          # names this server (npm: package.json mcpName; PyPI: an
+          # "mcp-name:" line in the long description). PyPI takes a few
+          # seconds after upload before the description is queryable.
+          name=$(jq -r .name server.json)
+          for _ in $(seq 1 20); do
+            npm_name=$(curl -s "https://registry.npmjs.org/@ailang/parse/$VERSION" | jq -r '.mcpName // empty')
+            pypi_ok=$(curl -s "https://pypi.org/pypi/ailang-parse/$VERSION/json" | jq -r '.info.description // ""' | grep -c "mcp-name: $name" || true)
+            if [ "$npm_name" = "$name" ] && [ "$pypi_ok" != "0" ]; then echo "npm and PyPI $VERSION both name $name"; exit 0; fi
+            echo "waiting (npm mcpName='$npm_name', PyPI marker lines=$pypi_ok)"; sleep 15
+          done
+          echo "::error::@ailang/parse@$VERSION and ailang-parse==$VERSION must both exist and name $name"; exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          # 1.5.0 hardcoded the OIDC audience to "mcp-registry"; the
+          # registry rejects that and expects "https://registry.modelcontextprotocol.io".
+          # 1.7.x ships the corrected audience.
+          MCP_PUBLISHER_VERSION="1.7.9"
+          # Release assets are named without the version: mcp-publisher_linux_amd64.tar.gz
+          # and contain the bare `mcp-publisher` binary at the tarball root.
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin mcp-publisher
+          sudo chmod +x /usr/local/bin/mcp-publisher
+          mcp-publisher --help | head -3
+
+      - name: Authenticate with GitHub OIDC
+        run: mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: mcp-publisher publish
