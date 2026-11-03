@@ -17,6 +17,7 @@ from scoring import (
 )
 from adapters.docparse_adapter import DocParseAdapter
 from adapters.llamaparse_adapter import LlamaParseAdapter
+from adapters.extend_adapter import ExtendAdapter
 from adapters.liteparse_adapter import LiteParseAdapter
 from types import SimpleNamespace
 from adapters.structure import (
@@ -531,6 +532,124 @@ class StructuralTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "conversion failed"):
             LlamaParseAdapter().convert_json(
                 [{"error": "conversion failed"}], Path("input.epub")
+            )
+
+    @staticmethod
+    def _extend_run(chunks):
+        return {"status": "PROCESSED", "output": {"chunks": chunks}}
+
+    def test_extend_sheet_scopes_formulas_and_merges(self):
+        sheet = {"sheet": {"index": 0, "name": "Budget"}}
+        html = (
+            '<table><tr><th data-cell="A1">Item</th><th data-cell="B1">Cost</th></tr>'
+            '<tr><td data-cell="A2">Total</td>'
+            '<td data-cell="B2" data-formula="=SUM(B1:B1)">9</td></tr>'
+            '<tr><td colspan="2" data-cell="A3:B3">Note</td></tr></table>'
+        )
+        run = self._extend_run(
+            [{"blocks": [{"type": "table", "content": html, "metadata": sheet}]}]
+        )
+        output = ExtendAdapter().convert_json(run, Path("input.xlsx"))
+        cells = output["structure"]["table_cells"]
+        self.assertEqual(output["metadata"]["sheet_names"], ["Budget"])
+        self.assertEqual(output["structure"]["containers"], [{"kind": "sheet", "name": "Budget"}])
+        self.assertTrue(all(c["scope"] == "Budget" for c in cells))
+        self.assertEqual(
+            [c.get("formula") for c in cells if c["text"] == "9"], ["=SUM(B1:B1)"]
+        )
+        self.assertTrue(output["tables"][0]["has_merged_cells"])
+        note = [c for c in cells if c["text"] == "Note"][0]
+        self.assertEqual((note["row"], note["col"], note["col_span"]), (3, 1, 2))
+        self.assertIn(
+            {"table": 0, "scope": "Budget", "row": 3, "col": 2, "text": "", "col_span": 1, "merged": True},
+            cells,
+        )
+
+    def test_extend_split_sheet_keeps_sheet_coordinates_and_colours(self):
+        sheet = {"sheet": {"index": 0, "name": "Form"}}
+        first = '<table><tr><td data-cell="A1" style="color:#FFFFFF;background-color:#1F4E78">Title</td></tr></table>'
+        second = '<table><tr><td data-cell="A6">Later</td></tr></table>'
+        run = self._extend_run(
+            [{"blocks": [
+                {"type": "table", "content": first, "metadata": sheet},
+                {"type": "table", "content": second, "metadata": sheet},
+            ]}]
+        )
+        output = ExtendAdapter().convert_json(run, Path("input.xlsx"))
+        cells = {c["text"]: c for c in output["structure"]["table_cells"]}
+        self.assertEqual((cells["Later"]["table"], cells["Later"]["row"]), (0, 6))
+        self.assertEqual((cells["Title"]["fill"], cells["Title"]["color"]), ("#1f4e78", "#ffffff"))
+        self.assertEqual(len(output["tables"]), 2)
+
+    def test_extend_change_markup_becomes_typed_changes(self):
+        run = self._extend_run(
+            [
+                {
+                    "blocks": [
+                        {
+                            "type": "text",
+                            "content": "Ship <change><ins>blue</ins><del>red</del></change> crates.",
+                            "metadata": {},
+                        },
+                        {"type": "footer", "content": "Page footer", "metadata": {}},
+                    ]
+                }
+            ]
+        )
+        output = ExtendAdapter().convert_json(run, Path("input.docx"))
+        self.assertEqual(
+            [(c["type"], c["text"]) for c in output["track_changes"]],
+            [("insert", "blue"), ("delete", "red")],
+        )
+        self.assertEqual(output["text_elements"][0]["text"], "Ship bluered crates.")
+        self.assertEqual(output["headers_footers"], [{"type": "footer", "text": "Page footer"}])
+        self.assertNotIn("Page footer", [t["text"] for t in output["text_elements"]])
+
+    def test_extend_slides_named_by_page_heading(self):
+        run = self._extend_run(
+            [
+                {"blocks": [{"type": "heading", "content": "# Agenda", "metadata": {}}]},
+                {"blocks": [{"type": "heading", "content": "# Wrap up", "metadata": {}}]},
+            ]
+        )
+        output = ExtendAdapter().convert_json(run, Path("input.pptx"))
+        self.assertEqual(
+            [c["name"] for c in output["structure"]["containers"]], ["Agenda", "Wrap up"]
+        )
+        self.assertEqual(output["speaker_notes"], [])
+
+    def test_extend_ods_sheets_are_containers(self):
+        meta = lambda i, n: {"sheet": {"index": i, "name": n}}
+        run = self._extend_run(
+            [
+                {"blocks": [{"type": "table", "content": "<table><tr><td>a</td></tr></table>", "metadata": meta(0, "Prices")}]},
+                {"blocks": [{"type": "table", "content": "<table><tr><td>b</td></tr></table>", "metadata": meta(1, "Stock")}]},
+            ]
+        )
+        output = ExtendAdapter().convert_json(run, Path("input.ods"))
+        self.assertEqual(output["metadata"]["sheet_names"], ["Prices", "Stock"])
+
+    def test_extend_html_passthrough_keeps_markup_structure(self):
+        html = (
+            "<h1>Guide</h1><div>Intro <b>bold</b> text</div>"
+            "<ul><li>One<ol><li>Nested</li></ol></li></ul>"
+            "<table><tr><th>K</th></tr><tr><td>V</td></tr></table>"
+        )
+        run = self._extend_run([{"blocks": [{"type": "text", "content": html, "metadata": {}}]}])
+        output = ExtendAdapter().convert_json(run, Path("input.html"))
+        self.assertEqual(output["headings"], [{"text": "Guide", "level": 1}])
+        self.assertIn("Intro bold text", [t["text"] for t in output["text_elements"]])
+        self.assertEqual(
+            [(i["text"], i["level"], i["ordered"]) for i in output["structure"]["list_items"]],
+            [("One", 0, False), ("Nested", 1, True)],
+        )
+        self.assertEqual(len(output["tables"]), 1)
+
+    def test_extend_failed_run_is_visible(self):
+        with self.assertRaisesRegex(RuntimeError, "FILE_TYPE_NOT_SUPPORTED"):
+            ExtendAdapter().convert_json(
+                {"status": "FAILED", "failureReason": "FILE_TYPE_NOT_SUPPORTED"},
+                Path("input.odt"),
             )
 
     def test_liteparse_native_layout_keeps_table_cells(self):

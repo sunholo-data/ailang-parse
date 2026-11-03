@@ -67,6 +67,7 @@ ADAPTER_NAMES = [
     "unstructured",
     "docling",
     "llamaparse",
+    "extend",
     "markitdown",
     "kreuzberg",
     "pandoc",
@@ -114,6 +115,13 @@ def load_adapter(name: str):
             from adapters.llamaparse_adapter import LlamaParseAdapter
 
             return LlamaParseAdapter()
+        except Exception:
+            return None
+    elif name == "extend":
+        try:
+            from adapters.extend_adapter import ExtendAdapter
+
+            return ExtendAdapter()
         except Exception:
             return None
     elif name == "markitdown":
@@ -352,6 +360,9 @@ def evaluate_adapter(
             "llamaparse_premium": os.environ.get("LLAMAPARSE_PREMIUM", "").lower()
             in ("1", "true", "yes")
             if adapter.name() == "LlamaParse"
+            else None,
+            "provider_config": adapter.provider_config()
+            if hasattr(adapter, "provider_config")
             else None,
         },
     }
