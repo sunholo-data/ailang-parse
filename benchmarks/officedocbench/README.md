@@ -60,7 +60,7 @@ uv run benchmarks/officedocbench/rescore.py \
 uv run benchmarks/officedocbench/eval_officedocbench.py --summarize
 ```
 
-LlamaParse needs `LLAMA_CLOUD_API_KEY`; inject it into the process from your secret manager. Standard non-premium mode is the default. `LLAMAPARSE_PREMIUM=1` is a different, more expensive run configuration and is recorded in provenance. Local adapters need their native dependencies, including Node.js/LibreOffice for LiteParse and Pandoc for the Pandoc adapter and some Unstructured formats.
+LlamaParse needs `LLAMA_CLOUD_API_KEY` and Extend needs `EXTEND_API_KEY`; inject them into the process from your secret manager. For Extend, `EXTEND_RAW_DIR=DIR` keeps every parse-run response, and adding `EXTEND_REUSE_RAW=1` remaps stored responses without new requests (recorded as `raw_reuse` in provenance; its timings are mapping time, not parse latency). Standard non-premium mode is the default. `LLAMAPARSE_PREMIUM=1` is a different, more expensive run configuration and is recorded in provenance. Local adapters need their native dependencies, including Node.js/LibreOffice for LiteParse and Pandoc for the Pandoc adapter and some Unstructured formats.
 
 `--golden` is diagnostic only and cannot produce a published summary. `--results-dir` supports isolated runs; only the canonical results directory mirrors a summary into `docs/data/officedocbench-summary.json`. `--summarize` rejects incompatible corpus revisions, filtered/incomplete case sets, duplicate cases, legacy results, and golden diagnostics.
 
@@ -110,6 +110,7 @@ covers eight selected cases; unaudited historical fields remain identified.
 | Kreuzberg | 4.10.4 | 82/87 | 68.5% | 64.6% | 5 |
 | Docling | 2.142.1 | 83/87 | 65.2% | 62.2% | 3 |
 | LlamaParse (standard) | 0.6.94 | 83/87 | 61.9% | 59.0% | 4 |
+| Extend (Parse 2.0) | parse_performance@api-2026-02-09 | 77/87 | 60.2% | 53.3% | 4 |
 | Unstructured | 0.27.34 | 76/87 | 58.9% | 51.4% | 5 |
 | Raw OOXML | 2.0.0-stdlib | 60/87 | 70.7% | 48.7% | 1 |
 | MarkItDown | 0.1.5 | 69/87 | 58.7% | 46.6% | 2 |
@@ -117,3 +118,5 @@ covers eight selected cases; unaudited historical fields remain identified.
 | LiteParse | 2.17.0 | 70/87 | 36.0% | 29.0% | 6 |
 
 LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. The original provider job responses were retrieved to audit and repair the mappings; no new parsing requests were needed for that remap. Its EPUB and minimal ODS/ODT conversion failures are retained. Other model tiers require separate configured runs.
+
+Extend was run on 2026-11-03 through its REST API (version 2026-02-09) at its strongest documented settings: the `parse_performance` engine (Parse 2.0) with agentic text and table correction, advanced chart extraction, formulas, `formattingDetection: change_tracking`, HTML tables, and `excelParsingMode: advanced` with cell metadata and formatting. The exact request is recorded in `provenance.provider_config`. Extend renders DOCX and PPTX to PDF before parsing, so comments, speaker notes, bookmarks and authorship are absent from its response; tracked changes appear only where they are visible on the page, without authors. XLSX and ODS are read natively, and the adapter scores their cells at Extend's own `data-cell` coordinates. HTML and Markdown input is returned as-is. ODP, EPUB and TSV are rejected at upload and count as unsupported. Four provider errors reproduced on a second attempt: an `OCR_ERROR` (`challenge_footnotes.docx`), an HTTP 500 (`test.odt`), an empty three-slide response (`python_pptx_slides.pptx`), and no blocks for the recovery-profile `challenge_threaded_comments.xlsx`. The run used 220 credits; the median latency was 5.6 s per file including upload and polling.
