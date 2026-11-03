@@ -62,6 +62,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # PyPI trusted publishing
+    outputs:
+      version: ${{ steps.version.outputs.version }}   # for publish-mcp-registry
     steps:
       - uses: actions/checkout@v6
 
@@ -171,58 +173,13 @@ jobs:
   publish-mcp-registry:
     name: Publish to MCP Registry
     needs: [publish-python, publish-npm]
-    runs-on: ubuntu-latest
     permissions:
       id-token: write   # GitHub OIDC for mcp-publisher auth
       contents: read
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#sdk-v}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify server.json version matches tag
-        run: |
-          FILE_VERSION=$(jq -r .version server.json)
-          TAG_VERSION="${{ steps.version.outputs.version }}"
-          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Tag version ($TAG_VERSION) does not match server.json version ($FILE_VERSION)"
-            exit 1
-          fi
-          # All package entries in server.json must also match the tag version
-          MISMATCH=$(jq -r --arg v "$TAG_VERSION" '.packages[] | select(.version != $v) | .identifier' server.json)
-          if [ -n "$MISMATCH" ]; then
-            echo "::error::These server.json packages do not match tag version $TAG_VERSION: $MISMATCH"
-            exit 1
-          fi
-          echo "server.json version $TAG_VERSION confirmed"
-
-      - name: Wait for PyPI long description to be queryable
-        run: |
-          # PyPI takes a few seconds after upload before the long description
-          # (where the mcp-name marker lives) is reachable. Sleep is cheaper
-          # than the retry-loop alternative.
-          sleep 30
-
-      - name: Install mcp-publisher
-        run: |
-          # 1.5.0 hardcoded the OIDC audience to "mcp-registry"; the
-          # registry rejects that and expects "https://registry.modelcontextprotocol.io".
-          # 1.7.x ships the corrected audience.
-          MCP_PUBLISHER_VERSION="1.7.9"
-          # Release assets are named without the version: mcp-publisher_linux_amd64.tar.gz
-          # and contain the bare `mcp-publisher` binary at the tarball root.
-          curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin mcp-publisher
-          sudo chmod +x /usr/local/bin/mcp-publisher
-          mcp-publisher --help | head -3
-
-      - name: Authenticate with GitHub OIDC
-        run: mcp-publisher login github-oidc
-
-      - name: Publish to MCP Registry
-        run: mcp-publisher publish
+    # The version is stamped into server.json from the tag there; no hand bump.
+    uses: ./.github/workflows/publish-mcp-registry.yml
+    with:
+      version: ${{ needs.publish-python.outputs.version }}
 
   publish-r:
     name: Publish R SDK (GitHub Release)
