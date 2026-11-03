@@ -1,6 +1,6 @@
 # AILANG Parse Design Documentation
 
-Current release: **v0.55.4**. See [CHANGELOG.md](../CHANGELOG.md) for shipped work.
+Current release: **v0.55.5**. See [CHANGELOG.md](../CHANGELOG.md) for shipped work.
 
 Current fidelity follow-ups: [OfficeDocBench source audit and remaining gaps](planned/unscheduled/office_fidelity_followups.md).
 Older target-version folders contain partially shipped designs; consult each status and the changelog.
