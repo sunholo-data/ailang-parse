@@ -24,7 +24,7 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "What is the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse exposes 7 MCP tools on its hosted connector at https://docparse.ailang.sunholo.com/mcp/connect/: parse documents (mcpParse), create or convert them (mcpConvert, with a one-hour download link), edit them (editDocument), discover formats and samples (mcpFormats), estimate cost (mcpEstimate), check the account (mcpAccount) and send feedback. You sign in with OAuth. Send a document as content, a public link or a sample id."}},
+    {"@type": "Question", "name": "What is the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse exposes 9 tools for the assistant: parse (mcpParse), create or convert (mcpConvert, with a one-hour download link), edit (editDocument), the upload card (uploadDocument), upload links (createUpload), formats and samples (mcpFormats), estimate (mcpEstimate), account (mcpAccount) and feedback (submit_feedback), plus uploadViaHost, which only the upload card calls, on its hosted connector at https://docparse.ailang.sunholo.com/mcp/connect/. You sign in with OAuth. Send a document through the upload card, an upload link, a ChatGPT attachment, a public link, short text or a sample id."}},
     {"@type": "Question", "name": "How do AI agents discover AILANG Parse as a tool?", "acceptedAnswer": {"@type": "Answer", "text": "Via MCP's tools/list (automatic when connected). Agents should call mcpFormats first: it lists formats, samples and how to send a document. Non-MCP clients can fetch tool definitions from GET /api/v1/tools."}},
     {"@type": "Question", "name": "Which AI agents work with the AILANG Parse MCP server?", "acceptedAnswer": {"@type": "Answer", "text": "Any MCP-compatible agent works: Claude (via Claude Code or Claude Desktop), ChatGPT and Codex (via MCP, as a connector or plugin), custom LangChain agents, and LlamaIndex agent pipelines. The MCP server also works with Cursor, Windsurf, and other IDE-integrated AI tools that support MCP."}},
     {"@type": "Question", "name": "Why is structured document parsing better for AI agents than flat text extraction?", "acceptedAnswer": {"@type": "Answer", "text": "When an AI agent receives flat text, it loses the ability to reference specific table cells, identify which text was inserted versus deleted (track changes), or attribute comments to specific reviewers. AILANG Parse gives agents a typed Block ADT where each element has semantic meaning, enabling precise reasoning about document structure."}}
@@ -41,7 +41,7 @@
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">MCP</span> Server</h1>
     <p class="subtitle reveal reveal-delay-1">Document parsing as a tool for any AI agent.</p>
-    <p class="reveal reveal-delay-1" style="margin-top:8px;font-size:14px;color:var(--dp-muted)">AI agents: fetch <a href="llms.txt">llms.txt</a> or <a href="llms-full.txt">llms-full.txt</a> for a single-request reference covering the hosted MCP endpoint, device auth flow, and the 7 curated tools.</p>
+    <p class="reveal reveal-delay-1" style="margin-top:8px;font-size:14px;color:var(--dp-muted)">AI agents: fetch <a href="llms.txt">llms.txt</a> or <a href="llms-full.txt">llms-full.txt</a> for a single-request reference covering the hosted MCP endpoint, device auth flow, and the curated tools.</p>
   </section>
 
   <div class="dp-callout">
@@ -59,7 +59,8 @@
         <a href="#quick-start">Quick Start</a>
         <a href="#available-tools">Available Tools</a>
         <a href="#available-tools" style="padding-left:24px;font-size:12px">Core (4)</a>
-        <a href="#available-tools" style="padding-left:24px;font-size:12px">Hosted (3)</a>
+        <a href="#hosted-tools" style="padding-left:24px;font-size:12px">Hosted</a>
+        <a href="#sending-documents" style="padding-left:24px;font-size:12px">Sending a document</a>
         <a href="#mcp-registry">MCP Registry</a>
         <a href="#configuration">Manual Configuration</a>
         <a href="#tool-discovery">Tool Discovery</a>
@@ -74,7 +75,7 @@
 
       <h2 id="what-is-mcp">What is MCP?</h2>
       <p>The <strong>Model Context Protocol</strong> (MCP) is an open standard for connecting AI assistants to external tools and data sources. Instead of hardcoding integrations, agents discover what tools are available, what parameters they accept, and how to call them &mdash; all at runtime.</p>
-      <p>AILANG Parse ships as a native MCP server. The hosted connector exposes 7 tools: parse, convert, edit, formats, estimate, account and feedback. Claude, ChatGPT, Codex, Cursor, VS Code and any MCP-compatible agent can discover and call them. Office and text formats are parsed deterministically, PDFs with <code>pdftotext</code> (AI only when you ask for it, for scans), and images with pluggable AI.</p>
+      <p>AILANG Parse ships as a native MCP server. The hosted connector exposes 9 tools for the assistant: parse, convert, edit, upload card, upload links, formats, estimate, account and feedback. Claude, ChatGPT, Codex, Cursor, VS Code and any MCP-compatible agent can discover and call them. Office and text formats are parsed deterministically, PDFs with <code>pdftotext</code> (AI only when you ask for it, for scans), and images with pluggable AI.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -128,7 +129,7 @@ ailang serve-api --mcp --routes-only \
   --caps IO,FS,Env,AI,Net --ai gemini-3.5-flash-lite docparse/</code></pre>
 
       <h2 id="available-tools">Available Tools</h2>
-      <p>The hosted connector exposes <strong>7 tools</strong>; the agent surface <code>/mcp/</code> adds the two device-flow tools. Agents discover them automatically from <code>tools/list</code>. On the hosted service, give a tool your document in one of three ways: the document itself as <code>content</code> + <code>filename</code> (text, or base64 with <code>contentEncoding="base64"</code> for binary files), a public <code>https://</code> URL, or a sample id.</p>
+      <p>The hosted connector exposes <strong>9 tools for the assistant</strong>, plus <code>uploadViaHost</code>, which only the upload card calls (it is marked app-only). The agent surface <code>/mcp/</code> adds the two device-flow tools. Agents discover them automatically from <code>tools/list</code>; this list was checked against the live server on 5 November 2026. How to give a tool a document: <a href="#sending-documents">Sending a document</a>.</p>
 
       <h3>Core Tools (local + hosted)</h3>
       <table class="dp-config-table">
@@ -138,13 +139,13 @@ ailang serve-api --mcp --routes-only \
         <tbody>
           <tr>
             <td><code>mcpParse</code></td>
-            <td>Parse any document into structured blocks, Markdown, or HTML. Office and text formats are deterministic; PDFs use <code>pdftotext</code>; images use AI.</td>
-            <td><code>content</code> + <code>filename</code> (+ <code>contentEncoding</code>), or <code>filepath</code> (https URL or sample_id); <code>outputFormat</code> (<code>blocks</code> | <code>markdown</code> | <code>html</code>)</td>
+            <td>Parse any document into structured blocks, Markdown, HTML or A2UI, or a short <code>summary</code> (counts, first 50 headings, warnings). Office and text formats are deterministic; PDFs use <code>pdftotext</code> (<code>pdfBackend: "ai"</code> for scans); images use AI. Long results come in parts: follow <code>page.nextCursor</code> with <code>cursor</code>.</td>
+            <td>One of <code>fileRef</code> (hosted), <code>file</code> (ChatGPT), <code>filepath</code> (https URL or sample_id) or <code>content</code> + <code>filename</code> (+ <code>contentEncoding</code>); <code>outputFormat</code> (<code>blocks</code> | <code>markdown</code> | <code>html</code> | <code>a2ui</code> | <code>summary</code>); <code>cursor</code>; <code>maxChars</code> (digits, default <code>"80000"</code>); <code>pdfBackend</code></td>
           </tr>
           <tr>
             <td><code>mcpConvert</code></td>
             <td>Create or convert a document. To write a new one, send Markdown as <code>content</code> with <code>filename: "notes.md"</code>. The hosted result includes <code>download_url</code>, a link to the generated file valid for one hour.</td>
-            <td><code>content</code> + <code>filename</code> (+ <code>contentEncoding</code>), or <code>input</code> (https URL or sample_id); <code>outputFormat</code> (docx, pptx, xlsx, odt, odp, ods, html, md, qmd)</td>
+            <td>One of <code>fileRef</code> (hosted), <code>file</code> (ChatGPT), <code>input</code> (https URL or sample_id) or <code>content</code> + <code>filename</code> (+ <code>contentEncoding</code>); <code>outputFormat</code> (docx, pptx, xlsx, odt, odp, ods, html, md, qmd)</td>
           </tr>
           <tr>
             <td><code>mcpFormats</code></td>
@@ -159,8 +160,8 @@ ailang serve-api --mcp --routes-only \
         </tbody>
       </table>
 
-      <h3>Hosted-Only Tools</h3>
-      <p>These tools are available when connecting to the hosted service at <code>docparse.ailang.sunholo.com</code>. They let agents edit documents, check the account, send feedback and, on the agent surface only, sign in with the device flow.</p>
+      <h3 id="hosted-tools">Hosted-Only Tools</h3>
+      <p>These tools are available when connecting to the hosted service at <code>docparse.ailang.sunholo.com</code>. They let agents upload the user&rsquo;s files, edit documents, check the account, send feedback and, on the agent surface only, sign in with the device flow.</p>
       <table class="dp-config-table">
         <thead>
           <tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
@@ -169,7 +170,17 @@ ailang serve-api --mcp --routes-only \
           <tr>
             <td><code>editDocument</code></td>
             <td>Parse a document, apply JSON edit deltas, and return the modified blocks (same shape as <code>outputFormat=blocks</code>). An empty delta list round-trips the document. Deterministic Office formats only (DOCX, PPTX, XLSX, ODT, ODP, ODS). Never writes the input file.</td>
-            <td><code>content</code> + <code>filename</code> (base64 file), or <code>filepath</code> (https URL or sample_id); <code>deltas</code> (JSON array of edit operations)</td>
+            <td>One of <code>fileRef</code>, <code>file</code> (ChatGPT), <code>content</code> + <code>filename</code> (base64 file) or <code>filepath</code> (https URL or sample_id); <code>deltas</code> (JSON array of edit operations)</td>
+          </tr>
+          <tr>
+            <td><code>uploadDocument</code></td>
+            <td>Show the AILANG Parse upload card (MCP Apps, <code>ui://docparse/upload</code>) so the user can pick a file. The card uploads it to AILANG Parse directly, never through the model, summarises it with <code>mcpParse</code> (<code>outputFormat: "summary"</code>) and reports its <code>fileRef</code>.</td>
+            <td><code>outputFormat</code> (optional)</td>
+          </tr>
+          <tr>
+            <td><code>createUpload</code></td>
+            <td>One-time upload links for files in the agent&rsquo;s sandbox or workspace. Each descriptor has a <code>curl</code> line; running it prints a receipt with a <code>fileRef</code>. One token per file, single use, valid 10 minutes.</td>
+            <td><code>count</code> (1..20), optional <code>filename</code>, <code>mimeType</code></td>
           </tr>
           <tr>
             <td><code>mcpAuth</code></td>
@@ -196,6 +207,18 @@ ailang serve-api --mcp --routes-only \
 
       <p>Each tool has named parameters with JSON Schema types. Agents receive full schemas via <code>tools/list</code> &mdash; no hardcoding required.</p>
 
+      <h3 id="sending-documents">Sending a document (hosted)</h3>
+      <p>The tool descriptions route the agent; in short:</p>
+      <ul>
+        <li><strong>File in the agent&rsquo;s sandbox or workspace</strong> (Claude Code, Codex, a code sandbox with network access): <code>createUpload</code>, then run its line, <code>curl -sS -F token=&lt;token&gt; -F file=@&lt;path&gt; https://docparse.ailang.sunholo.com/uploads</code>, and pass the receipt&rsquo;s <code>fileRef</code>. For several files, <code>count</code> returns one descriptor per file.</li>
+        <li><strong>The user wants to pick a file, or <code>curl</code> fails with a network error:</strong> <code>uploadDocument</code> (claude.ai, Claude Desktop and other MCP Apps hosts).</li>
+        <li><strong>ChatGPT attachment:</strong> the <code>file</code> argument of <code>mcpParse</code>, <code>mcpConvert</code> and <code>editDocument</code> is declared in <code>_meta["openai/fileParams"]</code>, so ChatGPT fills it with the attachment&rsquo;s <code>download_url</code> and <code>file_id</code> (and <code>mime_type</code> and <code>file_name</code> when it has them) and AILANG Parse fetches the file.</li>
+        <li><strong>Public link:</strong> <code>filepath</code> (<code>input</code> for <code>mcpConvert</code>). <strong>Short text:</strong> <code>content</code> + <code>filename</code>. <strong>Trying it:</strong> a sample id from <code>mcpFormats</code>.</li>
+        <li><strong>Never</strong> parse the file some other way and present it as the tool&rsquo;s result; if the file cannot be sent, tell the user.</li>
+      </ul>
+      <p><strong>fileRef reuse.</strong> A <code>fileRef</code> (<code>mcp-file://docparse/file_&hellip;</code>) works only for the account that uploaded it. Unused, it is refused after 1 hour; after its first use the same account can use it again for 30 minutes (more parts, another format), never past that hour.</p>
+      <p><strong>Large results.</strong> Call <code>summary</code> first when a document may be large. A result longer than <code>maxChars</code> returns its first part with <code>page: {index, of, firstBlock, endBlock, totalBlocks, nextCursor}</code>; call again with the same document and <code>cursor: nextCursor</code> until it is absent, and read every part before answering about the whole document. Scanned PDFs return <code>PDF_TEXT_LAYER_SPARSE</code>: retry with <code>pdfBackend: "ai"</code> and pass it on every cursor call (AI results are cached for 30 minutes per account).</p>
+
       <h3 id="agent-auth-flow">Device flow on the agent surface</h3>
       <p>Clients that can open a browser should use the OAuth connector <code>/mcp/connect/</code> (<a href="#connect">above</a>), where none of this is needed. On the agent surface <code>/mcp/</code>, an agent without a key signs in like this:</p>
       <ol style="font-size:14px;color:var(--text-secondary);line-height:1.8">
@@ -221,7 +244,7 @@ ailang serve-api --mcp --routes-only \
       <ul style="font-size:14px;color:var(--text-secondary);line-height:1.8">
         <li><strong>Claude Code</strong>: <code>claude mcp add io.github.sunholo-data/parse</code> &mdash; resolves the entry, picks the best available transport (PyPI / npm / hosted HTTP), and writes the config for you.</li>
         <li><strong>Cursor / VS Code with MCP extension</strong>: open the MCP server browser and search for <em>parse</em> or <em>sunholo</em>. Click install &mdash; the client populates <code>.cursor/mcp.json</code> or <code>.vscode/settings.json</code> automatically.</li>
-        <li><strong>Any registry-aware client</strong>: point it at <code>io.github.sunholo-data/parse</code>. The listing exposes both <em>packages</em> (npm + PyPI stdio bridges) and a <em>remote</em> (hosted Streamable HTTP at <code>docparse.ailang.sunholo.com/mcp/</code>); the client picks whichever it supports.</li>
+        <li><strong>Any registry-aware client</strong>: point it at <code>io.github.sunholo-data/parse</code>. The listing exposes both <em>packages</em> (npm + PyPI stdio bridges) and two <em>remotes</em>: the OAuth connector <code>docparse.ailang.sunholo.com/mcp/connect/</code> (for clients that can open a browser) and the API-key agent surface <code>docparse.ailang.sunholo.com/mcp/</code>; the client picks whichever it supports.</li>
       </ul>
 
       <p>Inspect the live entry directly:</p>
@@ -337,7 +360,7 @@ ailang serve-api --mcp --routes-only \
       <p>AILANG Parse follows an <strong>agent-first design</strong>. Three discovery mechanisms:</p>
 
       <h3>MCP tools/list</h3>
-      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the connector <code>/mcp/connect/</code> it returns 7 tools: <code>mcpParse</code>, <code>mcpConvert</code>, <code>editDocument</code>, <code>mcpFormats</code>, <code>mcpEstimate</code>, <code>mcpAccount</code> and <code>submit_feedback</code>; the agent surface <code>/mcp/</code> adds <code>mcpAuth</code> and <code>mcpAuthPoll</code>. Large-file uploads (<code>getUploadUrl</code>) are REST-only.</p>
+      <p>MCP clients call <code>tools/list</code> and receive full JSON Schema input definitions automatically &mdash; no configuration needed once the server is connected. On the connector <code>/mcp/connect/</code> it returns 10 tools: <code>mcpParse</code>, <code>mcpConvert</code>, <code>editDocument</code>, <code>uploadDocument</code>, <code>createUpload</code>, <code>mcpFormats</code>, <code>mcpEstimate</code>, <code>mcpAccount</code>, <code>submit_feedback</code> and the widget-only <code>uploadViaHost</code>; the agent surface <code>/mcp/</code> adds <code>mcpAuth</code> and <code>mcpAuthPoll</code>. On REST, large files go through <code>getUploadUrl</code>.</p>
 
       <h3>mcpFormats (recommended first call)</h3>
       <p>Agents should call <code>mcpFormats</code> first. It returns 17 input formats, 9 output formats, 26 test samples, and how to send a document. Plans and prices are on the <a href="pricing.html">pricing page</a> and <code>GET /api/v1/pricing</code>.</p>
@@ -404,7 +427,7 @@ ailang_parse = StructuredTool.from_function(
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>What is the AILANG Parse MCP server?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse ships as a native MCP server. The hosted connector at <code>https://docparse.ailang.sunholo.com/mcp/connect/</code> exposes 7 tools: <code>mcpParse</code> (parse any document), <code>mcpConvert</code> (create or convert documents, with a one-hour download link), <code>editDocument</code> (apply structured edits), <code>mcpFormats</code> (formats, samples and how to send a document), <code>mcpEstimate</code> (predict cost before parsing), <code>mcpAccount</code> (plan, usage, keys, history setting) and <code>submit_feedback</code>. The agent surface <code>/mcp/</code> adds the device-flow tools <code>mcpAuth</code> and <code>mcpAuthPoll</code>; see <a href="#two-surfaces">two ways to sign in</a>.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse ships as a native MCP server. The hosted connector at <code>https://docparse.ailang.sunholo.com/mcp/connect/</code> exposes 9 tools for the assistant: <code>mcpParse</code> (parse any document, in parts when long), <code>mcpConvert</code> (create or convert documents, with a one-hour download link), <code>editDocument</code> (apply structured edits), <code>uploadDocument</code> (the upload card), <code>createUpload</code> (upload links for sandbox files), <code>mcpFormats</code> (formats, samples and how to send a document), <code>mcpEstimate</code> (predict cost before parsing), <code>mcpAccount</code> (plan, usage, keys, history setting) and <code>submit_feedback</code>, plus the widget-only <code>uploadViaHost</code>. The agent surface <code>/mcp/</code> adds the device-flow tools <code>mcpAuth</code> and <code>mcpAuthPoll</code>; see <a href="#two-surfaces">two ways to sign in</a>.</p></div>
         </details>
         <details>
           <summary>How do AI agents discover AILANG Parse as a tool?</summary>

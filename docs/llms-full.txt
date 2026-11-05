@@ -100,22 +100,28 @@ A working end-to-end shell example lives in [examples/agent_workflow.sh](https:/
 
 ## Tool catalog
 
-`tools/list` on the connector `/mcp/connect/` returns **7** tools: `mcpParse`, `mcpConvert`, `editDocument`, `mcpFormats`, `mcpEstimate`, `mcpAccount` and `submit_feedback`. The agent surface `/mcp/` returns the same plus `mcpAuth` and `mcpAuthPoll`. Large-file upload (`getUploadUrl`) is REST-only (`POST /api/v1/upload/url`, Business tier). Tool results are JSON objects.
+`tools/list` on the connector `/mcp/connect/` returns **10** tools (live, 2026-11-05): `mcpParse`, `mcpConvert`, `editDocument`, `uploadDocument`, `createUpload`, `mcpFormats`, `mcpEstimate`, `mcpAccount`, `submit_feedback`, and `uploadViaHost`, which only the upload widget calls (`_meta.ui.visibility: ["app"]`). The agent surface `/mcp/` returns the same plus `mcpAuth` and `mcpAuthPoll`. On REST, large files go through `getUploadUrl` (`POST /api/v1/upload/url`, Business tier). Tool results are JSON objects.
 
 **Giving a tool a document** (`mcpParse`, `mcpConvert`, `editDocument`) — pass ONE of:
+- `fileRef`: `mcp-file://docparse/file_<32 hex>`, from an upload. Works only for the account that uploaded it; refused 1 hour after upload if unused; after its first use reusable for 30 minutes (never past that hour).
+  - File in your sandbox/workspace (Claude Code, Codex, a code sandbox with network): call `createUpload` (`count` 1..20 for several files; one single-use token per file, valid 10 minutes) and run its `curl` line: `curl -sS -F token=<token> -F file=@<path> https://docparse.ailang.sunholo.com/uploads`. The receipt carries the `fileRef`.
+  - The user wants to pick a file, or `curl` fails with a network error: call `uploadDocument` (MCP Apps card `ui://docparse/upload`; the card uploads the file and summarises it).
+- `file` (ChatGPT): declared in `_meta["openai/fileParams"]`; ChatGPT fills it with the attachment's `download_url` and `file_id`.
 - `content` + `filename`: the document itself. Text formats (Markdown, HTML, CSV) as plain text; binary files (DOCX, PDF, PPTX, XLSX, ODT, EPUB, …) base64-encoded with `contentEncoding: "base64"`. The filename's extension picks the parser (`notes.md`, `report.docx`).
 - an `https://` URL of a publicly reachable document (`filepath` on mcpParse/editDocument, `input` on mcpConvert). Internal and private addresses are refused.
 - a `sample_…` ID from `mcpFormats`.
 
-The hosted server never reads a path on the caller's machine.
+The hosted server never reads a path on the caller's machine. Never parse the file yourself and present that as the tool's result; if it cannot be sent, tell the user.
 
 | Tool | Sign-in? | Purpose | Key params |
 |---|---|---|---|
 | `mcpFormats` | no | Formats, samples, how to send a document. **Call this first.** | (none) |
 | `mcpEstimate` | no | Cost, latency and whether the request counts as AI, before parsing. | `filepath` (sample ID), `outputFormat` |
-| `mcpParse` | yes | Parse a document into blocks / markdown / HTML. | `content`+`filename` (+`contentEncoding`) or `filepath`; `outputFormat` |
-| `mcpConvert` | yes | Create or convert a document; returns `download_url`. | `content`+`filename` (+`contentEncoding`) or `input`; `outputFormat` |
-| `editDocument` | yes | Apply JSON edit deltas, return modified blocks. Office formats only. | `content`+`filename` or `filepath`; `deltas` |
+| `mcpParse` | yes | Parse a document into blocks / markdown / HTML / a2ui / summary; long results in parts. | `fileRef`, `file`, `filepath` or `content`+`filename`; `outputFormat`; `cursor`; `maxChars` (digit string, default "80000"); `pdfBackend` |
+| `mcpConvert` | yes | Create or convert a document; returns `download_url` (valid 1 hour). | `fileRef`, `file`, `input` or `content`+`filename`; `outputFormat` |
+| `editDocument` | yes | Apply JSON edit deltas, return modified blocks. Office formats only. | `fileRef`, `file`, `filepath` or `content`+`filename`; `deltas` |
+| `uploadDocument` | yes | Show the upload card so the user can pick a file; reports its `fileRef`. | `outputFormat` (optional) |
+| `createUpload` | yes | One-time upload links with a `curl` line, for sandbox files. | `count` (1..20), `filename`, `mimeType` |
 | `mcpAccount` | yes | Plan, usage, keys, request-history setting. | `action` |
 | `submit_feedback` | no | Report a bug, missing format or docs gap. | `title`, `body`, `category`, `ailang_version`, `package="sunholo/ailang_parse"` |
 | `mcpAuth` | no | `/mcp/` only. Start RFC 8628 device authorization. | `label` |
@@ -126,7 +132,9 @@ On `/mcp/connect/` the client's OAuth token authenticates "yes" tools. On `/mcp/
 ### Tool details
 
 **`mcpParse`**
-- `outputFormat`: `"blocks"` (default, structured JSON), `"markdown"`, or `"html"`.
+- `outputFormat`: `"blocks"` (default, structured JSON), `"markdown"`, `"html"`, `"a2ui"`, or `"summary"` (counts, first 50 headings, warnings: a few KB; look with it first when a document may be large).
+- Paging: a result longer than `maxChars` returns its first part with `page: {index, of, firstBlock, endBlock, totalBlocks, nextCursor}`. Call again with the same document and `cursor: <nextCursor>` until it is absent; read every part before answering about the whole document.
+- `pdfBackend: "ai"` when a PDF returns `PDF_TEXT_LAYER_SPARSE` (a scan): about 5 s a page, counts as an AI request; pass it on every cursor call (results are cached 30 minutes per account).
 - PDFs are parsed with `pdftotext` (no AI, not an AI request). Images use AI and count as one AI request.
 
 **`mcpConvert`**
@@ -204,7 +212,7 @@ Base URL: `https://docparse.ailang.sunholo.com`
 ### Discover
 
 ```bash
-# All 7 tools as machine-readable JSON Schema definitions
+# Tool definitions as machine-readable JSON Schema
 curl -s https://docparse.ailang.sunholo.com/api/v1/tools
 
 # Service capabilities (formats, pricing, samples)

@@ -43,6 +43,8 @@
         <a href="#chatgpt" style="padding-left:24px;font-size:12px">ChatGPT</a>
         <a href="#sign-in">Signing in</a>
         <a href="#tools">Tools</a>
+        <a href="#documents">Giving it a document</a>
+        <a href="#large">Large documents</a>
         <a href="#using">Using it</a>
         <a href="#revoke">Revoking access</a>
         <a href="#troubleshooting">Troubleshooting</a>
@@ -109,7 +111,7 @@ codex mcp login docparse</code></pre>
       <p><strong>What a connection is.</strong> The app receives an access key for your account, labelled <code>oauth: &lt;app host&gt;</code> (for example <code>oauth: claude.ai</code>). The key lasts 24 hours. The app renews it automatically with a refresh token valid for 30 days; each renewal replaces the old key. If the app is not used for 30 days, you sign in again.</p>
 
       <h2 id="tools">Tools</h2>
-      <p>The connector provides these tools. None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
+      <p>The connector provides these tools (checked against the live server on 5 November 2026). None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
       <table class="dp-config-table">
         <thead>
           <tr><th>Tool</th><th>What it does</th><th>Sign-in</th><th>Hints</th></tr>
@@ -117,9 +119,21 @@ codex mcp login docparse</code></pre>
         <tbody>
           <tr>
             <td><code>mcpParse</code><br><small>Parse document</small></td>
-            <td>Reads a document (Office, PDF, HTML, Markdown, email, images and more) into structured blocks, Markdown or HTML, keeping tables, headings, comments and tracked changes.</td>
+            <td>Reads a document (Office, PDF, HTML, Markdown, email, images and more) into structured blocks, Markdown, HTML or A2UI, keeping tables, headings, comments and tracked changes. <code>outputFormat: "summary"</code> returns a few KB (counts, the first 50 headings, warnings). Long results come in <a href="#large">parts</a>. Scanned PDFs: <code>pdfBackend: "ai"</code>.</td>
             <td>Required</td>
             <td>Read-only</td>
+          </tr>
+          <tr>
+            <td><code>uploadDocument</code><br><small>Upload a document</small></td>
+            <td>Shows the AILANG Parse upload card in the conversation, with a <em>Choose file</em> button. The card uploads the file you pick, summarises it, and gives the assistant a <code>fileRef</code> for the other tools. In claude.ai and Claude Desktop, and other apps that show MCP Apps cards.</td>
+            <td>Required</td>
+            <td>Not read-only (stores your upload); not destructive</td>
+          </tr>
+          <tr>
+            <td><code>createUpload</code><br><small>Create upload link</small></td>
+            <td>Gives the assistant one-time upload links, each with a <code>curl</code> line, for files in its own sandbox or workspace (Claude Code, Codex, a code sandbox). <code>count</code> (1&ndash;20) returns that many links in one call: one link per file.</td>
+            <td>Required</td>
+            <td>Not read-only (stores your upload); not destructive</td>
           </tr>
           <tr>
             <td><code>mcpConvert</code><br><small>Convert document</small></td>
@@ -159,10 +173,61 @@ codex mcp login docparse</code></pre>
           </tr>
         </tbody>
       </table>
+      <p>The list also contains <code>uploadViaHost</code> (<em>Receive upload from widget</em>). Only the upload card calls it, to send the file through the app when the app does not let the card upload directly; it is marked app-only, so the assistant does not use it.</p>
       <p>The tool list can change as the service improves; your assistant always shows the current list and descriptions.</p>
 
+      <h2 id="documents">Giving it a document</h2>
+      <p>AILANG Parse works only on the documents that you, or the assistant at your request, pass to one of its tools. It never reads your conversation, the assistant&rsquo;s memory or other files. The tools take a document in one of these ways, and their descriptions tell the assistant which to use:</p>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>Where the file is</th><th>How it reaches AILANG Parse</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>On your computer, and you are in claude.ai or Claude Desktop</td>
+            <td>The assistant calls <code>uploadDocument</code>. You pick the file in the AILANG Parse card; the card uploads it straight to AILANG Parse (it never passes through the model) and shows a summary.</td>
+          </tr>
+          <tr>
+            <td>In the assistant&rsquo;s sandbox or workspace (Claude Code, Codex, a code-execution sandbox with network access)</td>
+            <td>The assistant calls <code>createUpload</code> and runs the <code>curl</code> line it returns, which prints a receipt with a <code>fileRef</code>.</td>
+          </tr>
+          <tr>
+            <td>Attached to a ChatGPT message</td>
+            <td><code>mcpParse</code>, <code>mcpConvert</code> and <code>editDocument</code> take a <code>file</code> argument that ChatGPT fills in (<code>openai/fileParams</code>): ChatGPT gives AILANG Parse a temporary download link to the attachment.</td>
+          </tr>
+          <tr>
+            <td>On the web</td>
+            <td>A public <code>https://</code> link, passed as <code>filepath</code> (or <code>input</code> for <code>mcpConvert</code>). Pages behind a login cannot be read.</td>
+          </tr>
+          <tr>
+            <td>Short text the assistant already has (Markdown, HTML, CSV)</td>
+            <td><code>content</code> plus a <code>filename</code> whose extension picks the parser. For a new document, the assistant writes Markdown and sends it to <code>mcpConvert</code>.</td>
+          </tr>
+          <tr>
+            <td>Just trying it out</td>
+            <td>A sample id from <code>mcpFormats</code>, such as <code>sample_docx_formatting</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>If none of these works (for example the sandbox has no network access), the tool descriptions tell the assistant to say so, not to read the file some other way and present that as AILANG Parse&rsquo;s result.</p>
+
+      <h3 id="upload-links">Upload links (<code>createUpload</code>)</h3>
+      <p>Each link holds a single-use token valid for 10 minutes. The result has the upload descriptor and a ready-made line; the assistant replaces <code>&lt;path&gt;</code> with the file&rsquo;s path and runs it where the file is:</p>
+      <pre><code>curl -sS -F token=&lt;token&gt; -F file=@&lt;path&gt; https://docparse.ailang.sunholo.com/uploads</code></pre>
+      <p>The receipt includes <code>{"fileRef":"mcp-file://docparse/file_&hellip;","name":"report.docx","mimeType":"&hellip;","sizeBytes":&hellip;,"sha256":"&hellip;"}</code>. For several files the assistant sets <code>count</code> (up to 20) and runs one line per file; a token used twice is refused. In claude.ai&rsquo;s code sandbox, <code>docparse.ailang.sunholo.com</code> has to be allowed by your network settings, or the assistant falls back to the upload card.</p>
+
+      <h3 id="fileref">Reusing an upload (<code>fileRef</code>)</h3>
+      <p>Every upload, from the card or a link, ends in a <code>fileRef</code> (<code>mcp-file://docparse/file_&hellip;</code>) that <code>mcpParse</code>, <code>mcpConvert</code> and <code>editDocument</code> accept. It belongs to your account only: another account gets &ldquo;not found&rdquo;. An upload nobody uses is refused after 1 hour. After its first use the same account can use it again for 30 minutes (more parts, another format, a conversion), never more than 1 hour after upload. Then the assistant needs a fresh upload. See the <a href="privacy.html#ai-assistants">privacy policy</a> for how long the stored copy is kept.</p>
+
+      <h2 id="large">Large documents</h2>
+      <ul>
+        <li><strong>Look first:</strong> <code>outputFormat: "summary"</code> returns the file name, format, counts (blocks, headings, tables, images, tracked changes, comments), an outline of the first 50 headings and any warnings, in a few KB. The upload card uses it.</li>
+        <li><strong>Parts:</strong> a result longer than <code>maxChars</code> (a string of digits, default <code>"80000"</code>, range <code>"2000"</code>&ndash;<code>"120000"</code>) comes back as its first part with <code>page: {index, of, nextCursor, &hellip;}</code>. The assistant calls <code>mcpParse</code> again with the same document and <code>cursor: &lt;nextCursor&gt;</code> until there is no <code>nextCursor</code>. Parts never split a block. Each part counts as one request.</li>
+        <li><strong>Scanned PDFs:</strong> a PDF with no usable text layer returns <code>PDF_TEXT_LAYER_SPARSE</code>. Retry with <code>pdfBackend: "ai"</code>: each page is read by an AI model (about 5 seconds a page), the call counts as an AI request, and the same <code>pdfBackend</code> goes with every <code>cursor</code> call. The AI result is cached for 30 minutes for your account, so reading further parts does not repeat the work.</li>
+      </ul>
+
       <h2 id="using">Using it</h2>
-      <p>Ask naturally, for example &ldquo;parse this contract and list the tracked changes&rdquo;, &ldquo;turn these notes into a PowerPoint&rdquo; or &ldquo;try AILANG Parse on a sample DOCX&rdquo;. The assistant can give AILANG Parse a document in three ways: the file itself, a public <code>https://</code> link, or one of the built-in sample documents. Created files come back with a download link that is valid for one hour.</p>
+      <p>Ask naturally, for example &ldquo;parse this contract and list the tracked changes&rdquo;, &ldquo;turn these notes into a PowerPoint&rdquo; or &ldquo;try AILANG Parse on a sample DOCX&rdquo;. The assistant can give AILANG Parse a document in the ways listed under <a href="#documents">Giving it a document</a>. Created files come back with a download link that is valid for one hour.</p>
 
       <h2 id="revoke">Revoking access</h2>
       <ul>
@@ -202,7 +267,7 @@ codex mcp login docparse</code></pre>
       <p>Details are on the <a href="mcp.html">MCP server page</a>.</p>
 
       <h2 id="privacy">Privacy &amp; support</h2>
-      <p>The assistant sends AILANG Parse only the tool call: the document and options you ask it to work on, never your conversation. How connections, keys and created files are stored is described in our <a href="privacy.html#ai-assistants">privacy policy</a>; see also the <a href="terms.html">terms</a>.</p>
+      <p>The assistant sends AILANG Parse only the tool call: the document and options you ask it to work on, never your conversation. AILANG Parse acts only on files that are explicitly passed to its tools. How connections, keys and created files are stored is described in our <a href="privacy.html#ai-assistants">privacy policy</a>; see also the <a href="terms.html">terms</a>.</p>
       <p>Need help? Email <a href="mailto:docparse@sunholo.com">docparse@sunholo.com</a> or open an issue at <a href="https://github.com/sunholo-data/ailang-parse/issues">github.com/sunholo-data/ailang-parse/issues</a>.</p>
 
     </main>
