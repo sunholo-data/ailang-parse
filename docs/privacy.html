@@ -60,7 +60,7 @@
 
     <main class="dp-docs-content legal-content">
 
-      <p class="legal-updated">Last updated: 6 October 2026</p>
+      <p class="legal-updated">Last updated: 5 November 2026</p>
 
       <h2 id="who-we-are">1. Who We Are</h2>
       <p>AILANG Parse is operated by <strong>Holosun ApS</strong> (CVR 44324687), a company registered in Denmark. We provide a document parsing service that extracts structured content from Office documents, PDFs, images, and other file formats.</p>
@@ -84,7 +84,7 @@
           </tr>
           <tr>
             <td><strong>Hosted API</strong> (europe-west1)</td>
-            <td>Uploaded files are not stored. Each request keeps a <strong>request record</strong>: its metadata and, unless you turn request history off, up to 10&nbsp;KB of the parsed output for replay. <strong>Request records are deleted after 12 months.</strong> Google Gemini (only when you choose AI parsing) may process in the US, and Firebase sign-in runs in the US; see <a href="#transfers" style="color:var(--dp-blue)">International Transfers</a>.</td>
+            <td>Documents are processed and then discarded, except for short-lived copies that are deleted automatically within about a day: large files, files uploaded through an AI assistant, generated files you download, and AI parse results (see below). Each request keeps a <strong>request record</strong>: its metadata and, unless you turn request history off, up to 10&nbsp;KB of the parsed output for replay. <strong>Request records are deleted automatically after 30 days, 6 months or 12 months, depending on your plan.</strong> Google Gemini (only when a request uses AI parsing) is currently reached through Google&rsquo;s global endpoint and may process outside the EU, and Firebase sign-in runs in the US; see <a href="#transfers" style="color:var(--dp-blue)">International Transfers</a>.</td>
           </tr>
         </tbody>
       </table>
@@ -109,7 +109,7 @@
           <tr>
             <td><strong>AI-routed documents</strong></td>
             <td>Content sent to your selected AI provider (e.g. Google Gemini) for PDF/image parsing</td>
-            <td>Per AI provider&rsquo;s terms. We do not retain AI inputs or outputs.</td>
+            <td>Large PDFs are passed to the AI provider through our temporary storage (deleted automatically once a day old). The AI parse result is cached for 30 minutes for your account only, so reading the same document again does not repeat the AI work; the cached copy is deleted automatically once a day old. Not cached if you turned request history off. The provider&rsquo;s own handling is governed by its terms.</td>
           </tr>
           <tr>
             <td><strong>Browser / CLI parsing</strong></td>
@@ -118,7 +118,7 @@
           </tr>
           <tr>
             <td><strong>Account &amp; auth</strong></td>
-            <td>Email address, display name and profile photo URL, and the sign-in provider (Google or GitHub) with its user ID, via Firebase Authentication. Access keys issued to AI assistants you connect (stored hashed; see <a href="#ai-assistants" style="color:var(--dp-blue)">AI Assistant Connections</a>)</td>
+            <td>Email address, display name and profile photo URL, and the sign-in provider (Google, GitHub, or an email and password for accounts we create) with its user ID, via Firebase Authentication. Access keys issued to AI assistants you connect (stored hashed; see <a href="#ai-assistants" style="color:var(--dp-blue)">AI Assistant Connections</a>)</td>
             <td>Until account deletion. Connection keys expire after 24 hours; refresh tokens after 30 days</td>
           </tr>
           <tr>
@@ -129,7 +129,7 @@
           <tr>
             <td><strong>Request records</strong></td>
             <td>Per API request: request ID, account and API key ID, endpoint, file name or source reference, input and output format, whether AI was used, file size, outcome and error code, timestamp. <strong>Request history</strong>: up to 10&nbsp;KB of the parsed output, kept so you can replay the request. It&rsquo;s on by default; turn it off in your <a href="https://www.sunholo.com/docparse/dashboard.html" style="color:var(--dp-blue)">dashboard</a> or with <code>POST /api/v1/account/history</code> and new requests keep metadata only. The file name is stored as you send it; if it identifies a person, rename the file before upload.</td>
-            <td>Automatically deleted 12 months after the request. Your history shows the last 30, 180 or 365 days depending on plan. You can delete all of your request history at any time from the dashboard (<em>Delete history</em>).</td>
+            <td>Automatically deleted after your plan&rsquo;s history period: 30 days (Free), 6 months (Pro) or 12 months (Business), counted from the request. With request history off, only the file&rsquo;s extension is kept, not its name. You can delete all of your request history at any time from the dashboard (<em>Delete history</em>).</td>
           </tr>
           <tr>
             <td><strong>Usage metrics</strong></td>
@@ -150,9 +150,11 @@
       <h3 id="ai-assistants">Using AILANG Parse from Claude, ChatGPT or another AI assistant</h3>
       <p>You can connect AILANG Parse to an AI assistant that supports the Model Context Protocol (MCP), at <code>https://docparse.ailang.sunholo.com/mcp/connect/</code>. When you connect:</p>
       <ul>
-        <li><strong>Sign-in.</strong> You sign in to AILANG Parse on our own page, with Google or GitHub through Firebase Authentication. The assistant never receives your Google or GitHub password or tokens. The sign-in page shows which app is asking and where it will send you back, and nothing is granted until you choose <em>Allow</em>.</li>
+        <li><strong>Sign-in.</strong> You sign in to AILANG Parse on our own page, with Google or GitHub (or an email and password, for accounts we create) through Firebase Authentication. The assistant never receives your password or your Google or GitHub tokens. The sign-in page shows which app is asking and where it will send you back, and nothing is granted until you choose <em>Allow</em>.</li>
         <li><strong>What we store for a connection.</strong> We issue the assistant an access key for your account, labelled <code>oauth: &lt;app&gt;</code> (for example <code>oauth: claude.ai</code>). It expires after 24 hours. The assistant then uses a refresh token to get a new key, which replaces the old one. Refresh tokens are valid for 30 days and are replaced each time they are used. We store keys and refresh tokens only as SHA-256 hashes, never in readable form, in Google Cloud Firestore in the EU (Belgium). Expired sign-in and refresh records are deleted automatically, and an expired key stops working immediately.</li>
         <li><strong>What the assistant sends us.</strong> Only the tool call: the document or text you ask it to work on and the options for that request. We do not receive your conversation, your chat history or other files.</li>
+        <li><strong>Only the files you choose.</strong> AILANG Parse acts only on the documents that you, or the assistant at your request, explicitly pass to one of its tools. It does not read, search or extract your assistant&rsquo;s memory, chat history, conversation summaries, or any other files you have uploaded to the assistant.</li>
+        <li><strong>How a file reaches us.</strong> You choose it in the AILANG Parse upload card; the assistant runs an upload link we give it, where it can run commands; or, in ChatGPT, ChatGPT gives us a temporary link to the file you attached and we fetch it from OpenAI. A file uploaded through an AI assistant (the upload card or an upload link) is kept in Google Cloud Storage in the EU (Belgium) for your account only. If it is never used it is refused after 1 hour. After its first use your account can use it again for 30 minutes (never more than 1 hour after upload); after that it can no longer be read. The stored copy is deleted automatically by a storage rule once it is a day old, and its record (file name, type, size and checksum) is deleted automatically after it expires.</li>
         <li><strong>Files you create.</strong> When the assistant creates a document for you, we keep the file in Google Cloud Storage (EU) for up to 24 hours so you can download it from a private link that expires after one hour; it is then deleted automatically.</li>
         <li><strong>What the assistant receives.</strong> The tool&rsquo;s result: parsed or converted content, estimates, or information about your account. From then on that content is handled under the assistant provider&rsquo;s own privacy policy (for example Anthropic&rsquo;s or OpenAI&rsquo;s), not ours.</li>
         <li><strong>Requests made through an assistant</strong> are recorded like any other API request (see <em>Request records</em> above), and your request-history setting applies.</li>
@@ -198,7 +200,8 @@
         <li>Document content is sent to the AI provider you configure (currently Google Gemini via Vertex AI)</li>
         <li>By selecting AI parsing, you instruct us to engage that provider as a sub-processor for your request</li>
         <li>We use enterprise Cloud API endpoints &mdash; your data is <strong>not used for model training</strong> under Google Cloud&rsquo;s data processing terms</li>
-        <li>We do not retain AI inputs or outputs after your response is delivered</li>
+        <li>We keep AI parse results only as described above: a 30-minute cache for your account (deleted automatically once a day old, and not used if request history is off) and, unless you turn it off, your request history</li>
+        <li>Requests to Vertex AI currently go through Google&rsquo;s <strong>global</strong> endpoint, so Google may process the document in any of its regions, including outside the EU. We ask for EU processing (location <code>eu</code>), but Google&rsquo;s data-residency guarantee does not cover the global endpoint. Moving to Google&rsquo;s EU endpoint is a planned change; we will update this page when it is live.</li>
         <li>Deterministic-format parsing (DOCX, PPTX, XLSX, ODT, ODP, ODS, HTML, Markdown, CSV, EPUB, EML, TEX, RTF) <strong>never involves AI</strong> &mdash; source bytes go in, structured blocks come out, no model calls</li>
       </ul>
 
@@ -221,8 +224,8 @@
           </tr>
           <tr>
             <td><strong>Google Gemini</strong><br><span style="font-size:12px;color:var(--text-muted)">Vertex AI</span></td>
-            <td>AI-assisted PDF/image parsing. Only when you select AI parsing. No data retention, no model training.</td>
-            <td>EU endpoint preferred; US fallback (EU-US DPF + SCCs)</td>
+            <td>AI-assisted PDF/image parsing. Only when a request uses AI parsing. Not used for model training.</td>
+            <td>Currently Google&rsquo;s global endpoint: any Google region, including the US (EU-US DPF + SCCs). EU endpoint planned.</td>
           </tr>
         </tbody>
       </table>
@@ -231,9 +234,9 @@
 
       <h2 id="transfers">7. International Transfers</h2>
       <ul>
-        <li><strong>Primary infrastructure:</strong> EU (europe-west1, Belgium). All compute and document storage stays in the EU.</li>
+        <li><strong>Primary infrastructure:</strong> EU (europe-west1, Belgium). All our compute and document storage stays in the EU; AI parsing (below) is the exception.</li>
         <li><strong>Firebase Authentication:</strong> US &mdash; covered by the EU-US Data Privacy Framework (Google is on the DPF list) + Standard Contractual Clauses as fallback.</li>
-        <li><strong>Vertex AI:</strong> EU endpoint preferred. When US processing occurs, covered by EU-US DPF + SCCs.</li>
+        <li><strong>Vertex AI:</strong> only when a request uses AI parsing. Requests to Vertex AI currently go through Google&rsquo;s <strong>global</strong> endpoint, so Google may process the document in any of its regions, including outside the EU. We ask for EU processing (location <code>eu</code>), but Google&rsquo;s data-residency guarantee does not cover the global endpoint. Moving to Google&rsquo;s EU endpoint is a planned change; we will update this page when it is live. Processing outside the EU is covered by the EU-US DPF + SCCs.</li>
         <li><strong>Alternative regions</strong> available on request for customers with specific requirements.</li>
       </ul>
       <p>A Transfer Impact Assessment has been conducted in accordance with EDPB Recommendations 01/2020 and is available on request.</p>
@@ -262,7 +265,7 @@
         <li>API key authentication for all API requests</li>
         <li>No human review of uploaded document content</li>
         <li>Access controls limited to authorised Holosun ApS personnel</li>
-        <li>Uploaded files are not stored; parsed output is kept only as request history (up to 10&nbsp;KB per request, on by default, can be turned off), deleted after 12 months</li>
+        <li>Temporary copies (large files, uploads through an AI assistant, generated files, AI parse results) are deleted automatically once a day old; parsed output is otherwise kept only as request history (up to 10&nbsp;KB per request, on by default, can be turned off), deleted after 30 days, 6 months or 12 months depending on plan</li>
       </ul>
 
       <h2 id="cookies">10. Cookies</h2>
