@@ -18,29 +18,203 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
 (function () {
   'use strict';
 
-  // ── Referral attribution capture (?ref=<code> → localStorage.docparse_ref) ──
-  // Partner referral links land here as www.sunholo.com/ailang-parse/<page>?ref=<code>.
-  // First touch wins: an existing docparse_ref value is never overwritten. The
-  // key is later read by the docparse dashboard/approve pages at
-  // www.sunholo.com/docparse/ (same origin, same localStorage). Runs only on
-  // the www.sunholo.com origin; no network calls, no UI. localStorage is
-  // wrapped in try/catch — storage failures must never break the page.
-  (function captureRef() {
-    if (window.location.hostname !== 'www.sunholo.com') return;
-    var refCode = new URLSearchParams(window.location.search).get('ref');
-    if (!refCode || !/^[a-z0-9-]{2,32}$/.test(refCode)) return;
-    try {
-      var existing = window.localStorage.getItem('docparse_ref');
-      if (existing === null || existing === '') {
-        window.localStorage.setItem('docparse_ref', refCode);
-      }
-    } catch (e) { /* storage unavailable — skip capture */ }
-    try {
-      // Clean the address bar: strip ref, keep any other params and the hash.
-      var params = new URLSearchParams(window.location.search);
-      params.delete('ref');
+  // ── Campaign attribution + visit counter ──
+  // Shared contract with the docparse API (/api/v1/referral/claim, /api/v1/visit)
+  // and docparse/docs/js/firebase-app.js. Partner and campaign links land here
+  // as www.sunholo.com/ailang-parse/<page>?ref=<code>&utm_source=...
+  //
+  // First touch wins. localStorage.docparse_ref keeps the bare partner code
+  // exactly as before; localStorage.docparse_attr holds the whole first-touch
+  // object {ref?, utm_*?, landing, at}, mirrored into the dp_attr cookie on
+  // .sunholo.com so the MCP sign-in page on docparse.ailang.sunholo.com can
+  // read it. Neither is overwritten while either exists. firebase-app.js hands
+  // them to the server at sign-in and clears them once it confirms.
+  //
+  // The visit counter sends one request per page load: path plus the
+  // campaign fields of the CURRENT URL, no cookies set or sent, no
+  // identifiers. It stays silent under automation, Do Not Track and Global
+  // Privacy Control. It uses fetch with keepalive and credentials:'omit'
+  // rather than sendBeacon, because sendBeacon always attaches cookies and
+  // would carry dp_attr (Domain=.sunholo.com) to the API.
+  //
+  // Everything runs only on the www.sunholo.com origin and is wrapped in
+  // try/catch: attribution must never break the page.
+  var DPA = (function () {
+    var SITE_HOST = 'www.sunholo.com';
+    var REF_RE = /^[a-z0-9-]{2,32}$/;
+    var UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+    var STRIP_KEYS = ['ref'].concat(UTM_KEYS);
+    var COOKIE_NAME = 'dp_attr';
+    var COOKIE_SCOPE = '; Domain=.sunholo.com; Path=/';
+    var COOKIE_MAX_AGE = 7776000; // 90 days
+    // Same docparse API hosts as firebase-app.js ENV_CONFIG, so ?env=dev|test
+    // sends the beacon where that page's sign-in goes. ?api= wins over both.
+    var ENV_API = {
+      dev: 'https://ailang-dev-docparse-api-ejjw6zt3bq-ew.a.run.app',
+      test: 'https://ailang-test-docparse-api-rrmdhcxo4a-ew.a.run.app'
+    };
+
+    function validRef(v) {
+      return (typeof v === 'string' && REF_RE.test(v)) ? v : null;
+    }
+    function validUtm(v) {
+      return (typeof v === 'string' && v.length > 0 && v.length <= 100 && !/[<>"]/.test(v)) ? v : null;
+    }
+
+    // {ref?, utm_*?} from a query string. Invalid values are dropped, not cleaned.
+    function campaign(search) {
+      var params = new URLSearchParams(search || '');
+      var out = {};
+      var ref = validRef(params.get('ref'));
+      if (ref) out.ref = ref;
+      UTM_KEYS.forEach(function (k) {
+        var v = validUtm(params.get(k));
+        if (v) out[k] = v;
+      });
+      return out;
+    }
+
+    function hasCampaign(c) {
+      if (c.ref) return true;
+      for (var i = 0; i < UTM_KEYS.length; i++) if (c[UTM_KEYS[i]]) return true;
+      return false;
+    }
+
+    // The first-touch object, or null when the URL carries no valid campaign.
+    function buildAttr(search, pathname, nowIso) {
+      var attr = campaign(search);
+      if (!hasCampaign(attr)) return null;
+      attr.landing = String(pathname || '').slice(0, 200);
+      attr.at = nowIso;
+      return attr;
+    }
+
+    function cookieString(attr) {
+      return COOKIE_NAME + '=' + encodeURIComponent(JSON.stringify(attr)) + COOKIE_SCOPE +
+        '; Max-Age=' + COOKIE_MAX_AGE + '; SameSite=Lax; Secure';
+    }
+
+    function hasAttrCookie(cookieHeader) {
+      return String(cookieHeader || '').split(/;\s*/).some(function (c) {
+        return c.indexOf(COOKIE_NAME + '=') === 0 && c.length > COOKIE_NAME.length + 1;
+      });
+    }
+
+    // First touch: nothing stored yet in either place.
+    function isFirstTouch(storedAttr, cookieHeader) {
+      return (storedAttr === null || storedAttr === undefined || storedAttr === '') &&
+        !hasAttrCookie(cookieHeader);
+    }
+
+    // Address bar without ref/utm_*, other params and the hash kept. null when
+    // there is nothing to strip.
+    function strippedUrl(search, pathname, hash) {
+      var params = new URLSearchParams(search || '');
+      var found = STRIP_KEYS.filter(function (k) { return params.has(k); });
+      if (!found.length) return null;
+      found.forEach(function (k) { params.delete(k); });
       var qs = params.toString();
-      window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+      return pathname + (qs ? '?' + qs : '') + (hash || '');
+    }
+
+    function visitBody(search, pathname) {
+      var body = { site: 'ailang-parse', page: String(pathname || '').slice(0, 200) };
+      var c = campaign(search);
+      Object.keys(c).forEach(function (k) { body[k] = c[k]; });
+      return body;
+    }
+
+    // Why the beacon must not be sent, or null to send it.
+    function visitSkipReason(hostname, nav, win) {
+      if (hostname !== SITE_HOST) return 'host';
+      if (!nav) return 'no-navigator';
+      if (nav.webdriver === true) return 'webdriver';
+      if (nav.doNotTrack === '1' || (win && win.doNotTrack === '1')) return 'dnt';
+      if (nav.globalPrivacyControl) return 'gpc';
+      if (!win || typeof win.fetch !== 'function') return 'no-fetch';
+      return null;
+    }
+
+    function visitBase(search, apiBase) {
+      var params = new URLSearchParams(search || '');
+      if (params.get('api')) return apiBase;
+      return ENV_API[params.get('env')] || apiBase;
+    }
+
+    return {
+      SITE_HOST: SITE_HOST,
+      validRef: validRef,
+      validUtm: validUtm,
+      campaign: campaign,
+      buildAttr: buildAttr,
+      cookieString: cookieString,
+      isFirstTouch: isFirstTouch,
+      strippedUrl: strippedUrl,
+      visitBody: visitBody,
+      visitSkipReason: visitSkipReason,
+      visitBase: visitBase
+    };
+  })();
+  window.DocParseAttribution = DPA;
+
+  // One beacon per page load. Returns true when the browser queued it.
+  var dpVisitSent = false;
+  window.docparseVisit = function () {
+    if (dpVisitSent) return false;
+    try {
+      if (DPA.visitSkipReason(window.location.hostname, window.navigator, window)) return false;
+      dpVisitSent = true;
+      var body = DPA.visitBody(window.location.search, window.location.pathname);
+      var url = DPA.visitBase(window.location.search, API_BASE) + '/api/v1/visit';
+      // text/plain + no-cors: a simple request, no preflight; credentials
+      // omitted so no cookie travels with it; keepalive survives navigation.
+      window.fetch(url, {
+        method: 'POST', body: JSON.stringify(body), keepalive: true,
+        credentials: 'omit', mode: 'no-cors', referrerPolicy: 'no-referrer',
+        headers: { 'Content-Type': 'text/plain' }
+      }).catch(function () { /* fire and forget */ });
+      return true;
+    } catch (e) { return false; }
+  };
+
+  (function captureAttribution() {
+    if (window.location.hostname !== DPA.SITE_HOST) return;
+    var search = window.location.search;
+
+    // Legacy key, unchanged: bare partner code, first touch wins.
+    var refCode = DPA.validRef(new URLSearchParams(search).get('ref'));
+    if (refCode) {
+      try {
+        var existing = window.localStorage.getItem('docparse_ref');
+        if (existing === null || existing === '') {
+          window.localStorage.setItem('docparse_ref', refCode);
+        }
+      } catch (e) { /* storage unavailable — skip capture */ }
+    }
+
+    // Full first-touch object: localStorage + cookie, set together, never overwritten.
+    try {
+      var attr = DPA.buildAttr(search, window.location.pathname, new Date().toISOString());
+      if (attr) {
+        var stored = null;
+        var storageOk = true;
+        try { stored = window.localStorage.getItem('docparse_attr'); } catch (e) { storageOk = false; }
+        if (DPA.isFirstTouch(stored, document.cookie)) {
+          if (storageOk) {
+            try { window.localStorage.setItem('docparse_attr', JSON.stringify(attr)); } catch (e) { /* ignore */ }
+          }
+          try { document.cookie = DPA.cookieString(attr); } catch (e) { /* ignore */ }
+        }
+      }
+    } catch (e) { /* never break the page */ }
+
+    // Count the visit while the campaign fields are still in the URL.
+    window.docparseVisit();
+
+    // Clean the address bar: strip ref and utm_*, keep any other params and the hash.
+    try {
+      var clean = DPA.strippedUrl(search, window.location.pathname, window.location.hash);
+      if (clean !== null) window.history.replaceState(null, '', clean);
     } catch (e) { /* replaceState unavailable — leave the URL as it is */ }
   })();
 

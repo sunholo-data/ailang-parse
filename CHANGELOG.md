@@ -9,6 +9,28 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ---
 
+## [Unreleased]
+
+### Website: campaign attribution and a cookieless visit counter
+
+- `docs/js/components.js` records the first touch of a partner or campaign link
+  (`?ref=` plus `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`) as
+  `localStorage.docparse_attr` and a `dp_attr` cookie on `.sunholo.com` (90 days, `SameSite=Lax`,
+  `Secure`), so the MCP sign-in page on docparse.ailang.sunholo.com can credit it too. Neither is
+  overwritten while either exists. `localStorage.docparse_ref` is kept exactly as before. Invalid
+  values are dropped: `ref` must match `^[a-z0-9-]{2,32}$`, a `utm_*` value must be at most 100
+  characters with no `<`, `>` or `"`. `ref` and every `utm_*` are stripped from the address bar.
+- `docs/js/firebase-app.js` claims `{ref?, utm_*?, landing?}` at sign-in, from `docparse_attr`,
+  then `docparse_ref`, then the cookie, and clears all three once the server confirms.
+- `window.docparseVisit()` sends one `navigator.sendBeacon` per page load to `/api/v1/visit`:
+  `{site, page}` plus the current URL's `ref`/`utm_*`. It sets no cookie and carries no identifier,
+  and it is skipped under `navigator.webdriver`, Do Not Track and Global Privacy Control. It runs
+  on www.sunholo.com only. Until the DocParse API ships `/api/v1/visit`, the beacon gets a 404,
+  which nothing waits on.
+- Privacy policy: describes the visit counter, the `dp_attr` cookie, and partners seeing the
+  campaign source of a referred sign-up. It drops the stale claim that www.sunholo.com sets `_ga`
+  analytics cookies; no Google Analytics runs anywhere on www.sunholo.com.
+
 ## [v0.55.5](https://github.com/sunholo-data/ailang-parse/compare/v0.55.4...v0.55.5) — 2026-11-02
 
 ### Fixed
