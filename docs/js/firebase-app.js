@@ -252,16 +252,76 @@
   }
 
   // ── Referral attribution (docparse design_docs/planned/referral_tracking.md) ──
-  // components.js saves a partner's ?ref= code to localStorage.docparse_ref on
-  // first touch. At sign-in we hand it to the server once, fire-and-forget; the
-  // server records it on the account (first write wins permanently, no
-  // self-referral, unknown codes ignored). The key is cleared only after the
-  // server confirms, so a failure retries on the next sign-in. Same code as
-  // docparse/docs/js/firebase-app.js — keep the two in step.
+  // components.js saves the first touch of a partner or campaign link:
+  // localStorage.docparse_ref (bare ?ref= code), localStorage.docparse_attr
+  // (JSON {ref?, utm_*?, landing?, at?}) and the dp_attr cookie on .sunholo.com
+  // (same JSON, URI-encoded). At sign-in we hand it to the server once,
+  // fire-and-forget; the server records it on the account (first write wins
+  // permanently, no self-referral, unknown codes ignored). All three are
+  // cleared only after the server confirms, so a failure retries on the next
+  // sign-in. Same code as docparse/docs/js/firebase-app.js — keep the two in step.
+  var DP_REF_RE = /^[a-z0-9-]{2,32}$/;
+  var DP_UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+  var DP_ATTR_COOKIE_CLEAR = 'dp_attr=; Domain=.sunholo.com; Path=/; Max-Age=0; SameSite=Lax; Secure';
+
+  function dpValidRef(v) { return (typeof v === 'string' && DP_REF_RE.test(v)) ? v : null; }
+  function dpValidUtm(v) {
+    return (typeof v === 'string' && v.length > 0 && v.length <= 100 && !/[<>"]/.test(v)) ? v : null;
+  }
+  function dpParseAttr(raw) {
+    if (!raw) return null;
+    try {
+      var o = JSON.parse(raw);
+      return (o && typeof o === 'object' && !Array.isArray(o)) ? o : null;
+    } catch (e) { return null; }
+  }
+  function dpAttrCookie(cookieHeader) {
+    var parts = String(cookieHeader || '').split(/;\s*/);
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf('dp_attr=') === 0) {
+        try { return dpParseAttr(decodeURIComponent(parts[i].slice(8))); } catch (e) { return null; }
+      }
+    }
+    return null;
+  }
+
+  // Claim body {ref?, utm_*?, landing?}, or null when there is nothing to claim.
+  //   ref:            docparse_attr.ref, else docparse_ref, else the cookie's ref
+  //   utm_*, landing: docparse_attr, else the cookie
+  // Every value is re-validated; `at` is never sent.
+  function dpBuildClaimBody(storedAttr, storedRef, cookieHeader) {
+    var attr = dpParseAttr(storedAttr);
+    var cookieAttr = dpAttrCookie(cookieHeader);
+    var src = attr || cookieAttr || {};
+    var body = {};
+    var ref = dpValidRef(attr && attr.ref) || dpValidRef(storedRef) || dpValidRef(cookieAttr && cookieAttr.ref);
+    if (ref) body.ref = ref;
+    var hasUtm = false;
+    DP_UTM_KEYS.forEach(function (k) {
+      var v = dpValidUtm(src[k]);
+      if (v) { body[k] = v; hasUtm = true; }
+    });
+    if (!ref && !hasUtm) return null;
+    if (typeof src.landing === 'string' && src.landing) body.landing = src.landing.slice(0, 200);
+    return body;
+  }
+  window.dpBuildClaimBody = dpBuildClaimBody;
+
+  function dpStorageGet(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+  function dpClearAttribution() {
+    try { localStorage.removeItem('docparse_ref'); } catch (e) { /* ignore */ }
+    try { localStorage.removeItem('docparse_attr'); } catch (e) { /* ignore */ }
+    try { document.cookie = DP_ATTR_COOKIE_CLEAR; } catch (e) { /* ignore */ }
+  }
+
   function claimReferral() {
-    var ref = null;
-    try { ref = localStorage.getItem('docparse_ref'); } catch (e) { /* storage unavailable */ }
-    if (!ref || !currentUser) return;
+    var body = null;
+    try {
+      body = dpBuildClaimBody(dpStorageGet('docparse_attr'), dpStorageGet('docparse_ref'), document.cookie);
+    } catch (e) { /* never break sign-in */ }
+    if (!body || !currentUser) return;
     currentUser.getIdToken().then(function (token) {
       return fetch(API_BASE + '/api/v1/referral/claim', {
         method: 'POST',
@@ -269,13 +329,13 @@
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ' + token
         },
-        body: JSON.stringify({ ref: ref })
+        body: JSON.stringify(body)
       });
     }).then(function (r) { return r.json(); })
       .then(function (data) {
         var result = typeof data.result === 'string' ? JSON.parse(data.result) : data;
         if (result.ok) {
-          try { localStorage.removeItem('docparse_ref'); } catch (e) { /* ignore */ }
+          dpClearAttribution();
         } else {
           console.error('Referral claim not recorded:', result.error || result);
         }
