@@ -96,6 +96,9 @@ test("landing link stores attribution, sets dp_attr, strips the URL and beacons 
   // Second page view: plain beacon, first touch untouched.
   await page.goto(`${PREFIX}docs.html?ref=other-partner`);
   await expect.poll(() => beacons.length).toBe(2);
+  // dp_attr (Domain=.sunholo.com) exists by now, yet the counter must not carry
+  // it: fetch with credentials:'omit', not sendBeacon, which always sends cookies.
+  for (const b of beacons) expect((await b.allHeaders())["cookie"]).toBeUndefined();
   expect(JSON.parse(beacons[1].postData() || "{}")).toEqual({
     site: "ailang-parse", page: "/ailang-parse/docs.html", ref: "other-partner",
   });

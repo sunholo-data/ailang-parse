@@ -30,9 +30,12 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
   // read it. Neither is overwritten while either exists. firebase-app.js hands
   // them to the server at sign-in and clears them once it confirms.
   //
-  // The visit counter sends one sendBeacon per page load: path plus the
-  // campaign fields of the CURRENT URL, no cookies set, no identifiers. It
-  // stays silent under automation, Do Not Track and Global Privacy Control.
+  // The visit counter sends one request per page load: path plus the
+  // campaign fields of the CURRENT URL, no cookies set or sent, no
+  // identifiers. It stays silent under automation, Do Not Track and Global
+  // Privacy Control. It uses fetch with keepalive and credentials:'omit'
+  // rather than sendBeacon, because sendBeacon always attaches cookies and
+  // would carry dp_attr (Domain=.sunholo.com) to the API.
   //
   // Everything runs only on the www.sunholo.com origin and is wrapped in
   // try/catch: attribution must never break the page.
@@ -128,7 +131,7 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
       if (nav.webdriver === true) return 'webdriver';
       if (nav.doNotTrack === '1' || (win && win.doNotTrack === '1')) return 'dnt';
       if (nav.globalPrivacyControl) return 'gpc';
-      if (typeof nav.sendBeacon !== 'function') return 'no-beacon';
+      if (!win || typeof win.fetch !== 'function') return 'no-fetch';
       return null;
     }
 
@@ -163,7 +166,14 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
       dpVisitSent = true;
       var body = DPA.visitBody(window.location.search, window.location.pathname);
       var url = DPA.visitBase(window.location.search, API_BASE) + '/api/v1/visit';
-      return window.navigator.sendBeacon(url, new Blob([JSON.stringify(body)], { type: 'text/plain' }));
+      // text/plain + no-cors: a simple request, no preflight; credentials
+      // omitted so no cookie travels with it; keepalive survives navigation.
+      window.fetch(url, {
+        method: 'POST', body: JSON.stringify(body), keepalive: true,
+        credentials: 'omit', mode: 'no-cors', referrerPolicy: 'no-referrer',
+        headers: { 'Content-Type': 'text/plain' }
+      }).catch(function () { /* fire and forget */ });
+      return true;
     } catch (e) { return false; }
   };
 

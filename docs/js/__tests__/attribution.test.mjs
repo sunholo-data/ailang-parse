@@ -67,6 +67,8 @@ function baseContext(href, { storage, cookies, navigator } = {}) {
     history: { replaceState: (_s, _t, u) => replaced.push(u) },
     localStorage: storage || makeStorage(),
     navigator: navigator || {},
+    // The visit counter uses window.fetch; tests hand it in via navigator.__fetch.
+    fetch: navigator && navigator.__fetch,
   };
   return { ctx, replaced, cookies: cookies || makeCookieJar() };
 }
@@ -77,7 +79,7 @@ function beaconNavigator(extra = {}) {
     beacons,
     nav: {
       webdriver: false,
-      sendBeacon: (u, blob) => { beacons.push({ url: u, blob }); return true; },
+      __fetch: (u, init) => { beacons.push({ url: u, init }); return Promise.resolve({}); },
       ...extra,
     },
   };
@@ -239,14 +241,18 @@ test('dp_attr cookie string has the contract attributes', () => {
 
 // ── visit beacon ────────────────────────────────────────────────────────
 
-async function beaconBody(b) { return JSON.parse(await b.blob.text()); }
+async function beaconBody(b) { return JSON.parse(b.init.body); }
 
 test('landing visit beacons path and campaign from the current URL', async () => {
   const { nav, beacons } = beaconNavigator();
   loadComponents(`${SITE}pricing.html?ref=demo-partner&utm_source=demo&utm_medium=${'m'.repeat(101)}`, { navigator: nav });
   assert.equal(beacons.length, 1);
   assert.equal(beacons[0].url, 'https://docparse.ailang.sunholo.com/api/v1/visit');
-  assert.equal(beacons[0].blob.type, 'text/plain');
+  // A simple request that carries no cookie: dp_attr must not travel with it.
+  assert.equal(beacons[0].init.headers['Content-Type'], 'text/plain');
+  assert.equal(beacons[0].init.credentials, 'omit');
+  assert.equal(beacons[0].init.keepalive, true);
+  assert.equal(beacons[0].init.method, 'POST');
   assert.deepEqual(await beaconBody(beacons[0]),
     { site: 'ailang-parse', page: '/ailang-parse/pricing.html', ref: 'demo-partner', utm_source: 'demo' });
 });
@@ -279,7 +285,7 @@ test('the beacon follows ?env= and ?api= like the rest of the site', () => {
   }
 });
 
-test('beacon is skipped under automation, DNT, GPC, or without sendBeacon', () => {
+test('beacon is skipped under automation, DNT, GPC, or without fetch', () => {
   const cases = [
     ['webdriver', { webdriver: true }],
     ['dnt', { doNotTrack: '1' }],
@@ -290,7 +296,7 @@ test('beacon is skipped under automation, DNT, GPC, or without sendBeacon', () =
     loadComponents(`${SITE}?ref=demo-partner`, { navigator: nav });
     assert.equal(beacons.length, 0, why);
   }
-  // No sendBeacon: no throw, attribution still captured.
+  // No fetch: no throw, attribution still captured.
   const { storage } = loadComponents(`${SITE}?ref=demo-partner`, { navigator: { webdriver: false } });
   assert.equal(storage.getItem('docparse_ref'), 'demo-partner');
 });
@@ -299,14 +305,14 @@ test('visitSkipReason names each skip condition', () => {
   const DPA = loadComponents(`${SITE}`).ctx.DocParseAttribution;
   const send = () => true;
   const host = 'www.sunholo.com';
-  assert.equal(DPA.visitSkipReason(host, { sendBeacon: send }, {}), null);
-  assert.equal(DPA.visitSkipReason('localhost', { sendBeacon: send }, {}), 'host');
-  assert.equal(DPA.visitSkipReason(host, { webdriver: true, sendBeacon: send }, {}), 'webdriver');
-  assert.equal(DPA.visitSkipReason(host, { doNotTrack: '1', sendBeacon: send }, {}), 'dnt');
-  assert.equal(DPA.visitSkipReason(host, { sendBeacon: send }, { doNotTrack: '1' }), 'dnt');
-  assert.equal(DPA.visitSkipReason(host, { doNotTrack: '0', sendBeacon: send }, {}), null);
-  assert.equal(DPA.visitSkipReason(host, { globalPrivacyControl: true, sendBeacon: send }, {}), 'gpc');
-  assert.equal(DPA.visitSkipReason(host, {}, {}), 'no-beacon');
+  assert.equal(DPA.visitSkipReason(host, {}, { fetch: send }), null);
+  assert.equal(DPA.visitSkipReason('localhost', {}, { fetch: send }), 'host');
+  assert.equal(DPA.visitSkipReason(host, { webdriver: true }, { fetch: send }), 'webdriver');
+  assert.equal(DPA.visitSkipReason(host, { doNotTrack: '1' }, { fetch: send }), 'dnt');
+  assert.equal(DPA.visitSkipReason(host, {}, { doNotTrack: '1', fetch: send }), 'dnt');
+  assert.equal(DPA.visitSkipReason(host, { doNotTrack: '0' }, { fetch: send }), null);
+  assert.equal(DPA.visitSkipReason(host, { globalPrivacyControl: true }, { fetch: send }), 'gpc');
+  assert.equal(DPA.visitSkipReason(host, {}, {}), 'no-fetch');
 });
 
 test('docparseVisit sends at most once per page load', () => {
@@ -316,8 +322,8 @@ test('docparseVisit sends at most once per page load', () => {
   assert.equal(beacons.length, 1);
 });
 
-test('a throwing sendBeacon never breaks the page', () => {
-  const nav = { webdriver: false, sendBeacon: () => { throw new Error('boom'); } };
+test('a throwing fetch never breaks the page', () => {
+  const nav = { webdriver: false, __fetch: () => { throw new Error('boom'); } };
   const { replaced } = loadComponents(`${SITE}?ref=demo-partner`, { navigator: nav });
   assert.deepEqual(replaced, ['/ailang-parse/']);
 });
