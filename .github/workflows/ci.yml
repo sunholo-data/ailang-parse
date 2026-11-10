@@ -47,6 +47,11 @@ jobs:
       - name: Check advertised formats match format_router
         run: python3 docs/scripts/check-format-lists.py
 
+      # The inline numbers in data-bench elements are what crawlers, no-JS
+      # readers and LLMs see. They sat at v1 scores for weeks after the v2 run.
+      - name: Check benchmark fallbacks match the published summary
+        run: python3 docs/scripts/sync-bench-fallbacks.py --check
+
       - name: Package exports cover every imported module (consumers load only exports)
         run: python3 docs/scripts/check-exports.py
 
