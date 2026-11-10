@@ -4,7 +4,7 @@ import std/string (length, join, intToStr, startsWith, contains, find, substring
 import std/fs (readFile)
 import std/result (Result, Ok, Err)
 import std/list (map, foldl, length as listLength)
-import docparse/types/document (InlineRun, plainRun, simpleCell, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
+import docparse/types/document (InlineRun, plainRun, dropLinkEchoRuns, simpleCell, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks, imageSrcRef)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape)
 import docparse/services/colour (normaliseHex)
 
@@ -197,7 +197,7 @@ pure func htmlHeadingTag(level: int) -> string =
 -- and the output round-trips back through html_parser to the same flags.
 -- <sup>/<sub> are innermost because they wrap the smallest span.
 pure func htmlRunsToStr(runs: [InlineRun]) -> string =
-  foldl(\acc r. "${acc}${htmlRunToStr(r)}", "", runs)
+  foldl(\acc r. "${acc}${htmlRunToStr(r)}", "", dropLinkEchoRuns(runs))
 
 pure func htmlRunToStr(r: InlineRun) -> string {
   let inner = xmlEscape(r.text);

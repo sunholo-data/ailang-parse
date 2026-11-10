@@ -116,7 +116,7 @@ type MdParseState = {
   indentCode: [string],  -- accumulated indented-code-block lines (reversed)
   quoteLines: [string],  -- accumulated blockquote lines (reversed)
   tableAligns: [string], -- per-column alignment from the separator row
-  itemLevels: [int],     -- nesting depth per list item (reversed)
+  itemIndents: [(int, int)], -- per list item: (indent, content column), reversed
   inCode: bool,          -- inside a ``` fence
   codeLang: string       -- info string of the open fence, "" when absent
 }
@@ -139,7 +139,7 @@ pure func emptyParseState() -> MdParseState
   indentCode: [],
   quoteLines: [],
   tableAligns: [],
-  itemLevels: [],
+  itemIndents: [],
   inCode: false,
   codeLang: ""
 }
@@ -260,12 +260,16 @@ pure func mdThematicBreakState(state: MdParseState) -> MdParseState {
   { s | blocks: mkText("", "hr", 0) :: s.blocks }
 }
 
--- A list item opens (or extends) the current list. Nesting depth is read off
--- the RAW line's indentation, which is why the untrimmed line is passed in.
+-- A list item opens (or extends) the current list. Nesting depth is decided
+-- when the list closes (mdIndentsToLevels), from the RAW line's indentation
+-- and where the item's text starts, which is why the untrimmed line is passed
+-- in. The marker width is what the trimmed line has beyond the item text.
 pure func mdListItemState(state: MdParseState, item: string, ordered: bool, line: string) -> MdParseState {
   let s = flushText(flushTable(flushIndentCode(state)));
+  let n = mdCountIndent(line, 0, 0);
+  let w = length(trim(line)) - length(item);
   { s | listItems: item :: s.listItems, listOrdered: ordered,
-        itemLevels: mdIndentLevel(line) :: s.itemLevels }
+        itemIndents: (n, n + w) :: s.itemIndents }
 }
 
 -- The separator row (| --- | :-: |) is where alignment is declared. It used
@@ -431,9 +435,9 @@ pure func flushList(state: MdParseState) -> MdParseState
   if mdIsEmptyList(state.listItems) then state
   else {
     let items = reverse(state.listItems);
-    let levels = reverse(state.itemLevels);
+    let levels = mdIndentsToLevels(reverse(state.itemIndents));
     { state | blocks: mdListBlock(items, state.listOrdered, levels) :: state.blocks,
-              listItems: [], listOrdered: false, itemLevels: [] }
+              listItems: [], listOrdered: false, itemIndents: [] }
   }
 }
 
@@ -453,14 +457,59 @@ pure func flushTable(state: MdParseState) -> MdParseState
   }
 }
 
--- Two spaces (or one tab) per level, which is what every Markdown writer emits
--- and what CommonMark's "indented enough to be inside the parent item" reduces
--- to for ordinary lists. Capped so a runaway indent cannot invent depth.
-pure func mdIndentLevel(line: string) -> int {
-  let n = mdCountIndent(line, 0, 0);
-  let lvl = n / 2;
-  if lvl > 8 then 8 else lvl
-}
+-- Nesting depth per item, from (indent, content column) pairs in order.
+--
+-- An item is a child when it is indented at least two columns past the open
+-- item above it; otherwise it is a sibling of that item. This is CommonMark's
+-- rule (a child starts at its parent's content column: 2 under "- ", 3 under
+-- "1. ", 4 under "10. "), relaxed to two columns because hand-written lists
+-- nest numbered items by two spaces too. The old reading, indent / 2, put the
+-- grandchildren of a numbered list (6 spaces) at depth 3.
+--
+-- Two further columns past the parent's content column mean one more level,
+-- so a Word list that jumps 0 -> 2 survives the trip through
+-- markdown_writer.renderListMd. A list whose first item is already indented
+-- keeps two columns per level. Depth is capped at 8 so a runaway indent
+-- cannot invent levels.
+pure func mdIndentsToLevels(items: [(int, int)]) -> [int]
+  tests [
+    ([(0, 3), (3, 6), (6, 9), (3, 6), (0, 3)], [0, 1, 2, 1, 0]),
+    ([(0, 2), (2, 4), (4, 6), (0, 2)], [0, 1, 2, 0]),
+    ([(0, 2), (4, 6), (2, 4)], [0, 2, 1]),
+    ([(0, 3), (2, 5), (4, 7)], [0, 1, 2]),
+    ([(0, 3), (1, 4)], [0, 0]),
+    ([(4, 6), (0, 2)], [2, 0])
+  ]
+{ reverse(mdLevelsGo(items, [], [])) }
+
+pure func mdLevelsGo(items: [(int, int)], stack: [(int, int, int)], acc: [int]) -> [int] =
+  match items {
+    [] => acc,
+    (n, c) :: rest => {
+      let kept = mdPopIndented(stack, n);
+      let top = match kept {
+        [] => (n, c, mdCapLevel(n / 2)),
+        (ti, tc, tl) :: _ =>
+          if n < ti + 2 then (ti, c, tl)
+          else (n, c, mdCapLevel(tl + 1 + (if n > tc then (n - tc) / 2 else 0)))
+      };
+      let level = match top { (_, _, l) => l };
+      let next = match kept {
+        (ti, _, _) :: below => if n < ti + 2 then top :: below else top :: kept,
+        [] => [top]
+      };
+      mdLevelsGo(rest, next, level :: acc)
+    }
+  }
+
+-- Close every open item indented further than `n`.
+pure func mdPopIndented(stack: [(int, int, int)], n: int) -> [(int, int, int)] =
+  match stack {
+    [] => [],
+    (ti, _, _) :: rest => if ti > n then mdPopIndented(rest, n) else stack
+  }
+
+pure func mdCapLevel(l: int) -> int = if l > 8 then 8 else l
 
 pure func mdCountIndent(line: string, i: int, acc: int) -> int =
   if i >= length(line) then acc

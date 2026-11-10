@@ -11,6 +11,28 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: Markdown output for numbered lists, links and `--convert`
+
+- **Nested numbered lists render as nested lists.** The Markdown writer indented every level by
+  two spaces and numbered the whole list with one counter, so a three-level outline came out as
+  `1.` to `15.` and no CommonMark renderer nested it (a child of `1. ` needs three spaces). Each
+  level now counts from 1 and a child sits at its parent's content column: 3 spaces under `1. `,
+  4 under `10. `. Bulleted lists are unchanged (two spaces per level). The Markdown reader decides
+  depth the same way, from an indent stack rather than `indent / 2`, so standard CommonMark lists
+  read back at the right depth (grandchildren of a numbered list at 6 spaces used to read as level
+  3), and a list that skips a level (Word allows 0 → 2) survives the round trip.
+- **Links appear once.** A DOCX link's `text` reads `text (url)` so the target shows to readers
+  that ignore `href`. The Markdown, HTML and DOCX writers, which turn `href` into a real link,
+  printed that suffix as well: `[Reference](https://x) (https://x)`. They now drop it
+  (`dropLinkEchoRuns` in `types/document.ail`). The JSON is unchanged.
+- **HYPERLINK fields are links.** `docx_parser` read a `w:fldSimple` `HYPERLINK` field (what our
+  own DOCX writer emits) as plain text, so a link written by `--convert out.docx` read back with no
+  target. It now carries the target, like `w:hyperlink`. A bookmark-only `HYPERLINK \l` stays text.
+- **`--convert` writes only the file it names.** `docparse a.docx --convert a.md` also left
+  `a.docx.json` and `a.docx.md` in the current directory. Those parse outputs are now written
+  during a conversion only when an output directory is given (`--output-dir` or
+  `DOCPARSE_OUTPUT_DIR`), which is what the CI checks that read them back already do.
+
 ### Website: campaign attribution and a cookieless visit counter
 
 - `docs/js/components.js` records the first touch of a partner or campaign link

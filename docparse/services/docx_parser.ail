@@ -3,7 +3,7 @@ module docparse/services/docx_parser
 import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag, findAllAttrs)
 import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Ok, Err)
-import std/string (contains, length, trim, stringToInt, join, charCode, chars, substring)
+import std/string (contains, length, trim, stringToInt, join, charCode, chars, substring, split, startsWith, replaceMany)
 import std/map (empty as emptyMap, fromList as mapFromList, lookup as mapLookup, member as mapMember, insert as mapInsert)
 import std/list (map, flatMap, any, concat, length as listLength, filter, reverse, last, dedup)
 import docparse/types/document (mkHeading, mkHeadingRuns, mkList, mkListRuns, mkListNested, mkText, mkTextRuns, mkNamedSection, plainRun, coalesceRuns, InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, SectionBlock, ChangeBlock, CommentBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, mkImage, mkTable, mkAnchoredComment, mkUnanchoredComment, mkSection)
@@ -225,12 +225,45 @@ pure func docxHyperlinkSuffixRuns(node: XmlNode, rels: Map[string, string]) -> [
 -- (pandoc_inline_images.docx links an identicon), and appending a bare URL
 -- where there is no anchor text injects it mid-sentence:
 -- "Here is one that (http://www.google.com) links."
-pure func docxHyperlinkSuffix(node: XmlNode, rels: Map[string, string]) -> string {
-  let url = docxRelTarget(rels, getOrElse(getAttr(node, "r:id"), ""));
-  if length(url) > 0 && length(extractNestedRunText(node)) > 0
-  then " (${url})"
-  else ""
+pure func docxHyperlinkSuffix(node: XmlNode, rels: Map[string, string]) -> string =
+  docxLinkSuffix(docxRelTarget(rels, getOrElse(getAttr(node, "r:id"), "")),
+                 extractNestedRunText(node))
+
+pure func docxLinkSuffix(url: string, text: string) -> string =
+  if length(url) > 0 && length(text) > 0 then " (${url})" else ""
+
+-- The target of a HYPERLINK field instruction (ECMA-376 §17.16.5.25):
+--   HYPERLINK "https://x" \o "tooltip"  ->  https://x
+-- The target is the first argument that is not a switch. \l, \o and \t take
+-- an argument of their own, so a bookmark-only link (HYPERLINK \l "intro")
+-- has no external target and yields "" — it stays plain text rather than
+-- getting a bookmark name as its URL. docx_generator writes links as this
+-- field, so without it our own DOCX output read back with no link at all.
+pure func docxFieldHyperlinkTarget(instr: string) -> string
+  tests [
+    (" HYPERLINK \"https://example.com\" ", "https://example.com"),
+    ("HYPERLINK https://example.com \\o \"tip\"", "https://example.com"),
+    ("HYPERLINK \\l \"intro\"", ""),
+    (" PAGE ", ""),
+    ("", "")
+  ]
+{
+  let words = filter(\w. length(w) > 0, split(trim(instr), " "));
+  match words {
+    first :: rest => if first == "HYPERLINK" then docxFieldTargetWord(rest) else "",
+    [] => ""
+  }
 }
+
+pure func docxFieldTargetWord(words: [string]) -> string =
+  match words {
+    [] => "",
+    w :: rest =>
+      if w == "\\l" || w == "\\o" || w == "\\t" then
+        (match rest { [] => "", _ :: after => docxFieldTargetWord(after) })
+      else if startsWith(w, "\\") then docxFieldTargetWord(rest)
+      else replaceMany(w, [("\"", "")])
+  }
 
 -- Extract metadata from a DOCX file
 export func parseDocxMetadata(filepath: string) -> DocMetadata ! {FS} {
@@ -659,8 +692,16 @@ pure func childNodeRuns(node: XmlNode, rels: Map[string, string]) -> [InlineRun]
            docxHyperlinkSuffixRuns(node, rels))
   -- w:fldSimple wraps the field's cached result run (DATE, NUMPAGES, FILENAME).
   -- Deleted by e9de665; without it the result text vanishes and a paragraph
-  -- reads "Total pages in document: ".
-  else if tag == "w:fldSimple" then map(extractRun, findAll(node, "w:r"))
+  -- reads "Total pages in document: ". A HYPERLINK field is a link like
+  -- w:hyperlink: its runs carry the target and the same " (url)" suffix.
+  else if tag == "w:fldSimple" then {
+    let url = docxFieldHyperlinkTarget(getOrElse(getAttr(node, "w:instr"), ""));
+    let runs = findAll(node, "w:r");
+    if length(url) == 0 then map(extractRun, runs)
+    else concat(map(\n. { let run = extractRun(n); {run | href: url} }, runs),
+                (if length(docxLinkSuffix(url, joinRunTexts(runs))) > 0
+                 then [plainRun(docxLinkSuffix(url, joinRunTexts(runs)))] else []))
+  }
   else if tag == "w:sdt" then childNodeSdtRuns(node)
   else if tag == "m:oMath" then [plainRun(renderOmml(node))]
   else if tag == "m:oMathPara" then [plainRun(renderOmml(node))]
@@ -721,7 +762,9 @@ pure func docxHyperlinkRunView(xml: string) -> string
      "true;Visit ->|Our->https://example.com*| site->https://example.com| (https://example.com)->|!->"),
     ("<w:p xmlns:w=\"w\" xmlns:r=\"r\"><w:hyperlink r:id=\"missing\"><w:r><w:t>Unresolved</w:t></w:r></w:hyperlink></w:p>",
      "true;"),
-    ("<w:p xmlns:w=\"w\"><w:r><w:t>Plain</w:t></w:r></w:p>", "true;")
+    ("<w:p xmlns:w=\"w\"><w:r><w:t>Plain</w:t></w:r></w:p>", "true;"),
+    ("<w:p xmlns:w=\"w\"><w:fldSimple w:instr=\" HYPERLINK &quot;https://f.example&quot; \"><w:r><w:t>Field</w:t></w:r></w:fldSimple></w:p>",
+     "true;Field->https://f.example| (https://f.example)->")
   ]
 {
   match parseLenient(xml) {
@@ -778,7 +821,10 @@ pure func childNodeText(node: XmlNode, rels: Map[string, string]) -> string {
   else if tag == "w:smartTag" then extractNestedRunText(node)
   else if tag == "w:hyperlink" then
     "${extractNestedRunText(node)}${docxHyperlinkSuffix(node, rels)}"
-  else if tag == "w:fldSimple" then extractNestedRunText(node)
+  else if tag == "w:fldSimple" then {
+    let text = extractNestedRunText(node);
+    "${text}${docxLinkSuffix(docxFieldHyperlinkTarget(getOrElse(getAttr(node, "w:instr"), "")), text)}"
+  }
   else if tag == "w:sdt" then extractSdtText(node)
   else if tag == "m:oMath" then renderOmml(node)
   else if tag == "m:oMathPara" then renderOmml(node)

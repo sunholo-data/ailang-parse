@@ -900,10 +900,19 @@ fi
 # Precedence: --output-dir, then a DOCPARSE_OUTPUT_DIR already in the
 # environment, then the caller's cwd.
 
+#
+# A --convert writes only the file it names: with no --output-dir and no
+# DOCPARSE_OUTPUT_DIR, OUTPUT_DIR stays empty and main.ail skips the
+# .json/.md sidecars (they used to land in the cwd beside the converted file).
+
 if [ -z "$OUTPUT_DIR" ]; then
-  OUTPUT_DIR="${DOCPARSE_OUTPUT_DIR:-$(pwd)}"
+  if [ -n "$CONVERT_TARGET" ] && [ -z "${DOCPARSE_OUTPUT_DIR:-}" ]; then
+    OUTPUT_DIR=""
+  else
+    OUTPUT_DIR="${DOCPARSE_OUTPUT_DIR:-$(pwd)}"
+  fi
 fi
-if [[ ! "$OUTPUT_DIR" = /* ]]; then
+if [ -n "$OUTPUT_DIR" ] && [[ ! "$OUTPUT_DIR" = /* ]]; then
   OUTPUT_DIR="$(pwd)/$OUTPUT_DIR"
 fi
 
@@ -916,8 +925,10 @@ cd "$PROJECT_DIR"
 # files are visible mid-batch, nothing is lost on Ctrl+C, and there's no bulk
 # post-copy step.
 ENV_PREFIX=()
-mkdir -p "$OUTPUT_DIR"
-ENV_PREFIX+=(DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR")
+if [ -n "$OUTPUT_DIR" ]; then
+  mkdir -p "$OUTPUT_DIR"
+  ENV_PREFIX+=(DOCPARSE_OUTPUT_DIR="$OUTPUT_DIR")
+fi
 if $USE_AI; then
   ENV_PREFIX+=(GOOGLE_API_KEY="")
 fi

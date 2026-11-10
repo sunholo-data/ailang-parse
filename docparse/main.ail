@@ -168,7 +168,12 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
     } else ();
     -- --output-dir flag wins over the env var the bash wrapper sets; env wins
     -- over the default of "." (the caller's cwd).
-    let outDir = if length(outDirFlag) > 0 then outDirFlag else getEnvOr("DOCPARSE_OUTPUT_DIR", ".");
+    -- --convert writes the file it names and nothing else, unless an output
+    -- dir was asked for: "docparse a.docx --convert a.md" used to leave
+    -- a.docx.json and a.docx.md in the cwd as well. "" means no sidecars;
+    -- the checks that read the parse JSON after a conversion set the dir.
+    let outDir = if length(outDirFlag) > 0 then outDirFlag
+      else getEnvOr("DOCPARSE_OUTPUT_DIR", if length(convertTarget) > 0 then "" else ".");
 
     -- Parse. Every format recipe lives in the orchestrator, shared
     -- with the MCP server and the hosted API — see docparse/services/orchestrator.
@@ -582,22 +587,20 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
                   convertTarget: string, referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string) -> () ! {IO, FS, AI, Env} {
   let basename = mainBasename(filepath);
 
-  -- Ensure the output directory exists (defensive — bin/docparse already
-  -- mkdirs when --output-dir is used, but direct ailang invocations setting
-  -- DOCPARSE_OUTPUT_DIR to a non-existent path need this).
-  mkdirAll(outDir);
-
-  -- Write JSON
-  let jsonOutput = formatResult(result);
-  let jsonPath = "${outDir}/${basename}.json";
-  writeFile(jsonPath, jsonOutput);
-  println("JSON output written to ${jsonPath}");
-
-  -- Write markdown (LLM-ready text)
+  -- Write the JSON and Markdown sidecars, unless main resolved no output
+  -- dir (a --convert with none asked for). mkdirAll is defensive: bin/docparse
+  -- already mkdirs, but direct ailang invocations setting DOCPARSE_OUTPUT_DIR
+  -- to a non-existent path need it.
   let markdown = renderMarkdown(doc);
-  let mdPath = "${outDir}/${basename}.md";
-  writeFile(mdPath, markdown);
-  println("Markdown output written to ${mdPath}");
+  if length(outDir) > 0 then {
+    mkdirAll(outDir);
+    let jsonPath = "${outDir}/${basename}.json";
+    writeFile(jsonPath, formatResult(result));
+    println("JSON output written to ${jsonPath}");
+    let mdPath = "${outDir}/${basename}.md";
+    writeFile(mdPath, markdown);
+    println("Markdown output written to ${mdPath}")
+  } else ();
 
   -- Optional: format conversion
   if length(convertTarget) > 0 then {
@@ -673,10 +676,13 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
     );
     println(summary);
     println("");
-    -- Write summary to file
-    let summaryPath = "${outDir}/${basename}_summary.txt";
-    writeFile(summaryPath, summary);
-    println("Summary written to ${summaryPath}")
+    -- Write summary to file, beside the other sidecars (none on a bare
+    -- --convert: the summary is printed above).
+    if length(outDir) > 0 then {
+      let summaryPath = "${outDir}/${basename}_summary.txt";
+      writeFile(summaryPath, summary);
+      println("Summary written to ${summaryPath}")
+    } else ()
   }
   else ();
 
