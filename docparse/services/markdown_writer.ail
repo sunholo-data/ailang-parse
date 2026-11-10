@@ -2,7 +2,7 @@ module docparse/services/markdown_writer
 
 import std/string (length, replaceMany, startsWith, substring, repeat, join, split, contains)
 import std/list (map, length as listLength)
-import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText, mkText, mkNamedSection)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, InlineRun, ParsedDocument, DocMetadata, cellText, mkText, mkNamedSection, dropLinkEchoRuns)
 
 -- Markdown writer — renders a ParsedDocument to markdown for LLM consumption.
 --
@@ -60,7 +60,7 @@ export pure func renderBlockMd(block: Block) -> string =
     TableBlock(t) =>
       "${renderTableMd(t.headers, t.rows)}\n",
     ListBlock(l) =>
-      "${renderListMd(l.items, l.itemRuns, l.ordered, 1, l.itemLevels)}\n",
+      "${renderListMd(l.items, l.itemRuns, l.ordered, [], l.itemLevels)}\n",
     ImageBlock(i) =>
       if length(i.description) > 0
       then "[Image: ${i.description}]\n\n"
@@ -245,7 +245,7 @@ pure func cellTextMd(cell: TableCell) -> string {
 -- docx(bold) -> md -> docx came out plain.
 pure func inlineMd(text: string, runs: [InlineRun]) -> string =
   if listLength(runs) == 0 then text
-  else mdEmitRuns(runs, false, false, false, "")
+  else mdEmitRuns(dropLinkEchoRuns(runs), false, false, false, "")
 
 -- Markers are emitted as TRANSITIONS, not per run: adjacent runs sharing a
 -- format share one pair. Wrapping each run on its own produced ambiguous
@@ -318,17 +318,71 @@ pure func renderRowsMd(rows: [[TableCell]]) -> string =
 -- mirroring docx_generator's docxListItemsToXml. Without this a list item's
 -- bold/italic/code markers survived into `blocks` but were dropped on the way
 -- to markdown, since only the flattened plain-text `items` were ever read.
-pure func renderListMd(items: [string], itemRuns: [[InlineRun]], ordered: bool, idx: int, levels: [int]) -> string =
+--
+-- Nesting follows CommonMark: a child item is indented to its parent's
+-- CONTENT column, i.e. past the parent's marker. Under "- " that is 2 spaces,
+-- under "1. " 3 and under "10. " 4. Two spaces per level under a numbered item
+-- does not nest in any CommonMark renderer, and each level counts from 1: the
+-- old single counter numbered a three-level outline 1..15 straight through.
+--
+-- `stack` holds the open levels, deepest first, as (level, count, indent,
+-- contentColumn). A jump of more than one level (Word allows 0 -> 2) adds two
+-- spaces per skipped level past the parent's content column, which is what
+-- markdown_parser's mdIndentsToLevels reads back as the same jump.
+pure func renderListMd(items: [string], itemRuns: [[InlineRun]], ordered: bool,
+                       stack: [(int, int, int, int)], levels: [int]) -> string =
   match items {
     [] => "",
     item :: rest => {
-      -- Two spaces per level, which is what the reader measures back.
       let lvl = match levels { [] => 0, n :: _ => n };
       let restLevels = match levels { [] => [], _ :: t => t };
-      let pad = repeat("  ", lvl);
-      let marker = if ordered then "${show(idx)}. " else "- ";
+      let open = mdListPopDeeper(stack, lvl);
+      let place = mdListPlace(open, lvl);
+      let count = match place { (c, _) => c };
+      let indent = match place { (_, i) => i };
+      let marker = if ordered then "${show(count)}. " else "- ";
+      let entry = (lvl, count, indent, indent + length(marker));
+      let next = match open {
+        (l, _, _, _) :: below => if l == lvl then entry :: below else entry :: open,
+        [] => [entry]
+      };
       let body = match itemRuns { [] => item, r :: _ => inlineMd(item, r) };
       let restRuns = match itemRuns { [] => [], _ :: t => t };
-      "${pad}${marker}${mdOneLine(body)}\n${renderListMd(rest, restRuns, ordered, idx + 1, restLevels)}"
+      "${repeat(" ", indent)}${marker}${mdOneLine(body)}\n${renderListMd(rest, restRuns, ordered, next, restLevels)}"
     }
   }
+
+-- Close every open level deeper than `lvl`.
+pure func mdListPopDeeper(stack: [(int, int, int, int)], lvl: int) -> [(int, int, int, int)] =
+  match stack {
+    [] => [],
+    (l, _, _, _) :: rest => if l > lvl then mdListPopDeeper(rest, lvl) else stack
+  }
+
+-- (number, indent) for an item at `lvl`, given the open levels after popping.
+-- A list that opens below level 0 has no parent to align to, so it keeps two
+-- spaces per level (what the reader measures for a first item).
+pure func mdListPlace(open: [(int, int, int, int)], lvl: int) -> (int, int) =
+  match open {
+    [] => (1, 2 * lvl),
+    (l, count, indent, content) :: _ =>
+      if l == lvl then (count + 1, indent)
+      else (1, content + 2 * (lvl - l - 1))
+  }
+
+-- Pins the CommonMark nesting: children of "1. " sit at 3 spaces, each level
+-- numbers from 1, and a level resumes its own count after a deeper run.
+pure func mdOrderedListNests() -> bool
+  tests [((), true)]
+{
+  renderListMd(["a", "b", "c", "d"], [], true, [], [0, 1, 1, 0]) ==
+    "1. a\n   1. b\n   2. c\n2. d\n"
+}
+
+-- Bullets keep two spaces per level; a skipped level adds two more.
+pure func mdBulletListJumps() -> bool
+  tests [((), true)]
+{
+  renderListMd(["a", "b", "c"], [], false, [], [0, 2, 1]) ==
+    "- a\n    - b\n  - c\n"
+}

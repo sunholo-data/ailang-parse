@@ -358,6 +358,48 @@ export pure func plainRun(text: string) -> InlineRun =
   {text: text, bold: false, italic: false, underline: false,
    strike: false, code: false, href: "", vertAlign: "", color: ""}
 
+-- docx_parser writes a link as "text (url)" so that `text`, and any reader
+-- that ignores href, still shows where the link goes; the " (url)" is a plain
+-- run after the linked runs. A renderer that turns href into a real link
+-- (Markdown [text](url), HTML <a>, a Word HYPERLINK field) must drop that
+-- echo, or the output reads "[Reference](https://x) (https://x)".
+-- coalesceRuns may have merged the echo into the plain text after it, so the
+-- echo is stripped as a prefix, not only as a whole run.
+export pure func dropLinkEchoRuns(runs: [InlineRun]) -> [InlineRun] =
+  match runs {
+    [] => [],
+    r :: rest =>
+      if length(r.href) == 0 then r :: dropLinkEchoRuns(rest)
+      else match rest {
+        [] => [r],
+        n :: more => {
+          let echo = " (${r.href})";
+          if length(n.href) == 0 && startsWith(n.text, echo) then {
+            let tail = substring(n.text, length(echo), length(n.text));
+            if length(tail) == 0 then r :: dropLinkEchoRuns(more)
+            else r :: dropLinkEchoRuns({n | text: tail} :: more)
+          }
+          else r :: dropLinkEchoRuns(rest)
+        }
+      }
+  }
+
+-- Pins the three shapes: echo as its own run, echo merged into following
+-- text, and a parenthesised URL that is NOT the link's own target (kept).
+pure func linkEchoView(mode: int) -> string
+  tests [
+    (0, "Ref->x|"),
+    (1, "Ref->x|!->|"),
+    (2, "Ref->x| (y)->|")
+  ]
+{
+  let link = {plainRun("Ref") | href: "x"};
+  let after = if mode == 0 then [plainRun(" (x)")]
+    else if mode == 1 then [plainRun(" (x)!")]
+    else [plainRun(" (y)")];
+  join("", map(\r. "${r.text}->${r.href}|", dropLinkEchoRuns(link :: after)))
+}
+
 -- Merge adjacent runs that carry identical formatting.
 --
 -- Parsers split runs wherever the source does, which is finer than the

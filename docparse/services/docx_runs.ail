@@ -2,7 +2,7 @@ module docparse/services/docx_runs
 
 import std/string (length, intToStr, split, startsWith, contains, substring)
 import std/list (foldl, length as listLength)
-import docparse/types/document (InlineRun, plainRun)
+import docparse/types/document (InlineRun, plainRun, dropLinkEchoRuns)
 import docparse/services/colour (normaliseHex)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, docxRun, docxParagraph)
 
@@ -63,7 +63,7 @@ export pure func docxHorizontalRule() -> string =
   docxParagraph("<w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr>")
 
 export pure func docxRunsToXml(runs: [InlineRun]) -> string =
-  foldl(\acc r. "${acc}${docxRunMaybeLinked(r)}", "", runs)
+  foldl(\acc r. "${acc}${docxRunMaybeLinked(r)}", "", dropLinkEchoRuns(runs))
 
 -- A run carrying an href becomes a real clickable link.
 --

@@ -11,6 +11,9 @@ markdown can represent must survive the trip.
 
   tables       same count, same dimensions, same cell text
   headings     same (level, text) sequence
+  lists        every list keeps its kind (numbered/bulleted), item count and
+               per-item nesting depth, in order — CommonMark nesting is where
+               writer and reader must agree (a child of "1. " sits at 3 spaces)
   annotations  same comments (author, date, text, anchor) and track changes
                (type, author, date, text), in order — the writer renders both
                as blockquotes and the reader reads that syntax back
@@ -133,6 +136,18 @@ def headings(blocks: list[dict]) -> list[tuple]:
             for b in walk(blocks) if b.get("type") == "heading"]
 
 
+def lists(blocks: list[dict]) -> list[tuple]:
+    # Shape, not text: item text legitimately differs by inline markup the
+    # first parse kept as literal "**" and the second reads as formatting.
+    out = []
+    for b in walk(blocks):
+        if b.get("type") == "list":
+            items = b.get("items") or []
+            out.append((bool(b.get("ordered")), len(items),
+                        tuple(b.get("itemLevels") or [0] * len(items))))
+    return out
+
+
 def ws(s) -> str:
     return " ".join((s or "").split())
 
@@ -249,6 +264,14 @@ def main() -> int:
         if missing is not None:
             failures.append((src.name, f"heading lost or altered: {missing!r}"))
 
+        # Like headings, Markdown may GAIN lists (an e-mail body's "- " lines,
+        # a "1. Summary ..... 2" contents line), so: no original list lost or
+        # reshaped, as a subsequence.
+        missing = subsequence_gap(lists(a), lists(b))
+        if missing is not None:
+            failures.append((src.name, f"list lost or reshaped "
+                                       f"(ordered, items, levels): {missing!r}"))
+
         aa, ab = annotations(a), annotations(b)
         if aa != ab:
             failures.append((src.name,
@@ -264,7 +287,7 @@ def main() -> int:
         if len(failures) > len(shown):
             print(f"  ... and {len(failures) - len(shown)} more (--verbose)")
         return 1
-    print("All round-trips preserve tables, headings, comments and track changes.")
+    print("All round-trips preserve tables, headings, lists, comments and track changes.")
     return 0
 
 
