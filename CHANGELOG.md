@@ -11,6 +11,19 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.55.6](https://github.com/sunholo-data/ailang-parse/compare/v0.55.5...v0.55.6) — 2026-11-10
+
+### Website: Word to Markdown page, MarkItDown on the benchmarks page
+
+- New `docs/docx-to-markdown.html`: DOCX to clean Markdown, with MarkItDown 0.1.5 and AILANG Parse
+  output side by side on three public OfficeDocBench files (a tracked move, review comments, a
+  nested list), DOCX scores for seven parsers, and CLI, folder, API and Python commands.
+- `benchmarks.html` names all ten adapters, adds a MarkItDown FAQ (HTML and JSON-LD) and links the
+  side-by-side.
+- Inline benchmark fallbacks on five pages were still v1 numbers (MarkItDown 67.9%/51.2%, AILANG
+  Parse 92%). `docs/scripts/sync-bench-fallbacks.py` rewrites them from
+  `docs/data/officedocbench-summary.json`; CI runs it with `--check`.
+
 ### Fixed: Markdown output for numbered lists, links and `--convert`
 
 - **Nested numbered lists render as nested lists.** The Markdown writer indented every level by
