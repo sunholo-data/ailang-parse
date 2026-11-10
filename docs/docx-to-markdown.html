@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Word to Markdown, Nothing Dropped — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Convert DOCX to clean Markdown or text for LLMs, RAG and search. Comments, tracked changes, nested lists, merged cells, headers and footers come through. Local, deterministic, no GPU and no AI model.">
+<meta property="og:title" content="Word to Markdown, Nothing Dropped — AILANG Parse">
+<meta property="og:description" content="DOCX to clean Markdown with comments, tracked changes and list structure kept. Side-by-side output against MarkItDown on the same files.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/ailang-parse/docx-to-markdown.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+/* ---- Hero: at a glance ---- */
+.d2m-glance {
+  list-style: none;
+  margin: 28px auto 0;
+  padding: 0;
+  max-width: 900px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+.d2m-glance li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding: 14px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+.d2m-glance svg {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 6px;
+  fill: none;
+  stroke: var(--dp-blue);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.d2m-glance b {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.d2m-glance span {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+.hero pre.d2m-hero-cmd {
+  max-width: 900px;
+  margin: 18px auto 0;
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12.5px;
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hero pre.d2m-hero-cmd code { font-size: inherit; white-space: inherit; }
+@media (max-width: 860px) {
+  .d2m-glance { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .d2m-glance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- Side-by-side output ---- */
+.d2m-pair {
+  border: 1px solid var(--dp-blue-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin: 18px 0 8px;
+}
+.d2m-pair-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--dp-blue-border);
+  background: var(--dp-blue-faded, rgba(37, 99, 235, 0.04));
+}
+.d2m-pair-head b {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.d2m-pair-head a {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.d2m-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.d2m-pane { min-width: 0; display: flex; flex-direction: column; }
+.d2m-pane + .d2m-pane { border-left: 1px solid var(--dp-blue-border); }
+.d2m-pane-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dp-blue-border);
+}
+.d2m-pane--ours .d2m-pane-label { color: #047857; }
+.d2m-pane pre {
+  margin: 0;
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px 14px;
+  background: var(--bg-card, #fff);
+  color: var(--text-primary);
+}
+.d2m-pane pre code {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  white-space: inherit;
+}
+.d2m-pair-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--dp-blue-border);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.d2m-pair-note b { color: var(--text-primary); }
+@media (max-width: 760px) {
+  .d2m-panes { grid-template-columns: 1fr; }
+  .d2m-pane + .d2m-pane { border-left: 0; border-top: 1px solid var(--dp-blue-border); }
+}
+
+/* ---- DOCX score bars ---- */
+.d2m-bars { margin: 18px 0 8px; display: grid; gap: 8px; }
+.d2m-bar {
+  display: grid;
+  grid-template-columns: 130px 1fr 56px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.d2m-bar-name { color: var(--text-primary); font-weight: 500; }
+.d2m-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-input, rgba(100, 116, 139, 0.12));
+  overflow: hidden;
+}
+.d2m-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--ink-faint, #94a3b8); transition: width .6s ease; }
+.d2m-bar--ours .d2m-bar-fill { background: var(--dp-blue); }
+.d2m-bar--ours .d2m-bar-name { color: var(--dp-blue); font-weight: 700; }
+.d2m-bar-val { font-family: var(--font-mono); font-size: 12px; text-align: right; }
+@media (max-width: 480px) {
+  .d2m-bar { grid-template-columns: 96px 1fr 48px; font-size: 12px; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I convert a DOCX file to Markdown?", "acceptedAnswer": {"@type": "Answer", "text": "Run docparse contract.docx --convert contract.md. For a whole folder, run docparse ~/contracts/ --output-dir out/, which writes one .md (and one structured .json) per file. Over the hosted API, POST the file to /api/v1/convert with target=md."}},
+    {"@type": "Question", "name": "Does DOCX to Markdown keep comments and tracked changes?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each comment is kept next to the text it is anchored to, with its author and date. Tracked insertions, deletions and moves are kept as marked revisions, so the Markdown shows the current text and what was changed. Many converters accept every change silently or drop comments."}},
+    {"@type": "Question", "name": "Do I need a GPU or an AI model to convert Word to Markdown?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads the Office XML inside the .docx directly. It is deterministic: the same file always gives the same Markdown, it runs offline, and nothing is sent anywhere."}},
+    {"@type": "Question", "name": "How does it compare with MarkItDown, Docling or Pandoc on Word files?", "acceptedAnswer": {"@type": "Answer", "text": "On the DOCX files in the open OfficeDocBench v2 corpus, AILANG Parse scores 97.1% composite, against 56.7% for Kreuzberg, 53.5% for Pandoc, 49.1% for Docling and 42.8% for MarkItDown. The corpus, scorer and per-file results are public."}},
+    {"@type": "Question", "name": "What about PDFs and scanned documents?", "acceptedAnswer": {"@type": "Answer", "text": "The same command converts PDFs to Markdown, reading them with a local backend: pdftotext or poppler for born-digital PDFs, docling for scans. When the original Word file exists, convert that instead: reading a PDF is where structure is lost."}}
+  ]
+}
+</script>
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+  <section class="hero" style="margin-bottom:24px">
+    <h1 class="reveal">Word to <span class="dp-accent">Markdown</span></h1>
+    <p class="subtitle reveal reveal-delay-1">Clean Markdown from any <code>.docx</code>, with comments, tracked changes and list structure kept.</p>
+
+    <ul class="d2m-glance reveal reveal-delay-1" aria-label="At a glance">
+      <li>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <b>Comments</b><span>on the text they mark</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+        <b>Tracked changes</b><span>inserts, deletes, moves</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M13 12h7M17 18h3"/><circle cx="4.5" cy="6" r="1"/><circle cx="8.5" cy="12" r="1"/><circle cx="12.5" cy="18" r="1"/></svg>
+        <b>Nested lists</b><span>depth kept</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M10 4v16"/></svg>
+        <b>Tables</b><span>merged cells marked</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 7.5h16M4 16.5h16M8 11h8M8 13.5h5"/></svg>
+        <b>Header &amp; footer</b><span>kept, labelled</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        <b>Local</b><span>no GPU, no AI, offline</span>
+      </li>
+    </ul>
+
+    <pre class="d2m-hero-cmd reveal reveal-delay-2"><code class="language-bash">docparse contract.docx --convert contract.md</code></pre>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#side-by-side" class="active">Side by Side</a>
+        <a href="#scores">DOCX Scores</a>
+        <a href="#what-you-get">What You Get</a>
+        <a href="#run">Run It</a>
+        <a href="#api">Over the API</a>
+        <a href="#outputs">Other Outputs</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <p>A Word file already knows which line is a heading, which paragraphs are a list and how deep, who commented on which sentence, and what was changed in review. Converting it to Markdown should keep all of that. Lose the comments and the redlines, and the text your LLM or search index sees is not the text the reviewers saw.</p>
+      <p>AILANG Parse reads the Office XML inside the <code>.docx</code> directly. There is no model in the loop, so the same file always gives the same Markdown, it runs on a laptop with no GPU, and the document never leaves the machine.</p>
+
+      <h2 id="side-by-side">Side by side, same files</h2>
+      <p>Three Word files from the public <a href="benchmarks.html">OfficeDocBench</a> corpus, converted to Markdown by MarkItDown and by AILANG Parse. Both outputs are shown exactly as the tools printed them. Download a file and run both yourself.</p>
+
+      <div class="d2m-pair">
+        <div class="d2m-pair-head">
+          <b>A tracked move</b>
+          <a href="https://github.com/sunholo-data/ailang-parse/raw/main/data/test_files/track_changes_move.docx">track_changes_move.docx &#8595;</a>
+        </div>
+        <div class="d2m-panes">
+          <div class="d2m-pane">
+            <div class="d2m-pane-label">MarkItDown 0.1.5</div>
+            <pre><code>Here is some text.
+
+Here is some more text.</code></pre>
+          </div>
+          <div class="d2m-pane d2m-pane--ours">
+            <div class="d2m-pane-label">AILANG Parse</div>
+            <pre><code>**Author:** Jesse Rosenthal
+
+Here is some text.
+
+Here is the text to be moved.
+
+&gt; [move-to by Jesse Rosenthal on 2016-04-16T08:20:00Z] Here is the text to be moved.
+
+Here is some more text.
+
+&gt; [move-from by Jesse Rosenthal on 2016-04-16T08:20:00Z] ~~Here is the text to be moved.~~</code></pre>
+          </div>
+        </div>
+        <p class="d2m-pair-note">A paragraph moved during review is part of the current document. <b>MarkItDown&rsquo;s output does not contain it.</b> AILANG Parse keeps it in its new place and records where it came from, who moved it and when.</p>
+      </div>
+
+      <div class="d2m-pair">
+        <div class="d2m-pair-head">
+          <b>Review comments</b>
+          <a href="https://github.com/sunholo-data/ailang-parse/raw/main/data/test_files/challenge/challenge_comment_ranges.docx">challenge_comment_ranges.docx &#8595;</a>
+        </div>
+        <div class="d2m-panes">
+          <div class="d2m-pane">
+            <div class="d2m-pane-label">MarkItDown 0.1.5</div>
+            <pre><code># Document with Comment Ranges
+
+The project deadline is March 15 and we need to prepare.
+
+The budget allocation needs to be reviewed by the finance team.
+
+Please review the technical specification before the meeting.</code></pre>
+          </div>
+          <div class="d2m-pane d2m-pane--ours">
+            <div class="d2m-pane-label">AILANG Parse</div>
+            <pre><code>**Author:** python-docx
+
+# Document with Comment Ranges
+
+The project deadline is March 15 and we need to prepare.
+
+&gt; deadline is March 15
+&gt;
+&gt; **Comment (Alice Smith, 2026-03-01T10:00:00Z):** This deadline seems too tight
+
+The budget allocation needs to be reviewed by the finance team.
+
+&gt; budget allocation
+&gt;
+&gt; **Comment (Bob Jones, 2026-03-02T14:30:00Z):** Need to increase by 15%
+
+Please review the technical specification before the meeting.
+
+&gt; technical specification
+&gt;
+&gt; **Comment (Alice Smith, 2026-03-03T09:15:00Z):** Missing API section</code></pre>
+          </div>
+        </div>
+        <p class="d2m-pair-note">Each comment comes through under the paragraph it belongs to, quoting the exact words it was attached to, with its author and date. Ask a model &ldquo;what did finance object to?&rdquo; and the answer is in the text it was given.</p>
+      </div>
+
+      <div class="d2m-pair">
+        <div class="d2m-pair-head">
+          <b>Nested lists</b>
+          <a href="https://github.com/sunholo-data/ailang-parse/raw/main/data/test_files/challenge/challenge_nested_lists.docx">challenge_nested_lists.docx &#8595;</a>
+        </div>
+        <div class="d2m-panes">
+          <div class="d2m-pane">
+            <div class="d2m-pane-label">MarkItDown 0.1.5</div>
+            <pre><code># Project Requirements
+
+* Frontend
+* React components
+* Button component
+* Form component
+* State management
+* Backend
+* API endpoints
+* Database
+* PostgreSQL schema
+* Migrations</code></pre>
+          </div>
+          <div class="d2m-pane d2m-pane--ours">
+            <div class="d2m-pane-label">AILANG Parse</div>
+            <pre><code>**Author:** python-docx
+
+# Project Requirements
+
+- Frontend
+  - React components
+    - Button component
+    - Form component
+  - State management
+- Backend
+  - API endpoints
+  - Database
+    - PostgreSQL schema
+    - Migrations</code></pre>
+          </div>
+        </div>
+        <p class="d2m-pair-note">The outline&rsquo;s three levels stay three levels, so &ldquo;Migrations&rdquo; is still under Database, under Backend. Flattened, a list of requirements becomes a list of unrelated lines.</p>
+      </div>
+      <p style="font-size:12px;color:var(--text-secondary)">Outputs captured on 10 November 2026 with MarkItDown 0.1.5 (<code>markitdown[docx]</code>) and the AILANG Parse CLI, from the files linked above. The <code>Timeline</code> section after the lists is the same in both and is cut here.</p>
+
+      <h2 id="scores">DOCX scores on an open benchmark</h2>
+      <p>The examples above are three files. <a href="benchmarks.html">OfficeDocBench v2</a> scores every parser on the same <span data-bench="ailang_parse.per_format.docx.files">33</span> Word files with source-verified assertions: headings, lists, tables, comments, tracked changes, notes, links and text. The DOCX composite:</p>
+
+      <div class="d2m-bars">
+        <div class="d2m-bar d2m-bar--ours"><span class="d2m-bar-name">AILANG Parse</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="ailang_parse.per_format.docx.composite" data-bench-style="width" style="width:97.1%"></span></span><span class="d2m-bar-val" data-bench="ailang_parse.per_format.docx.composite">97.1%</span></div>
+        <div class="d2m-bar"><span class="d2m-bar-name">Kreuzberg</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="kreuzberg.per_format.docx.composite" data-bench-style="width" style="width:56.7%"></span></span><span class="d2m-bar-val" data-bench="kreuzberg.per_format.docx.composite">56.7%</span></div>
+        <div class="d2m-bar"><span class="d2m-bar-name">Pandoc</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="pandoc.per_format.docx.composite" data-bench-style="width" style="width:53.5%"></span></span><span class="d2m-bar-val" data-bench="pandoc.per_format.docx.composite">53.5%</span></div>
+        <div class="d2m-bar"><span class="d2m-bar-name">Docling</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="docling.per_format.docx.composite" data-bench-style="width" style="width:49.1%"></span></span><span class="d2m-bar-val" data-bench="docling.per_format.docx.composite">49.1%</span></div>
+        <div class="d2m-bar"><span class="d2m-bar-name">Unstructured</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="unstructured.per_format.docx.composite" data-bench-style="width" style="width:47.0%"></span></span><span class="d2m-bar-val" data-bench="unstructured.per_format.docx.composite">47.0%</span></div>
+        <div class="d2m-bar"><span class="d2m-bar-name">LlamaParse</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="llamaparse.per_format.docx.composite" data-bench-style="width" style="width:43.7%"></span></span><span class="d2m-bar-val" data-bench="llamaparse.per_format.docx.composite">43.7%</span></div>
+        <div class="d2m-bar"><span class="d2m-bar-name">MarkItDown</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="markitdown.per_format.docx.composite" data-bench-style="width" style="width:42.8%"></span></span><span class="d2m-bar-val" data-bench="markitdown.per_format.docx.composite">42.8%</span></div>
+      </div>
+      <p>The corpus, the scorer, every adapter and the per-file results are public, so you can rerun the comparison or add your own files. Full tables, other formats and methodology are on the <a href="benchmarks.html#full-suite">benchmarks page</a>.</p>
+
+      <h2 id="what-you-get">What you get</h2>
+      <table class="dp-config-table">
+        <thead>
+          <tr><th>In the Word file</th><th>In the Markdown</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Headings</td><td><code>#</code> to <code>######</code>, at the level the document used.</td></tr>
+          <tr><td>Bold, italic, links</td><td><code>**bold**</code>, <code>*italic*</code> and <code>[text](url)</code> on the words that carried them.</td></tr>
+          <tr><td>Bulleted and numbered lists</td><td>Markdown lists, nested to the depth in the document.</td></tr>
+          <tr><td>Tables</td><td>Pipe tables. Merged cells are marked <code>{colspan=N}</code> or <code>{merged}</code> instead of shifting the columns.</td></tr>
+          <tr><td>Comments</td><td>A quote block under the paragraph: the commented words, then the author, date and comment.</td></tr>
+          <tr><td>Tracked changes</td><td>The current text, plus a note for each insertion, deletion or move with who made it and when. Deleted text is struck through.</td></tr>
+          <tr><td>Headers and footers</td><td>Kept once, labelled <code>*Header:*</code> and <code>*Footer:*</code>, including tables inside them.</td></tr>
+          <tr><td>Document properties</td><td>The author line at the top; the full metadata is in the JSON.</td></tr>
+          <tr><td>Images</td><td>Image blocks in the JSON. Add <code>--describe</code> for AI-written image descriptions (opt-in).</td></tr>
+        </tbody>
+      </table>
+      <p>Parsing without <code>--convert</code> (<code>docparse contract.docx</code>, or the folder command below) writes the Markdown together with a <code>.json</code> holding the same content as typed blocks (heading, list with item levels, table with cell spans, comment, change), for pipelines that want structure rather than text. See <a href="docx-parsing.html">DOCX Parsing</a> for that output.</p>
+
+      <h2 id="run">Run it</h2>
+      <p>Install the CLI (it also sets up the AILANG runtime):</p>
+      <pre><code class="language-bash">curl -fsSL https://www.sunholo.com/ailang-parse/install.sh | sh</code></pre>
+      <pre><code class="language-bash"># One file to Markdown
+docparse contract.docx --convert contract.md
+
+# A whole folder: one .md and one .json per file, compiled once
+docparse ~/contracts/ --output-dir ~/contracts-md/
+
+# Quarto Markdown instead, ready for `quarto render`
+docparse contract.docx --convert contract.qmd</code></pre>
+      <p>Batch mode compiles the parser once and then converts every file in the folder, so a large folder is far faster than a loop over single files. The Markdown from a folder run is identical to <code>--convert</code> on each file.</p>
+
+      <h2 id="api">Over the API</h2>
+      <p>The hosted API runs the same converter. <code>POST /api/v1/convert</code> with <code>target=md</code> returns the Markdown in the JSON response:</p>
+      <pre><code class="language-bash">curl -s -X POST https://docparse.ailang.sunholo.com/api/v1/convert \
+  -F "filepath=@contract.docx" \
+  -F "target=md" \
+  -F "apiKey=$DOCPARSE_API_KEY"</code></pre>
+      <p>Or from Python (<code>pip install ailang-parse</code>):</p>
+      <pre><code class="language-python">from ailang_parse import DocParse
+
+client = DocParse(api_key="dp_...")
+print(client.convert_file("contract.docx", target="md").text)</code></pre>
+      <p>Direct uploads are capped at 32&nbsp;MB by the hosting platform; send larger files by URL. Keys, plan limits and the other input modes are in the <a href="api.html">API reference</a>.</p>
+
+      <h2 id="outputs">Other outputs from the same read</h2>
+      <p>Change the extension after <code>--convert</code>: <code>.html</code>, <code>.qmd</code>, <code>.odt</code>, or back to <code>.docx</code> in your own template with <code>--reference-doc</code> (see <a href="document-generation.html">Document Generation</a>). The same command converts <code>.odt</code>, <code>.pptx</code>, <code>.xlsx</code>, <code>.html</code> and <code>.epub</code> to Markdown too.</p>
+      <div class="dp-callout">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Most of your documents are PDFs? The same command converts them to Markdown with a local reader: <code>--pdf-backend poppler</code> for born-digital PDFs, <code>docling</code> for scans. A PDF has already lost the structure a Word file carries, so where the <code>.docx</code> still exists, convert that. See <a href="pdf-parsing.html">PDF Parsing</a>.</div>
+      </div>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>How do I convert a DOCX file to Markdown?</summary>
+          <div class="dp-faq-answer"><p><code>docparse contract.docx --convert contract.md</code>. For a whole folder, <code>docparse ~/contracts/ --output-dir out/</code> writes one <code>.md</code> and one <code>.json</code> per file. Over the hosted API, POST the file to <code>/api/v1/convert</code> with <code>target=md</code>.</p></div>
+        </details>
+        <details>
+          <summary>Does it keep comments and tracked changes?</summary>
+          <div class="dp-faq-answer"><p>Yes. Each comment is kept next to the words it is anchored to, with author and date. Insertions, deletions and moves are kept as marked revisions, so the Markdown shows the current text and what was changed in review.</p></div>
+        </details>
+        <details>
+          <summary>Do I need a GPU or an AI model?</summary>
+          <div class="dp-faq-answer"><p>No. The <code>.docx</code> is read from its Office XML. The same file always gives the same Markdown, it runs offline, and nothing is sent anywhere. AI is only used if you ask for it with <code>--describe</code> or <code>--summarize</code>.</p></div>
+        </details>
+        <details>
+          <summary>How does it compare with MarkItDown, Docling or Pandoc?</summary>
+          <div class="dp-faq-answer"><p>On the <span data-bench="ailang_parse.per_format.docx.files">33</span> DOCX files of OfficeDocBench v2: AILANG Parse <span data-bench="ailang_parse.per_format.docx.composite">97.1%</span>, Kreuzberg <span data-bench="kreuzberg.per_format.docx.composite">56.7%</span>, Pandoc <span data-bench="pandoc.per_format.docx.composite">53.5%</span>, Docling <span data-bench="docling.per_format.docx.composite">49.1%</span>, MarkItDown <span data-bench="markitdown.per_format.docx.composite">42.8%</span>. See <a href="#scores">DOCX scores</a> and the <a href="benchmarks.html">benchmarks page</a>.</p></div>
+        </details>
+        <details>
+          <summary>What about PDFs and scanned documents?</summary>
+          <div class="dp-faq-answer"><p>The same command converts PDFs, read by a local backend: <code>pdftotext</code> or <code>poppler</code> for born-digital PDFs, <code>docling</code> for scans. Where the original Word file exists, convert that instead: reading a PDF is where structure is lost.</p></div>
+        </details>
+      </div>
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/bench-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+// Sidebar active link tracking on scroll
+(function () {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function (link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function (s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>
