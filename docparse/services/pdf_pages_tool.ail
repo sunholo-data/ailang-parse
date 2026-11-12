@@ -1,0 +1,45 @@
+module docparse/services/pdf_pages_tool
+
+-- Command-line front for pdf_pages: write one PDF per page.
+--
+--   ailang run --entry main --caps IO,FS,Env docparse/services/pdf_pages_tool.ail in.pdf out/page
+--
+-- writes out/page-1.pdf, out/page-2.pdf, ... and prints "pages=N", or prints
+-- "error: <why>" and exits 1. benchmarks/pdf/native_split_check.py drives it.
+
+import std/io (println, exit)
+import std/env (getArgs)
+import std/fs (readFileBytes, writeFileBytes)
+import std/bytes (fromBase64)
+import std/string (intToStr)
+import std/list (nth_or, length as llen)
+import std/option (Some, None)
+import std/result (Ok, Err)
+import docparse/services/pdf_pages (pdfPagesSplit)
+
+func pdfptWrite(pages: [string], i: int, prefix: string) -> bool ! {FS} {
+  match pages {
+    [] => true,
+    p :: rest => match fromBase64(p) {
+      None => false,
+      Some(b) => {
+        writeFileBytes("${prefix}-${intToStr(i)}.pdf", b);
+        pdfptWrite(rest, i + 1, prefix)
+      }
+    }
+  }
+}
+
+export func main() -> () ! {IO, FS, Env} {
+  let args = getArgs();
+  let prefix = nth_or(args, 1, "");
+  match readFileBytes(nth_or(args, 0, "")) {
+    Err(e) => { println("error: ${e}"); exit(1) },
+    Ok(b64) => match pdfPagesSplit(b64) {
+      Err(e) => { println("error: ${e}"); exit(1) },
+      Ok(pages) =>
+        if pdfptWrite(pages, 1, prefix) then println("pages=${intToStr(llen(pages))}")
+        else { println("error: could not write a page"); exit(1) }
+    }
+  }
+}
