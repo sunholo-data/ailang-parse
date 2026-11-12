@@ -61,12 +61,20 @@
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Extract", "item": "https://www.sunholo.com/ailang-parse/docs.html#extract"}, {"@type": "ListItem", "position": 4, "name": "Comments", "item": "https://www.sunholo.com/ailang-parse/comments.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
 <div id="header-mount"></div>
 
 <div class="page">
+
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#extract">Extract</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Comments</span></nav>
+<!-- /nav:crumbs -->
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Comment</span> Extraction</h1>
@@ -108,7 +116,7 @@
         </thead>
         <tbody>
           <tr><td>AILANG Parse</td><td><span class="dp-preserved">Extracted</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td></tr>
-          <tr><td>Unstructured</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
+          <tr><td><a href="migrate-from-unstructured.html">Unstructured</a></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
           <tr><td>Docling</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
           <tr><td>LlamaParse</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
           <tr><td>MarkItDown</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
@@ -118,16 +126,16 @@
       <h2 id="how-it-works">How It Works</h2>
       <p>AILANG Parse reads the Office file itself, with no conversion to PDF on the way. An Office file is a ZIP archive of XML files (the OOXML format), and the comments are read from the XML files that hold them.</p>
 
-      <h3>DOCX (Word)</h3>
+      <h3 id="docx-word">DOCX (Word)</h3>
       <p>Word stores comments in <code>word/comments.xml</code> as <code>w:comment</code> elements, each with an id (<code>w:id</code>), author (<code>w:author</code>) and date (<code>w:date</code>). In the document text (<code>word/document.xml</code>), <code>w:commentRangeStart</code> and <code>w:commentRangeEnd</code> markers surround the exact words the comment is attached to. AILANG Parse matches the two, so each comment comes with the text it is about.</p>
       <p>Replies are recorded in a separate file, <code>word/commentsExtended.xml</code>, which links each reply to its parent comment (<code>w15:paraIdParent</code>) and says whether the thread is resolved (<code>w15:done</code>). AILANG Parse reads it, so each reply points to its parent comment and is attached to the same text.</p>
       <p>Sometimes a file does not say clearly what a comment is attached to: the markers are missing, a range is never closed, or the ids do not match. The comment is then returned with <code>anchored: false</code> and no attached text. AILANG Parse does not guess, because a comment attached to the wrong clause looks just like a correct one.</p>
 
-      <h3>PPTX (PowerPoint)</h3>
+      <h3 id="pptx-powerpoint">PPTX (PowerPoint)</h3>
       <p>PowerPoint has two comment formats and AILANG Parse reads both. Older decks use <code>ppt/comments/comment1.xml</code>, with author names in <code>ppt/commentAuthors.xml</code>. Current PowerPoint writes <code>ppt/comments/modernComment_*.xml</code>, with author names in <code>ppt/authors.xml</code>. A parser that reads only the older format misses every comment made in a recent version of PowerPoint.</p>
       <p>Each comment is matched to its slide using the links stored in the slide itself, not by file number, so comments land on the right slide in decks where the numbering does not line up. A PowerPoint comment is pinned to a point on the slide, not to a run of text. AILANG Parse therefore reports the slide and its opening line, and does not invent a text range.</p>
 
-      <h3>XLSX (Excel)</h3>
+      <h3 id="xlsx-excel">XLSX (Excel)</h3>
       <p>In Excel each comment names its cell directly, in a <code>ref</code> attribute (e.g. <code>B5</code>). Older notes are stored in <code>xl/comments1.xml</code>, with the author looked up in the file's <code>authors</code> list. Current threaded comments are stored in <code>xl/threadedComments/</code>, with author names in <code>xl/persons/</code> and <code>parentId</code> linking each reply to its parent.</p>
       <p>Current Excel writes <em>both</em> for the same comment. The older copy is there for compatibility, and its author is a placeholder like <code>tc={guid}</code>. AILANG Parse uses the threaded version and drops the duplicate, so a two-message thread is returned as two comments, not three. Each comment also comes with the value of its cell, such as <code>B2: 184000</code>, not just the cell reference.</p>
 
@@ -152,10 +160,10 @@
       <h2 id="pptx-xlsx">PPTX &amp; XLSX Comments</h2>
       <p>Comments work differently in each Office format. AILANG Parse returns them in the same shape for all three.</p>
 
-      <h3>PowerPoint Comments</h3>
+      <h3 id="powerpoint-comments">PowerPoint Comments</h3>
       <p>A PowerPoint comment sits at a position on a slide, not on a run of text. Reviewers use them for notes such as "Move this chart to slide 3" or "Font too small for projection". AILANG Parse returns each comment with the slide it is on.</p>
 
-      <h3>Excel Comments</h3>
+      <h3 id="excel-comments">Excel Comments</h3>
       <p>Excel comments (called "Notes" in current Excel) are attached to a cell. They often explain a formula or question a specific value. AILANG Parse returns the comment text, the author and the cell reference, so you know which figure the comment is about.</p>
 
       <p>Current Excel also has "Threaded Comments", stored separately in <code>xl/threadedComments/</code>. These also carry timestamps and replies.</p>
@@ -188,7 +196,7 @@
 }</code></pre>
       <p>Each comment keeps its author, its timestamp, the text it was attached to and the comment it replies to. This is the review history that a PDF conversion loses.</p>
 
-      <h3>XLSX Example</h3>
+      <h3 id="xlsx-example">XLSX Example</h3>
       <pre><code class="language-json">{
   "blocks": [
     {
@@ -266,6 +274,36 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         <a href="pptx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">PPTX Parsing &rarr;</a> &nbsp;&middot;&nbsp;
         <a href="xlsx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">XLSX Parsing &rarr;</a>
       </p>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="track-changes.html" class="dp-doc-card" data-find="track changes every insertion, deletion and move, with who made it and when. tracked changes redlines revisions contracts legal">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Track changes</div>
+          <div class="dp-doc-card-desc">Every insertion, deletion and move, with who made it and when.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="docx-parsing.html" class="dp-doc-card" data-find="word (docx) track changes, comments, tables, headers, footers and images. word docx parsing">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Word (DOCX)</div>
+          <div class="dp-doc-card-desc">Track changes, comments, tables, headers, footers and images.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="docx-to-markdown.html" class="dp-doc-card" data-find="word (docx) to markdown clean markdown with comments, tracked changes and lists kept. compared with markitdown. docx to markdown word md markitdown rag llm">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Word (DOCX) to Markdown</div>
+          <div class="dp-doc-card-desc">Clean Markdown with comments, tracked changes and lists kept. Compared with MarkItDown.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

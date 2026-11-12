@@ -55,12 +55,20 @@
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Extract", "item": "https://www.sunholo.com/ailang-parse/docs.html#extract"}, {"@type": "ListItem", "position": 4, "name": "Tables and merged cells", "item": "https://www.sunholo.com/ailang-parse/tables.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
 <div id="header-mount"></div>
 
 <div class="page">
+
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#extract">Extract</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Tables and merged cells</span></nav>
+<!-- /nav:crumbs -->
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Tables</span> & Merged Cells</h1>
@@ -103,7 +111,7 @@
       <h2 id="docx-tables">DOCX Tables</h2>
       <p>DOCX files follow the Office Open XML standard (OOXML, ECMA-376). A table is defined on a grid: the <code>&lt;w:tblGrid&gt;</code> element lists the columns, and each cell says how much of that grid it covers.</p>
 
-      <h3>Horizontal Merges (gridSpan)</h3>
+      <h3 id="horizontal-merges-gridspan">Horizontal Merges (gridSpan)</h3>
       <p>A cell that spans several columns carries a <code>&lt;w:gridSpan w:val="3"/&gt;</code> element. AILANG Parse reads it and returns it as the cell's <code>colspan</code>. Nothing is guessed from the width of the cell on the page.</p>
       <pre><code class="language-xml">&lt;!-- OOXML: cell spanning 3 columns --&gt;
 &lt;w:tc&gt;
@@ -113,7 +121,7 @@
   &lt;w:p&gt;&lt;w:r&gt;&lt;w:t&gt;Total Revenue&lt;/w:t&gt;&lt;/w:r&gt;&lt;/w:p&gt;
 &lt;/w:tc&gt;</code></pre>
 
-      <h3>Vertical Merges (vMerge)</h3>
+      <h3 id="vertical-merges-vmerge">Vertical Merges (vMerge)</h3>
       <p>A vertical merge is marked in two parts. The first cell has <code>&lt;w:vMerge w:val="restart"/&gt;</code>. The cells below it in the same column carry <code>&lt;w:vMerge/&gt;</code> with no <code>val</code> attribute, which means "continue". AILANG Parse follows the merge down the rows and works out the <code>rowspan</code>.</p>
       <pre><code class="language-xml">&lt;!-- Row 1: start of vertical merge --&gt;
 &lt;w:tc&gt;
@@ -134,7 +142,7 @@
 &lt;/w:tc&gt;</code></pre>
       <p>The result is one cell with <code>rowspan: 3</code>. The continuation cells are left out, because they hold no content.</p>
 
-      <h3>Combined Merges</h3>
+      <h3 id="combined-merges">Combined Merges</h3>
       <p>A cell can have both <code>gridSpan</code> and <code>vMerge</code>, which makes a block that spans several rows and several columns. AILANG Parse reads both from the cell's <code>&lt;w:tcPr&gt;</code> element and returns both spans.</p>
 
       <h2 id="xlsx-tables">XLSX Tables</h2>
@@ -148,7 +156,7 @@
 
       <p>AILANG Parse reads these ranges and applies them to the cell data. In the resulting table, each merged range is a single cell with its <code>colspan</code> and <code>rowspan</code>.</p>
 
-      <h3>Shared Strings</h3>
+      <h3 id="shared-strings">Shared Strings</h3>
       <p>XLSX files keep text values in one shared list (<code>sharedStrings.xml</code>), and each cell refers to its text by number. AILANG Parse looks the text up, so the output contains the actual text, not the numbers.</p>
 
       <h2 id="pptx-tables">PPTX Tables</h2>
@@ -213,7 +221,7 @@
             <td class="dp-preserved">colspan and rowspan on every cell, as stored in the file</td>
           </tr>
           <tr>
-            <td>Unstructured</td>
+            <td><a href="migrate-from-unstructured.html">Unstructured</a></td>
             <td class="dp-lost">Converts DOCX to PDF via LibreOffice, then uses layout analysis</td>
             <td class="dp-lost">Merged cells come out as separate cells or garbled; the merge is lost</td>
           </tr>
@@ -228,14 +236,14 @@
             <td class="dp-lost">The same document can give different merges on different runs</td>
           </tr>
           <tr>
-            <td>MarkItDown</td>
+            <td><a href="docx-to-markdown.html">MarkItDown</a></td>
             <td class="dp-lost">Uses python-docx to extract cells</td>
             <td class="dp-lost">Reads some gridSpan merges but not vMerge; vertical merges become empty rows</td>
           </tr>
         </tbody>
       </table>
 
-      <h3>Why PDF Conversion Loses Merge Information</h3>
+      <h3 id="why-pdf-conversion-loses-merge-information">Why PDF Conversion Loses Merge Information</h3>
       <p>When a DOCX is converted to PDF, the table becomes lines and text on a page. The <code>gridSpan</code> and <code>vMerge</code> values are used to draw it and are not written to the PDF. The PDF shows how the table looks, with no record of which cells were merged.</p>
       <p>A tool that works from the PDF has to rebuild the table from the positions of lines and text. That works for simple tables with visible borders. It fails when:</p>
       <ul>
@@ -306,6 +314,36 @@
         <a href="pptx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">PPTX Parsing &rarr;</a> &nbsp;&middot;&nbsp;
         <a href="html-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">HTML Parsing &rarr;</a>
       </p>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="xlsx-parsing.html" class="dp-doc-card" data-find="excel (xlsx) every sheet, merged cells, formulas and cell types. excel xlsx spreadsheet parsing">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Excel (XLSX)</div>
+          <div class="dp-doc-card-desc">Every sheet, merged cells, formulas and cell types.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="docx-parsing.html" class="dp-doc-card" data-find="word (docx) track changes, comments, tables, headers, footers and images. word docx parsing">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Word (DOCX)</div>
+          <div class="dp-doc-card-desc">Track changes, comments, tables, headers, footers and images.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="vs-pdf-conversion.html" class="dp-doc-card" data-find="direct parsing vs pdf conversion what is lost when a word file is turned into a pdf before parsing. docx vs pdf conversion ocr">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Direct parsing vs PDF conversion</div>
+          <div class="dp-doc-card-desc">What is lost when a Word file is turned into a PDF before parsing.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

@@ -31,6 +31,10 @@
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Connect", "item": "https://www.sunholo.com/ailang-parse/docs.html#connect"}, {"@type": "ListItem", "position": 4, "name": "MCP server", "item": "https://www.sunholo.com/ailang-parse/mcp.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -38,9 +42,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#connect">Connect</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">MCP server</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">AILANG Parse in your <span class="dp-accent">AI assistant</span></h1>
-    <p class="subtitle reveal reveal-delay-1">Read, convert and edit Word, Excel, PowerPoint and PDF files from ChatGPT, Claude, Codex or any MCP agent.</p>
+    <p class="subtitle reveal reveal-delay-1">Read, convert and edit Word, <a href="xlsx-parsing.html">Excel</a>, PowerPoint and PDF files from ChatGPT, Claude, Codex or any MCP agent.</p>
     <p class="reveal reveal-delay-1" style="margin-top:8px;font-size:14px;color:var(--dp-muted)">AI agents: <a href="llms.txt">llms.txt</a> and <a href="llms-full.txt">llms-full.txt</a> give the endpoint, sign-in and tools in one file.</p>
   </section>
 
@@ -69,7 +77,7 @@
     <main class="dp-docs-content">
 
       <h2 id="connect">Connect from ChatGPT, Claude or Codex</h2>
-      <p class="dp-lede">AILANG Parse plugs into the AI assistant you already use. Add one URL, sign in with Google or GitHub, and the assistant can read a Word, Excel, PowerPoint or PDF file with its tables, comments and tracked changes, convert it to another format, or edit it. There is no API key to copy and no code to write.</p>
+      <p class="dp-lede">AILANG Parse plugs into the AI assistant you already use. Add one URL, sign in with Google or GitHub, and the assistant can read a Word, Excel, <a href="pptx-parsing.html">PowerPoint</a> or PDF file with its tables, comments and tracked changes, convert it to another format, or edit it. There is no API key to copy and no code to write.</p>
       <p>The URL to add:</p>
       <pre><code>https://docparse.ailang.sunholo.com/mcp/connect/</code></pre>
       <p>Setup for each app, signing in, sending documents, download links, revoking access and troubleshooting: <a href="connect.html">Connect from Claude, ChatGPT or Codex</a>. The <a href="claude-code.html">AILANG Parse plugin</a> installs the connector and the skill together in Claude Code and Codex.</p>
@@ -96,12 +104,12 @@
 
       <h2 id="quick-start">Quick Start</h2>
 
-      <h3>Local &mdash; stdio (recommended)</h3>
+      <h3 id="local-stdio-recommended">Local &mdash; stdio (recommended)</h3>
       <p>For Claude Desktop, Cursor and VS Code. The client starts the server for you:</p>
       <pre><code class="language-bash"># No manual server start needed — the MCP client launches this:
 ailang serve-api --mcp --routes-only --caps IO,FS,Env docparse/</code></pre>
 
-      <h3>Local &mdash; HTTP</h3>
+      <h3 id="local-http">Local &mdash; HTTP</h3>
       <p>For MCP clients that connect over HTTP:</p>
       <pre><code class="language-bash"># Start with MCP HTTP endpoint at /mcp/
 ailang serve-api --mcp-http --routes-only --caps IO,FS,Env --port 8080 docparse/
@@ -111,15 +119,15 @@ curl -X POST http://localhost:8080/mcp/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'</code></pre>
 
-      <h3>Hosted</h3>
+      <h3 id="hosted">Hosted</h3>
       <p>Nothing to install. Listing the tools works without a key. To call them, send your key as a header (or as the <code>apiKey</code> argument; see the <a href="#agent-auth-flow">device flow</a>):</p>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/mcp/ \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer dp_your_api_key" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}'</code></pre>
 
-      <h3>With AI parsing</h3>
-      <p>To parse images or scanned PDFs locally, turn on AI:</p>
+      <h3 id="with-ai-parsing">With AI parsing</h3>
+      <p>To parse images or <a href="pdf-parsing.html">scanned PDFs</a> locally, turn on AI:</p>
       <pre><code class="language-bash"># Add AI model for non-Office formats
 ailang serve-api --mcp --routes-only \
   --caps IO,FS,Env,AI,Net --ai gemini-3.5-flash-lite docparse/</code></pre>
@@ -127,7 +135,7 @@ ailang serve-api --mcp --routes-only \
       <h2 id="available-tools">Available Tools</h2>
       <p>The hosted connector gives the assistant <strong>9 tools</strong>, plus <code>uploadViaHost</code>, which only the upload card calls. The agent endpoint <code>/mcp/</code> adds the two device-flow tools. Agents get the list automatically from <code>tools/list</code>. To give a tool a document, see <a href="#sending-documents">Sending a document</a>.</p>
 
-      <h3>Core Tools (local + hosted)</h3>
+      <h3 id="core-tools-local-hosted">Core Tools (local + hosted)</h3>
       <table class="dp-config-table">
         <thead>
           <tr><th>Tool</th><th>Description</th><th>Parameters</th></tr>
@@ -165,7 +173,7 @@ ailang serve-api --mcp --routes-only \
         <tbody>
           <tr>
             <td><code>editDocument</code></td>
-            <td>Apply a list of JSON edits (<code>deltas</code>) to a document and return the edited blocks (same shape as <code>outputFormat=blocks</code>). An empty list returns the document unchanged. Office formats only (DOCX, PPTX, XLSX, ODT, ODP, ODS). Your original file is never changed.</td>
+            <td>Apply a list of JSON edits (<code>deltas</code>) to a document and return the edited blocks (same shape as <code>outputFormat=blocks</code>). An empty list returns the document unchanged. Office formats only (<a href="docx-parsing.html">DOCX</a>, PPTX, XLSX, ODT, ODP, ODS). Your original file is never changed.</td>
             <td>One of <code>fileRef</code>, <code>file</code> (ChatGPT), <code>content</code> + <code>filename</code> (base64 file) or <code>filepath</code> (https URL or sample_id); <code>deltas</code> (JSON array of edit operations)</td>
           </tr>
           <tr>
@@ -236,7 +244,7 @@ ailang serve-api --mcp --routes-only \
         </a>
       </p>
 
-      <h3>How to install via the registry</h3>
+      <h3 id="how-to-install-via-the-registry">How to install via the registry</h3>
       <ul style="font-size:14px;color:var(--text-secondary);line-height:1.8">
         <li><strong>Claude Code</strong>: <code>claude mcp add io.github.sunholo-data/parse</code> finds the entry, picks a transport it supports (PyPI / npm / hosted HTTP) and writes the config for you.</li>
         <li><strong>Cursor / VS Code with MCP extension</strong>: open the MCP server browser and search for <em>parse</em> or <em>sunholo</em>. Click install and the client fills in <code>.cursor/mcp.json</code> or <code>.vscode/settings.json</code> for you.</li>
@@ -254,7 +262,7 @@ ailang serve-api --mcp --routes-only \
 
       <h2 id="configuration">Manual Configuration</h2>
 
-      <h3>Claude Desktop (hosted &mdash; recommended)</h3>
+      <h3 id="claude-desktop-hosted-recommended">Claude Desktop (hosted &mdash; recommended)</h3>
       <p>Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or <code>%APPDATA%\Claude\claude_desktop_config.json</code> (Windows). Pick the runtime you have installed. All three SDKs include the same stdio bridge.</p>
 
       <p><strong>Node.js &ge; 18:</strong></p>
@@ -290,7 +298,7 @@ ailang serve-api --mcp --routes-only \
 
       <p style="font-size:13px;color:var(--text-secondary)">All three connect your client to the hosted API over stdio. You need no API key up front: the agent runs the device flow the first time.</p>
 
-      <h3>Claude Desktop (local)</h3>
+      <h3 id="claude-desktop-local">Claude Desktop (local)</h3>
       <p>To parse on your own machine without the hosted API, add to <code>claude_desktop_config.json</code>:</p>
       <pre><code class="language-json">{
   "mcpServers": {
@@ -326,7 +334,7 @@ ailang serve-api --mcp --routes-only \
   }
 }</code></pre>
 
-      <h3>Cursor</h3>
+      <h3 id="cursor">Cursor</h3>
       <p>Add to <code>.cursor/mcp.json</code> in your project root:</p>
       <pre><code class="language-json">{
   "mcpServers": {
@@ -338,7 +346,7 @@ ailang serve-api --mcp --routes-only \
   }
 }</code></pre>
 
-      <h3>VS Code</h3>
+      <h3 id="vs-code">VS Code</h3>
       <p>Add to <code>.vscode/settings.json</code>:</p>
       <pre><code class="language-json">{
   "mcp": {
@@ -355,13 +363,13 @@ ailang serve-api --mcp --routes-only \
       <h2 id="tool-discovery">Tool Discovery</h2>
       <p>An agent can find out what AILANG Parse offers in three ways:</p>
 
-      <h3>MCP tools/list</h3>
+      <h3 id="mcp-tools-list">MCP tools/list</h3>
       <p>Once connected, MCP clients call <code>tools/list</code> and get every tool with its full JSON Schema. No other configuration is needed. On the connector <code>/mcp/connect/</code> it returns 10 tools: <code>mcpParse</code>, <code>mcpConvert</code>, <code>editDocument</code>, <code>uploadDocument</code>, <code>createUpload</code>, <code>mcpFormats</code>, <code>mcpEstimate</code>, <code>mcpAccount</code>, <code>submit_feedback</code> and <code>uploadViaHost</code>, which only the upload card calls. The agent endpoint <code>/mcp/</code> adds <code>mcpAuth</code> and <code>mcpAuthPoll</code>. On REST, large files go through <code>getUploadUrl</code>.</p>
 
-      <h3>mcpFormats (recommended first call)</h3>
+      <h3 id="mcpformats-recommended-first-call">mcpFormats (recommended first call)</h3>
       <p>Agents should call <code>mcpFormats</code> first. It returns 17 input formats, 9 output formats, 26 test samples, and how to send a document. Plans and prices are on the <a href="pricing.html">pricing page</a> and <code>GET /api/v1/pricing</code>.</p>
 
-      <h3>REST /api/v1/tools</h3>
+      <h3 id="rest-api-v1-tools">REST /api/v1/tools</h3>
       <p>Clients that do not use MCP can fetch the tool definitions over REST:</p>
       <pre><code class="language-bash">curl -s https://docparse.ailang.sunholo.com/api/v1/tools | jq '.tools | length'
 # 7
@@ -372,10 +380,10 @@ curl -s https://docparse.ailang.sunholo.com/api/v1/tools | jq '.tools[0].name'
       <h2 id="claude-code">With Claude Code</h2>
       <p>Two ways to parse documents in <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code</a>:</p>
 
-      <h3>Option 1: MCP Server (recommended)</h3>
+      <h3 id="option-1-mcp-server-recommended">Option 1: MCP Server (recommended)</h3>
       <p>Add the config above to your settings. Claude finds the tools and uses them when you ask it to parse or convert a document.</p>
 
-      <h3>Option 2: Claude Code Skill</h3>
+      <h3 id="option-2-claude-code-skill">Option 2: Claude Code Skill</h3>
       <p>Install the AILANG Parse skill to parse locally with no configuration and no separate server. See the <a href="claude-code.html" style="color:var(--dp-blue)">Claude Code integration page</a>.</p>
 
       <div class="dp-callout">
@@ -385,10 +393,10 @@ curl -s https://docparse.ailang.sunholo.com/api/v1/tools | jq '.tools[0].name'
 
       <h2 id="other-agents">With Other Agents</h2>
 
-      <h3>Any MCP Client</h3>
+      <h3 id="any-mcp-client">Any MCP Client</h3>
       <p>Any MCP client can connect over stdio or HTTP. The server lists its tools, resources and capabilities the standard MCP way.</p>
 
-      <h3>REST API</h3>
+      <h3 id="rest-api">REST API</h3>
       <p>Agents that do not use MCP can call the same tools through the REST API:</p>
       <pre><code class="language-python"># Python — parse with the hosted API
 import requests
@@ -404,7 +412,7 @@ from ailang_parse import DocParse
 client = DocParse(api_key="dp_YOUR_KEY")
 result = client.parse("report.docx", output_format="markdown")</code></pre>
 
-      <h3>LangChain / LlamaIndex</h3>
+      <h3 id="langchain-llamaindex">LangChain / LlamaIndex</h3>
       <p>Add AILANG Parse as a tool in your agent chain:</p>
       <pre><code class="language-python">from langchain.tools import StructuredTool
 
@@ -454,6 +462,36 @@ ailang_parse = StructuredTool.from_function(
           <div class="dp-faq-answer"><p>When an AI agent receives flat text, it loses the ability to reference specific <a href="tables.html">table cells</a>, identify which text was inserted versus deleted (<a href="track-changes.html">track changes</a>), or attribute <a href="comments.html">comments</a> to specific reviewers. AILANG Parse gives agents typed blocks, where each element says what it is (a heading, a table cell, a tracked change, a comment), so the agent can reason about the document's structure.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="connect.html" class="dp-doc-card" data-find="chatgpt, claude and codex add one url, sign in, and your assistant can read, convert and edit documents. connect chatgpt claude codex connector assistant oauth">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">ChatGPT, Claude and Codex</div>
+          <div class="dp-doc-card-desc">Add one URL, sign in, and your assistant can read, convert and edit documents.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="claude-code.html" class="dp-doc-card" data-find="claude code plugin install the plugin and parse documents from your terminal. claude code plugin skill codex">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Claude Code plugin</div>
+          <div class="dp-doc-card-desc">Install the plugin and parse documents from your terminal.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="api.html" class="dp-doc-card" data-find="api and sdks rest api with python, javascript, go and r clients. rest api sdk python javascript go r key">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">API and SDKs</div>
+          <div class="dp-doc-card-desc">REST API with Python, JavaScript, Go and R clients.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

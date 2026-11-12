@@ -354,8 +354,19 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
       footerMount.parentNode.insertBefore(ctaBand, footerMount);
     }
 
+    // Link columns. The list is written by docs/scripts/stamp-site-nav.py from
+    // docs/data/site-map.json; do not edit it here.
+/* nav:footer */
+  var FOOTER_COLS = [{"title": "Convert", "links": [["docx-to-markdown.html", "Word (DOCX) to Markdown"], ["pdf-to-word.html", "PDF to Word"], ["pdf-to-powerpoint.html", "PDF to PowerPoint"], ["document-generation.html", "Markdown to Word, PowerPoint and Excel"], ["templates.html", "Word proposal templates"]]}, {"title": "Compare", "links": [["docx-to-markdown.html", "Word (DOCX) to Markdown"], ["benchmarks.html", "Benchmarks"], ["migrate-from-unstructured.html", "Unstructured vs AILANG Parse"], ["vs-pdf-conversion.html", "Direct parsing vs PDF conversion"], ["why.html", "Why AILANG Parse"]]}, {"title": "Extract", "links": [["track-changes.html", "Track changes"], ["comments.html", "Comments"], ["tables.html", "Tables and merged cells"], ["chunking.html", "Chunking for RAG"], ["sec-filings.html", "SEC filings"]]}, {"title": "Formats", "links": [["docx-parsing.html", "DOCX"], ["xlsx-parsing.html", "XLSX"], ["pptx-parsing.html", "PPTX"], ["pdf-parsing.html", "PDF"], ["html-parsing.html", "HTML"], ["email-parsing.html", "Email"], ["odt-parsing.html", "ODT"], ["ods-parsing.html", "ODS"], ["odp-parsing.html", "ODP"], ["epub-parsing.html", "EPUB"], ["latex-parsing.html", "LaTeX"], ["rtf-parsing.html", "RTF"]]}, {"title": "Connect", "links": [["connect.html", "ChatGPT, Claude and Codex"], ["mcp.html", "MCP server"], ["claude-code.html", "Claude Code plugin"], ["api.html", "API and SDKs"], ["integrations.html", "Integrations"], ["superdoc.html", "SuperDoc for legal review"]]}, {"title": "Try, run and buy", "links": [["workbench.html", "Workbench"], ["selfhost.html", "Run locally"], ["performance.html", "Performance guide"], ["pricing.html", "Pricing"]]}];
+/* /nav:footer */
+    var footerCols = FOOTER_COLS.map(function (col) {
+      return '<div class="footer-col' + (col.title === 'Formats' ? ' footer-col--formats' : '') + '"><h3>' + col.title + '</h3>' +
+        col.links.map(function (l) { return '<a href="' + l[0] + '">' + l[1] + '</a>'; }).join('') + '</div>';
+    }).join('');
+
     footerMount.outerHTML =
       '<footer class="footer">' +
+        (footerCols ? '<nav class="footer-cols" aria-label="Site">' + footerCols + '</nav>' : '') +
         '<div class="footer-brand">' +
           '<img src="img/docparse-logo.svg" alt="AILANG Parse" width="22" height="22" style="border-radius:3px">' +
           '<span>AILANG <span style="color:var(--dp-blue)">Parse</span></span>' +
@@ -387,6 +398,17 @@ var API_BASE = (_dpParams && _dpParams.get('api')) || _dpApiUrl || 'https://docp
         '</div>' +
       '</footer>';
   }
+
+  // ── Section links: a "#" beside each heading with an id, to share that section ──
+  document.querySelectorAll('.dp-docs-content h2[id], .dp-docs-content h3[id]').forEach(function (h) {
+    if (h.id === 'related' || h.querySelector('.dp-anchor')) return;
+    var a = document.createElement('a');
+    a.className = 'dp-anchor';
+    a.href = '#' + h.id;
+    a.textContent = '#';
+    a.setAttribute('aria-label', 'Link to this section');
+    h.appendChild(a);
+  });
 
   // ── Scroll Reveal (with staggered cascade) ──
   if ('IntersectionObserver' in window) {
