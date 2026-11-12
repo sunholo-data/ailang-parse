@@ -322,6 +322,11 @@ func parsePdfOnePageResult(base64Data: string, fileUri: string, filepath: string
     Ok(response) => Ok(parseBlocksFromJson(response))
   }
 
+-- One request for a PDF the caller has already cut down to a single page
+-- (pdf_ai_pages splits with poppler). Always inline: one page is small.
+export func parsePdfSinglePageResult(base64Data: string, filepath: string) -> Result[[Block], AIError] ! {AI, Clock} =
+  parsePdfOnePageResult(base64Data, "", filepath, 1, true)
+
 -- Parse an image of a document page using AI — extracts structured content (text, headings, tables)
 -- Same extraction pipeline as PDF but for image inputs (JPG, PNG, etc.)
 -- Use this for document page images (e.g., scanned pages, screenshots of documents)

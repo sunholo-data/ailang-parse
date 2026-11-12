@@ -86,6 +86,7 @@ import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
 import docparse/services/pdf_backend_external (parsePdfChecked, parsePdfLadder, parsePdfWithFallback, fetchPdfWords, pdfTextLayerPartialWarning, PdfTextLayer)
 import docparse/services/pdf_furniture (pdfFurnitureApply)
 import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocks, annotationsAsBlocksAnchored)
+import docparse/services/pdf_ai_pages (parsePdfPagedResult)
 import docparse/services/direct_ai_parser (
   parsePdfResult, parsePdfMetadata, parseDocumentImage, parseAudio, parseVideo
 )
@@ -861,7 +862,7 @@ func orchPdf(filepath: string, opts: ParseOptions)
   -- with a scanned PDF to retry with the paid AI backend.
   let explicit = length(opts.pdfBackend) > 0;
   let backend = if explicit then opts.pdfBackend else "pdftotext";
-  if backend == "ai" then match parsePdfResult(filepath) {
+  if backend == "ai" then match parsePdfPagedResult(filepath) {
     Err(e) => Err(e),
     Ok(rawBlocks) => {
       let ann = orchPdfAnnotations(filepath, opts.projectRoot);

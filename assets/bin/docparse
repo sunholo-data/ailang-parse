@@ -46,6 +46,7 @@ MODULES=(
   docparse/services/xlsx_hyperlinks.ail
   docparse/services/xlsx_parser.ail
   docparse/services/direct_ai_parser.ail
+  docparse/services/pdf_ai_pages.ail
   docparse/services/pdf_backend_external.ail
   docparse/services/pdf_furniture.ail
   docparse/services/layout_ai.ail
@@ -809,7 +810,10 @@ fi
 
 CAPS="IO,FS,Env"
 if $USE_AI; then
-  CAPS="${CAPS},AI"
+  # Clock: the AI path backs off before retrying a transient provider error,
+  # and names its per-page temp directory by the time. Without it either one
+  # ended the run with "effect 'Clock' requires capability".
+  CAPS="${CAPS},AI,Clock"
 fi
 if $NEEDS_PROCESS; then
   CAPS="${CAPS},Process"
