@@ -342,8 +342,7 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
       <p>With <code>--deep</code>, PDF and Office attachments are handled the same way. A DOCX attachment is decoded and parsed into paragraphs and tables:</p>
 
 <pre><code class="language-bash"># Parse email + resolve Office attachments
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail invoice-email.eml --deep</code></pre>
+docparse invoice-email.eml --deep</code></pre>
 
 <pre><code class="language-json">{
   "type": "section",
@@ -389,8 +388,7 @@ ailang run --entry main --caps IO,FS,Env \
       <p>A single email often makes no sense without the rest of its thread. AILANG Parse rebuilds conversation threads from MBOX archives using the <code>Message-ID</code>, <code>In-Reply-To</code> and <code>References</code> headers.</p>
 
 <pre><code class="language-bash"># Threaded mode: groups messages into conversations
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail archive.mbox --threaded</code></pre>
+docparse archive.mbox --threaded</code></pre>
 
       <p>Each thread becomes a section block with kind <code>thread</code>. It holds the cleaned-up subject, the list of participants, and the messages in date order with quoted text removed.</p>
 
@@ -441,7 +439,7 @@ ailang run --entry main --caps IO,FS,Env \
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Batch mode:</strong> <code>ailang run --batch</code> parses many files in one run, so the startup time is spent once per batch and not once per file. Useful for processing a whole mailbox directory in one command.</div>
+        <div><strong>Batch mode:</strong> <code>docparse *.eml</code> parses many files in one run, so the startup time is spent once per batch and not once per file. Useful for processing a whole mailbox directory in one command.</div>
       </div>
 
       <h2 id="example-output">Example: GitHub Notification</h2>
@@ -480,12 +478,10 @@ ailang run --entry main --caps IO,FS,Env \
 
       <h3 id="cli">CLI</h3>
       <pre><code class="language-bash" data-src="examples/cli/parse-email.sh"># Parse an EML email file
-ailang run --entry main --caps IO,FS,Env \
-  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail inbox.eml
+docparse inbox.eml
 
 # Parse an MBOX archive (multiple messages)
-ailang run --entry main --caps IO,FS,Env \
-  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail archive.mbox</code></pre>
+docparse archive.mbox</code></pre>
 
       <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
@@ -496,7 +492,7 @@ ailang run --entry main --caps IO,FS,Env \
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
-result = client.parse("inbox.eml", output_format="json")
+result = client.parse_file("inbox.eml")
 
 # Metadata extracted from headers
 print(result.metadata.title)   # Subject line

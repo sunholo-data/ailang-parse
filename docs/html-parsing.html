@@ -281,12 +281,10 @@
       <p>AILANG Parse tells layout tables (used for positioning) apart from data tables (holding real tabular data). Layout tables are dropped and their content kept; data tables keep their full structure. Together with <a href="email-parsing.html">EML parsing</a>, you get an email's headers, metadata and HTML body as structured blocks.</p>
 
 <pre><code class="language-bash"># Parse an HTML file directly
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail newsletter.html
+docparse newsletter.html
 
 # Parse an EML with HTML body — both are extracted
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail newsletter.eml</code></pre>
+docparse newsletter.eml</code></pre>
 
       <h2 id="use-cases">Use Cases</h2>
 
@@ -326,14 +324,13 @@ ailang run --entry main --caps IO,FS,Env \
 
       <h3 id="cli">CLI</h3>
       <pre><code class="language-bash"># Parse an HTML file
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail page.html
+docparse page.html
 
 # Convert HTML to Markdown
-./bin/docparse page.html --convert output.md
+docparse page.html --convert output.md
 
 # Convert HTML to DOCX
-./bin/docparse page.html --convert output.docx</code></pre>
+docparse page.html --convert output.docx</code></pre>
 
       <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
@@ -344,7 +341,7 @@ ailang run --entry main --caps IO,FS,Env \
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
-result = client.parse("newsletter.html", output_format="json")
+result = client.parse_file("newsletter.html")
 
 for block in result.blocks:
     if block.type == "heading":

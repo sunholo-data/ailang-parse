@@ -403,14 +403,16 @@ import requests
 
 response = requests.post(
     "https://docparse.ailang.sunholo.com/api/v1/parse",
-    json={"filepath": "report.docx", "outputFormat": "markdown", "apiKey": "dp_YOUR_KEY"}
+    headers={"Authorization": "Bearer dp_YOUR_KEY"},
+    files={"filepath": open("report.docx", "rb")},
+    data={"outputFormat": "markdown"},
 )
 markdown = response.json()["result"]
 
 # Or use the Python SDK
 from ailang_parse import DocParse
 client = DocParse(api_key="dp_YOUR_KEY")
-result = client.parse("report.docx", output_format="markdown")</code></pre>
+result = client.parse_file("report.docx", output_format="markdown")</code></pre>
 
       <h3 id="langchain-llamaindex">LangChain / LlamaIndex</h3>
       <p>Add AILANG Parse as a tool in your agent chain:</p>

@@ -46,7 +46,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Migrate</span> from Unstructured</h1>
-    <p class="subtitle reveal reveal-delay-1">Change one line of code. Keep the structure of your Office documents.</p>
+    <p class="subtitle reveal reveal-delay-1">Change the URL and the key. Keep the structure of your Office documents.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -67,7 +67,7 @@
     <main class="dp-docs-content">
 
       <h2 id="why-migrate">Why Migrate</h2>
-      <p class="dp-lede"><strong>Unstructured vs AILANG Parse for Office documents.</strong> Unstructured converts Word, Excel and PowerPoint files to PDF before parsing, which loses <a href="track-changes.html">track changes</a>, comments and merged cells. AILANG Parse reads the Office XML directly and keeps them. It accepts the same API calls, so switching is one changed line. On the open <a href="benchmarks.html">OfficeDocBench</a>, AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> and Unstructured <span data-bench="unstructured.composite">58.9%</span>.</p>
+      <p class="dp-lede"><strong>Unstructured vs AILANG Parse for Office documents.</strong> Both turn Word, Excel and PowerPoint files into elements for RAG. On the open <a href="benchmarks.html">OfficeDocBench</a>, Unstructured returned tracked changes in <span data-bench="unstructured.features.track_changes.detected">0</span> of <span data-bench="unstructured.features.track_changes.total">3</span> files that contain them and comments in <span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files; AILANG Parse returned them in every one. AILANG Parse accepts the same API requests, so you switch by changing the URL and the key. Overall it scores <span data-bench="ailang_parse.composite">98.1%</span> and Unstructured <span data-bench="unstructured.composite">58.9%</span>.</p>
       <p>Unstructured reads <span data-bench="unstructured.coverage">87.4%</span> of the benchmark files. Counting the files it can&rsquo;t read as zero, its score is <span data-bench="unstructured.adjusted">51.4%</span>. AILANG Parse reads all of them.</p>
 
       <div class="dp-callout">
@@ -151,23 +151,21 @@ def parse_document(filepath: str) -> dict:
       <p>You keep the structure of your Office documents and still get ML-based extraction for PDFs and scans.</p>
 
       <h2 id="what-you-gain">What You Gain</h2>
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>Feature</th><th>Unstructured</th><th>AILANG Parse</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Track Changes</td><td>None (lost in PDF conversion)</td><td>Insertions and deletions, with author and date</td></tr>
-          <tr><td>Merged Cells</td><td>Flattened to text</td><td>Row and column spans kept</td></tr>
-          <tr><td>Comments</td><td>Dropped</td><td>With author and the text each comment is attached to</td></tr>
-          <tr><td>Headers / Footers</td><td>Dropped or mixed into body</td><td>Separate blocks with page context</td></tr>
-          <tr><td>Text Boxes</td><td>Dropped</td><td>Extracted as positioned blocks</td></tr>
-          <tr><td>Footnotes / Endnotes</td><td>Dropped</td><td>Kept, with reference markers</td></tr>
-          <tr><td>Dependencies</td><td>Python + heavy libraries</td><td>None: a single binary</td></tr>
-          <tr><td>Repeatable output</td><td>Can vary between runs (ML models)</td><td>Same input always gives the same output</td></tr>
-          <tr><td>OfficeDocBench (composite)</td><td data-bench="unstructured.composite">58.9%</td><td data-bench="ailang_parse.composite">98.1%</td></tr>
-          <tr><td>Counting unreadable files as zero</td><td data-bench="unstructured.adjusted">51.4%</td><td data-bench="ailang_parse.adjusted">98.1%</td></tr>
-        </tbody>
-      </table>
+      <div style="overflow-x:auto"><table class="dp-config-table">
+<thead><tr><th>What is kept</th><th>Unstructured</th><th>AILANG Parse</th></tr></thead>
+<tbody>
+<tr><td>Tracked changes returned</td><td><span data-bench="unstructured.features.track_changes.detected">0</span> of <span data-bench="unstructured.features.track_changes.total">3</span> files</td><td><span data-bench="ailang_parse.features.track_changes.detected">3</span> of <span data-bench="ailang_parse.features.track_changes.total">3</span> files</td></tr>
+<tr><td>Comments returned</td><td><span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files</td><td><span data-bench="ailang_parse.features.comments.detected">2</span> of <span data-bench="ailang_parse.features.comments.total">2</span> files</td></tr>
+<tr><td>Headers and footers returned</td><td><span data-bench="unstructured.features.headers_footers.detected">1</span> of <span data-bench="unstructured.features.headers_footers.total">2</span> files</td><td><span data-bench="ailang_parse.features.headers_footers.detected">3</span> of <span data-bench="ailang_parse.features.headers_footers.total">3</span> files</td></tr>
+<tr><td>Text boxes returned</td><td><span data-bench="unstructured.features.text_boxes.detected">0</span> of <span data-bench="unstructured.features.text_boxes.total">2</span> files</td><td><span data-bench="ailang_parse.features.text_boxes.detected">2</span> of <span data-bench="ailang_parse.features.text_boxes.total">2</span> files</td></tr>
+<tr><td>Speaker notes returned</td><td><span data-bench="unstructured.features.speaker_notes.detected">0</span> of <span data-bench="unstructured.features.speaker_notes.total">1</span> files</td><td><span data-bench="ailang_parse.features.speaker_notes.detected">1</span> of <span data-bench="ailang_parse.features.speaker_notes.total">1</span> files</td></tr>
+<tr><td>Table cells: position, merges, formulas</td><td><span data-bench="unstructured.structural_features.table_cells.score">78.1%</span></td><td><span data-bench="ailang_parse.structural_features.table_cells.score">100.0%</span></td></tr>
+<tr><td>List type and depth</td><td><span data-bench="unstructured.structural_features.list_items.score">0.0%</span></td><td><span data-bench="ailang_parse.structural_features.list_items.score">80.0%</span></td></tr>
+<tr><td>Overall score, on the files it could read</td><td><span data-bench="unstructured.composite">58.9%</span></td><td><span data-bench="ailang_parse.composite">98.1%</span></td></tr>
+<tr><td>Overall score, counting unreadable files as zero</td><td><span data-bench="unstructured.adjusted">51.4%</span></td><td><span data-bench="ailang_parse.adjusted">98.1%</span></td></tr>
+</tbody>
+</table></div>
+      <p style="font-size:12px;color:var(--text-secondary)">Measured on <a href="benchmarks.html">OfficeDocBench</a>: how many of the test files containing each feature the parser returned it for, and the benchmark scores. Every figure is read from the published results.</p>
 
       <h2 id="self-hosting">Self-Hosting</h2>
       <p>Run AILANG Parse locally with Docker. Office formats need nothing else installed:</p>

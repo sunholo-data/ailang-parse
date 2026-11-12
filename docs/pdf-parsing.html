@@ -255,16 +255,13 @@
       <p>Switch providers with one flag. Your code and the output format stay the same.</p>
 
 <pre><code class="language-bash"># Gemini (fastest, most cost-effective)
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.5-flash-lite \
-  docparse/main.ail document.pdf
+docparse document.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Claude
-ailang run --entry main --caps IO,FS,Env,AI --ai claude-sonnet-4-5-20250514 \
-  docparse/main.ail document.pdf
+docparse document.pdf --pdf-backend ai --ai claude-sonnet-4-5-20250514
 
 # Ollama (fully local)
-ailang run --entry main --caps IO,FS,Env,AI --ai ollama/llama3.2-vision \
-  docparse/main.ail document.pdf</code></pre>
+docparse document.pdf --pdf-backend ai --ai ollama/llama3.2-vision</code></pre>
 
       <h2 id="providers">AI Providers</h2>
 
@@ -328,23 +325,23 @@ uv pip install docling liteparse</code></pre>
       <h3 id="local-usage">Usage</h3>
 
 <pre><code class="language-bash"># pdftotext — default, deterministic, no API key, most complete text
-./bin/docparse paper.pdf
+docparse paper.pdf
 
 # poppler — headings, lists, tables, header/footer; same poppler, no installs
-./bin/docparse report.pdf --pdf-backend poppler
+docparse report.pdf --pdf-backend poppler
 
 # PDF back to Word, styled by your own template
-./bin/docparse report.pdf --pdf-backend poppler --convert report.docx \
+docparse report.pdf --pdf-backend poppler --convert report.docx \
   --reference-doc house-style.docx
 
 # AI — opt-in only; scanned/image-only PDFs escalate to local docling by default
-./bin/docparse scan.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
+docparse scan.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Docling — local, structural, ~5× faster than Gemini
-./bin/docparse paper.pdf --pdf-backend docling
+docparse paper.pdf --pdf-backend docling
 
 # LiteParse — local, font-size heading inference
-./bin/docparse paper.pdf --pdf-backend liteparse</code></pre>
+docparse paper.pdf --pdf-backend liteparse</code></pre>
 
       <p>Converting a PDF back into a Word document or a deck in your own template? <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a> have examples you can open and say which backend to pick.</p>
 
@@ -420,9 +417,7 @@ uv pip install docling liteparse</code></pre>
 ollama pull llama3.2-vision
 
 # Parse PDF fully locally
-ailang run --entry main --caps IO,FS,Env,AI \
-  --ai ollama/llama3.2-vision \
-  docparse/main.ail confidential-report.pdf</code></pre>
+docparse confidential-report.pdf --pdf-backend ai --ai ollama/llama3.2-vision</code></pre>
 
       <p>The output format is the same as with a cloud provider. You can develop with Ollama and run production on Gemini or Claude with the same code.</p>
 
@@ -459,29 +454,33 @@ ailang run --entry main --caps IO,FS,Env,AI \
 
       <h3 id="cli">CLI</h3>
       <pre><code class="language-bash"># Parse with Gemini (set GOOGLE_API_KEY)
-GOOGLE_API_KEY="your-key" ailang run --entry main \
-  --caps IO,FS,Env,AI --ai gemini-3.5-flash-lite \
-  docparse/main.ail report.pdf
+GOOGLE_API_KEY="your-key" docparse report.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Parse with Ollama (fully local)
-ailang run --entry main --caps IO,FS,Env,AI \
-  --ai ollama/llama3.2-vision \
-  docparse/main.ail report.pdf</code></pre>
+docparse report.pdf --pdf-backend ai --ai ollama/llama3.2-vision</code></pre>
 
       <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"YOUR_API_KEY","ai":"gemini-3.5-flash-lite"}'</code></pre>
+  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'
+
+# A scanned PDF: upload it and choose the AI backend
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "filepath=@scan.pdf" \
+  -F "pdfBackend=ai" \
+  -F "outputFormat=markdown"</code></pre>
 
       <h3 id="python-sdk">Python SDK</h3>
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
 
-# Parse with AI provider
-result = client.parse("report.pdf", output_format="json", ai="gemini-3.5-flash-lite")
+# Text PDFs need no AI. For a scan, choose the AI backend.
+result = client.parse_file("report.pdf")
+scan = client.parse_file("scan.pdf", pdf_backend="ai")
 
-# Same Block ADT as Office formats
+# The same blocks as Office formats
 for block in result.blocks:
     if block.type == "table":
         print(f"Table: {len(block.rows)} rows")

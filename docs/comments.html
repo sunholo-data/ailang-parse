@@ -108,20 +108,21 @@
 
       <p>Office keeps comments in their own files inside the document (<code>word/comments.xml</code>, <code>xl/comments1.xml</code>, <code>ppt/comments/comment1.xml</code>), with markers that link each comment to the content it is about. A parser that works from a PDF never sees those files.</p>
 
-      <p>Of the five parsers in this table, only AILANG Parse returns Office comments.</p>
+      <p>On OfficeDocBench, AILANG Parse is the only one of these parsers that returns Office comments.</p>
 
       <table class="dp-config-table" style="margin-top:16px">
-        <thead>
-          <tr><th>Parser</th><th>Comments</th><th>Author</th><th>Timestamp</th><th>Commented text</th><th>Replies</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>AILANG Parse</td><td><span class="dp-preserved">Extracted</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td><td><span class="dp-preserved">Preserved</span></td></tr>
-          <tr><td><a href="migrate-from-unstructured.html">Unstructured</a></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
-          <tr><td>Docling</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
-          <tr><td>LlamaParse</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
-          <tr><td>MarkItDown</td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td><td><span class="dp-lost">Dropped</span></td></tr>
-        </tbody>
-      </table>
+<thead><tr><th>Parser</th><th>Comments returned</th><th>Right author, attached to the right text</th></tr></thead>
+<tbody>
+<tr><td>AILANG Parse</td><td><span data-bench="ailang_parse.features.comments.detected">2</span> of <span data-bench="ailang_parse.features.comments.total">2</span> files</td><td><span data-bench="ailang_parse.structural_features.comment_anchors.score">100.0%</span></td></tr>
+<tr><td>Unstructured</td><td><span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files</td><td><span data-bench="unstructured.structural_features.comment_anchors.score">0.0%</span></td></tr>
+<tr><td>Docling</td><td><span data-bench="docling.features.comments.detected">0</span> of <span data-bench="docling.features.comments.total">2</span> files</td><td><span data-bench="docling.structural_features.comment_anchors.score">0.0%</span></td></tr>
+<tr><td>LlamaParse</td><td><span data-bench="llamaparse.features.comments.detected">0</span> of <span data-bench="llamaparse.features.comments.total">2</span> files</td><td><span data-bench="llamaparse.structural_features.comment_anchors.score">0.0%</span></td></tr>
+<tr><td>MarkItDown</td><td><span data-bench="markitdown.features.comments.detected">0</span> of <span data-bench="markitdown.features.comments.total">2</span> files</td><td><span data-bench="markitdown.structural_features.comment_anchors.score">0.0%</span></td></tr>
+<tr><td>Pandoc</td><td><span data-bench="pandoc.features.comments.detected">0</span> of <span data-bench="pandoc.features.comments.total">2</span> files</td><td><span data-bench="pandoc.structural_features.comment_anchors.score">0.0%</span></td></tr>
+<tr><td>Extend</td><td><span data-bench="extend.features.comments.detected">0</span> of <span data-bench="extend.features.comments.total">2</span> files</td><td><span data-bench="extend.structural_features.comment_anchors.score">0.0%</span></td></tr>
+</tbody>
+</table>
+      <p style="font-size:12px;color:var(--text-secondary)">Read from the published <a href="benchmarks.html">OfficeDocBench</a> results.</p>
 
       <h2 id="how-it-works">How It Works</h2>
       <p>AILANG Parse reads the Office file itself, with no conversion to PDF on the way. An Office file is a ZIP archive of XML files (the OOXML format), and the comments are read from the XML files that hold them.</p>
@@ -235,15 +236,16 @@
       <h2 id="try-it">Try It</h2>
       <p>Extract comments from any Office document:</p>
       <pre><code class="language-bash"># Parse a DOCX with comments
-./bin/docparse contract_reviewed.docx
+docparse contract_reviewed.docx
 
 # Parse via the API
 curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
-  -H "Content-Type: application/json" \
-  -d '{"filepath": "contract_reviewed.docx", "apiKey": "dp_YOUR_KEY"}'
+  -H "Authorization: Bearer dp_YOUR_KEY" \
+  -F "filepath=@contract_reviewed.docx" \
+  -F "outputFormat=blocks"
 
 # Parse an XLSX with cell comments
-./bin/docparse budget_annotated.xlsx</code></pre>
+docparse budget_annotated.xlsx</code></pre>
 
       <p style="text-align:center;margin-top:28px">
         <a href="index.html#try-it" class="dp-btn" style="display:inline-block;padding:12px 32px;background:var(--dp-blue);color:#fff;border-radius:var(--radius-sm);text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:600">Parse in Browser</a>

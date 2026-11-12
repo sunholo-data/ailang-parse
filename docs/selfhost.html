@@ -245,21 +245,20 @@ docparse your-file.docx</code></pre>
 
       <p>Convert between formats:</p>
       <pre><code class="language-bash" data-src="examples/cli/convert.sh"># DOCX to HTML
-./bin/docparse input.docx --convert output.html
+docparse input.docx --convert output.html
 
 # CSV to DOCX report
-./bin/docparse data.csv --convert report.docx
+docparse data.csv --convert report.docx
 
 # Markdown to PowerPoint slides
-./bin/docparse notes.md --convert slides.pptx
+docparse notes.md --convert slides.pptx
 
 # Any format to Quarto Markdown (for Quarto rendering)
-./bin/docparse report.docx --convert report.qmd</code></pre>
+docparse report.docx --convert report.qmd</code></pre>
 
       <p>Generate documents with AI:</p>
       <pre><code class="language-bash" data-src="examples/cli/ai-parse.sh"># Generate a DOCX report from a prompt
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.5-flash-lite \
-  docparse/main.ail --generate report.docx --prompt "Q1 sales report with revenue table"</code></pre>
+docparse --generate report.docx --prompt "Q1 sales report with revenue table" --ai gemini-3.5-flash-lite</code></pre>
 
       <h2 id="install">Install AILANG</h2>
 
@@ -335,38 +334,34 @@ docparse *.eml</code></pre>
       </div>
 
       <h3 id="google-vertex-ai-ai-studio">Google (Vertex AI / AI Studio)</h3>
-      <pre><code class="language-bash"># Via Application Default Credentials (Cloud Run, GKE)
-GOOGLE_API_KEY="" ailang run --entry main --caps IO,FS,Env,AI \
-  --ai gemini-3.5-flash-lite docparse/main.ail document.pdf
+      <pre><code class="language-bash"># With Google Cloud credentials already set up
+GOOGLE_API_KEY="" docparse document.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Via API key (local development)
-GOOGLE_API_KEY="your-key" ailang run --entry main --caps IO,FS,Env,AI \
-  --ai gemini-3.5-flash-lite docparse/main.ail document.pdf</code></pre>
+GOOGLE_API_KEY="your-key" docparse document.pdf --pdf-backend ai --ai gemini-3.5-flash-lite</code></pre>
 
       <h3 id="anthropic-claude">Anthropic (Claude)</h3>
-      <pre><code class="language-bash">ANTHROPIC_API_KEY="sk-ant-..." ailang run --entry main --caps IO,FS,Env,AI \
-  --ai claude-haiku-4-5 docparse/main.ail document.pdf</code></pre>
+      <pre><code class="language-bash">ANTHROPIC_API_KEY="sk-ant-..." docparse document.pdf --pdf-backend ai --ai claude-haiku-4-5</code></pre>
 
       <h3 id="ollama-local-free">Ollama (Local, Free)</h3>
       <pre><code class="language-bash"># Start Ollama and pull a model
 ollama pull granite3.2-vision
 
 # Run AILANG Parse with local model (no API key needed)
-ailang run --entry main --caps IO,FS,Env,AI \
-  --ai granite-docling docparse/main.ail document.pdf</code></pre>
+docparse document.pdf --pdf-backend ai --ai granite-docling</code></pre>
 
       <h3 id="audio-video">Audio &amp; Video</h3>
       <pre><code class="language-bash"># Transcribe audio — returns transcription, speaker count, language
-./bin/docparse recording.mp3 --ai gemini-3.5-flash-lite
+docparse recording.mp3 --ai gemini-3.5-flash-lite
 
 # Extract video content — visual scenes, tables, transcription
-./bin/docparse presentation.mp4 --ai gemini-3.5-flash-lite
+docparse presentation.mp4 --ai gemini-3.5-flash-lite
 
 # Convert audio transcription to DOCX
-./bin/docparse interview.wav --ai gemini-3.5-flash-lite --convert transcript.docx
+docparse interview.wav --ai gemini-3.5-flash-lite --convert transcript.docx
 
 # Convert video content to HTML report
-./bin/docparse tutorial.mp4 --ai gemini-3.5-flash-lite --convert report.html</code></pre>
+docparse tutorial.mp4 --ai gemini-3.5-flash-lite --convert report.html</code></pre>
       <p style="font-size:13px;color:var(--text-secondary)">Audio formats: WAV, MP3, AIFF, AAC, OGG, FLAC. Video formats: MP4, MOV, AVI, WebM, WMV, MPEG, MPG, FLV, 3GPP.</p>
 
       <div class="dp-callout">

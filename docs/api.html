@@ -877,7 +877,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
     <pre><code class="language-bash" data-src="examples/api/curl-parse.sh"># Parse a built-in sample — list all 26 via GET /api/v1/samples
 curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"sample_id":"sample_docx_formatting","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
+  -d '{"filepath":"sample_docx_formatting","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
 
     <p style="font-size:13px;color:var(--text-muted)"><strong>Need an API key?</strong> Sign in above to generate one, or let a script or agent get one with <a href="#agent-guide" style="color:var(--dp-blue)">device auth</a>. <a href="#agent-guide" style="color:var(--dp-blue)">See the agent guide below</a>.</p>
     <p style="font-size:12px;color:var(--text-muted);margin-top:8px"><strong>Tip:</strong> Add <code>?api=http://localhost:8080</code> to any docs page URL to point every example at your local or self-hosted server.</p>
@@ -1069,9 +1069,7 @@ client = UnstructuredClient(
       <div class="dp-integration-card">
         <h3 id="cli">CLI</h3>
         <p>Run it from scripts and pipelines. Best for batch processing.</p>
-        <pre style="margin-top:10px"><code class="language-bash">ailang run --entry main \
-  --caps IO,FS,Env \
-  docparse/main.ail myfile.docx</code></pre>
+        <pre style="margin-top:10px"><code class="language-bash">docparse myfile.docx</code></pre>
       </div>
       <div class="dp-integration-card">
         <h3 id="rest-api">REST API</h3>
@@ -1222,7 +1220,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/auth/device/poll \
       <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);margin:20px 0 8px" id="step-4-estimate-cost">Step 4: Estimate Cost</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/estimate \
   -H "Content-Type: application/json" \
-  -d '{"filepath":"data/test_files/sample.docx","outputFormat":"markdown"}'
+  -d '{"filepath":"sample_docx_formatting","outputFormat":"markdown"}'
 # Returns: {"format":"zip-office", "strategy":"deterministic", "ai_required":false, "estimated_ms":15}</code></pre>
 
       <!-- Step 5 -->
@@ -1246,12 +1244,12 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
       <pre><code class="language-bash"># Deterministic (Office/Web/Text) — same output every time, &lt;15ms
 curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"sample_id":"sample_docx_basic","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'
+  -d '{"filepath":"sample_docx_formatting","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'
 
 # AI-powered (PDF/images) — content depends on model
 curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"sample_id":"sample_pdf","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
+  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"dp_YOUR_KEY"}'</code></pre>
       <p><strong>Output formats:</strong> <code>blocks</code> (structured JSON), <code>markdown</code>, <code>html</code>, <code>a2ui</code> (rich UI components).</p>
       <p>All formats return the same block types: Text, Heading, Table, Image, Audio, Video, List, Section, Change.</p>
       <p style="font-size:12px;color:var(--text-muted)"><strong>File size limits:</strong> Free 10 MB, Pro 25 MB, Business 50 MB. Upload files up to 32 MB directly. Send larger files by <code>sourceUrl</code>, or with <code>POST /api/v1/upload/url</code> + <code>gcsRef</code> (Business tier).</p>

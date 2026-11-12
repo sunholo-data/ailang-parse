@@ -663,7 +663,7 @@ details[open] summary svg { transform: rotate(180deg); }
           <div class="v2-label" style="color:var(--emerald)">Lost in PDF conversion</div>
           <h2 class="vs-title">Track changes: kept, not flattened</h2>
           <p class="vs-desc">See who changed what and when. Author, timestamp, original vs revised text. The audit trail that vanishes when you <a href="vs-pdf-conversion.html">convert to PDF</a>.</p>
-          <p class="vs-desc" style="font-size:13px;color:var(--ink-faint);margin-top:12px;">0 of 5 other parsers tested extract <a href="track-changes.html">track changes</a>. AILANG Parse gets 3/3.</p>
+          <p class="vs-desc" style="font-size:13px;color:var(--ink-faint);margin-top:12px;">On OfficeDocBench, AILANG Parse returns tracked changes in <span data-bench="ailang_parse.features.track_changes.detected">3</span> of <span data-bench="ailang_parse.features.track_changes.total">3</span> files that contain them. Docling, Unstructured, LlamaParse and MarkItDown return them in none.</p>
         </div>
         <div class="reveal-right reveal-delay-2">
           <div class="vs-tc-viz" id="vs-tc-viz">
@@ -1102,85 +1102,27 @@ details[open] summary svg { transform: rotate(180deg); }
   <!-- ============ MARKET COMPARISON ============ -->
   <section class="section reveal" id="comparison">
     <div class="section-header">
-      <span class="section-title">How Document Parsers Work</span>
+      <span class="section-title">What Each Parser Keeps</span>
     </div>
 
     <div class="dp-table-wrap">
-    <table class="compare-table" style="font-size:13px">
-      <thead>
-        <tr>
-          <th></th>
-          <th class="dp-col" style="min-width:140px">AILANG Parse</th>
-          <th style="min-width:130px">PDF-first parsers</th>
-          <th style="min-width:130px">Wrapper libraries</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Method</strong></td>
-          <td class="win">Reads the XML directly</td>
-          <td>Convert to PDF, then rebuild with ML</td>
-          <td>mammoth / pandas text extraction</td>
-        </tr>
-        <tr>
-          <td><strong>Track changes</strong></td>
-          <td class="win">Full (author, date, type)</td>
-          <td class="no">Lost in PDF conversion</td>
-          <td class="no">Not returned</td>
-        </tr>
-        <tr>
-          <td><strong>Merged cells</strong></td>
-          <td class="win">Kept (colspan/rowspan)</td>
-          <td class="no">Flattened</td>
-          <td class="no">Flattened</td>
-        </tr>
-        <tr>
-          <td><strong>Comments</strong></td>
-          <td class="win">With author</td>
-          <td class="no">Dropped</td>
-          <td class="no">Dropped</td>
-        </tr>
-        <tr>
-          <td><strong>Dependencies</strong></td>
-          <td class="win">AILANG only</td>
-          <td class="no">Python + ML libraries</td>
-          <td class="no">Python + wrappers</td>
-        </tr>
-        <tr>
-          <td><strong>Browser / WASM</strong></td>
-          <td class="win">Yes</td>
-          <td class="no">No</td>
-          <td class="no">No</td>
-        </tr>
-        <tr>
-          <td><strong>Privacy</strong></td>
-          <td class="win">Can run in your browser</td>
-          <td>Server required</td>
-          <td>Server required</td>
-        </tr>
-        <tr>
-          <td><strong>OfficeDocBench</strong></td>
-          <td class="win"><span data-bench="ailang_parse.composite">98.1%</span></td>
-          <td>61&ndash;79%</td>
-          <td>71&ndash;84%</td>
-        </tr>
-        <tr>
-          <td><strong>Cost per DOCX</strong> <span style="font-weight:400;font-size:11px">(25pg avg)</span></td>
-          <td class="win">&euro;0.00029 <span style="font-size:10px;color:var(--text-muted)">(per doc)</span></td>
-          <td>$0.025&ndash;$0.25 <span style="font-size:10px;color:var(--text-muted)">(per page)</span></td>
-          <td>Free <span style="font-size:10px;color:var(--text-muted)">(self-hosted)</span></td>
-        </tr>
-        <tr>
-          <td><strong>Pricing model</strong></td>
-          <td class="win">Per document (any page count)</td>
-          <td>Per page ($0.001&ndash;$0.01/pg)</td>
-          <td>Open source</td>
-        </tr>
-      </tbody>
-    </table>
+    <table class="compare-table">
+<thead><tr><th>What is kept</th><th class="dp-col">AILANG Parse</th><th>Docling</th><th>Unstructured</th><th>LlamaParse</th><th>MarkItDown</th></tr></thead>
+<tbody>
+<tr><td>Tracked changes returned</td><td><span data-bench="ailang_parse.features.track_changes.detected">3</span> of <span data-bench="ailang_parse.features.track_changes.total">3</span> files</td><td><span data-bench="docling.features.track_changes.detected">0</span> of <span data-bench="docling.features.track_changes.total">3</span> files</td><td><span data-bench="unstructured.features.track_changes.detected">0</span> of <span data-bench="unstructured.features.track_changes.total">3</span> files</td><td><span data-bench="llamaparse.features.track_changes.detected">0</span> of <span data-bench="llamaparse.features.track_changes.total">3</span> files</td><td><span data-bench="markitdown.features.track_changes.detected">0</span> of <span data-bench="markitdown.features.track_changes.total">3</span> files</td></tr>
+<tr><td>Comments returned</td><td><span data-bench="ailang_parse.features.comments.detected">2</span> of <span data-bench="ailang_parse.features.comments.total">2</span> files</td><td><span data-bench="docling.features.comments.detected">0</span> of <span data-bench="docling.features.comments.total">2</span> files</td><td><span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files</td><td><span data-bench="llamaparse.features.comments.detected">0</span> of <span data-bench="llamaparse.features.comments.total">2</span> files</td><td><span data-bench="markitdown.features.comments.detected">0</span> of <span data-bench="markitdown.features.comments.total">2</span> files</td></tr>
+<tr><td>Headers and footers returned</td><td><span data-bench="ailang_parse.features.headers_footers.detected">3</span> of <span data-bench="ailang_parse.features.headers_footers.total">3</span> files</td><td><span data-bench="docling.features.headers_footers.detected">0</span> of <span data-bench="docling.features.headers_footers.total">3</span> files</td><td><span data-bench="unstructured.features.headers_footers.detected">1</span> of <span data-bench="unstructured.features.headers_footers.total">2</span> files</td><td><span data-bench="llamaparse.features.headers_footers.detected">0</span> of <span data-bench="llamaparse.features.headers_footers.total">3</span> files</td><td><span data-bench="markitdown.features.headers_footers.detected">0</span> of <span data-bench="markitdown.features.headers_footers.total">2</span> files</td></tr>
+<tr><td>Text boxes returned</td><td><span data-bench="ailang_parse.features.text_boxes.detected">2</span> of <span data-bench="ailang_parse.features.text_boxes.total">2</span> files</td><td><span data-bench="docling.features.text_boxes.detected">0</span> of <span data-bench="docling.features.text_boxes.total">2</span> files</td><td><span data-bench="unstructured.features.text_boxes.detected">0</span> of <span data-bench="unstructured.features.text_boxes.total">2</span> files</td><td><span data-bench="llamaparse.features.text_boxes.detected">0</span> of <span data-bench="llamaparse.features.text_boxes.total">2</span> files</td><td><span data-bench="markitdown.features.text_boxes.detected">0</span> of <span data-bench="markitdown.features.text_boxes.total">2</span> files</td></tr>
+<tr><td>Speaker notes returned</td><td><span data-bench="ailang_parse.features.speaker_notes.detected">1</span> of <span data-bench="ailang_parse.features.speaker_notes.total">1</span> files</td><td><span data-bench="docling.features.speaker_notes.detected">0</span> of <span data-bench="docling.features.speaker_notes.total">1</span> files</td><td><span data-bench="unstructured.features.speaker_notes.detected">0</span> of <span data-bench="unstructured.features.speaker_notes.total">1</span> files</td><td><span data-bench="llamaparse.features.speaker_notes.detected">1</span> of <span data-bench="llamaparse.features.speaker_notes.total">1</span> files</td><td><span data-bench="markitdown.features.speaker_notes.detected">0</span> of <span data-bench="markitdown.features.speaker_notes.total">1</span> files</td></tr>
+<tr><td>Table cells: position, merges, formulas</td><td><span data-bench="ailang_parse.structural_features.table_cells.score">100.0%</span></td><td><span data-bench="docling.structural_features.table_cells.score">81.6%</span></td><td><span data-bench="unstructured.structural_features.table_cells.score">78.1%</span></td><td><span data-bench="llamaparse.structural_features.table_cells.score">78.2%</span></td><td><span data-bench="markitdown.structural_features.table_cells.score">54.5%</span></td></tr>
+<tr><td>List type and depth</td><td><span data-bench="ailang_parse.structural_features.list_items.score">80.0%</span></td><td><span data-bench="docling.structural_features.list_items.score">80.0%</span></td><td><span data-bench="unstructured.structural_features.list_items.score">0.0%</span></td><td><span data-bench="llamaparse.structural_features.list_items.score">45.7%</span></td><td><span data-bench="markitdown.structural_features.list_items.score">29.2%</span></td></tr>
+<tr><td>Overall score, on the files it could read</td><td><span data-bench="ailang_parse.composite">98.1%</span></td><td><span data-bench="docling.composite">65.2%</span></td><td><span data-bench="unstructured.composite">58.9%</span></td><td><span data-bench="llamaparse.composite">61.9%</span></td><td><span data-bench="markitdown.composite">58.7%</span></td></tr>
+<tr><td>Overall score, counting unreadable files as zero</td><td><span data-bench="ailang_parse.adjusted">98.1%</span></td><td><span data-bench="docling.adjusted">62.2%</span></td><td><span data-bench="unstructured.adjusted">51.4%</span></td><td><span data-bench="llamaparse.adjusted">59.0%</span></td><td><span data-bench="markitdown.adjusted">46.6%</span></td></tr>
+</tbody>
+</table>
     </div>
     <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:10px;line-height:1.5">
-      PDF-first: <a href="migrate-from-unstructured.html">Unstructured</a>, Docling, LlamaParse. Wrappers: MarkItDown.<br>
+      Measured on OfficeDocBench: in how many of the test files containing each feature the parser returned it. Read from the published results.<br>
       <a href="benchmarks.html" style="color:var(--dp-blue)">Full benchmark methodology and results &rarr;</a>
     </p>
   </section>
@@ -1750,53 +1692,26 @@ details[open] summary svg { transform: rotate(180deg); }
             <td><span data-bench="markitdown.coverage">79.3%</span></td>
           </tr>
           <tr>
-            <td>Track changes</td>
-            <td class="win">3/3</td>
-            <td class="partial">2/3</td>
-            <td class="win">3/3</td>
-            <td class="no">0/3</td>
-            <td class="no">—</td>
+            <td>Track changes (files returned / files containing it)</td>
+            <td class="win"><span data-bench="ailang_parse.features.track_changes.detected">3</span>/<span data-bench="ailang_parse.features.track_changes.total">3</span></td><td><span data-bench="ooxml.features.track_changes.detected">2</span>/<span data-bench="ooxml.features.track_changes.total">3</span></td><td><span data-bench="pandoc.features.track_changes.detected">3</span>/<span data-bench="pandoc.features.track_changes.total">3</span></td><td><span data-bench="kreuzberg.features.track_changes.detected">0</span>/<span data-bench="kreuzberg.features.track_changes.total">3</span></td><td><span data-bench="markitdown.features.track_changes.detected">0</span>/<span data-bench="markitdown.features.track_changes.total">3</span></td>
           </tr>
           <tr>
-            <td>Comments</td>
-            <td class="win">2/2</td>
-            <td class="win">2/2</td>
-            <td class="no">0/2</td>
-            <td class="no">0/2</td>
-            <td class="no">—</td>
+            <td>Comments (files returned / files containing it)</td>
+            <td class="win"><span data-bench="ailang_parse.features.comments.detected">2</span>/<span data-bench="ailang_parse.features.comments.total">2</span></td><td><span data-bench="ooxml.features.comments.detected">2</span>/<span data-bench="ooxml.features.comments.total">2</span></td><td><span data-bench="pandoc.features.comments.detected">0</span>/<span data-bench="pandoc.features.comments.total">2</span></td><td><span data-bench="kreuzberg.features.comments.detected">0</span>/<span data-bench="kreuzberg.features.comments.total">2</span></td><td><span data-bench="markitdown.features.comments.detected">0</span>/<span data-bench="markitdown.features.comments.total">2</span></td>
           </tr>
           <tr>
-            <td>Headers &amp; footers</td>
-            <td class="win">3/3</td>
-            <td class="win">2/2</td>
-            <td class="no">0/3</td>
-            <td class="partial">2/3</td>
-            <td class="no">—</td>
+            <td>Headers &amp; footers (files returned / files containing it)</td>
+            <td class="win"><span data-bench="ailang_parse.features.headers_footers.detected">3</span>/<span data-bench="ailang_parse.features.headers_footers.total">3</span></td><td><span data-bench="ooxml.features.headers_footers.detected">2</span>/<span data-bench="ooxml.features.headers_footers.total">2</span></td><td><span data-bench="pandoc.features.headers_footers.detected">0</span>/<span data-bench="pandoc.features.headers_footers.total">3</span></td><td><span data-bench="kreuzberg.features.headers_footers.detected">2</span>/<span data-bench="kreuzberg.features.headers_footers.total">2</span></td><td><span data-bench="markitdown.features.headers_footers.detected">0</span>/<span data-bench="markitdown.features.headers_footers.total">2</span></td>
           </tr>
           <tr>
-            <td>Text boxes</td>
-            <td class="win">2/2</td>
-            <td class="partial">1/2</td>
-            <td class="no">0/2</td>
-            <td class="no">0/2</td>
-            <td class="no">—</td>
+            <td>Text boxes (files returned / files containing it)</td>
+            <td class="win"><span data-bench="ailang_parse.features.text_boxes.detected">2</span>/<span data-bench="ailang_parse.features.text_boxes.total">2</span></td><td><span data-bench="ooxml.features.text_boxes.detected">1</span>/<span data-bench="ooxml.features.text_boxes.total">2</span></td><td><span data-bench="pandoc.features.text_boxes.detected">0</span>/<span data-bench="pandoc.features.text_boxes.total">2</span></td><td><span data-bench="kreuzberg.features.text_boxes.detected">0</span>/<span data-bench="kreuzberg.features.text_boxes.total">2</span></td><td><span data-bench="markitdown.features.text_boxes.detected">0</span>/<span data-bench="markitdown.features.text_boxes.total">2</span></td>
           </tr>
           <tr>
-            <td>Equations</td>
-            <td class="win">1/1</td>
-            <td class="no">0/1</td>
-            <td class="no">0/1</td>
-            <td class="no">0/1</td>
-            <td class="no">—</td>
+            <td>Equations (files returned / files containing it)</td>
+            <td class="win"><span data-bench="ailang_parse.features.equations.detected">1</span>/<span data-bench="ailang_parse.features.equations.total">1</span></td><td><span data-bench="ooxml.features.equations.detected">0</span>/<span data-bench="ooxml.features.equations.total">1</span></td><td><span data-bench="pandoc.features.equations.detected">0</span>/<span data-bench="pandoc.features.equations.total">1</span></td><td><span data-bench="kreuzberg.features.equations.detected">0</span>/<span data-bench="kreuzberg.features.equations.total">1</span></td><td><span data-bench="markitdown.features.equations.detected">0</span>/<span data-bench="markitdown.features.equations.total">1</span></td>
           </tr>
-          <tr>
-            <td>Formats supported</td>
-            <td class="win">10</td>
-            <td>3</td>
-            <td>5</td>
-            <td>9</td>
-            <td>5</td>
-          </tr>
+          
           <tr>
             <td>Runtime dependencies</td>
             <td class="win">AILANG only</td>

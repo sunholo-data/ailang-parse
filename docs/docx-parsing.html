@@ -376,14 +376,13 @@
 
       <h3 id="cli">CLI</h3>
       <pre><code class="language-bash"># Parse a DOCX file
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail report.docx
+docparse report.docx
 
 # Convert DOCX to Markdown
-./bin/docparse report.docx --convert output.md
+docparse report.docx --convert output.md
 
 # Convert DOCX to HTML
-./bin/docparse report.docx --convert output.html</code></pre>
+docparse report.docx --convert output.html</code></pre>
 
       <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
@@ -394,7 +393,7 @@ ailang run --entry main --caps IO,FS,Env \
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
-result = client.parse("contract.docx", output_format="json")
+result = client.parse_file("contract.docx")
 
 # Document metadata
 print(result.metadata.title)
@@ -403,7 +402,7 @@ print(result.metadata.author)
 # Iterate structured blocks
 for block in result.blocks:
     if block.type == "table":
-        print(f"Table: {len(block.rows)} rows, merged={block.has_merges}")
+        print(f"Table: {len(block.rows)} rows")
     if hasattr(block, "changes") and block.changes:
         for change in block.changes:
             print(f"{change.author} {change.type}d: {change.text}")

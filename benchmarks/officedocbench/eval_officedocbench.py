@@ -630,6 +630,29 @@ def _write_summary(all_results: list[dict]) -> None:
                     )
                 },
                 "per_format": per_format,
+                # In how many of the files that contain a feature (tracked
+                # changes, comments, text boxes...) the parser returned it.
+                # Pages bind to these, so "0 of 3 files" is never typed.
+                "features": {
+                    feature: {
+                        "detected": sum(
+                            bool(r["scores"]["feature_detection"]["checks"].get(feature))
+                            for r in ok
+                            if feature in r["scores"].get("feature_detection", {}).get("checks", {})
+                        ),
+                        "total": sum(
+                            feature in r["scores"].get("feature_detection", {}).get("checks", {})
+                            for r in ok
+                        ),
+                    }
+                    for feature in sorted(
+                        {
+                            k
+                            for r in ok
+                            for k in r["scores"].get("feature_detection", {}).get("checks", {})
+                        }
+                    )
+                },
             }
         )
 

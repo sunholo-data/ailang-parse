@@ -208,40 +208,18 @@
       </div>
 
       <h2 id="other-parsers">How Other Parsers Handle This</h2>
-      <p>Each tool reads tables in a different way. This is how five of them handle merged cells:</p>
-
-      <table class="dp-compare-table">
-        <thead>
-          <tr><th>Tool</th><th>Approach</th><th>Merged cells</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>AILANG Parse</td>
-            <td class="dp-preserved">Reads gridSpan, vMerge and mergeCells from the Office file</td>
-            <td class="dp-preserved">colspan and rowspan on every cell, as stored in the file</td>
-          </tr>
-          <tr>
-            <td><a href="migrate-from-unstructured.html">Unstructured</a></td>
-            <td class="dp-lost">Converts DOCX to PDF via LibreOffice, then uses layout analysis</td>
-            <td class="dp-lost">Merged cells come out as separate cells or garbled; the merge is lost</td>
-          </tr>
-          <tr>
-            <td>Docling</td>
-            <td class="dp-lost">Converts to PDF, then runs a table detection model (TableFormer)</td>
-            <td class="dp-lost">The table is sometimes detected, but the merges are not recovered from the PDF</td>
-          </tr>
-          <tr>
-            <td>LlamaParse</td>
-            <td class="dp-lost">Sends the document to a cloud API, where an LLM rebuilds the table</td>
-            <td class="dp-lost">The same document can give different merges on different runs</td>
-          </tr>
-          <tr>
-            <td><a href="docx-to-markdown.html">MarkItDown</a></td>
-            <td class="dp-lost">Uses python-docx to extract cells</td>
-            <td class="dp-lost">Reads some gridSpan merges but not vMerge; vertical merges become empty rows</td>
-          </tr>
-        </tbody>
-      </table>
+      <p>OfficeDocBench checks tables against the source file: is each value in the right cell, are the merges right, are formulas kept. Scores for five parsers:</p>
+      <div style="overflow-x:auto"><table class="dp-config-table">
+<thead><tr><th>Parser</th><th>Table cells: position, merges, formulas</th></tr></thead>
+<tbody>
+<tr><td>AILANG Parse</td><td><span data-bench="ailang_parse.structural_features.table_cells.score">100.0%</span></td></tr>
+<tr><td>Unstructured</td><td><span data-bench="unstructured.structural_features.table_cells.score">78.1%</span></td></tr>
+<tr><td>Docling</td><td><span data-bench="docling.structural_features.table_cells.score">81.6%</span></td></tr>
+<tr><td>LlamaParse</td><td><span data-bench="llamaparse.structural_features.table_cells.score">78.2%</span></td></tr>
+<tr><td>MarkItDown</td><td><span data-bench="markitdown.structural_features.table_cells.score">54.5%</span></td></tr>
+</tbody>
+</table></div>
+      <p style="font-size:12px;color:var(--text-secondary)">Read from the published <a href="benchmarks.html">OfficeDocBench</a> results, on the files each parser could read.</p>
 
       <h3 id="why-pdf-conversion-loses-merge-information">Why PDF Conversion Loses Merge Information</h3>
       <p>When a DOCX is converted to PDF, the table becomes lines and text on a page. The <code>gridSpan</code> and <code>vMerge</code> values are used to draw it and are not written to the PDF. The PDF shows how the table looks, with no record of which cells were merged.</p>
@@ -259,16 +237,16 @@
       <p>Parse a document with tables and look at the output:</p>
 
       <pre><code class="language-bash"># Parse a DOCX with merged cells
-./bin/docparse data/test_files/sample.docx
+docparse report.docx
 
 # Parse an XLSX spreadsheet
-./bin/docparse data/test_files/sample.xlsx
+docparse budget.xlsx
 
 # Parse a PPTX with tables
-./bin/docparse data/test_files/sample.pptx
+docparse deck.pptx
 
 # Convert a table-heavy DOCX to HTML (preserves colspan/rowspan)
-./bin/docparse report.docx --convert output.html</code></pre>
+docparse report.docx --convert output.html</code></pre>
 
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px">
         <a href="index.html#try-it" class="dp-btn" style="text-decoration:none">Try in Browser</a>
