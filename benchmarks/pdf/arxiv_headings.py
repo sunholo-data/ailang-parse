@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -109,6 +110,51 @@ def pct(v: float | None) -> str:
     return "—" if v is None else f"{v * 100:.0f}%"
 
 
+SUMMARY = Path(__file__).resolve().parent / "arxiv_headings_summary.json"
+SITE_SUMMARY = sr.REPO / "docs" / "data" / "pdf-headings-summary.json"
+
+
+def busy() -> bool:
+    """More runnable processes than cores: wall-clock times would be inflated."""
+    return os.getloadavg()[0] > (os.cpu_count() or 1)
+
+
+def publish(results: dict, backends: list[str], papers: int, truth_total: int, ai_model: str,
+            measured: str | None = None, measured_version: str | None = None) -> None:
+    """Merge this run into the published summary, one entry per backend.
+
+    Each entry carries its own date and version, so the paid `ai` row can be
+    re-run less often than the free ones without the page hiding that. An entry
+    measured on another corpus size is dropped: its figures are not comparable.
+    """
+    version = re.search(r'^version\s*=\s*"([^"]+)"', (sr.REPO / "ailang.toml").read_text(), re.M).group(1)
+    today = measured or time.strftime("%Y-%m-%d")
+    version = measured_version or version
+    old = json.loads(SUMMARY.read_text()) if SUMMARY.exists() else {}
+    kept = {b: e for b, e in old.get("backends", {}).items()
+            if e.get("papers") == papers and e.get("source_headings") == truth_total}
+    for backend in backends:
+        r = results[backend]
+        if "files" not in r:
+            continue
+        hit = sum(f["hit"] for f in r["files"].values())
+        claimed = sum(f["claimed"] for f in r["files"].values())
+        entry = {"papers": papers, "parsed": r["parsed"], "source_headings": truth_total,
+                 "headings_found": hit, "headings_reported": claimed,
+                 "heading_recall": r["heading_recall"], "heading_precision": r["heading_precision"],
+                 "seconds_per_paper": round(r["seconds_per_paper"], 1),
+                 "run_date": today, "version": version}
+        if backend == "ai":
+            entry["model"] = ai_model
+        kept[backend] = entry
+    summary = {"schema_version": 1, "benchmark": "arxiv_headings", "papers": papers,
+               "source_headings": truth_total,
+               "run_date": max(e["run_date"] for e in kept.values()), "backends": kept}
+    for path in (SUMMARY, SITE_SUMMARY):
+        path.write_text(json.dumps(summary, indent=2) + "\n")
+        print(f"wrote {path.relative_to(sr.REPO)}", file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--backends", default=",".join(DEFAULT_BACKENDS))
@@ -116,10 +162,39 @@ def main() -> int:
     ap.add_argument("--fetch", action="store_true", help="download missing PDFs from arXiv, then exit")
     ap.add_argument("--json", help="write per-file results here")
     ap.add_argument("--per-file", action="store_true", help="print a row per paper")
+    ap.add_argument("--publish", action="store_true",
+                    help="update the published summary (results file and the site's copy) "
+                         "for the backends in this run; other backends keep their last entry")
+    ap.add_argument("--from-json", help="publish a run saved earlier with --json instead of running one "
+                                        "(a paid ai run, or one measured when the machine was idle)")
+    ap.add_argument("--measured", nargs=2, metavar=("DATE", "VERSION"),
+                    help="with --from-json: the day (YYYY-MM-DD) and version that run was measured on")
+    ap.add_argument("--ai-model", default="gemini-3.5-flash-lite",
+                    help="model recorded for the ai backend's entry (the CLI default)")
     args = ap.parse_args()
     if args.fetch:
         print(f"fetched {fetch_pdfs()} PDFs into {CORPUS}")
         return 0
+
+    if args.from_json:
+        if not args.measured:
+            ap.error("--from-json needs --measured DATE VERSION")
+        results = json.loads(Path(args.from_json).read_text())
+        done = {b: r for b, r in results.items() if "files" in r}
+        first = next(iter(done.values()))
+        truth_total = sum(f["truth"] for f in first["files"].values())
+        for r in done.values():
+            if r["parsed"] != r["total"] or sum(f["truth"] for f in r["files"].values()) != truth_total:
+                ap.error("--from-json: a backend in that run did not parse every paper")
+            hit = sum(f["hit"] for f in r["files"].values())
+            claimed = sum(f["claimed"] for f in r["files"].values())
+            r["heading_recall"], r["heading_precision"] = prf(hit, truth_total, claimed)
+        publish(done, list(done), first["total"], truth_total, args.ai_model, *args.measured)
+        return 0
+    if args.publish and busy():
+        print(f"The machine is busy (load {os.getloadavg()[0]:.0f} on {os.cpu_count()} cores): the time per "
+              "paper would be wrong. Run --publish when it is idle.", file=sys.stderr)
+        return 3
 
     papers = [p for p in discover_papers(CORPUS, args.papers or None) if p["pdf_path"]]
     if not papers:
@@ -192,6 +267,11 @@ def main() -> int:
                 print(f"| {name} | {len(truth[name])} | {f['hit'] if f else 'failed'} | {f['claimed'] if f else ''} |")
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=2))
+    if args.publish and busy():
+        print("The machine became busy during the run: not publishing these times.", file=sys.stderr)
+        return 3
+    if args.publish:
+        publish(results, backends, len(pdfs), sum(len(t) for t in truth.values()), args.ai_model)
     return 0
 
 
