@@ -1,0 +1,657 @@
+module docparse/services/pdf_pages
+
+-- Read a PDF's structure and cut it into single-page PDFs, in AILANG alone.
+--
+-- Why: the AI backend reads a long PDF one page per request. Without a way to
+-- cut the file, every request carried the whole document. poppler's
+-- pdfseparate does the cut, but needs a subprocess; this does it in memory,
+-- for every caller (the AI-only path and the browser build included).
+--
+-- What it reads: the cross-reference data (classic tables, compressed
+-- cross-reference streams, hybrids, incremental updates via /Prev), objects
+-- stored in the file and objects packed into compressed object streams
+-- (/ObjStm, PDF 1.5+), and the page tree.
+--
+-- What a page file holds: the page, everything it refers to (fonts, images,
+-- content streams, annotations), a one-entry page tree and a catalog. Object
+-- numbers are kept, stream bytes are copied untouched, and attributes the page
+-- inherited from its ancestors (/Resources, /MediaBox, /CropBox, /Rotate) are
+-- written onto it. The document's outline, forms and metadata are left out.
+--
+-- What it refuses (Err, so the caller falls back): encrypted files, files
+-- whose cross-reference data it cannot follow, files with no pages. Objects
+-- copied out of an object stream of an encrypted file would no longer be
+-- encrypted the way the reader expects, hence the refusal.
+--
+-- Checked by benchmarks/pdf/native_split_check.py: every page of every PDF it
+-- is given is rendered from the original and from its split file, and the two
+-- images must be identical.
+
+import std/bytes (fromBase64, toBase64, toString as bstr, fromString as bfrom, slice, byteAt, length as blen, toInts, concatList)
+import std/deflate (inflateZlib)
+import std/string (length, substring, find, trim, split, stringToInt, intToStr, charAt, contains)
+import std/list (map, filter, reverse, length as llen, concat, flatMap, nth_or, any)
+import std/map (fromList, lookup as mapLookup)
+import std/option (Option, Some, None, getOrElse)
+import std/result (Result, Ok, Err)
+
+-- kind 0: free / unknown.  kind 1: a = file offset.  kind 2: a = object stream number, b = index in it.
+type PdfpgEntry = { num: int, kind: int, a: int, b: int }
+
+type PdfpgXref = { sections: [[PdfpgEntry]], root: int, encrypted: bool, ok: bool, note: string }
+
+-- An object stream, inflated once: `header` is its "number offset" pairs.
+type PdfpgStm = { body: string, header: [int], first: int, n: int }
+
+type PdfpgDoc = { data: bytes, x: Map[int, PdfpgEntry], stms: Map[int, PdfpgStm], top: int }
+
+type PdfpgOut = { parts: [bytes], offs: [{ num: int, off: int }], pos: int, ok: bool }
+
+-- ============================================================
+-- Bytes
+-- ============================================================
+
+func pdfpgSliceStr(data: bytes, from: int, to: int) -> string {
+  let n = blen(data);
+  let t = if to > n then n else to;
+  let f = if from < 0 then 0 else from;
+  if f >= t then "" else match slice(data, f, t - f) { Some(b) => bstr(b), None => "" }
+}
+
+func pdfpgMatchAt(data: bytes, pat: [int], at: int) -> bool =
+  match pat {
+    [] => true,
+    p :: rest => match byteAt(data, at) {
+      Some(v) => if v == p then pdfpgMatchAt(data, rest, at + 1) else false,
+      None => false
+    }
+  }
+
+func pdfpgFindBytes(data: bytes, pat: [int], from: int, limit: int) -> int =
+  if from >= limit then -1
+  else if pdfpgMatchAt(data, pat, from) then from
+  else pdfpgFindBytes(data, pat, from + 1, limit)
+
+func pdfpgFindBytesBack(data: bytes, pat: [int], from: int, floor: int) -> int =
+  if from < floor then -1
+  else if pdfpgMatchAt(data, pat, from) then from
+  else pdfpgFindBytesBack(data, pat, from - 1, floor)
+
+pure func pdfpgKwStream() -> [int] = [115, 116, 114, 101, 97, 109]
+pure func pdfpgKwEndobj() -> [int] = [101, 110, 100, 111, 98, 106]
+pure func pdfpgKwTrailer() -> [int] = [116, 114, 97, 105, 108, 101, 114]
+pure func pdfpgKwStartxref() -> [int] = [115, 116, 97, 114, 116, 120, 114, 101, 102]
+
+-- The `stream` keyword, not the letters inside a name such as
+-- /BitstreamVeraSans: it follows whitespace or ">" and an end of line follows it.
+func pdfpgStreamKwBytes(data: bytes, from: int, limit: int) -> int {
+  let s = pdfpgFindBytes(data, pdfpgKwStream(), from, limit);
+  if s < 0 then -1
+  else {
+    let before = getOrElse(byteAt(data, s - 1), 32);
+    let after = getOrElse(byteAt(data, s + 6), 0);
+    if (before == 32 || before == 10 || before == 13 || before == 62 || before == 9) && (after == 10 || after == 13)
+    then s else pdfpgStreamKwBytes(data, s + 6, limit)
+  }
+}
+
+export pure func pdfpgStreamKw(d: string, from: int) -> int {
+  let rest = substring(d, from, length(d));
+  let i = find(rest, "stream");
+  if i < 0 then -1
+  else {
+    let at = from + i;
+    let before = if at == 0 then " " else charAt(d, at - 1);
+    let after = if at + 6 < length(d) then charAt(d, at + 6) else "";
+    if (before == " " || before == "\n" || before == "\r" || before == ">" || before == "\t") && (after == "\n" || after == "\r")
+    then at else pdfpgStreamKw(d, at + 6)
+  }
+}
+
+-- ============================================================
+-- Dictionary text
+-- ============================================================
+
+pure func pdfpgIsDelim(c: string) -> bool =
+  c == " " || c == "/" || c == "[" || c == "<" || c == "(" || c == "\n" || c == "\r" || c == "\t" || c == ">" || c == "]"
+
+pure func pdfpgIsDigit(c: string) -> bool = c >= "0" && c <= "9"
+
+pure func pdfpgSkipWs(d: string, i: int) -> int =
+  if i >= length(d) then i
+  else { let c = charAt(d, i); if c == " " || c == "\n" || c == "\r" || c == "\t" then pdfpgSkipWs(d, i + 1) else i }
+
+pure func pdfpgDigitsEnd(d: string, i: int) -> int =
+  if i < length(d) && pdfpgIsDigit(charAt(d, i)) then pdfpgDigitsEnd(d, i + 1) else i
+
+-- Index just after `key` where a delimiter follows (so /Pages is not /PageMode), or -1.
+export pure func pdfpgKeyPos(d: string, key: string, from: int) -> int {
+  let rest = substring(d, from, length(d));
+  let i = find(rest, key);
+  if i < 0 then -1
+  else {
+    let after = from + i + length(key);
+    if after >= length(d) then -1
+    else if pdfpgIsDelim(charAt(d, after)) then after
+    else pdfpgKeyPos(d, key, after)
+  }
+}
+
+-- The int at or after i; next = -1 when there is none.
+pure func pdfpgIntAt(d: string, i: int) -> { v: int, next: int } {
+  let s = pdfpgSkipWs(d, i);
+  let e = pdfpgDigitsEnd(d, s);
+  if e == s then { v: 0, next: -1 }
+  else match stringToInt(substring(d, s, e)) { Some(n) => { v: n, next: e }, None => { v: 0, next: -1 } }
+}
+
+export pure func pdfpgDictInt(d: string, key: string) -> int {
+  let p = pdfpgKeyPos(d, key, 0);
+  if p < 0 then -1 else { let r = pdfpgIntAt(d, p); if r.next < 0 then -1 else r.v }
+}
+
+-- "/Key N G R" -> N; -1 when absent or not a reference.
+export pure func pdfpgDictRef(d: string, key: string) -> int {
+  let p = pdfpgKeyPos(d, key, 0);
+  if p < 0 then -1
+  else {
+    let a = pdfpgIntAt(d, p);
+    if a.next < 0 then -1
+    else {
+      let g = pdfpgIntAt(d, a.next);
+      if g.next < 0 then -1
+      else { let r = pdfpgSkipWs(d, g.next); if r < length(d) && charAt(d, r) == "R" then a.v else -1 }
+    }
+  }
+}
+
+pure func pdfpgIntsUntil(d: string, i: int, acc: [int]) -> [int] {
+  let r = pdfpgIntAt(d, i);
+  if r.next < 0 then reverse(acc) else pdfpgIntsUntil(d, r.next, r.v :: acc)
+}
+
+pure func pdfpgDictIntArray(d: string, key: string) -> [int] {
+  let p = pdfpgKeyPos(d, key, 0);
+  if p < 0 then []
+  else { let s = pdfpgSkipWs(d, p); if s < length(d) && charAt(d, s) == "[" then pdfpgIntsUntil(d, s + 1, []) else [] }
+}
+
+pure func pdfpgRefsFrom(d: string, i: int, acc: [int]) -> [int] {
+  let a = pdfpgIntAt(d, i);
+  if a.next < 0 then reverse(acc)
+  else {
+    let g = pdfpgIntAt(d, a.next);
+    if g.next < 0 then reverse(acc)
+    else { let r = pdfpgSkipWs(d, g.next); if r < length(d) && charAt(d, r) == "R" then pdfpgRefsFrom(d, r + 1, a.v :: acc) else reverse(acc) }
+  }
+}
+
+pure func pdfpgDictRefArray(d: string, key: string) -> [int] {
+  let p = pdfpgKeyPos(d, key, 0);
+  if p < 0 then []
+  else { let s = pdfpgSkipWs(d, p); if s < length(d) && charAt(d, s) == "[" then pdfpgRefsFrom(d, s + 1, []) else [] }
+}
+
+-- Every "N G R" in a text. A reference inside a string literal is picked up
+-- too; that only copies an object the page did not need.
+export pure func pdfpgAllRefs(d: string, i: int, acc: [int]) -> [int] =
+  if i >= length(d) then acc
+  else if pdfpgIsDigit(charAt(d, i)) && (i == 0 || not pdfpgIsDigit(charAt(d, i - 1))) then {
+    let a = pdfpgIntAt(d, i);
+    let g = pdfpgIntAt(d, a.next);
+    if g.next < 0 then pdfpgAllRefs(d, a.next, acc)
+    else {
+      let r = pdfpgSkipWs(d, g.next);
+      if r < length(d) && charAt(d, r) == "R" && (r + 1 >= length(d) || pdfpgIsDelim(charAt(d, r + 1)))
+      then pdfpgAllRefs(d, r + 1, a.v :: acc) else pdfpgAllRefs(d, a.next, acc)
+    }
+  } else pdfpgAllRefs(d, i + 1, acc)
+
+-- End (exclusive) of the "<< ... >>" opening at i.
+pure func pdfpgNestEnd(d: string, i: int, depth: int) -> int =
+  if i >= length(d) then length(d)
+  else {
+    let two = substring(d, i, i + 2);
+    if two == "<<" then pdfpgNestEnd(d, i + 2, depth + 1)
+    else if two == ">>" then (if depth <= 1 then i + 2 else pdfpgNestEnd(d, i + 2, depth - 1))
+    else pdfpgNestEnd(d, i + 1, depth)
+  }
+
+pure func pdfpgBracketEnd(d: string, i: int, depth: int) -> int =
+  if i >= length(d) then length(d)
+  else {
+    let c = charAt(d, i);
+    if c == "[" then pdfpgBracketEnd(d, i + 1, depth + 1)
+    else if c == "]" then (if depth <= 1 then i + 1 else pdfpgBracketEnd(d, i + 1, depth - 1))
+    else pdfpgBracketEnd(d, i + 1, depth)
+  }
+
+pure func pdfpgTokenEnd(d: string, i: int) -> int =
+  if i >= length(d) then i
+  else { let c = charAt(d, i); if c == " " || c == "\n" || c == "\r" || c == "/" || c == ">" then i else pdfpgTokenEnd(d, i + 1) }
+
+-- The value of a key as written: a dictionary, an array, a reference or one token.
+export pure func pdfpgDictValue(d: string, key: string) -> string {
+  let p = pdfpgKeyPos(d, key, 0);
+  if p < 0 then ""
+  else {
+    let s = pdfpgSkipWs(d, p);
+    if substring(d, s, s + 2) == "<<" then substring(d, s, pdfpgNestEnd(d, s, 0))
+    else if s < length(d) && charAt(d, s) == "[" then substring(d, s, pdfpgBracketEnd(d, s, 0))
+    else {
+      let a = pdfpgIntAt(d, s);
+      let g = if a.next >= 0 then pdfpgIntAt(d, a.next) else { v: 0, next: -1 };
+      let r = if g.next >= 0 then pdfpgSkipWs(d, g.next) else -1;
+      if r >= 0 && r < length(d) && charAt(d, r) == "R" then substring(d, s, r + 1)
+      else substring(d, s, pdfpgTokenEnd(d, if s < length(d) && charAt(d, s) == "/" then s + 1 else s))
+    }
+  }
+}
+
+-- The object's own dictionary, "<< ... >>", from its text.
+export pure func pdfpgBareDict(t: string) -> string {
+  let s = find(t, "<<");
+  if s < 0 then "" else substring(t, s, pdfpgNestEnd(t, s, 0))
+}
+
+-- The dictionary without one of its top-level keys.
+export pure func pdfpgDropKey(d: string, key: string) -> string {
+  let p = pdfpgKeyPos(d, key, 0);
+  if p < 0 then d
+  else {
+    let v = pdfpgDictValue(d, key);
+    let s = pdfpgSkipWs(d, p);
+    "${substring(d, 0, p - length(key))}${substring(d, s + length(v), length(d))}"
+  }
+}
+
+-- ============================================================
+-- Cross-reference data
+-- ============================================================
+
+pure func pdfpgBeInt(row: [int], i: int, w: int, acc: int) -> int =
+  if w <= 0 then acc else pdfpgBeInt(row, i + 1, w - 1, acc * 256 + nth_or(row, i, 0))
+
+pure func pdfpgTake(xs: [int], n: int, acc: [int]) -> [int] =
+  if n <= 0 then reverse(acc) else match xs { [] => reverse(acc), x :: r => pdfpgTake(r, n - 1, x :: acc) }
+
+pure func pdfpgDrop(xs: [int], n: int) -> [int] =
+  if n <= 0 then xs else match xs { [] => [], _ :: r => pdfpgDrop(r, n - 1) }
+
+pure func pdfpgAddUp(row: [int], prev: [int], acc: [int]) -> [int] =
+  match row {
+    [] => reverse(acc),
+    x :: r => match prev {
+      [] => pdfpgAddUp(r, [], (x % 256) :: acc),
+      p :: pr => pdfpgAddUp(r, pr, ((x + p) % 256) :: acc)
+    }
+  }
+
+pure func pdfpgAddSub(row: [int], left: int, acc: [int]) -> [int] =
+  match row { [] => reverse(acc), x :: r => { let v = (x + left) % 256; pdfpgAddSub(r, v, v :: acc) } }
+
+-- Undo the PNG predictor on rows of 1 + cols bytes. Filters 0 (none), 1 (sub,
+-- with one byte per pixel) and 2 (up) are what cross-reference streams use;
+-- any other filter byte marks the result bad.
+pure func pdfpgUnpredict(data: [int], cols: int, prev: [int], acc: [[int]], ok: bool) -> { rows: [[int]], ok: bool } =
+  match data {
+    [] => { rows: reverse(acc), ok: ok },
+    ft :: rest => {
+      let raw = pdfpgTake(rest, cols, []);
+      let row = if ft == 2 then pdfpgAddUp(raw, prev, []) else if ft == 1 then pdfpgAddSub(raw, 0, []) else raw;
+      pdfpgUnpredict(pdfpgDrop(rest, cols), cols, row, row :: acc, ok && ft >= 0 && ft <= 2)
+    }
+  }
+
+pure func pdfpgRowsPlain(data: [int], cols: int, acc: [[int]]) -> [[int]] =
+  match data { [] => reverse(acc), _ => pdfpgRowsPlain(pdfpgDrop(data, cols), cols, pdfpgTake(data, cols, []) :: acc) }
+
+pure func pdfpgRowsToEntries(rows: [[int]], w0: int, w1: int, w2: int, index: [int], cur: int, left: int, acc: [PdfpgEntry]) -> [PdfpgEntry] =
+  match rows {
+    [] => acc,
+    row :: rest =>
+      if left <= 0 then match index {
+        s :: c :: more => if c <= 0 then pdfpgRowsToEntries(rows, w0, w1, w2, more, s, 0, acc) else pdfpgRowsToEntries(rows, w0, w1, w2, more, s, c, acc),
+        _ => acc
+      } else {
+        let kind0 = if w0 == 0 then 1 else pdfpgBeInt(row, 0, w0, 0);
+        let kind = if kind0 == 1 || kind0 == 2 then kind0 else 0;
+        let e = { num: cur, kind: kind, a: pdfpgBeInt(row, w0, w1, 0), b: pdfpgBeInt(row, w0 + w1, w2, 0) };
+        pdfpgRowsToEntries(rest, w0, w1, w2, index, cur + 1, left - 1, e :: acc)
+      }
+  }
+
+pure func pdfpgEolLen(a: int, b: int) -> int = if a == 13 && b == 10 then 2 else if a == 10 || a == 13 then 1 else 0
+
+-- The raw stream bytes of the object at file offset `off`.
+func pdfpgStreamBytes(data: bytes, off: int, len: int) -> Option[bytes] {
+  let s = pdfpgStreamKwBytes(data, off, off + 4000000);
+  if s < 0 || len < 0 then None
+  else {
+    let e = pdfpgEolLen(getOrElse(byteAt(data, s + 6), 0), getOrElse(byteAt(data, s + 7), 0));
+    slice(data, s + 6 + e, len)
+  }
+}
+
+func pdfpgInflate(b: bytes) -> Option[bytes] =
+  match inflateZlib(toBase64(b)) { Ok(o) => fromBase64(o), Err(_) => None }
+
+-- Text of the object at a file offset, up to its `stream` keyword or `endobj`.
+-- The window grows until one of them is in view.
+func pdfpgDictAtN(data: bytes, off: int, win: int) -> string {
+  let chunk = pdfpgSliceStr(data, off, off + win);
+  let s = pdfpgStreamKw(chunk, 0);
+  let e = find(chunk, "endobj");
+  if s < 0 && e < 0 && win < 4000000 && off + win < blen(data) then pdfpgDictAtN(data, off, win * 8)
+  else { let cut = if s >= 0 && (e < 0 || s < e) then s else if e >= 0 then e else length(chunk); substring(chunk, 0, cut) }
+}
+
+func pdfpgDictAt(data: bytes, off: int) -> string = pdfpgDictAtN(data, off, 4096)
+
+-- Entries of a classic table: the lines after "xref".
+pure func pdfpgClassicLines(lines: [string], cur: int, left: int, acc: [PdfpgEntry]) -> [PdfpgEntry] =
+  match lines {
+    [] => acc,
+    l :: rest => {
+      let t = trim(l);
+      if find(t, "trailer") == 0 then acc
+      else if left > 0 then {
+        let off = pdfpgIntAt(t, 0);
+        let e = if contains(t, " n") && off.next >= 0 then { num: cur, kind: 1, a: off.v, b: 0 } else { num: cur, kind: 0, a: 0, b: 0 };
+        pdfpgClassicLines(rest, cur + 1, left - 1, e :: acc)
+      } else {
+        let a = pdfpgIntAt(t, 0);
+        if a.next < 0 then pdfpgClassicLines(rest, cur, 0, acc)
+        else { let c = pdfpgIntAt(t, a.next); if c.next < 0 then pdfpgClassicLines(rest, cur, 0, acc) else pdfpgClassicLines(rest, a.v, c.v, acc) }
+      }
+    }
+  }
+
+pure func pdfpgBad(acc: PdfpgXref, note: string) -> PdfpgXref =
+  { sections: acc.sections, root: acc.root, encrypted: acc.encrypted, ok: false, note: note }
+
+-- Follow the cross-reference chain from the newest section back. Sections are
+-- prepended as they are met, so the list ends up oldest first and a later
+-- entry for the same object wins when the map is built.
+func pdfpgReadXref(data: bytes, off: int, acc: PdfpgXref, depth: int) -> PdfpgXref =
+  if off <= 0 || depth > 64 || not acc.ok then acc
+  else if find(pdfpgSliceStr(data, off, off + 5), "xref") == 0 then {
+    let t = pdfpgFindBytes(data, pdfpgKwTrailer(), off, blen(data));
+    if t < 0 then pdfpgBad(acc, "cross-reference table without a trailer")
+    else {
+      let entries = pdfpgClassicLines(split(pdfpgSliceStr(data, off + 4, t + 7), "\n"), 0, 0, []);
+      let trailer = pdfpgSliceStr(data, t, t + 4000);
+      let tEnd = find(trailer, "startxref");
+      let td = if tEnd >= 0 then substring(trailer, 0, tEnd) else trailer;
+      let a1 = { sections: entries :: acc.sections, root: if acc.root >= 0 then acc.root else pdfpgDictRef(td, "/Root"),
+                 encrypted: acc.encrypted || pdfpgKeyPos(td, "/Encrypt", 0) >= 0, ok: true, note: acc.note };
+      -- A hybrid file's stream entries rank below this table and above /Prev.
+      let xs = pdfpgDictInt(td, "/XRefStm");
+      let a2 = if xs > 0 then pdfpgReadXref(data, xs, a1, depth + 1) else a1;
+      pdfpgReadXref(data, pdfpgDictInt(td, "/Prev"), a2, depth + 1)
+    }
+  } else {
+    let d = pdfpgDictAt(data, off);
+    let w = pdfpgDictIntArray(d, "/W");
+    let len = pdfpgDictInt(d, "/Length");
+    if llen(w) != 3 || len < 0 then pdfpgBad(acc, "no cross-reference data at offset ${intToStr(off)}")
+    else match pdfpgStreamBytes(data, off, len) {
+      None => pdfpgBad(acc, "cross-reference stream has no data"),
+      Some(raw) => match (if contains(d, "/FlateDecode") then pdfpgInflate(raw) else Some(raw)) {
+        None => pdfpgBad(acc, "cross-reference stream would not inflate"),
+        Some(pb) => {
+          let w0 = nth_or(w, 0, 0);
+          let w1 = nth_or(w, 1, 0);
+          let w2 = nth_or(w, 2, 0);
+          let cols = w0 + w1 + w2;
+          let un = if pdfpgDictInt(d, "/Predictor") >= 10 then pdfpgUnpredict(toInts(pb), cols, [], [], true)
+                   else { rows: pdfpgRowsPlain(toInts(pb), cols, []), ok: true };
+          if cols <= 0 || not un.ok then pdfpgBad(acc, "cross-reference stream uses a predictor this reader does not handle")
+          else {
+            let idx0 = pdfpgDictIntArray(d, "/Index");
+            let index = if llen(idx0) >= 2 then idx0 else [0, pdfpgDictInt(d, "/Size")];
+            let entries = pdfpgRowsToEntries(un.rows, w0, w1, w2, index, 0, 0, []);
+            let a1 = { sections: entries :: acc.sections, root: if acc.root >= 0 then acc.root else pdfpgDictRef(d, "/Root"),
+                       encrypted: acc.encrypted || pdfpgKeyPos(d, "/Encrypt", 0) >= 0, ok: true, note: acc.note };
+            pdfpgReadXref(data, pdfpgDictInt(d, "/Prev"), a1, depth + 1)
+          }
+        }
+      }
+    }
+  }
+
+-- ============================================================
+-- Objects
+-- ============================================================
+
+pure func pdfpgEntry(x: Map[int, PdfpgEntry], num: int) -> PdfpgEntry =
+  match mapLookup(x, num) { Some(e) => e, None => { num: num, kind: 0, a: 0, b: 0 } }
+
+-- A stream's /Length, which may itself be a reference to an object in the file.
+func pdfpgStreamLen(data: bytes, x: Map[int, PdfpgEntry], d: string) -> int {
+  let ref = pdfpgDictRef(d, "/Length");
+  if ref < 0 then pdfpgDictInt(d, "/Length")
+  else {
+    let e = pdfpgEntry(x, ref);
+    if e.kind != 1 then -1
+    else { let t = pdfpgDictAt(data, e.a); let o = find(t, "obj"); let r = pdfpgIntAt(t, if o >= 0 then o + 3 else 0); if r.next < 0 then -1 else r.v }
+  }
+}
+
+func pdfpgLoadStm(data: bytes, x: Map[int, PdfpgEntry], num: int) -> PdfpgStm {
+  let se = pdfpgEntry(x, num);
+  if se.kind != 1 then { body: "", header: [], first: 0, n: 0 }
+  else {
+    let d = pdfpgDictAt(data, se.a);
+    let first = pdfpgDictInt(d, "/First");
+    let body = match pdfpgStreamBytes(data, se.a, pdfpgStreamLen(data, x, d)) {
+      None => "",
+      Some(raw) => match (if contains(d, "/FlateDecode") then pdfpgInflate(raw) else Some(raw)) { None => "", Some(pb) => bstr(pb) }
+    };
+    { body: body, header: if first > 0 then pdfpgIntsUntil(substring(body, 0, first), 0, []) else [], first: first, n: pdfpgDictInt(d, "/N") }
+  }
+}
+
+pure func pdfpgStmNums(entries: [PdfpgEntry], seen: Map[int, bool], acc: [int]) -> [int] =
+  match entries {
+    [] => acc,
+    e :: rest => if e.kind == 2 && not any(\n. n == e.a, acc) then pdfpgStmNums(rest, seen, e.a :: acc) else pdfpgStmNums(rest, seen, acc)
+  }
+
+-- Text of an object: for one stored in the file, "N G obj << ... >>" up to its
+-- stream; for one in an object stream, the bare value.
+func pdfpgObjText(doc: PdfpgDoc, num: int) -> string {
+  let e = pdfpgEntry(doc.x, num);
+  if e.kind == 1 then pdfpgDictAt(doc.data, e.a)
+  else if e.kind == 2 then match mapLookup(doc.stms, e.a) {
+    None => "",
+    Some(st) => {
+      let s = nth_or(st.header, 2 * e.b + 1, -1);
+      let nxt = if e.b + 1 < st.n then nth_or(st.header, 2 * e.b + 3, -1) else length(st.body) - st.first;
+      if s < 0 || nxt < s then "" else substring(st.body, st.first + s, st.first + nxt)
+    }
+  }
+  else ""
+}
+
+-- End (exclusive) of the object stored at a file offset: just after its endobj.
+func pdfpgObjEnd(doc: PdfpgDoc, off: int) -> int {
+  let d = pdfpgDictAt(doc.data, off);
+  let s = pdfpgStreamKwBytes(doc.data, off, off + length(d) + 64);
+  let len = if s < 0 then 0 else pdfpgStreamLen(doc.data, doc.x, d);
+  let from = if s < 0 then off else s + 6 + (if len > 0 then len else 0);
+  let e = pdfpgFindBytes(doc.data, pdfpgKwEndobj(), from, blen(doc.data));
+  if e < 0 then -1 else e + 6
+}
+
+func pdfpgPagesOf(doc: PdfpgDoc, num: int, depth: int) -> [int] {
+  if depth > 64 || num < 0 then []
+  else {
+    let t = pdfpgObjText(doc, num);
+    if pdfpgKeyPos(t, "/Kids", 0) >= 0 then flatMap(\k. pdfpgPagesOf(doc, k, depth + 1), pdfpgDictRefArray(t, "/Kids"))
+    else if length(t) == 0 then []
+    else [num]
+  }
+}
+
+-- ============================================================
+-- Opening a document
+-- ============================================================
+
+pure func pdfpgMaxNum(entries: [PdfpgEntry], m: int) -> int =
+  match entries { [] => m, e :: rest => pdfpgMaxNum(rest, if e.num > m then e.num else m) }
+
+pure func pdfpgPairs(entries: [PdfpgEntry], acc: [(int, PdfpgEntry)]) -> [(int, PdfpgEntry)] =
+  match entries { [] => reverse(acc), e :: rest => pdfpgPairs(rest, (e.num, e) :: acc) }
+
+pure func pdfpgFlatten(sections: [[PdfpgEntry]], acc: [PdfpgEntry]) -> [PdfpgEntry] =
+  match sections { [] => acc, s :: rest => pdfpgFlatten(rest, concat(acc, s)) }
+
+type PdfpgOpened = { doc: PdfpgDoc, pages: [int] }
+
+func pdfpgOpen(data: bytes) -> Result[PdfpgOpened, string] {
+  let n = blen(data);
+  let sx = pdfpgFindBytesBack(data, pdfpgKwStartxref(), n - 9, if n > 2048 then n - 2048 else 0);
+  if sx < 0 then Err("not a PDF this reader can follow: no startxref")
+  else {
+    let off = pdfpgIntAt(pdfpgSliceStr(data, sx + 9, sx + 40), 0).v;
+    let x = pdfpgReadXref(data, off, { sections: [], root: -1, encrypted: false, ok: true, note: "" }, 0);
+    if not x.ok then Err(x.note)
+    else if x.encrypted then Err("encrypted PDF")
+    else if x.root < 0 then Err("no document catalog")
+    else {
+      let entries = pdfpgFlatten(x.sections, []);
+      let xmap = fromList(pdfpgPairs(entries, []));
+      let stmPairs = map(\s. (s, pdfpgLoadStm(data, xmap, s)), pdfpgStmNums(entries, fromList([]), []));
+      let doc = { data: data, x: xmap, stms: fromList(stmPairs), top: pdfpgMaxNum(entries, 0) };
+      let pages = pdfpgPagesOf(doc, pdfpgDictRef(pdfpgObjText(doc, x.root), "/Pages"), 0);
+      if llen(pages) == 0 then Err("no pages found") else Ok({ doc: doc, pages: pages })
+    }
+  }
+}
+
+-- ============================================================
+-- Writing one page
+-- ============================================================
+
+-- An inheritable attribute, from the nearest ancestor that sets it.
+func pdfpgInherited(doc: PdfpgDoc, num: int, key: string, depth: int) -> string {
+  if num < 0 || depth > 64 then ""
+  else {
+    let d = pdfpgBareDict(pdfpgObjText(doc, num));
+    let v = pdfpgDictValue(d, key);
+    if length(v) > 0 then v else pdfpgInherited(doc, pdfpgDictRef(d, "/Parent"), key, depth + 1)
+  }
+}
+
+func pdfpgInheritAll(doc: PdfpgDoc, pd: string, keys: [string], acc: string) -> string =
+  match keys {
+    [] => acc,
+    k :: rest =>
+      if pdfpgKeyPos(pd, k, 0) >= 0 then pdfpgInheritAll(doc, pd, rest, acc)
+      else {
+        let v = pdfpgInherited(doc, pdfpgDictRef(pd, "/Parent"), k, 0);
+        pdfpgInheritAll(doc, pd, rest, if length(v) > 0 then "${acc} ${k} ${v}" else acc)
+      }
+  }
+
+-- Everything reachable from the page. An annotation's /P and a structure
+-- element's /Pg point back at pages; other pages are kept out by `stop`.
+func pdfpgClosure(doc: PdfpgDoc, todo: [int], seen: Map[int, bool], acc: [int], stop: Map[int, bool]) -> [int] =
+  match todo {
+    [] => acc,
+    n :: rest => match mapLookup(seen, n) {
+      Some(_) => pdfpgClosure(doc, rest, seen, acc, stop),
+      None => match mapLookup(stop, n) {
+        Some(_) => pdfpgClosure(doc, rest, seen, acc, stop),
+        None =>
+          if pdfpgEntry(doc.x, n).kind == 0 then pdfpgClosure(doc, rest, seen, acc, stop)
+          else pdfpgClosure(doc, concat(pdfpgAllRefs(pdfpgObjText(doc, n), 0, []), rest), fromList((n, true) :: pdfpgSeenPairs(acc, [])), n :: acc, stop)
+      }
+    }
+  }
+
+pure func pdfpgSeenPairs(nums: [int], acc: [(int, bool)]) -> [(int, bool)] =
+  match nums { [] => acc, n :: rest => pdfpgSeenPairs(rest, (n, true) :: acc) }
+
+pure func pdfpgPad10(n: int) -> string { let s = intToStr(n); "${substring("0000000000", 0, 10 - length(s))}${s}" }
+
+func pdfpgEmit(o: PdfpgOut, num: int, b: bytes) -> PdfpgOut =
+  { parts: b :: o.parts, offs: { num: num, off: o.pos } :: o.offs, pos: o.pos + blen(b), ok: o.ok }
+
+func pdfpgEmitObjs(doc: PdfpgDoc, nums: [int], o: PdfpgOut) -> PdfpgOut =
+  match nums {
+    [] => o,
+    n :: rest => {
+      let e = pdfpgEntry(doc.x, n);
+      if e.kind == 1 then {
+        let end = pdfpgObjEnd(doc, e.a);
+        match (if end > e.a then slice(doc.data, e.a, end - e.a) else None) {
+          Some(raw) => pdfpgEmitObjs(doc, rest, pdfpgEmit(o, n, concatList([raw, bfrom("\n")]))),
+          None => { parts: o.parts, offs: o.offs, pos: o.pos, ok: false }
+        }
+      } else {
+        let t = pdfpgObjText(doc, n);
+        if length(t) == 0 then { parts: o.parts, offs: o.offs, pos: o.pos, ok: false }
+        else pdfpgEmitObjs(doc, rest, pdfpgEmit(o, n, bfrom("${intToStr(n)} 0 obj\n${t}\nendobj\n")))
+      }
+    }
+  }
+
+pure func pdfpgXrefRows(offs: [{ num: int, off: int }], acc: string) -> string =
+  match offs { [] => acc, e :: rest => pdfpgXrefRows(rest, "${acc}${intToStr(e.num)} 1\n${pdfpgPad10(e.off)} 00000 n \n") }
+
+func pdfpgWritePage(doc: PdfpgDoc, pageNum: int, otherPages: Map[int, bool]) -> Option[bytes] {
+  let pd = pdfpgBareDict(pdfpgObjText(doc, pageNum));
+  if length(pd) < 4 then None
+  else {
+    let pagesN = doc.top + 1;
+    let catN = doc.top + 2;
+    let inh = pdfpgInheritAll(doc, pd, ["/Resources", "/MediaBox", "/CropBox", "/Rotate"], "");
+    let core = pdfpgDropKey(pd, "/Parent");
+    let newPage = "${substring(core, 0, length(core) - 2)} /Parent ${intToStr(pagesN)} 0 R${inh} >>";
+    let deps = pdfpgClosure(doc, pdfpgAllRefs(newPage, 0, []), fromList([(pageNum, true)]), [], otherPages);
+    let o1 = pdfpgEmitObjs(doc, deps, { parts: [bfrom("%PDF-1.7\n")], offs: [], pos: 9, ok: true });
+    if not o1.ok then None
+    else {
+      let o2 = pdfpgEmit(o1, pageNum, bfrom("${intToStr(pageNum)} 0 obj\n${newPage}\nendobj\n"));
+      let o3 = pdfpgEmit(o2, pagesN, bfrom("${intToStr(pagesN)} 0 obj\n<< /Type /Pages /Kids [${intToStr(pageNum)} 0 R] /Count 1 >>\nendobj\n"));
+      let o4 = pdfpgEmit(o3, catN, bfrom("${intToStr(catN)} 0 obj\n<< /Type /Catalog /Pages ${intToStr(pagesN)} 0 R >>\nendobj\n"));
+      let rows = pdfpgXrefRows(o4.offs, "xref\n0 1\n0000000000 65535 f \n");
+      let tail = "${rows}trailer\n<< /Size ${intToStr(catN + 1)} /Root ${intToStr(catN)} 0 R >>\nstartxref\n${intToStr(o4.pos)}\n%%EOF\n";
+      Some(concatList(reverse(bfrom(tail) :: o4.parts)))
+    }
+  }
+}
+
+func pdfpgWriteAll(doc: PdfpgDoc, pages: [int], others: Map[int, bool], acc: [string]) -> Result[[string], string] =
+  match pages {
+    [] => Ok(reverse(acc)),
+    p :: rest => match pdfpgWritePage(doc, p, others) {
+      None => Err("page object ${intToStr(p)} could not be copied"),
+      Some(b) => pdfpgWriteAll(doc, rest, others, toBase64(b) :: acc)
+    }
+  }
+
+-- ============================================================
+-- Public API
+-- ============================================================
+
+-- Number of pages, or 0 when this reader cannot follow the file.
+export func pdfPagesCount(pdfBase64: string) -> int =
+  match fromBase64(pdfBase64) {
+    None => 0,
+    Some(data) => match pdfpgOpen(data) { Ok(o) => llen(o.pages), Err(_) => 0 }
+  }
+
+-- One single-page PDF per page, in page order, each base64-encoded.
+-- Err when the file is encrypted or its structure cannot be followed; the
+-- caller should then fall back to another way of reading it.
+export func pdfPagesSplit(pdfBase64: string) -> Result[[string], string] =
+  match fromBase64(pdfBase64) {
+    None => Err("input is not base64"),
+    Some(data) => match pdfpgOpen(data) {
+      Err(e) => Err(e),
+      Ok(o) => pdfpgWriteAll(o.doc, o.pages, fromList(pdfpgSeenPairs(o.pages, [])), [])
+    }
+  }

@@ -10,6 +10,7 @@ import std/list (map, flatMap, concat, any, length as listLength)
 import std/result (Ok, Err)
 import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, TableCell, DocMetadata, emptyMetadata, simpleCell, mkImage, mkTable)
 import docparse/services/pdf_annotations (extractAnnotations, annotationsAsBlocks)
+import docparse/services/pdf_pages (pdfPagesSplit)
 import pkg/sunholo/gemini_files/upload (uploadFile, deleteFile, UploadedFile)
 
 -- Direct AI Parser for PDF and Image files
@@ -40,15 +41,20 @@ export func parsePdf(filepath: string) -> [Block] ! {Clock, FS, AI, Net, Env} {
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
       else {
-        -- Upload large files for efficiency (avoids re-sending base64 per page)
-        let uploaded = prepareUpload(base64Data, pdfMimeType(), filepath);
-        let fileUri = uploadedUri(uploaded);
-        let pageCount = aiGetPageCount(base64Data, fileUri, filepath);
-        let aiBlocks = if pageCount <= 5
-          then aiExtractWithRetry(base64Data, fileUri, filepath, true, 1)
-          else parsePdfAllPages(base64Data, fileUri, filepath, 1, pageCount);
-        -- Cleanup uploaded file (best-effort; GCS lifecycle policy as safety net)
-        cleanupUpload(uploaded);
+        let split = aiPdfLongPages(base64Data);
+        let aiBlocks = if listLength(split) > 0 then aiPdfPagesBlocks(split, filepath, [])
+          else {
+            -- Upload large files for efficiency (avoids re-sending base64 per page)
+            let uploaded = prepareUpload(base64Data, pdfMimeType(), filepath);
+            let fileUri = uploadedUri(uploaded);
+            let pageCount = aiGetPageCount(base64Data, fileUri, filepath);
+            let blocks = if pageCount <= 5
+              then aiExtractWithRetry(base64Data, fileUri, filepath, true, 1)
+              else parsePdfAllPages(base64Data, fileUri, filepath, 1, pageCount);
+            -- Cleanup uploaded file (best-effort; GCS lifecycle policy as safety net)
+            cleanupUpload(uploaded);
+            blocks
+          };
         -- Layer in PDF annotations (deterministic, no AI). Empty list on
         -- /ObjStm-compressed files; that's logged inside extractAnnotations.
         let annBlocks = annotationsAsBlocks(extractAnnotations(filepath));
@@ -83,25 +89,41 @@ export func parsePdfResult(filepath: string) -> Result[[Block], AIError] ! {FS, 
     Ok(base64Data) =>
       if length(base64Data) == 0 then Ok([])
       else {
-        let uploaded = prepareUpload(base64Data, pdfMimeType(), filepath);
-        let fileUri = uploadedUri(uploaded);
-        match aiGetPageCountResult(base64Data, fileUri, filepath) {
-          Err(e) => { let _ = cleanupUpload(uploaded); Err(e) },
-          Ok(pageCount) => {
-            let extraction = if pageCount <= 5
-              then aiExtractWithRetryResult(base64Data, fileUri, filepath, true, 1)
-              else parsePdfAllPagesResult(base64Data, fileUri, filepath, 1, pageCount);
-            let _ = cleanupUpload(uploaded);
-            match extraction {
-              Err(e) => Err(e),
-              Ok(aiBlocks) => {
-                let annBlocks = annotationsAsBlocks(extractAnnotations(filepath));
-                Ok(concat(aiBlocks, annBlocks))
-              }
-            }
-          }
+        let split = aiPdfLongPages(base64Data);
+        if listLength(split) > 0 then parsePdfSplitResult(split, filepath)
+        else parsePdfWholeResult(base64Data, filepath)
+      }
+  }
+}
+
+-- A long PDF already cut into single pages: one request per page, then the
+-- annotations layer, as parsePdfResult returns them.
+export func parsePdfSplitResult(pages: [string], filepath: string) -> Result[[Block], AIError] ! {FS, AI, Clock} =
+  match parsePdfFromPagesResult(pages, filepath, []) {
+    Err(e) => Err(e),
+    Ok(aiBlocks) => Ok(concat(aiBlocks, annotationsAsBlocks(extractAnnotations(filepath))))
+  }
+
+-- The whole file in each request: short PDFs (one request), and files
+-- pdf_pages could not cut.
+func parsePdfWholeResult(base64Data: string, filepath: string) -> Result[[Block], AIError] ! {FS, AI, Net, Env, Clock} {
+  let uploaded = prepareUpload(base64Data, pdfMimeType(), filepath);
+  let fileUri = uploadedUri(uploaded);
+  match aiGetPageCountResult(base64Data, fileUri, filepath) {
+    Err(e) => { let _ = cleanupUpload(uploaded); Err(e) },
+    Ok(pageCount) => {
+      let extraction = if pageCount <= 5
+        then aiExtractWithRetryResult(base64Data, fileUri, filepath, true, 1)
+        else parsePdfAllPagesResult(base64Data, fileUri, filepath, 1, pageCount);
+      let _ = cleanupUpload(uploaded);
+      match extraction {
+        Err(e) => Err(e),
+        Ok(aiBlocks) => {
+          let annBlocks = annotationsAsBlocks(extractAnnotations(filepath));
+          Ok(concat(aiBlocks, annBlocks))
         }
       }
+    }
   }
 }
 
@@ -322,8 +344,34 @@ func parsePdfOnePageResult(base64Data: string, fileUri: string, filepath: string
     Ok(response) => Ok(parseBlocksFromJson(response))
   }
 
--- One request for a PDF the caller has already cut down to a single page
--- (pdf_ai_pages splits with poppler). Always inline: one page is small.
+-- The single-page PDFs of a document long enough to be read page by page
+-- (more than five pages), cut in memory by pdf_pages; [] when the document is
+-- short or pdf_pages cannot follow it, and the caller reads it the old way.
+-- This is what keeps a page request from carrying the whole file.
+export func aiPdfLongPages(base64Data: string) -> [string] =
+  match pdfPagesSplit(base64Data) {
+    Err(_) => [],
+    Ok(pages) => if listLength(pages) > 5 then pages else []
+  }
+
+-- Extract each single-page PDF in turn. Stops at the first provider failure.
+export func parsePdfFromPagesResult(pages: [string], filepath: string, acc: [Block]) -> Result[[Block], AIError] ! {AI, Clock} =
+  match pages {
+    [] => Ok(acc),
+    p :: rest => match parsePdfSinglePageResult(p, filepath) {
+      Err(e) => Err(e),
+      Ok(blocks) => parsePdfFromPagesResult(rest, filepath, concat(acc, blocks))
+    }
+  }
+
+func aiPdfPagesBlocks(pages: [string], filepath: string, acc: [Block]) -> [Block] ! {AI} =
+  match pages {
+    [] => acc,
+    p :: rest => aiPdfPagesBlocks(rest, filepath, concat(acc, parsePdfOnePage(p, "", filepath, 1, true)))
+  }
+
+-- One request for a PDF already cut down to a single page (by pdf_pages, or
+-- by poppler in pdf_ai_pages). Always inline: one page is small.
 export func parsePdfSinglePageResult(base64Data: string, filepath: string) -> Result[[Block], AIError] ! {AI, Clock} =
   parsePdfOnePageResult(base64Data, "", filepath, 1, true)
 

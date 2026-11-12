@@ -11,6 +11,24 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### PDF pages are split natively, with no external tool
+
+- New `docparse/services/pdf_pages`: reads a PDF's structure in AILANG (classic and compressed
+  cross-reference data, incremental updates, objects packed in compressed object streams, the
+  page tree) and writes one single-page PDF per page, in memory. `pdfPagesSplit` and
+  `pdfPagesCount` are exported. Each page file holds the page and what it refers to, with
+  inherited page attributes written onto it.
+- The AI backend uses it first. `parsePdfResult` and `parsePdf` now send one page per request on
+  long PDFs for every caller, including the AI-only path and the browser build, which cannot run
+  poppler. poppler's `pdfseparate` remains the second line where a process can be run, and the
+  whole-file request the last.
+- It refuses encrypted PDFs and files whose structure it cannot follow, so the caller falls back.
+- `benchmarks/pdf/native_split_check.py` renders every page from the original and from its split
+  file and requires identical images. On 152 PDFs (papers, contracts,
+  LibreOffice exports, repo fixtures, one 229-page file) all 1,039 pages were identical.
+- `docparse/services/pdf_pages_tool.ail` writes the page files from the command line.
+
+
 ### Fixed: the AI PDF backend sent the whole file with every page request
 
 - A PDF of more than five pages is read page by page, so long output is never cut off. Each of
