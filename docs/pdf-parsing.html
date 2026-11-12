@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PDF Parsing API — AI or Local Deterministic Backends — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Parse PDFs to structured JSON via local deterministic backends (pdftotext default, Docling, LiteParse) or AI (Gemini, Claude, OpenAI, Ollama) for scanned pages. Born-digital PDFs parse with no API key. Same Block ADT as Office formats.">
+<meta name="description" content="Parse PDFs to structured JSON on your own machine (pdftotext by default, or Docling or LiteParse), or with AI (Gemini, Claude, OpenAI, Ollama) for scanned pages. PDFs that contain real text need no API key. Same output as for Office files.">
 <meta property="og:title" content="PDF Parsing API — AILANG Parse">
-<meta property="og:description" content="Parse PDFs with local deterministic backends (pdftotext default, Docling, LiteParse) or pluggable AI for scans. Pick per call — same Block ADT, no vendor lock-in.">
+<meta property="og:description" content="Parse PDFs on your own machine (pdftotext by default, or Docling or LiteParse), or with an AI model for scans. Choose on each call. The output is the same either way.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/pdf-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -191,15 +191,19 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "The CLI offers five backends via --pdf-backend: pdftotext (poppler, deterministic plain text — the default), poppler (the same poppler tools read for headings, lists, tables and header/footer), docling (IBM Docling, local ML layout — also the automatic fallback for scanned pages, ~5× faster than AI), liteparse (run-llama LiteParse, font-size heading inference), or ai (Gemini, Claude, OpenAI, or Ollama — opt-in only, never automatic). All produce the same structured JSON Block ADT."}},
-    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Local deterministic backends: pdftotext (default, poppler plain-text, highest character recall), poppler (structure from the same poppler tools, no Python packages), Docling (structural ML extraction — the automatic local fallback when pdftotext finds no text layer, e.g. a scan), LiteParse (text + font-size headings). AI backends, opt-in only via --pdf-backend ai: Gemini, Claude, OpenAI, Ollama. Switch with --pdf-backend pdftotext|poppler|docling|liteparse|ai — no code changes."}},
-    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — that is the default, including for scanned PDFs. --pdf-backend pdftotext (poppler) needs no API key and runs offline; when it finds no text layer it escalates automatically to the local docling backend, as does liteparse if you choose it. AI is opt-in only (--pdf-backend ai) and, if you still want to stay fully local, --ai ollama/llama3.2-vision works offline too."}},
-    {"@type": "Question", "name": "Do all PDFs require AI?", "acceptedAnswer": {"@type": "Answer", "text": "No — PDFs default to the pdftotext → docling ladder, never AI. Born-digital PDFs (papers, reports, invoices, contracts) parse cleanly with pdftotext; scanned or image-only PDFs escalate automatically to the local docling backend. AI (--pdf-backend ai) is opt-in only, for cases where you want cloud-model quality on handwriting or complex multimodal layouts."}},
-    {"@type": "Question", "name": "Is the output format the same as Office parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. PDF parsing produces the same Block ADT (headings, text, tables, images) as DOCX, XLSX, and PPTX parsing. Your downstream code handles all formats identically."}},
-    {"@type": "Question", "name": "How much does PDF parsing cost?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse charges per API request. The AI provider costs are separate — you use your own API key. Gemini Flash is the most cost-effective option for high-volume PDF processing."}}
+    {"@type": "Question", "name": "How do I parse a PDF to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "From the CLI, choose a PDF reader with --pdf-backend: pdftotext (the default: plain text, no AI), poppler (the same poppler tools, used to recover headings, lists, tables and the page header and footer), docling (IBM Docling, a layout model that runs on your machine, also the automatic fallback for scanned pages, ~5× faster than AI), liteparse (run-llama LiteParse, headings detected from font size), or ai (Gemini, Claude, OpenAI or Ollama, used only when you ask for it). All return the same structured JSON."}},
+    {"@type": "Question", "name": "Which PDF backends are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Four backends run on your machine without AI: pdftotext (the default: plain text, the most complete text), poppler (structure from the same poppler tools, no Python packages), Docling (a layout model, and the automatic fallback when pdftotext finds no text, as in a scan) and LiteParse (text plus headings detected from font size). The AI backend is used only when you pass --pdf-backend ai: Gemini, Claude, OpenAI or Ollama. Switch with --pdf-backend pdftotext|poppler|docling|liteparse|ai. Your code does not change."}},
+    {"@type": "Question", "name": "Can I parse PDFs locally without sending data to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and that is the default, including for scanned PDFs. --pdf-backend pdftotext needs no API key and runs offline. When it finds no text, the PDF goes automatically to the docling backend on your machine, and the same happens if you choose liteparse. AI is used only when you pass --pdf-backend ai, and --ai ollama/llama3.2-vision keeps that on your machine too."}},
+    {"@type": "Question", "name": "Do all PDFs require AI?", "acceptedAnswer": {"@type": "Answer", "text": "No. By default a PDF is read by pdftotext, then by docling if no text is found, and never by AI. PDFs that contain real text (papers, reports, invoices, contracts) parse cleanly with pdftotext. Scanned or image-only PDFs go automatically to the docling backend on your machine. AI is used only when you pass --pdf-backend ai, for handwriting or pages that mix text and images."}},
+    {"@type": "Question", "name": "Is the output format the same as Office parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. You get the same blocks (headings, text, tables, images) as for DOCX, XLSX and PPTX, whichever backend or provider you use. Your code handles every format the same way."}},
+    {"@type": "Question", "name": "How much does PDF parsing cost?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse charges per API request. AI provider costs are separate, paid on your own key. Gemini Flash costs least at high volume. Ollama is free and runs on your hardware."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Formats", "item": "https://www.sunholo.com/ailang-parse/docs.html#formats"}, {"@type": "ListItem", "position": 4, "name": "PDF", "item": "https://www.sunholo.com/ailang-parse/pdf-parsing.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -207,9 +211,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#formats">Formats</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">PDF</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">PDF Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Parse PDFs to structured JSON with local deterministic backends (<strong>pdftotext by default</strong>, Docling, LiteParse) &mdash; no API key, no cost &mdash; or plug in AI (Gemini, Claude, OpenAI, Ollama) for scanned pages. Same typed blocks as Office formats, no vendor lock-in. Converting back? See <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a>.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse PDFs to structured JSON on your own machine, with <strong>pdftotext by default</strong> or Docling or LiteParse, and no API key or cost. For scanned pages, add an AI model (Gemini, Claude, OpenAI, Ollama). The output has the same shape as for Office files. Converting back? See <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a>.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own file in the Workbench &rarr;</a></div>
   </section>
 
@@ -231,80 +239,77 @@
 
     <main class="dp-docs-content">
 
-      <h2 id="problem">PDFs Have No Semantic Structure</h2>
-      <p>A PDF encodes where to draw glyphs on a page. It has no concept of "heading", "paragraph", or "table cell". Extracting document structure from PDF requires visual understanding &mdash; recognizing that larger bold text at the top of a page is a heading, that aligned columns of text form a table, that reading order flows left-to-right then top-to-bottom.</p>
+      <h2 id="problem">A PDF Does Not Store Structure</h2>
+      <p>A PDF records where to draw each character on a page. It has no "heading", "paragraph" or "table cell". The structure has to be worked out from the layout: large bold text at the top of a page is a heading, aligned columns of text are a table, and reading order runs left to right, then top to bottom.</p>
 
-      <p>AILANG Parse delegates this visual understanding to the AI provider of your choice, then normalizes the output into the same Block ADT used for <a href="docx-parsing.html">DOCX</a>, <a href="xlsx-parsing.html">XLSX</a>, and <a href="pptx-parsing.html">PPTX</a> parsing. Your downstream code handles all formats identically.</p>
+      <p>AILANG Parse does this with the PDF reader you choose, a local one by default or an AI model. It returns the same kinds of block as for <a href="docx-parsing.html">DOCX</a>, <a href="xlsx-parsing.html">XLSX</a> and <a href="pptx-parsing.html">PPTX</a>, so your code handles every format the same way.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>If your source document is a DOCX that was converted to PDF, parse the DOCX directly instead. You'll get track changes, comments, merged cells, and metadata that the PDF lost. <a href="vs-pdf-conversion.html">See why DOCX &gt; PDF for parsing</a>.</div>
+        <div>If the PDF was made from a DOCX and you still have the DOCX, parse that. You get the track changes, comments, merged cells and metadata that the PDF lost. <a href="vs-pdf-conversion.html">See why parsing the DOCX beats parsing the PDF</a>.</div>
       </div>
 
       <h2 id="how-it-works">How It Works</h2>
-      <p>AILANG Parse sends the PDF to the configured AI provider with a structured extraction prompt. The AI returns content in a normalized format, which AILANG Parse validates and converts into typed blocks. The result is the same Block ADT &mdash; headings, text, tables, images &mdash; regardless of which AI provider performed the extraction.</p>
+      <p>With the AI backend, AILANG Parse sends the PDF to the AI provider you choose and asks for the content in a fixed structure. It checks the reply and converts it into blocks. You get the same blocks (headings, text, tables, images) whichever provider read the PDF.</p>
 
-      <p>Switch providers with a single flag. No code changes, no output format differences.</p>
+      <p>Switch providers with one flag. Your code and the output format stay the same.</p>
 
 <pre><code class="language-bash"># Gemini (fastest, most cost-effective)
-ailang run --entry main --caps IO,FS,Env,AI --ai gemini-3.5-flash-lite \
-  docparse/main.ail document.pdf
+docparse document.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Claude
-ailang run --entry main --caps IO,FS,Env,AI --ai claude-sonnet-4-5-20250514 \
-  docparse/main.ail document.pdf
+docparse document.pdf --pdf-backend ai --ai claude-sonnet-4-5-20250514
 
 # Ollama (fully local)
-ailang run --entry main --caps IO,FS,Env,AI --ai ollama/llama3.2-vision \
-  docparse/main.ail document.pdf</code></pre>
+docparse document.pdf --pdf-backend ai --ai ollama/llama3.2-vision</code></pre>
 
       <h2 id="providers">AI Providers</h2>
 
       <div class="dp-provider-grid">
         <div class="dp-provider-card">
           <h4>Gemini</h4>
-          <p>Best for high-volume processing. <code>gemini-3.5-flash-lite</code> offers the fastest response times and lowest per-page cost. Use a higher-reasoning Gemini model for complex documents with dense tables or multi-column layouts.</p>
+          <p>Best for high volumes. <code>gemini-3.5-flash-lite</code> has the fastest responses and the lowest cost per page. Use a larger Gemini model for documents with dense tables or several columns.</p>
         </div>
         <div class="dp-provider-card">
           <h4>Claude</h4>
-          <p>Strong on nuanced document understanding. <code>claude-sonnet-4-5-20250514</code> excels at extracting meaning from complex layouts and academic papers. Good for documents where context matters.</p>
+          <p>Strong on documents where context matters. <code>claude-sonnet-4-5-20250514</code> does well on complex layouts and academic papers.</p>
         </div>
         <div class="dp-provider-card">
           <h4>OpenAI</h4>
-          <p>Solid general-purpose extraction. <code>gpt-4o</code> handles standard business documents well. Use when your team already has an OpenAI API key and wants a single provider.</p>
+          <p>A good general choice. <code>gpt-4o</code> handles standard business documents well. Use it when your team already has an OpenAI API key and wants one provider.</p>
         </div>
         <div class="dp-provider-card">
           <h4>Ollama (Local)</h4>
-          <p>Fully local processing &mdash; no data leaves your machine. Use any vision-capable model: <code>llama3.2-vision</code>, <code>llava</code>, etc. Ideal for sensitive documents, air-gapped environments, or cost-zero development.</p>
+          <p>Runs entirely on your machine, so no data leaves it. Use any model that can read images, such as <code>llama3.2-vision</code> or <code>llava</code>. Suited to sensitive documents, networks with no internet access, and development at no cost.</p>
         </div>
       </div>
 
-      <h2 id="local-backends">Local Deterministic Backends <span class="dp-pill dp-pill-new">v0.19+</span></h2>
-      <p>The CLI dispatches PDF parsing to local backends instead of an AI provider. <strong>As of v0.21.0, <code>pdftotext</code> is the default</strong> — born-digital PDFs parse deterministically with no API key, no cost, and no network call. Four local options ship today:</p>
+      <h2 id="local-backends">Local Backends, No AI</h2>
+      <p>A backend is the PDF reader AILANG Parse uses. The CLI reads PDFs on your machine unless you ask for AI. <strong><code>pdftotext</code> is the default</strong>: a PDF that contains real text (not a scan) parses with no API key, no cost and no network call, and the same file always gives the same result. There are four local backends:</p>
 
       <div class="dp-provider-grid">
         <div class="dp-provider-card">
           <h4>pdftotext <span class="dp-pill dp-pill-new">default</span></h4>
-          <p>poppler <code>pdftotext -layout</code> — deterministic plain-text extraction with layout preserved. Highest character recall (the most complete text of any backend), instant, free, offline, zero Python ML dependencies. The reliable choice for born-digital documents — including the Mindworking-generated PDFs behind most Danish real-estate contracts (købsaftaler, salgsopstillinger, tilstandsrapporter). Returns no text for scanned/image-only PDFs, which then fail loudly pointing you at <code>--pdf-backend ai</code>.</p>
+          <p>Plain text with the page layout kept, from poppler&rsquo;s <code>pdftotext -layout</code>. It returns the most complete text of any backend, and it is instant, free and offline, with no Python packages. The reliable choice for PDFs that contain real text, such as contracts, reports and invoices. It finds no text in a scanned or image-only PDF.</p>
         </div>
         <div class="dp-provider-card">
           <h4>poppler <span class="dp-pill">structure, no installs</span></h4>
-          <p>The same poppler tools as <code>pdftotext</code>, read for structure: headings ranked by font size, bulleted and numbered lists, tables from aligned columns, paragraphs reflowed, bold and links kept, and the running header, footer and page numbers separated from the body. Deterministic, instant, offline, no Python packages. The backend to use when converting a PDF back into a Word document.</p>
+          <p>The same poppler tools as <code>pdftotext</code>, used to recover structure: headings ranked by font size, bulleted and numbered lists, tables from aligned columns, paragraphs rejoined across line breaks, bold and links kept, and the page header, footer and page numbers separated from the body. Instant, offline, the same result every run, and no Python packages. Use it when converting a PDF back into a Word document.</p>
         </div>
         <div class="dp-provider-card">
           <h4>Docling <span class="dp-pill">structural</span></h4>
-          <p>IBM Docling — local layout analysis with table detection and reading order. Matches AI structural quality on real arxiv papers, runs in ~28&nbsp;s on a 100&nbsp;KB paper (vs ~127&nbsp;s for Gemini Flash). Free, MIT, no API key. Best when you want the headings/tables structure without an AI round-trip.</p>
+          <p>IBM Docling analyses the page layout on your machine, with table detection and reading order. On arXiv papers its structure matches the AI backend, and a 100&nbsp;KB paper takes ~28&nbsp;s (~127&nbsp;s with Gemini Flash). Free, MIT-licensed, no API key. Best when you want headings and tables without calling an AI service.</p>
         </div>
         <div class="dp-provider-card">
           <h4>LiteParse <span class="dp-pill">fastest</span></h4>
-          <p>run-llama LiteParse — text extraction with bounding boxes, no layout model. End-to-end ~3&nbsp;s on a 100&nbsp;KB PDF via the CLI (the raw parse is under a second, the rest is AILANG startup + Python import). Heading detection via a font-size heuristic. Best for RAG ingest, search indexing, or anywhere raw text is what you need.</p>
+          <p>LiteParse from run-llama extracts text with its position on the page, without a layout model. A 100&nbsp;KB PDF takes ~3&nbsp;s from the CLI, of which the parse itself is under a second. Headings are detected from font size. Best for RAG ingestion, search indexing, or anywhere plain text is what you need.</p>
         </div>
       </div>
 
-      <p>Both run as Python subprocesses dispatched from inside AILANG via the <a href="https://github.com/sunholo-data/ailang-packages/tree/main/packages/external-backend"><code>sunholo/external_backend</code></a> package, with typed error handling and stderr capture. Selection is per call — there's no global config to drift.</p>
+      <p>Docling and LiteParse are Python packages that AILANG Parse runs for you. You choose the backend on each call, so there is no global setting to keep track of.</p>
 
       <h3 id="local-install">Install</h3>
-      <p>The default <code>pdftotext</code> backend and the <code>poppler</code> backend need only poppler (<code>brew install poppler</code> / <code>apt install poppler-utils</code>), which ships with most systems. The <code>ai</code> backend works out of the box. <code>docling</code> and <code>liteparse</code> need their Python package installed in the same Python environment your CLI uses:</p>
+      <p>The default <code>pdftotext</code> backend and the <code>poppler</code> backend need only poppler (<code>brew install poppler</code> / <code>apt install poppler-utils</code>), which most systems already have. The <code>ai</code> backend needs nothing installed. <code>docling</code> and <code>liteparse</code> need their Python package installed in the Python environment your CLI uses:</p>
 
 <pre><code class="language-bash"># Docling (see <a href="https://github.com/docling-project/docling">docling-project/docling</a> for the full install matrix)
 uv pip install docling
@@ -315,45 +320,45 @@ uv pip install liteparse
 # Or both
 uv pip install docling liteparse</code></pre>
 
-      <p>No service to run, no daemon to start — both adapters launch on demand when you pass <code>--pdf-backend docling</code> or <code>--pdf-backend liteparse</code>. If the package isn't installed, the adapter exits non-zero and AILANG surfaces a typed <code>NonZeroExit</code> error with the underlying <code>ImportError</code> captured from stderr.</p>
+      <p>There is no service to start. Each one runs when you pass <code>--pdf-backend docling</code> or <code>--pdf-backend liteparse</code>. If the package is not installed, the parse fails with a <code>NonZeroExit</code> error that includes Python&rsquo;s <code>ImportError</code> message.</p>
 
       <h3 id="local-usage">Usage</h3>
 
 <pre><code class="language-bash"># pdftotext — default, deterministic, no API key, most complete text
-./bin/docparse paper.pdf
+docparse paper.pdf
 
 # poppler — headings, lists, tables, header/footer; same poppler, no installs
-./bin/docparse report.pdf --pdf-backend poppler
+docparse report.pdf --pdf-backend poppler
 
 # PDF back to Word, styled by your own template
-./bin/docparse report.pdf --pdf-backend poppler --convert report.docx \
+docparse report.pdf --pdf-backend poppler --convert report.docx \
   --reference-doc house-style.docx
 
 # AI — opt-in only; scanned/image-only PDFs escalate to local docling by default
-./bin/docparse scan.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
+docparse scan.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Docling — local, structural, ~5× faster than Gemini
-./bin/docparse paper.pdf --pdf-backend docling
+docparse paper.pdf --pdf-backend docling
 
 # LiteParse — local, font-size heading inference
-./bin/docparse paper.pdf --pdf-backend liteparse</code></pre>
+docparse paper.pdf --pdf-backend liteparse</code></pre>
 
-      <p>Converting a PDF back into a Word document or a deck in your own template? See <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a> for live examples and which backend to pick.</p>
+      <p>Converting a PDF back into a Word document or a deck in your own template? <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a> have examples you can open and say which backend to pick.</p>
 
-      <p>Output is the same <code>Block</code> ADT — your pipeline code doesn't change when you switch backend. When <code>--pdf-backend</code> is anything other than <code>ai</code>, AILANG drops the <code>AI</code> capability and swaps in <code>Process</code> — no API key required, no network calls.</p>
+      <p>Every backend returns the same kinds of block, so your code does not change when you switch. With any backend other than <code>ai</code>, no API key is needed and no network call is made.</p>
 
       <h3 id="backend-choice">Which Backend to Pick</h3>
 
       <div class="dp-comparison-table">
         <table>
           <thead>
-            <tr><th>Need</th><th>Recommended Backend</th><th>Why</th></tr>
+            <tr><th>You have</th><th>Use</th><th>Why</th></tr>
           </thead>
           <tbody>
-            <tr><td>Born-digital PDF, faithful complete text (the common case)</td><td><code>pdftotext</code> (default)</td><td>Most complete character recall; deterministic; instant; free; offline; no Python deps.</td></tr>
-            <tr><td>Scanned PDFs, handwriting, complex multimodal</td><td><code>ai</code> (Gemini / Claude / Ollama)</td><td>Only AI handles non-text content; deterministic backends can't read scans.</td></tr>
-            <tr><td>Born-digital PDF, want ML structure (tables, reading order)</td><td><code>docling</code></td><td>Structural quality on par with AI; ~5× faster; free; offline.</td></tr>
-            <tr><td>RAG ingest where you want font-size heading inference</td><td><code>liteparse</code></td><td>Sub-second per PDF; lightweight heading detection; trivial cost.</td></tr>
+            <tr><td>A PDF that contains real text, and you want all of it (the common case)</td><td><code>pdftotext</code> (default)</td><td>The most complete text; the same result every run; instant; free; offline; no Python packages.</td></tr>
+            <tr><td>Scanned PDFs, handwriting, pages that mix text and images</td><td><code>docling</code> (chosen automatically for scans), or <code>ai</code> (Gemini / Claude / Ollama)</td><td>Both read content that is not stored as text. <code>pdftotext</code>, <code>poppler</code> and <code>liteparse</code> cannot read scans.</td></tr>
+            <tr><td>A PDF that contains real text, and you want tables and reading order from a layout model</td><td><code>docling</code></td><td>Structure on a par with AI; ~5× faster; free; offline.</td></tr>
+            <tr><td>RAG ingestion where headings detected from font size are enough</td><td><code>liteparse</code></td><td>Under a second per PDF; simple heading detection; negligible cost.</td></tr>
           </tbody>
         </table>
       </div>
@@ -363,31 +368,31 @@ uv pip install docling liteparse</code></pre>
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
           <h4>Headings &amp; Text</h4>
-          <p>The AI identifies heading hierarchy and body text from visual cues (font size, weight, position). Extracted as <code>heading</code> and <code>text</code> blocks with inferred levels.</p>
+          <p>The AI tells headings from body text by font size, weight and position. They are returned as <code>heading</code> blocks, with a level, and <code>text</code> blocks.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Tables</h4>
-          <p>Visually aligned data is extracted as structured tables with headers and rows. Multi-page tables spanning page breaks are handled by the AI's visual context window.</p>
+          <p>Data laid out in aligned columns is returned as a table with headers and rows. The AI also follows a table that continues across a page break.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Images &amp; Figures</h4>
-          <p>Embedded images are identified with their captions and alt text. The AI describes figure content for downstream indexing or accessibility.</p>
+          <p>Images are returned with their captions and alt text. The AI describes what each figure shows, for search indexing or accessibility.</p>
         </div>
         <div class="dp-feature-card">
-          <h4>Uniform Output</h4>
-          <p>Regardless of AI provider, the output is the same Block ADT: <code>heading</code>, <code>text</code>, <code>table</code>, <code>image</code>. Your pipeline code never changes when you switch providers.</p>
+          <h4>Same Output Everywhere</h4>
+          <p>Whichever AI provider you use, the output is the same set of blocks: <code>heading</code>, <code>text</code>, <code>table</code>, <code>image</code>. Your code does not change when you switch providers.</p>
         </div>
       </div>
 
-      <h2 id="annotations">Highlights &amp; Comments <span class="dp-pill dp-pill-new">v0.25+</span></h2>
+      <h2 id="annotations">Highlights &amp; Comments</h2>
 
-      <p>A reviewed PDF carries a second document alongside the text: the highlights, sticky notes and free-text comments a reader left on it. These live in the PDF's <code>/Annots</code> object layer, which <em>no</em> text-extraction backend reports. Extract the text alone and every review comment silently disappears.</p>
+      <p>A reviewed PDF holds more than its text: the highlights, sticky notes and typed <a href="comments.html">comments</a> a reader left on it. A PDF stores these as annotations (<code>/Annots</code>), separately from the text. Extract the text alone and every review comment is missing.</p>
 
-      <p>AILANG Parse reads that layer on <strong>every</strong> backend &mdash; including the default <code>pdftotext</code> &mdash; and emits each annotation as a <code>CommentBlock</code>, the same shape DOCX, XLSX and PPTX comments use. One consumer handles review comments across every format.</p>
+      <p>AILANG Parse reads the annotations with <strong>every</strong> backend, including the default <code>pdftotext</code>. Each one is returned as a comment block, in the same shape as DOCX, XLSX and PPTX comments, so the same code handles review comments from every format.</p>
 
-      <h3>Anchored to the text they cover</h3>
+      <h3 id="attached-to-the-text-they-cover">Attached to the text they cover</h3>
 
-      <p>A highlight that reports only a page number tells you little. Each annotation's <code>/QuadPoints</code> rectangles are intersected with word positions on that page, so a highlight reports the text it actually covers:</p>
+      <p>A highlight that reports only a page number tells you little. AILANG Parse compares the highlighted area (<code>/QuadPoints</code>) with the positions of the words on the page, so a highlight reports the text it covers:</p>
 
 <pre><code class="language-json">{
   "type": "comment",
@@ -398,82 +403,84 @@ uv pip install docling liteparse</code></pre>
   "anchored": true
 }</code></pre>
 
-      <p>Membership is decided by word <strong>centre</strong>, not by any overlap. A highlight drawn slightly wide clips its neighbour, and an any-overlap rule would pull in a word the reviewer never marked &mdash; a confidently wrong anchor is worse than an honest unanchored one. Where word positions are unavailable, annotations degrade to unanchored rather than being dropped or guessed.</p>
+      <p>A word counts as highlighted when its <strong>centre</strong> is inside the highlight. A highlight drawn slightly wide touches the next word, and counting every touched word would include words the reviewer never marked. When word positions are not available, the annotation is still returned, with <code>anchored</code> set to false and no guessed text.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Compressed object streams.</strong> Some PDFs store annotations inside an <code>/ObjStm</code>, where neither this scanner nor <code>pdftotext</code>'s annotation view can see them. Rather than return silence, the parser reports what it can see plus a <code>mayBeIncomplete</code> flag, and the CLI says so &mdash; an incomplete list you know about beats a complete-looking one you don't.</div>
+        <div><strong>Compressed PDFs.</strong> Some PDFs store annotations in a compressed form (an <code>/ObjStm</code> object stream) that AILANG Parse cannot read. In that case it returns the annotations it found and sets a <code>mayBeIncomplete</code> flag, and the CLI tells you, so you know the list may be missing some.</div>
       </div>
 
       <h2 id="local-processing">Local Processing with Ollama</h2>
-      <p>For sensitive documents that can't leave your network, use Ollama as the AI backend. Install Ollama, pull a vision-capable model, and point AILANG Parse at it. Zero cloud calls.</p>
+      <p>For sensitive documents that must not leave your network, use Ollama as the AI provider. Install Ollama, download a model that can read images, and name it with <code>--ai</code>. Nothing is sent to a cloud service.</p>
 
 <pre><code class="language-bash"># Install Ollama and pull a vision model
 ollama pull llama3.2-vision
 
 # Parse PDF fully locally
-ailang run --entry main --caps IO,FS,Env,AI \
-  --ai ollama/llama3.2-vision \
-  docparse/main.ail confidential-report.pdf</code></pre>
+docparse confidential-report.pdf --pdf-backend ai --ai ollama/llama3.2-vision</code></pre>
 
-      <p>The output format is identical to cloud providers. You can develop locally with Ollama and deploy to production with Gemini or Claude &mdash; same code, same output structure.</p>
+      <p>The output format is the same as with a cloud provider. You can develop with Ollama and run production on Gemini or Claude with the same code.</p>
 
       <h2 id="use-cases">Use Cases</h2>
 
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
           <h4>Scanned Document Digitization</h4>
-          <p>OCR-level extraction from scanned PDFs using AI vision. The model reads handwritten notes, stamp marks, and degraded print that rule-based OCR struggles with. Output is structured JSON, not raw text.</p>
+          <p>Read scanned PDFs with an AI model. It reads handwritten notes, stamps and faded print that traditional OCR struggles with. The output is structured JSON, not plain text.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Invoice Processing</h4>
-          <p>Extract line items, totals, dates, and vendor details from PDF invoices. The AI identifies table structure from visual layout, handling the wide variation in invoice formats across vendors.</p>
+          <p>Extract line items, totals, dates and vendor details from PDF invoices. The AI works out the table from the layout, which copes with the many invoice formats vendors use.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Academic Paper Ingestion</h4>
-          <p>Parse research papers into structured sections: abstract, methodology, results, references. The AI handles multi-column layouts, figure captions, and equation blocks that trip up rule-based PDF parsers.</p>
+          <p>Parse research papers into sections: abstract, methodology, results, references. The AI handles multi-column layouts, figure captions and equations, which rule-based PDF parsers often get wrong.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Legacy Archive Migration</h4>
-          <p>Convert PDF archives to structured JSON for database ingestion or knowledge base population. Process thousands of documents with batch mode, using the most cost-effective AI provider for your volume.</p>
+          <p>Convert a PDF archive to structured JSON for a database or a knowledge base. Process thousands of documents in batch mode, with the AI provider that costs least at your volume.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Compliance Document Review</h4>
-          <p>Parse regulatory filings, audit reports, and policy documents from PDF into structured blocks. Feed to an LLM for automated compliance checking, clause extraction, or cross-document comparison.</p>
+          <p>Parse regulatory filings, audit reports and policy documents from PDF into structured blocks. Give them to an LLM to check compliance, extract clauses or compare documents.</p>
         </div>
         <div class="dp-usecase-card">
-          <h4>Air-Gapped Environments</h4>
-          <p>Process classified or restricted documents entirely on-premises using Ollama. No internet connection required after initial model download. The same Block ADT output integrates with your existing pipeline.</p>
+          <h4>Networks With No Internet Access</h4>
+          <p>Process classified or restricted documents entirely on your own hardware with Ollama. No internet connection is needed once the model is downloaded. The output is the same, so it fits your existing pipeline.</p>
         </div>
       </div>
 
       <h2 id="try-it">Try It</h2>
 
-      <h3>CLI</h3>
+      <h3 id="cli">CLI</h3>
       <pre><code class="language-bash"># Parse with Gemini (set GOOGLE_API_KEY)
-GOOGLE_API_KEY="your-key" ailang run --entry main \
-  --caps IO,FS,Env,AI --ai gemini-3.5-flash-lite \
-  docparse/main.ail report.pdf
+GOOGLE_API_KEY="your-key" docparse report.pdf --pdf-backend ai --ai gemini-3.5-flash-lite
 
 # Parse with Ollama (fully local)
-ailang run --entry main --caps IO,FS,Env,AI \
-  --ai ollama/llama3.2-vision \
-  docparse/main.ail report.pdf</code></pre>
+docparse report.pdf --pdf-backend ai --ai ollama/llama3.2-vision</code></pre>
 
-      <h3>API</h3>
+      <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"YOUR_API_KEY","ai":"gemini-3.5-flash-lite"}'</code></pre>
+  -d '{"filepath":"sample_pdf","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'
 
-      <h3>Python SDK</h3>
+# A scanned PDF: upload it and choose the AI backend
+curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "filepath=@scan.pdf" \
+  -F "pdfBackend=ai" \
+  -F "outputFormat=markdown"</code></pre>
+
+      <h3 id="python-sdk">Python SDK</h3>
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
 
-# Parse with AI provider
-result = client.parse("report.pdf", output_format="json", ai="gemini-3.5-flash-lite")
+# Text PDFs need no AI. For a scan, choose the AI backend.
+result = client.parse_file("report.pdf")
+scan = client.parse_file("scan.pdf", pdf_backend="ai")
 
-# Same Block ADT as Office formats
+# The same blocks as Office formats
 for block in result.blocks:
     if block.type == "table":
         print(f"Table: {len(block.rows)} rows")
@@ -491,29 +498,60 @@ for block in result.blocks:
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I parse a PDF to JSON?</summary>
-          <div class="dp-faq-answer"><p>Send the PDF to the <a href="api.html">AILANG Parse API</a> with an AI provider specified. The AI extracts content into the same structured JSON used for <a href="docx-parsing.html">Office formats</a>.</p></div>
+          <div class="dp-faq-answer"><p>From the CLI, choose a PDF reader with <code>--pdf-backend</code>: <code>pdftotext</code> (the default, plain text, no AI), <code>poppler</code>, <code>docling</code>, <code>liteparse</code> or <code>ai</code>. Over the <a href="api.html">AILANG Parse API</a>, send the PDF. Either way you get the same structured JSON as for <a href="docx-parsing.html">Office formats</a>.</p></div>
         </details>
         <details>
           <summary>Which AI providers are supported for PDF parsing?</summary>
-          <div class="dp-faq-answer"><p>Gemini (gemini-3.5-flash-lite), Claude (claude-sonnet-4-5-20250514), OpenAI (gpt-4o), and Ollama for fully local processing. Switch with a single flag.</p></div>
+          <div class="dp-faq-answer"><p>Gemini (gemini-3.5-flash-lite), Claude (claude-sonnet-4-5-20250514), OpenAI (gpt-4o), and Ollama, which runs on your own machine. Switch with one flag.</p></div>
         </details>
         <details>
           <summary>Can I parse PDFs locally without sending data to the cloud?</summary>
-          <div class="dp-faq-answer"><p>Yes, for every PDF — that's the default. pdftotext handles born-digital PDFs; docling handles scanned/image-only ones automatically, no flag needed. If you choose the AI backend anyway, Ollama keeps it local too: set <code>--ai ollama/llama3.2-vision</code> or any vision-capable model. No data leaves your machine either way.</p></div>
+          <div class="dp-faq-answer"><p>Yes, and that is the default for every PDF. pdftotext handles PDFs that contain real text. Scanned and image-only PDFs go to docling automatically, with no flag. If you choose the AI backend, Ollama keeps that local too: set <code>--ai ollama/llama3.2-vision</code> or any model that can read images. Either way, no data leaves your machine.</p></div>
         </details>
         <details>
           <summary>Why would PDF parsing ever use AI?</summary>
-          <div class="dp-faq-answer"><p>PDFs encode glyph positions, not document structure, so extracting headings, tables, and reading order needs either a layout model (docling, the local default for scans) or, for handwriting and complex multimodal layouts, visual understanding from a cloud AI model — opt-in via <code>--pdf-backend ai</code>, never automatic. For structured source files, <a href="docx-parsing.html">parse the DOCX directly</a>.</p></div>
+          <div class="dp-faq-answer"><p>A PDF records where each character is drawn, not the document&rsquo;s structure. Recovering headings, tables and reading order from a scan needs a layout model (docling, used automatically for scans). Handwriting and pages that mix text and images need an AI model, which is used only when you pass <code>--pdf-backend ai</code>. When you have the original file, <a href="docx-parsing.html">parse the DOCX</a>.</p></div>
         </details>
         <details>
           <summary>Is the output format the same as Office parsing?</summary>
-          <div class="dp-faq-answer"><p>Yes. Same Block ADT (headings, text, tables, images) regardless of provider. Your downstream code handles all formats identically.</p></div>
+          <div class="dp-faq-answer"><p>Yes. You get the same blocks (headings, text, tables, images) as for DOCX, XLSX and PPTX, whichever backend or provider you use. Your code handles every format the same way.</p></div>
         </details>
         <details>
           <summary>How much does PDF parsing cost?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse charges per API request. AI provider costs are separate (your own key). Gemini Flash is the most cost-effective for volume. Ollama is free (your hardware).</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse charges per API request. AI provider costs are separate, paid on your own key. Gemini Flash costs least at high volume. Ollama is free and runs on your hardware.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <nav class="dp-format-switch" aria-label="Other formats"><span class="dp-format-switch-label">Other formats</span><a class="dp-chip" href="docx-parsing.html">DOCX</a><a class="dp-chip" href="xlsx-parsing.html">XLSX</a><a class="dp-chip" href="pptx-parsing.html">PPTX</a><span class="dp-chip dp-chip--here" aria-current="page">PDF</span><a class="dp-chip" href="html-parsing.html">HTML</a><a class="dp-chip" href="email-parsing.html">Email</a><a class="dp-chip" href="odt-parsing.html">ODT</a><a class="dp-chip" href="ods-parsing.html">ODS</a><a class="dp-chip" href="odp-parsing.html">ODP</a><a class="dp-chip" href="epub-parsing.html">EPUB</a><a class="dp-chip" href="latex-parsing.html">LaTeX</a><a class="dp-chip" href="rtf-parsing.html">RTF</a></nav>
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="pdf-to-word.html" class="dp-doc-card" data-find="pdf to word an editable word document from a pdf, styled by your own template. pdf to docx convert editable">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">PDF to Word</div>
+          <div class="dp-doc-card-desc">An editable Word document from a PDF, styled by your own template.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="pdf-to-powerpoint.html" class="dp-doc-card" data-find="pdf to powerpoint editable slides from a pdf deck, in your own template. pdf to pptx slides deck convert">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">PDF to PowerPoint</div>
+          <div class="dp-doc-card-desc">Editable slides from a PDF deck, in your own template.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="vs-pdf-conversion.html" class="dp-doc-card" data-find="direct parsing vs pdf conversion what is lost when a word file is turned into a pdf before parsing. docx vs pdf conversion ocr">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Direct parsing vs PDF conversion</div>
+          <div class="dp-doc-card-desc">What is lost when a Word file is turned into a PDF before parsing.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

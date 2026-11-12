@@ -19,7 +19,9 @@
  * The inline text in the element is a fallback shown if the fetch fails.
  *
  * Path resolution rules:
- *   - Top-level keys (`total_files`, `run_date`, `schema_version`) → summary[key]
+ *   - Top-level keys (`total_files`, `tool_count`, `format_count`, `run_date`) → summary[key]
+ *   - `<adapter>.version` and `<adapter>.run_date` are the tested version and the day it ran.
+ *     Never type either into a page.
  *   - Anything else → adapter id is the first segment, then dotted path into the adapter object
  *   - Numeric values in [0, 1] are auto-formatted as percentages (one decimal)
  *   - Values >= 1 are displayed as integers

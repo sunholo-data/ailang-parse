@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PDF to Word, in Your Own Template — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Turn a PDF back into an editable Word document styled by your own template. Reading the PDF is the lossy step; AILANG Parse recovers headings, lists, tables and running headers from any PDF backend, then writes the DOCX deterministically.">
+<meta name="description" content="Turn a PDF back into an editable Word document in your own template. AILANG Parse recovers the headings, lists, tables, pictures and page headers from the PDF and writes a real DOCX.">
 <meta property="og:title" content="PDF to Word, in Your Own Template — AILANG Parse">
-<meta property="og:description" content="Reading the PDF is the lossy step. See what AILANG Parse recovers from it, with the source PDF and the generated Word documents embedded side by side.">
+<meta property="og:description" content="See what AILANG Parse recovers from a PDF, with the source PDF and the generated Word documents side by side.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/pdf-to-word.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -434,20 +434,28 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "Is converting a PDF back to Word lossless?", "acceptedAnswer": {"@type": "Answer", "text": "No conversion from PDF can be: a PDF records where glyphs are drawn, not which paragraph is a heading, a list item or a table cell. Reading the PDF is the lossy step. AILANG Parse recovers that structure from layout (font size, alignment, repetition across pages) and then writes the Word document deterministically, so nothing further is lost after the read."}},
-    {"@type": "Question", "name": "Do I need a Word template?", "acceptedAnswer": {"@type": "Answer", "text": "No, but it gives the best result. Without one you get a clean, editable DOCX with real headings, lists, tables and the PDF's running header and footer. With --reference-doc, the styles, fonts, page setup, header and footer come from your own .docx, so the output looks like your house style rather than an approximation of the PDF."}},
-    {"@type": "Question", "name": "Which PDF backend should I use?", "acceptedAnswer": {"@type": "Answer", "text": "For born-digital PDFs such as reports, proposals and contracts, use --pdf-backend poppler: it recovers headings, lists and tables with no extra installs. Use docling for scanned PDFs and complex layouts, and ai for handwriting or visually complex pages. Every backend feeds the same pipeline, including header/footer handling and the template."}},
-    {"@type": "Question", "name": "Does PDF to Word work on scanned PDFs?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use --pdf-backend docling, which runs OCR locally; without a backend flag, a PDF with no text layer is sent to docling automatically. The result goes through the same conversion and template as any other PDF."}},
-    {"@type": "Question", "name": "Is my PDF uploaded anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Not with the CLI and the local backends (pdftotext, poppler, docling, liteparse): parsing and Word generation run on your machine. Only --pdf-backend ai sends pages to the AI provider you configure, and it is never chosen automatically."}}
+    {"@type": "Question", "name": "Is converting a PDF back to Word lossless?", "acceptedAnswer": {"@type": "Answer", "text": "No conversion from PDF can be. A PDF records where characters are drawn, not which line is a heading, a list item or a table cell. AILANG Parse recovers that structure from the layout (font size, alignment, lines that repeat on every page). It then writes the Word document exactly from what it read, so nothing more is lost."}},
+    {"@type": "Question", "name": "Do I need a Word template?", "acceptedAnswer": {"@type": "Answer", "text": "No, but it gives the best result. Without one you get a clean, editable DOCX with real headings, lists, tables and the PDF's header and footer. With --reference-doc, the styles, fonts, page setup, header and footer come from your own .docx, so the output is in your house style."}},
+    {"@type": "Question", "name": "Which PDF backend should I use?", "acceptedAnswer": {"@type": "Answer", "text": "For PDFs that contain real text, such as reports, proposals and contracts, use --pdf-backend poppler. It recovers headings, lists and tables and needs nothing but poppler. Use docling for scanned PDFs and complex layouts, and ai for handwriting or visually complex pages. Whichever you choose, the header and footer handling and the template work the same way."}},
+    {"@type": "Question", "name": "Does PDF to Word work on scanned PDFs?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use --pdf-backend docling, which runs OCR on your machine. Without a backend flag, a PDF with no text in it is sent to docling automatically. The conversion and the template then work as for any other PDF."}},
+    {"@type": "Question", "name": "Is my PDF uploaded anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Not with the CLI and the local backends (pdftotext, poppler, docling, liteparse): the PDF is read and the Word file is written on your machine. Only --pdf-backend ai sends pages to the AI provider you choose, and it is used only when you ask for it."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Convert", "item": "https://www.sunholo.com/ailang-parse/docs.html#convert"}, {"@type": "ListItem", "position": 4, "name": "PDF to Word", "item": "https://www.sunholo.com/ailang-parse/pdf-to-word.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
 <div id="header-mount"></div>
 
 <div class="page">
+
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#convert">Convert</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">PDF to Word</span></nav>
+<!-- /nav:crumbs -->
 
   <section class="hero" style="margin-bottom:24px">
     <h1 class="reveal">PDF to <span class="dp-accent">Word</span></h1>
@@ -489,9 +497,9 @@
       <nav>
         <a href="#templates" class="active">Switch Templates</a>
         <a href="#example">Live Example</a>
-        <a href="#lossy-step">The Lossy Step</a>
+        <a href="#lossy-step">Where Information Is Lost</a>
         <a href="#structure">Recovered Structure</a>
-        <a href="#recover">What We Recover</a>
+        <a href="#recover">What Is Recovered</a>
         <a href="#limits">What a PDF Can&rsquo;t Give Back</a>
         <a href="#backends">Choosing a Backend</a>
         <a href="#run">Run It</a>
@@ -502,7 +510,7 @@
     <main class="dp-docs-content">
 
       <h2 id="templates">Switch templates with one flag</h2>
-      <p>AILANG Parse reads the PDF once; the look is just the <code>--reference-doc</code> you pass. Here is the same page &mdash; recovered from one PDF &mdash; in five looks. Nothing else in the command changes.</p>
+      <p>The look of the Word document comes from the template you pass with <code>--reference-doc</code>. Here is the same page, recovered from one PDF, in five looks. Nothing else in the command changes.</p>
       <p class="p2w-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5a2 2 0 0 1 4 0v5"/><path d="M13 10V8a2 2 0 0 1 4 0v4"/><path d="M17 11a2 2 0 0 1 4 0v3a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3l-2.5-4a2 2 0 0 1 3.3-2.2L9 13"/></svg>Click a page to open it next to the source PDF, just below.</p>
 
       <div class="p2w-gallery">
@@ -548,10 +556,10 @@
         </figure>
       </div>
 
-      <p>Any <code>.docx</code> works as a template: your letterhead, last year&rsquo;s report, a document from your design team. AILANG Parse takes its styles, fonts, page setup, header and footer, and binds tables to its table style &mdash; the one named &ldquo;Table&rdquo;, else the first it defines, or the one you name with <code>--table-style</code>. The Classic, Modern and Minimal references above are three small files you can download and edit in Word; the viewer also has the AILANG design under two more brands, Holosun and Sunholo.</p>
+      <p>Any <code>.docx</code> works as a template: your letterhead, last year&rsquo;s report, a document from your design team. AILANG Parse takes its styles, fonts, page setup, header and footer. Tables use the template&rsquo;s table style: the one named &ldquo;Table&rdquo;, or else the first it defines, or the one you name with <code>--table-style</code>. The Classic, Modern and Minimal templates above are three small files you can download and edit in Word. The viewer below also has the AILANG design for two more brands, Holosun and Sunholo.</p>
 
       <h2 id="example">Live example</h2>
-      <p>A real PDF on the left, the Word document generated from it on the right. Pick a template to restyle it.</p>
+      <p>A real PDF on the left, the Word document generated from it on the right. Pick a template to change the look.</p>
 
       <div class="p2w-viewer" id="viewer">
         <div class="p2w-viewer-bar">
@@ -577,7 +585,7 @@
           </div>
         </div>
       </div>
-      <p style="font-size:12px;color:var(--text-secondary)">The Word document is shown rendered by LibreOffice, since browsers can&rsquo;t display <code>.docx</code>. No inline PDFs in your browser? The screenshots below are the same pages.</p>
+      <p style="font-size:12px;color:var(--text-secondary)">Browsers can&rsquo;t display <code>.docx</code>, so the Word document is shown as LibreOffice renders it. If your browser does not show PDFs in the page, the screenshots below are the same pages.</p>
 
       <div class="p2w-shots">
         <figure class="p2w-shot">
@@ -601,16 +609,16 @@
         </figure>
         <figure class="p2w-shot">
           <img src="assets/pdf-to-word/ailang-style-p1.jpg" alt="Page 1 as a generated Word document in the AILANG template, with bold labels kept" width="745" height="1053" loading="lazy">
-          <figcaption><b>Word, AILANG template.</b> The illustration is carried over in its place; bold labels (&ldquo;Prepared by:&rdquo;) stay bold; the PDF&rsquo;s running header and footer are not repeated in the body.</figcaption>
+          <figcaption><b>Word, AILANG template.</b> The illustration is in its place, bold labels (&ldquo;Prepared by:&rdquo;) stay bold, and the PDF&rsquo;s page header and footer are not repeated in the body.</figcaption>
         </figure>
         <figure class="p2w-shot">
           <img src="assets/pdf-to-word/no-template-p1.jpg" alt="The generated Word document with no template: plain styles, with the PDF's header and footer as real Word header and footer" width="745" height="1053" loading="lazy">
-          <figcaption><b>Word, no template.</b> Plain styles, and the PDF&rsquo;s own header and footer become real Word header and footer parts.</figcaption>
+          <figcaption><b>Word, no template.</b> Plain styles, and the PDF&rsquo;s own header and footer become a real Word header and footer.</figcaption>
         </figure>
       </div>
 
-      <h2 id="lossy-step">The lossy step is reading the PDF</h2>
-      <p>A Word document knows that a line is a heading, that three lines are a list, that a grid is a table and that a line at the top of every page is a running header. Producing a PDF throws all of that away and keeps only where each glyph is drawn. Getting a Word document back means working that structure out again from the page.</p>
+      <h2 id="lossy-step">Information is lost when the PDF is made</h2>
+      <p>A Word document knows that a line is a heading, that three lines are a list, that a grid is a table and that a line at the top of every page is a page header. Saving it as a PDF discards all of that and keeps only where each character is drawn. Getting a Word document back means working the structure out again from the page.</p>
 
       <div class="p2w-flow">
         <div class="p2w-step">
@@ -619,11 +627,11 @@
         </div>
         <div class="p2w-step">
           <div class="p2w-step-name">PDF</div>
-          <div class="p2w-step-note">Positioned glyphs and fonts. The structure is gone.</div>
+          <div class="p2w-step-note">Characters at positions, and fonts. The structure is gone.</div>
         </div>
         <div class="p2w-step p2w-step--loss">
           <div class="p2w-step-name">Read the PDF</div>
-          <div class="p2w-step-note">Recover structure from layout. Any PDF backend.</div>
+          <div class="p2w-step-note">Recover the structure from the layout, with the PDF reader you choose.</div>
         </div>
         <div class="p2w-step p2w-step--ours">
           <div class="p2w-step-name">Blocks</div>
@@ -631,18 +639,18 @@
         </div>
         <div class="p2w-step p2w-step--ours">
           <div class="p2w-step-name">Word, your style</div>
-          <div class="p2w-step-note">Written directly as OOXML, styled by your template.</div>
+          <div class="p2w-step-note">A real Word file, styled by your template.</div>
         </div>
       </div>
       <div class="p2w-legend">
-        <span class="l-loss">where information is lost, and recovered</span>
-        <span class="l-ours">deterministic: nothing further is lost</span>
+        <span class="l-loss">where the lost structure is recovered</span>
+        <span class="l-ours">exact: nothing further is lost</span>
       </div>
 
-      <p>Everything after the read is exact: the same blocks always produce the same document, and <a href="document-generation.html#reference-doc">the template merge</a> carries your styles, fonts, page setup, header and footer across byte for byte. So the quality of a PDF-to-Word conversion is decided at one place, the read, and that is where AILANG Parse spends its effort.</p>
+      <p>Everything after the read is exact. The same blocks always produce the same document, and <a href="document-generation.html#reference-doc">your template</a> supplies its styles, fonts, page setup, header and footer unchanged. So the quality of a PDF-to-Word conversion depends on one step: how well the PDF is read.</p>
 
       <h2 id="structure">The recovered structure</h2>
-      <p>This is what the read produced &mdash; loaded below from the actual parse output of the PDF above, not retyped. Every Word document on this page was generated from exactly these blocks.</p>
+      <p>This is what AILANG Parse read from the PDF above, loaded from the actual output file. Every Word document on this page was generated from these blocks.</p>
       <div class="p2w-struct" id="p2w-struct" aria-live="polite">Loading the parse output&hellip;</div>
       <div class="p2w-downloads">
         <a href="assets/pdf-to-word/proposal.blocks.json">proposal.blocks.json</a>
@@ -651,54 +659,54 @@
         <a href="assets/pdf-to-word/proposal-no-template.docx" download>proposal-no-template.docx</a>
       </div>
 
-      <h2 id="recover">What we recover</h2>
+      <h2 id="recover">What is recovered</h2>
       <table class="dp-config-table">
         <thead>
           <tr><th>In the Word document</th><th>How it is read back from the PDF</th></tr>
         </thead>
         <tbody>
-          <tr><td>Heading levels</td><td>Font sizes ranked into tiers relative to the body text; bold rows slightly larger than the body count too. Numbered headings (&ldquo;1. Overview&rdquo;) stay headings, not lists.</td></tr>
-          <tr><td>Paragraphs</td><td>Lines rejoined into paragraphs using the document&rsquo;s own line spacing, so the PDF&rsquo;s hard line breaks disappear and paragraph breaks stay.</td></tr>
-          <tr><td>Lists</td><td>Bullet and number markers, with nesting from indentation. Ordered lists stay ordered.</td></tr>
-          <tr><td>Tables</td><td>Rows whose cells snap to shared columns. Wrapped cell text is folded back into its cell; stacked tables with different columns stay separate; prose set in two columns is read column by column, not mistaken for a table.</td></tr>
-          <tr><td>Running header, footer, page numbers</td><td>Lines that recur at the top or bottom of the pages become one header and one footer. With a template, yours replaces them; without one, they become the document&rsquo;s header and footer.</td></tr>
-          <tr><td>Pictures</td><td>Illustrations, photos and figures in the body are carried into the document in their place, at the size they had on the page. Logos in the running header and footer are left to the template, which brings its own.</td></tr>
-          <tr><td>Bold, italic, links</td><td>Kept as inline formatting on the words that carried it.</td></tr>
-          <tr><td>Text</td><td>Taken from the layer that reads glyphs a PDF draws twice as one letter, so &ldquo;The&rdquo; does not come back as &ldquo;Thee&rdquo;.</td></tr>
+          <tr><td>Heading levels</td><td>From font size, compared with the body text. Larger sizes become higher levels, and a bold line slightly larger than the body counts as a heading too. Numbered headings (&ldquo;1. Overview&rdquo;) stay headings, not lists.</td></tr>
+          <tr><td>Paragraphs</td><td>Lines are rejoined into paragraphs using the document&rsquo;s own line spacing. The PDF&rsquo;s line breaks go and the paragraph breaks stay.</td></tr>
+          <tr><td>Lists</td><td>From bullet and number markers, with nesting from indentation. Numbered lists stay numbered.</td></tr>
+          <tr><td>Tables</td><td>From rows whose cells line up in shared columns. Wrapped text is put back in its cell. Tables stacked above each other with different columns stay separate. Text set in two columns is read column by column and not mistaken for a table.</td></tr>
+          <tr><td>Page header, footer, page numbers</td><td>Lines that repeat at the top or bottom of the pages become one header and one footer. With a template, the template&rsquo;s header and footer replace them. Without one, they become the Word document&rsquo;s header and footer.</td></tr>
+          <tr><td>Pictures</td><td>Illustrations, photos and figures in the body are placed where they were, at the size they had on the page. Logos in the page header and footer are not copied, because the template has its own.</td></tr>
+          <tr><td>Bold, italic, links</td><td>Kept on the words that had them.</td></tr>
+          <tr><td>Text</td><td>Some PDFs draw a letter twice. It is read as one letter, so &ldquo;The&rdquo; does not come back as &ldquo;Thee&rdquo;.</td></tr>
         </tbody>
       </table>
 
       <h2 id="limits">What a PDF can&rsquo;t give back</h2>
-      <p>Some of what was in the original never reached the PDF, and no reader can recover it:</p>
+      <p>Some of what was in the original is not in the PDF, so it cannot be recovered:</p>
       <ul>
         <li><b>Style names.</b> The PDF shows a 20pt bold line, not &ldquo;Heading 2&rdquo;. Levels are relative: if a document&rsquo;s only heading was a Heading 2, it comes back as the top level.</li>
-        <li><b>Page breaks you inserted.</b> A PDF records where pages ended, not why. The Word document repaginates in its template.</li>
-        <li><b>Formatting that looks like nothing.</b> If headings were set in the same size and weight as body text, the PDF carries no sign they were headings.</li>
-        <li><b>Merged cells</b> are recovered as best the column layout allows; a cell spanning several columns may come back split.</li>
-        <li><b>Header and footer logos.</b> A logo in the running header or footer is not copied into the Word header: the template supplies its own. Without a template, the header carries the text only.</li>
+        <li><b>Page breaks you inserted.</b> A PDF records where pages ended, not why. The Word document flows its pages again in the template&rsquo;s page size.</li>
+        <li><b>Headings that look like body text.</b> If headings had the same size and weight as body text, nothing in the PDF shows they were headings.</li>
+        <li><b>Merged cells</b> are recovered as far as the column layout allows. A cell spanning several columns may come back split.</li>
+        <li><b>Header and footer logos.</b> A logo in the page header or footer is not copied into the Word header, because the template has its own. Without a template, the header has the text only.</li>
         <li><b>Charts and diagrams as pictures.</b> A chart comes back as an image of the chart, not as editable chart data.</li>
       </ul>
-      <p>When you still have the original <code>.docx</code>, <a href="docx-parsing.html">parse that instead</a> &mdash; it is lossless. This page is for when the PDF is all you have.</p>
+      <p>When you still have the original <code>.docx</code>, <a href="docx-parsing.html">parse that instead</a>: its structure is still in the file. This page is for when the PDF is all you have.</p>
 
       <h2 id="backends">Choosing a backend</h2>
-      <p>Different PDFs need different readers, and AILANG Parse works with all of them. Whichever backend reads the PDF, its output goes through the same pipeline: page furniture is separated from the body, the blocks are written as OOXML, and your template is applied. Changing backend is one flag.</p>
+      <p>A backend is the PDF reader AILANG Parse uses. Different PDFs need different readers, and you pick one with <code>--pdf-backend</code>. Whichever you pick, the steps after it are the same: the page header and footer are separated from the body, the Word file is written, and your template is applied.</p>
 
       <table class="dp-config-table">
         <thead>
           <tr><th>Backend</th><th>Use it for</th><th>Needs</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>poppler</code></td><td>Born-digital PDFs &mdash; reports, proposals, contracts, anything exported from Word. Headings, lists, tables, pictures, header and footer. The usual choice for PDF to Word.</td><td>poppler only</td></tr>
-          <tr><td><code>docling</code></td><td>Scanned PDFs (OCR) and complex layouts; carries pictures too. Without a <code>--pdf-backend</code> flag, a PDF with no text layer is sent here automatically.</td><td>local Python package</td></tr>
-          <tr><td><code>pdftotext</code></td><td>The default for parsing: the most complete plain text, layout kept as it is. For conversion it still gets a proper header and footer; text only, no pictures.</td><td>poppler only</td></tr>
-          <tr><td><code>liteparse</code></td><td>Fast text with headings from font size, when tables and pictures don&rsquo;t matter.</td><td>local Python package</td></tr>
-          <tr><td><code>ai</code></td><td>Handwriting and visually complex pages. Opt-in, never automatic.</td><td>an AI provider key</td></tr>
+          <tr><td><code>poppler</code></td><td>PDFs that contain real text: reports, proposals, contracts, anything exported from Word. Gives headings, lists, tables, pictures, header and footer. The usual choice for PDF to Word.</td><td>poppler only</td></tr>
+          <tr><td><code>docling</code></td><td>Scanned PDFs (it runs OCR) and complex layouts. Keeps pictures too. Without a <code>--pdf-backend</code> flag, a PDF with no text in it is sent here automatically.</td><td>a Python package on your machine</td></tr>
+          <tr><td><code>pdftotext</code></td><td>The default for parsing: the most complete plain text, with the layout kept as it is. In a conversion the header and footer are still separated out. Text only, no pictures.</td><td>poppler only</td></tr>
+          <tr><td><code>liteparse</code></td><td>Fast text with headings from font size, when tables and pictures don&rsquo;t matter.</td><td>a Python package on your machine</td></tr>
+          <tr><td><code>ai</code></td><td>Handwriting and visually complex pages. Used only when you ask for it.</td><td>an AI provider key</td></tr>
         </tbody>
       </table>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Not sure? Start with <code>--pdf-backend poppler</code>. If it reports that the PDF has no text, it is a scan: use <code>--pdf-backend docling</code>, or leave the flag off and the default reader moves to <code>docling</code> by itself. Try another backend when a document looks wrong &mdash; the rest of the command stays the same. For how the backends compare on parsing, see <a href="pdf-parsing.html#local-backends">PDF Parsing</a>.</div>
+        <div>Not sure? Start with <code>--pdf-backend poppler</code>. If it reports that the PDF has no text, the PDF is a scan: use <code>--pdf-backend docling</code>, or leave the flag off and <code>docling</code> is used automatically. If a document looks wrong, try another backend. The rest of the command stays the same. <a href="pdf-parsing.html#local-backends">PDF Parsing</a> compares the backends.</div>
       </div>
 
       <h2 id="run">Run it</h2>
@@ -717,31 +725,61 @@ docparse report.pdf --pdf-backend poppler --convert report.docx
 # A scanned PDF: same command, read with OCR
 docparse scan.pdf --pdf-backend docling --convert scan.docx --reference-doc house-style.docx</code></pre>
 
-      <p>The same read also converts to ODT, HTML, Markdown and Quarto &mdash; change the extension after <code>--convert</code>. For slides, see <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a>. Any existing <code>.docx</code> works as a reference doc; the <a href="templates.html">proposal templates</a> are a worked example. Install the CLI from the <a href="docs.html">docs</a>.</p>
+      <p>The same command also converts to ODT, HTML, Markdown and Quarto: change the extension after <code>--convert</code>. For slides, see <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a>. Any existing <code>.docx</code> works as a template, and the <a href="templates.html">proposal templates</a> are a ready example. Install the CLI from the <a href="docs.html">docs</a>.</p>
 
       <div class="dp-faq" id="faq">
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>Is converting a PDF back to Word lossless?</summary>
-          <div class="dp-faq-answer"><p>No conversion from PDF can be: a PDF records where glyphs are drawn, not which paragraph is a heading, a list item or a table cell. Reading the PDF is the lossy step. AILANG Parse recovers that structure from layout and then writes the Word document deterministically, so nothing further is lost after the read.</p></div>
+          <div class="dp-faq-answer"><p>No conversion from PDF can be. A PDF records where characters are drawn, not which line is a heading, a list item or a table cell. AILANG Parse recovers that structure from the layout (font size, alignment, lines that repeat on every page). It then writes the Word document exactly from what it read, so nothing more is lost.</p></div>
         </details>
         <details>
           <summary>Do I need a Word template?</summary>
-          <div class="dp-faq-answer"><p>No, but it gives the best result. Without one you get a clean, editable DOCX with real headings, lists, tables and the PDF&rsquo;s header and footer. With <code>--reference-doc</code>, styles, fonts, page setup, header and footer come from your own <code>.docx</code>.</p></div>
+          <div class="dp-faq-answer"><p>No, but it gives the best result. Without one you get a clean, editable DOCX with real headings, lists, tables and the PDF&rsquo;s header and footer. With <code>--reference-doc</code>, the styles, fonts, page setup, header and footer come from your own <code>.docx</code>, so the output is in your house style.</p></div>
         </details>
         <details>
           <summary>Which PDF backend should I use?</summary>
-          <div class="dp-faq-answer"><p><code>poppler</code> for born-digital PDFs, <code>docling</code> for scans and complex layouts, <code>ai</code> for handwriting. They all feed the same pipeline, so switching is one flag. See <a href="#backends">Choosing a backend</a>.</p></div>
+          <div class="dp-faq-answer"><p><code>poppler</code> for PDFs that contain real text, <code>docling</code> for scans and complex layouts, <code>ai</code> for handwriting. Switching is one flag, and the rest of the conversion is the same. See <a href="#backends">Choosing a backend</a>.</p></div>
         </details>
         <details>
           <summary>Does it work on scanned PDFs?</summary>
-          <div class="dp-faq-answer"><p>Yes. Use <code>--pdf-backend docling</code>, which runs OCR locally; without a backend flag, a PDF with no text layer is sent to <code>docling</code> automatically. The result goes through the same conversion and template as any other PDF.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Use <code>--pdf-backend docling</code>, which runs OCR on your machine. Without a backend flag, a PDF with no text in it is sent to <code>docling</code> automatically. The conversion and the template then work as for any other PDF.</p></div>
         </details>
         <details>
           <summary>Is my PDF uploaded anywhere?</summary>
-          <div class="dp-faq-answer"><p>Not with the CLI and the local backends: parsing and Word generation run on your machine. Only <code>--pdf-backend ai</code> sends pages to the AI provider you configure, and it is never chosen automatically.</p></div>
+          <div class="dp-faq-answer"><p>Not with the CLI and the local backends (<code>pdftotext</code>, <code>poppler</code>, <code>docling</code>, <code>liteparse</code>): the PDF is read and the Word file is written on your machine. Only <code>--pdf-backend ai</code> sends pages to the AI provider you choose, and it is used only when you ask for it.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="pdf-to-powerpoint.html" class="dp-doc-card" data-find="pdf to powerpoint editable slides from a pdf deck, in your own template. pdf to pptx slides deck convert">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">PDF to PowerPoint</div>
+          <div class="dp-doc-card-desc">Editable slides from a PDF deck, in your own template.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="templates.html" class="dp-doc-card" data-find="word proposal templates free editable templates, and how to style generated documents with your own. reference doc template branded docx proposal">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Word proposal templates</div>
+          <div class="dp-doc-card-desc">Free editable templates, and how to style generated documents with your own.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="pdf-parsing.html" class="dp-doc-card" data-find="pdf pdfs with real text are read with no ai and no key. ai for scans, when you ask for it. pdf parsing ocr scanned pdftotext">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">PDF</div>
+          <div class="dp-doc-card-desc">PDFs with real text are read with no AI and no key. AI for scans, when you ask for it.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

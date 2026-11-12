@@ -12,7 +12,7 @@ Run OfficeDocBench, regenerate `summary.json` (the single source of truth for be
 OfficeDocBench scores live in **one place**: `benchmarks/officedocbench/results/summary.json`. From there they propagate to the static site via `docs/data/officedocbench-summary.json` (a mirror) and the `data-bench` injector at `docs/js/bench-data.js`. If you re-run the benchmark without using this skill, you risk:
 
 - Forgetting to regenerate the summary mirror in `docs/`
-- Forgetting that JSON-LD / SEO copy on a handful of pages **cannot** use `data-bench` and must be hand-edited if the AILANG Parse composite changes
+- Leaving meta descriptions and FAQ structured data on old numbers (they cannot hold a `data-bench` span, so `docs/scripts/sync-bench-fallbacks.py` stamps them from `docs/data/bench-text.json` and from the visible FAQ)
 - Not catching score regressions before committing
 
 This skill bundles all of those steps so they happen together.
@@ -21,14 +21,14 @@ This skill bundles all of those steps so they happen together.
 
 | When | Use script | What it does |
 |---|---|---|
-| Changed parser code, want to re-verify everything | `scripts/full.sh` | Full eval across all 8 adapters (~1 minute), regenerates summary, syncs docs |
+| Changed parser code, want to re-verify everything | `scripts/full.sh` | Full eval across every parser (~1 minute), regenerates summary, syncs docs |
 | Changed parser code, only care about AILANG Parse | `scripts/quick.sh` | docparse-only eval (~10 sec), regenerates summary, syncs docs |
 | Just want to refresh `summary.json` from existing per-adapter results without re-parsing | `scripts/refresh-summary.sh` | Re-aggregates the existing `results/<adapter>/results.json` files into a fresh `summary.json` + mirror |
 
 After any of these, the script automatically:
 
-1. Diffs the new AILANG Parse composite score against the previous run
-2. If the composite changed, prints a checklist of static-copy files that need manual updates (since they can't use `data-bench`)
+1. Runs `docs/scripts/sync-bench-fallbacks.py`, which rewrites every figure, tool version, count and run date on the site from the summary
+2. Diffs the new AILANG Parse composite score against the previous run
 3. Reports the headline numbers so you can sanity-check before committing
 
 ## Quick start
@@ -76,15 +76,22 @@ docs/index.html, benchmarks.html, why.html, vs-pdf-conversion.html,
 docs/migrate-from-unstructured.html, pricing.html             ← all auto-update
 ```
 
-Pages **not** wired to `data-bench` (they need literal text for SEO/JSON-LD):
-`docs/docx-parsing.html`, `docs/pptx-parsing.html`, `docs/xlsx-parsing.html`,
-`docs/tables.html`, `docs/integrations.html`. The skill prints a reminder
-to update these by hand whenever the AILANG Parse composite score changes.
+## No figure is typed by hand
+
+`python3 docs/scripts/sync-bench-fallbacks.py --check` runs in CI and fails when:
+
+- a `data-bench` fallback, a stamped meta description or a generated FAQ answer differs from the summary;
+- any page has a score such as `98.1%`, or a `PR #123` reference, outside a `data-bench` element. A block that is meant to stay fixed (past runs, another benchmark) goes between `<!-- bench:static why -->` and `<!-- /bench:static -->`;
+- the published AILANG Parse entry was not measured on the version in `ailang.toml`. **A release that bumps the version must run `scripts/quick.sh` and commit the results.** Run it on a released `ailang` binary and a clean tree, and never set `DOCPARSE_BENCHMARK_LABEL` for a published run: the site shows the version string as recorded.
+
+To put a figure in a meta description, add a template to `docs/data/bench-text.json` with `{adapter.path}` placeholders. To put one in FAQ structured data, write it as a `data-bench` span in the visible answer; the JSON-LD answer to the same question is generated from it.
+
+Public pages say what was measured, on which version, and when, all from the summary. How a run came about (PR numbers, candidates, rescoring) stays in `benchmarks/officedocbench/results/`.
 
 ## Available scripts
 
 ### `scripts/full.sh`
-Full benchmark across all 8 adapters. Run after any non-trivial parser change. Takes ~1 minute. Requires the competitor adapters to be installed (`uv pip install -e '.[competitors]'`) — script warns if missing.
+Full benchmark across every parser. Run after any non-trivial parser change. Takes ~1 minute. Requires the competitor adapters to be installed (`uv pip install -e '.[competitors]'`) — script warns if missing.
 
 ### `scripts/quick.sh`
 docparse-only run. Use during fast iteration when you only care about whether AILANG Parse regressed. Other adapters in `summary.json` are left at their previous values, so the site still shows a consistent snapshot.
@@ -95,15 +102,15 @@ Re-aggregates existing per-adapter `results.json` files into a fresh `summary.js
 All three scripts call `scripts/_postcheck.sh` at the end to:
 1. Print the current AILANG Parse composite + adjusted + coverage
 2. Compare against the previous run (saved as `.previous-summary.json`)
-3. If composite changed, list the static-copy files that need a manual sweep
+3. Point at `docs/scripts/sync-bench-fallbacks.py`, which has already rewritten the site figures
 
 ## After running
 
-The scripts will tell you what (if anything) needs manual attention. Common follow-ups:
+Common follow-ups:
 
 - **No score change** → nothing to do, you're done
 - **Composite changed within ±0.5%** → likely just rounding from a re-parse; commit the updated summary
-- **Composite changed by more than 0.5%** → investigate (regression or improvement?), then update the static-copy SEO pages listed by the post-check, commit everything together
+- **Composite changed by more than 0.5%** → investigate (regression or improvement?), then commit the summary and the synced pages together
 - **Coverage dropped** → a parser is now failing on files it used to handle. Check `results/docparse/results.json` for files with `status: ERROR`
 
 ## Resources

@@ -187,12 +187,16 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "What exactly is lost when converting DOCX to PDF before parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Converting DOCX to PDF destroys five categories of data: (1) track changes and revision history, (2) merge attributes on table cells, (3) comments and annotations with author metadata, (4) semantic heading levels (PDF has no heading concept), and (5) document metadata like custom properties. AILANG Parse preserves all five by reading Office XML directly."}},
-    {"@type": "Question", "name": "Why do wrapper-based parsers have quality problems with DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Most wrapper-based parsers use libraries designed for display rendering, not structural extraction. They miss track changes, flatten merged cells, and drop comments. On OfficeDocBench, the next-best alternative scores 68.5% composite (64.6% coverage-adjusted) versus AILANG Parse's 98.1% with 100% format coverage."}},
-    {"@type": "Question", "name": "Is PDF parsing always worse than direct DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "When the original source is a DOCX, direct XML parsing is strictly better — more accurate, no per-page billing, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends for PDFs."}}
+    {"@type": "Question", "name": "What exactly is lost when converting DOCX to PDF before parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Five kinds of data are lost: (1) track changes and revision history, (2) which table cells are merged, (3) comments and their authors, (4) heading levels, which PDF does not record, and (5) document metadata such as custom properties. AILANG Parse keeps all five by reading the Office XML directly."}},
+    {"@type": "Question", "name": "Why do wrapper-based parsers have quality problems with DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Many of them return a document’s text and leave out its structure: tracked changes, comments, notes and list nesting. AILANG Parse scores 98.1% on OfficeDocBench and reads every file. The table above shows what Unstructured, Docling and MarkItDown returned on the same files."}},
+    {"@type": "Question", "name": "Is PDF parsing always worse than direct DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "When the source is a DOCX, reading the XML directly is better: it is more accurate, has no per-page billing, and keeps metadata that PDF conversion drops. If your source is a PDF or a scan, you need an ML-based PDF parser. AILANG Parse does both: it reads Office XML directly and uses an AI model of your choice (Gemini, Claude, Ollama) for PDFs."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Compare", "item": "https://www.sunholo.com/ailang-parse/docs.html#compare"}, {"@type": "ListItem", "position": 4, "name": "Direct parsing vs PDF conversion", "item": "https://www.sunholo.com/ailang-parse/vs-pdf-conversion.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -200,9 +204,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#compare">Compare</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Direct parsing vs PDF conversion</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">Your DOCX is <span class="dp-accent">already structured data.</span><br>Why are you destroying it?</h1>
-    <p class="subtitle reveal reveal-delay-1">Every tool that converts Office documents to PDF before parsing throws away the very structure you need.</p>
+    <p class="subtitle reveal reveal-delay-1">Tools that convert Office documents to PDF before parsing throw away the structure you need.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -211,7 +219,7 @@
     <aside class="dp-docs-sidebar reveal">
       <nav>
         <a href="#roundtrip" class="active">The Round-Trip Problem</a>
-        <a href="#comparison">Feature Comparison</a>
+        <a href="#comparison">What Each Parser Keeps</a>
         <a href="#alongside">Using Alongside Other Tools</a>
         <a href="#try">Try It</a>
         <a href="#faq">FAQ</a>
@@ -221,9 +229,11 @@
     <!-- Content -->
     <main class="dp-docs-content">
 
+      <p class="dp-lede"><strong>Parsing a Word file directly vs converting it to PDF first.</strong> Many document pipelines turn <a href="docx-parsing.html">DOCX</a>, XLSX and PPTX files into PDF, then use a model to work out the layout again. That step discards track changes, comments and merged cells, and adds time and per-page cost. AILANG Parse reads the Office XML directly, so the structure reaches your RAG or AI application as the author wrote it.</p>
+
       <h2 id="roundtrip">The Round-Trip Problem</h2>
 
-      <p>A DOCX file is a ZIP archive of XML. Track changes, comments, merged cells, headers, footers, speaker notes &mdash; they are all right there in the markup, addressable and typed. Converting to PDF flattens this into a bitmap of positioned glyphs. Then an ML model has to <em>guess</em> the structure back from pixel positions.</p>
+      <p>An Office file is a ZIP archive of XML. Track changes, comments, merged cells, headers, footers and speaker notes are all in that XML, each one labelled. Converting to PDF reduces this to characters placed on a page. Then an ML model has to <em>guess</em> the structure from where things sit on the page.</p>
 
       <div class="dp-roundtrip">
         <div class="dp-roundtrip-path dp-roundtrip-path--bad">
@@ -236,13 +246,13 @@
               <div class="dp-roundtrip-arrow">&darr;</div>
             </div>
             <div class="dp-roundtrip-step">
-              <div class="dp-roundtrip-step-box dp-loss">Convert to PDF &mdash; structure destroyed</div>
+              <div class="dp-roundtrip-step-box dp-loss">Convert to PDF: structure lost</div>
             </div>
             <div class="dp-roundtrip-step">
               <div class="dp-roundtrip-arrow">&darr;</div>
             </div>
             <div class="dp-roundtrip-step">
-              <div class="dp-roundtrip-step-box dp-loss">ML model guesses layout from pixels</div>
+              <div class="dp-roundtrip-step-box dp-loss">ML model guesses the layout from the page</div>
             </div>
             <div class="dp-roundtrip-step">
               <div class="dp-roundtrip-arrow">&darr;</div>
@@ -262,7 +272,7 @@
               <div class="dp-roundtrip-arrow">&darr;</div>
             </div>
             <div class="dp-roundtrip-step">
-              <div class="dp-roundtrip-step-box dp-gain">Read XML directly &mdash; structure preserved</div>
+              <div class="dp-roundtrip-step-box dp-gain">Read the XML directly: structure kept</div>
             </div>
             <div class="dp-roundtrip-step">
               <div class="dp-roundtrip-arrow">&darr;</div>
@@ -274,112 +284,33 @@
         </div>
       </div>
 
-      <p>Two lossy steps versus zero. A categorically different approach.</p>
+      <p>Two lossy steps against none.</p>
 
 
-      <h2 id="comparison">Feature-by-Feature Comparison</h2>
-
-      <p>What each tool preserves when parsing a DOCX, PPTX, or XLSX file. Data from <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> (March 2026).</p>
-
-      <table class="dp-compare-table">
-        <thead>
-          <tr>
-            <th>Feature</th>
-            <th>AILANG Parse</th>
-            <th>Unstructured</th>
-            <th>Docling</th>
-            <th>MarkItDown</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Parsing method</td>
-            <td>Direct XML</td>
-            <td>PDF conversion + ML</td>
-            <td>PDF conversion + ML</td>
-            <td>mammoth / pandas wrappers</td>
-          </tr>
-          <tr>
-            <td>Track changes</td>
-            <td><span class="dp-check">&#10003;</span> Full (author, date, type)</td>
-            <td><span class="dp-cross">&#10005;</span> None</td>
-            <td><span class="dp-cross">&#10005;</span> None</td>
-            <td><span class="dp-cross">&#10005;</span> None</td>
-          </tr>
-          <tr>
-            <td>Merged cells</td>
-            <td><span class="dp-check">&#10003;</span> Structural (colspan)</td>
-            <td><span class="dp-cross">&#10005;</span> Flattened</td>
-            <td><span class="dp-cross">&#10005;</span> Flattened</td>
-            <td><span class="dp-cross">&#10005;</span> Flattened</td>
-          </tr>
-          <tr>
-            <td>Comments</td>
-            <td><span class="dp-check">&#10003;</span> Author-attributed</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-          </tr>
-          <tr>
-            <td>Headers / footers</td>
-            <td><span class="dp-check">&#10003;</span> Per-section</td>
-            <td><span class="dp-cross">&#10005;</span> Lost</td>
-            <td><span class="dp-cross">&#10005;</span> Lost</td>
-            <td><span class="dp-partial">~</span> Basic</td>
-          </tr>
-          <tr>
-            <td>Text boxes</td>
-            <td><span class="dp-check">&#10003;</span> Preserved</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-          </tr>
-          <tr>
-            <td>Speaker notes (PPTX)</td>
-            <td><span class="dp-check">&#10003;</span> Preserved</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-            <td><span class="dp-cross">&#10005;</span> Dropped</td>
-          </tr>
-          <tr>
-            <td>Runtime deps</td>
-            <td><span class="dp-check">&#10003;</span> None</td>
-            <td>Python + heavy libs</td>
-            <td>Python + PyTorch</td>
-            <td>Python + mammoth</td>
-          </tr>
-          <tr>
-            <td>Browser / WASM</td>
-            <td><span class="dp-check">&#10003;</span> Yes</td>
-            <td><span class="dp-cross">&#10005;</span> No</td>
-            <td><span class="dp-cross">&#10005;</span> No</td>
-            <td><span class="dp-cross">&#10005;</span> No</td>
-          </tr>
-          <tr>
-            <td>OfficeDocBench (composite)</td>
-            <td><span class="dp-score dp-score--high" data-bench="ailang_parse.composite">98.1%</span></td>
-            <td><span class="dp-score dp-score--low" data-bench="unstructured.composite">58.9%</span></td>
-            <td><span class="dp-score dp-score--low" data-bench="docling.composite">65.2%</span></td>
-            <td><span class="dp-score dp-score--low" data-bench="markitdown.composite">58.7%</span></td>
-          </tr>
-          <tr>
-            <td>Coverage-adjusted</td>
-            <td><span class="dp-score dp-score--high" data-bench="ailang_parse.adjusted">98.1%</span></td>
-            <td><span class="dp-score dp-score--low" data-bench="unstructured.adjusted">51.4%</span></td>
-            <td><span class="dp-score dp-score--low" data-bench="docling.adjusted">62.2%</span></td>
-            <td><span class="dp-score dp-score--low" data-bench="markitdown.adjusted">46.6%</span></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <p>Every row with a <span class="dp-cross">&#10005;</span> represents data that existed in the source file and was thrown away during conversion. For legal, compliance, and audit workflows, this is not acceptable.</p>
-
+      <h2 id="comparison">What Each Parser Keeps</h2>
+      <p>What four parsers return when they read a DOCX, PPTX or XLSX file.</p>
+      <div style="overflow-x:auto"><table class="dp-config-table">
+<thead><tr><th>What is kept</th><th>AILANG Parse</th><th>Unstructured</th><th>Docling</th><th>MarkItDown</th></tr></thead>
+<tbody>
+<tr><td>Tracked changes returned</td><td><span data-bench="ailang_parse.features.track_changes.detected">3</span> of <span data-bench="ailang_parse.features.track_changes.total">3</span> files</td><td><span data-bench="unstructured.features.track_changes.detected">0</span> of <span data-bench="unstructured.features.track_changes.total">3</span> files</td><td><span data-bench="docling.features.track_changes.detected">0</span> of <span data-bench="docling.features.track_changes.total">3</span> files</td><td><span data-bench="markitdown.features.track_changes.detected">0</span> of <span data-bench="markitdown.features.track_changes.total">3</span> files</td></tr>
+<tr><td>Comments returned</td><td><span data-bench="ailang_parse.features.comments.detected">2</span> of <span data-bench="ailang_parse.features.comments.total">2</span> files</td><td><span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files</td><td><span data-bench="docling.features.comments.detected">0</span> of <span data-bench="docling.features.comments.total">2</span> files</td><td><span data-bench="markitdown.features.comments.detected">0</span> of <span data-bench="markitdown.features.comments.total">2</span> files</td></tr>
+<tr><td>Headers and footers returned</td><td><span data-bench="ailang_parse.features.headers_footers.detected">3</span> of <span data-bench="ailang_parse.features.headers_footers.total">3</span> files</td><td><span data-bench="unstructured.features.headers_footers.detected">1</span> of <span data-bench="unstructured.features.headers_footers.total">2</span> files</td><td><span data-bench="docling.features.headers_footers.detected">0</span> of <span data-bench="docling.features.headers_footers.total">3</span> files</td><td><span data-bench="markitdown.features.headers_footers.detected">0</span> of <span data-bench="markitdown.features.headers_footers.total">2</span> files</td></tr>
+<tr><td>Text boxes returned</td><td><span data-bench="ailang_parse.features.text_boxes.detected">2</span> of <span data-bench="ailang_parse.features.text_boxes.total">2</span> files</td><td><span data-bench="unstructured.features.text_boxes.detected">0</span> of <span data-bench="unstructured.features.text_boxes.total">2</span> files</td><td><span data-bench="docling.features.text_boxes.detected">0</span> of <span data-bench="docling.features.text_boxes.total">2</span> files</td><td><span data-bench="markitdown.features.text_boxes.detected">0</span> of <span data-bench="markitdown.features.text_boxes.total">2</span> files</td></tr>
+<tr><td>Speaker notes returned</td><td><span data-bench="ailang_parse.features.speaker_notes.detected">1</span> of <span data-bench="ailang_parse.features.speaker_notes.total">1</span> files</td><td><span data-bench="unstructured.features.speaker_notes.detected">0</span> of <span data-bench="unstructured.features.speaker_notes.total">1</span> files</td><td><span data-bench="docling.features.speaker_notes.detected">0</span> of <span data-bench="docling.features.speaker_notes.total">1</span> files</td><td><span data-bench="markitdown.features.speaker_notes.detected">0</span> of <span data-bench="markitdown.features.speaker_notes.total">1</span> files</td></tr>
+<tr><td>Table cells: position, merges, formulas</td><td><span data-bench="ailang_parse.structural_features.table_cells.score">100.0%</span></td><td><span data-bench="unstructured.structural_features.table_cells.score">78.1%</span></td><td><span data-bench="docling.structural_features.table_cells.score">81.6%</span></td><td><span data-bench="markitdown.structural_features.table_cells.score">54.5%</span></td></tr>
+<tr><td>List type and depth</td><td><span data-bench="ailang_parse.structural_features.list_items.score">80.0%</span></td><td><span data-bench="unstructured.structural_features.list_items.score">0.0%</span></td><td><span data-bench="docling.structural_features.list_items.score">80.0%</span></td><td><span data-bench="markitdown.structural_features.list_items.score">29.2%</span></td></tr>
+<tr><td>Overall score, on the files it could read</td><td><span data-bench="ailang_parse.composite">98.1%</span></td><td><span data-bench="unstructured.composite">58.9%</span></td><td><span data-bench="docling.composite">65.2%</span></td><td><span data-bench="markitdown.composite">58.7%</span></td></tr>
+<tr><td>Overall score, counting unreadable files as zero</td><td><span data-bench="ailang_parse.adjusted">98.1%</span></td><td><span data-bench="unstructured.adjusted">51.4%</span></td><td><span data-bench="docling.adjusted">62.2%</span></td><td><span data-bench="markitdown.adjusted">46.6%</span></td></tr>
+</tbody>
+</table></div>
+      <p style="font-size:12px;color:var(--text-secondary)">Measured on <a href="benchmarks.html">OfficeDocBench</a>: how many of the test files containing each feature the parser returned it for, and the benchmark scores. Every figure is read from the published results.</p>
+      <p>A low figure is data that was in the source file and did not reach the output. Legal, compliance and audit work cannot afford that.</p>
 
       <h2 id="alongside">Using Alongside Other Tools</h2>
 
-      <p>PDFs need ML &mdash; there is no XML to read. But <strong>Office documents are not PDFs</strong>, and routing them through a PDF pipeline destroys information for no reason.</p>
+      <p>PDFs need ML, because there is no XML to read. But <strong>Office documents are not PDFs</strong>, and sending them through a PDF pipeline loses information for no reason.</p>
 
-      <p>The practical architecture: use AILANG Parse for Office formats where it reads the XML directly, and your preferred tool for PDFs where ML is genuinely needed.</p>
+      <p>In practice: use AILANG Parse for Office formats, where it reads the XML directly, and your preferred tool for PDFs, where ML is needed.</p>
 
       <div class="dp-enhancer-split">
         <div class="dp-enhancer-card dp-enhancer-card--before">
@@ -394,31 +325,31 @@ elements = partition(filename="report.docx")</code></pre>
         </div>
         <div class="dp-enhancer-card dp-enhancer-card--after">
           <h4>After: right tool for each format</h4>
-          <pre><code class="language-python">from ailang_parse import AilangParse
+          <pre><code class="language-python">from ailang_parse import DocParse
 from unstructured.partition.pdf import partition_pdf
 
 if filename.endswith(('.docx', '.pptx', '.xlsx')):
-    # Direct XML parse, no per-page billing, full structure
-    blocks = AilangParse().parse(filename)
+    # Read the Office file directly: structure kept, no per-page billing
+    blocks = DocParse(api_key="dp_YOUR_KEY").parse_file(filename).blocks
 else:
     # ML pipeline where it's actually needed
     elements = partition_pdf(filename)</code></pre>
         </div>
       </div>
 
-      <p>Keep your PDF pipeline exactly as it is. Add AILANG Parse for the formats where deterministic parsing produces categorically better results.</p>
+      <p>Keep your PDF pipeline as it is. Add AILANG Parse for Office formats, where reading the file directly gives better results.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         <div>
-          AILANG Parse also handles PDFs &mdash; by delegating to a pluggable AI model (Gemini, Claude, or local Ollama). If you want a single tool for everything, it works. The split approach is for teams that already have a PDF pipeline they are happy with.
+          AILANG Parse also reads PDFs: without AI when they contain text, and with an AI model you choose (Gemini, Claude or a local Ollama model) for scans. If you want one tool for everything, it works. The split approach is for teams that already have a PDF pipeline they are happy with.
         </div>
       </div>
 
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Already converted, and only the PDF is left? AILANG Parse can turn it back into an editable document in your own template &mdash; see <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a>. Reading the original is still lossless; reading the PDF is the best that can be recovered.</div>
+        <div>Already converted, and only the PDF is left? AILANG Parse can turn it back into an editable document in your own template. See <a href="pdf-to-word.html">PDF to Word</a> and <a href="pdf-to-powerpoint.html">PDF to PowerPoint</a>. The original file is still the better source: a PDF gives only what can be recovered.</div>
       </div>
 
       <h2 id="try">See for Yourself</h2>
@@ -434,17 +365,47 @@ else:
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>What exactly is lost when converting DOCX to PDF before parsing?</summary>
-          <div class="dp-faq-answer"><p>Converting DOCX to PDF destroys five categories of data: (1) <a href="track-changes.html">track changes</a> and revision history, (2) merge attributes on <a href="tables.html">table cells</a>, (3) <a href="comments.html">comments</a> and annotations with author metadata, (4) semantic heading levels (PDF has no heading concept), and (5) document metadata like custom properties. AILANG Parse preserves all five by reading Office XML directly.</p></div>
+          <div class="dp-faq-answer"><p>Five kinds of data are lost: (1) <a href="track-changes.html">track changes</a> and revision history, (2) which <a href="tables.html">table cells</a> are merged, (3) <a href="comments.html">comments</a> and their authors, (4) heading levels, which PDF does not record, and (5) document metadata such as custom properties. AILANG Parse keeps all five by reading the Office XML directly.</p></div>
         </details>
         <details>
           <summary>Why do wrapper-based parsers have quality problems with DOCX parsing?</summary>
-          <div class="dp-faq-answer"><p>Most wrapper-based parsers use libraries designed for display rendering, not structural extraction. They miss track changes, flatten merged cells, and drop comments. On <a href="benchmarks.html">OfficeDocBench</a>, the next-best alternative scores <span data-bench="kreuzberg.composite">68.5%</span> composite (<span data-bench="kreuzberg.adjusted">64.6%</span> coverage-adjusted) versus AILANG Parse's <span data-bench="ailang_parse.composite">98.1%</span> with 100% format coverage.</p></div>
+          <div class="dp-faq-answer"><p>Many of them return a document&rsquo;s text and leave out its structure: tracked changes, comments, notes and list nesting. AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> on OfficeDocBench and reads every file. The table above shows what Unstructured, Docling and MarkItDown returned on the same files.</p></div>
         </details>
         <details>
           <summary>Is PDF parsing always worse than direct DOCX parsing?</summary>
-          <div class="dp-faq-answer"><p>When the original source is a DOCX, direct XML parsing is strictly better &mdash; more accurate, no per-page billing, and preserves metadata that PDF rendering destroys. But if your source is a born-digital PDF or a scanned document, you need an ML-based PDF parser. AILANG Parse handles both: deterministic XML extraction for Office formats and pluggable AI backends (Gemini, Claude, Ollama) for PDFs.</p></div>
+          <div class="dp-faq-answer"><p>When the source is a DOCX, reading the XML directly is better: it is more accurate, has no per-page billing, and keeps metadata that PDF conversion drops. If your source is a PDF or a scan, you need an ML-based PDF parser. AILANG Parse does both: it reads Office XML directly and uses an AI model of your choice (Gemini, Claude, Ollama) for PDFs.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="why.html" class="dp-doc-card" data-find="why ailang parse why reading the office file directly beats parsing a picture of it. why direct xml photos">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Why AILANG Parse</div>
+          <div class="dp-doc-card-desc">Why reading the Office file directly beats parsing a picture of it.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="track-changes.html" class="dp-doc-card" data-find="track changes every insertion, deletion and move, with who made it and when. tracked changes redlines revisions contracts legal">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Track changes</div>
+          <div class="dp-doc-card-desc">Every insertion, deletion and move, with who made it and when.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="tables.html" class="dp-doc-card" data-find="tables and merged cells every value in its own row and column, merged cells included. table extraction colspan rowspan merged cells">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Tables and merged cells</div>
+          <div class="dp-doc-card-desc">Every value in its own row and column, merged cells included.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

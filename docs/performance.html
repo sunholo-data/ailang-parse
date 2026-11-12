@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Document Parsing Performance Guide — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Get the best document parsing performance from AILANG Parse. Batch mode, tracing control, folder parsing tips — 58 files in 2.5 seconds.">
+<meta name="description" content="How to get the best speed from AILANG Parse: pass a folder so start-up happens once, leave tracing off, and use the API for a steady stream of documents.">
 <meta property="og:title" content="Document Parsing Performance Guide — AILANG Parse">
-<meta property="og:description" content="Parse 58 Office documents in 2.5 seconds. Batch mode, tracing control, and tuning tips for maximum document parsing performance.">
+<meta property="og:description" content="How to get the best speed from AILANG Parse: pass a folder so start-up happens once, leave tracing off, and use the API for a steady stream of documents.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/performance.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -54,13 +54,17 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How fast is AILANG Parse compared to other document parsers?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse parses 58 mixed Office files (22.9MB, 11 formats) in 2.5 seconds using batch mode. This is faster than Unstructured (3.5s), Pandoc (3.6s), and Docling (8.6s) while parsing every file — competitors skip 7-19 files they don't support."}},
-    {"@type": "Question", "name": "Why is AILANG Parse slow on a single file?", "acceptedAnswer": {"@type": "Answer", "text": "Single-file invocations pay ~400ms of AILANG runtime startup (module compilation). Use batch mode to amortize this: pass multiple files or a folder to docparse, and per-file time drops to ~44ms."}},
-    {"@type": "Question", "name": "How do I enable batch mode in AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "The docparse CLI enables batch mode automatically when you pass multiple files or a folder. Just run: docparse ~/Documents/ or docparse *.docx *.pptx. No flags needed."}},
-    {"@type": "Question", "name": "What does AILANG_NO_TRACE do?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG_NO_TRACE=1 disables auto-trace collection, which creates millions of objects per run when OpenTelemetry endpoints are configured. This gives a 2-5x speedup. The docparse CLI sets this by default."}}
+    {"@type": "Question", "name": "How fast is AILANG Parse compared to other document parsers?", "acceptedAnswer": {"@type": "Answer", "text": "Once the parser has started, each Office file takes milliseconds, so a folder of documents is done in about the time one file takes on its own. Parse times for every parser we test are recorded with the benchmark results."}},
+    {"@type": "Question", "name": "Why is AILANG Parse slow on a single file?", "acceptedAnswer": {"@type": "Answer", "text": "Every run has a fixed start-up time before parsing begins. Batch mode pays it once: pass several files or a folder to docparse, and each extra file adds only milliseconds."}},
+    {"@type": "Question", "name": "How do I enable batch mode in AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "The docparse CLI turns on batch mode by itself when you pass several files or a folder. Run docparse ~/Documents/ or docparse *.docx *.pptx. No flags needed."}},
+    {"@type": "Question", "name": "What does AILANG_NO_TRACE do?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG_NO_TRACE=1 turns off trace collection, which slows parsing when OpenTelemetry endpoints are configured. The docparse CLI sets it by default."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Try, run and buy", "item": "https://www.sunholo.com/ailang-parse/docs.html#run"}, {"@type": "ListItem", "position": 4, "name": "Performance guide", "item": "https://www.sunholo.com/ailang-parse/performance.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -68,9 +72,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#run">Try, run and buy</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Performance guide</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Document Parsing Performance</span> Guide</h1>
-    <p class="subtitle reveal reveal-delay-1">58 files, 22.9MB, 11 formats — 2.5 seconds. How to get the best throughput from AILANG Parse.</p>
+    <p class="subtitle reveal reveal-delay-1">How to get the most speed out of AILANG Parse.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -78,10 +86,9 @@
     <aside class="dp-docs-sidebar reveal">
       <nav>
         <a href="#batch-mode" class="active">Batch Mode</a>
-        <a href="#tracing">Tracing Control</a>
-        <a href="#folder-benchmark">Folder Benchmark</a>
+        <a href="#tracing">Turn Off Tracing</a>
         <a href="#cli-vs-api">CLI vs API</a>
-        <a href="#single-file">Single-File Overhead</a>
+        <a href="#single-file">Single-File Start-Up</a>
         <a href="#tips">Quick Tips</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -89,12 +96,12 @@
 
     <main class="dp-docs-content">
 
-      <h2 id="batch-mode">Batch Mode: Compile Once, Parse Many</h2>
-      <p>AILANG Parse compiles 38 modules before parsing starts. In batch mode, this happens once — then every file is parsed with zero recompilation. This is the single most important document parsing performance optimisation.</p>
+      <h2 id="batch-mode">Batch Mode: Start Once, Parse Many</h2>
+      <p>AILANG Parse has a fixed start-up cost before parsing begins. In batch mode this happens once, and every file after that is parsed without it. Batch mode is the single biggest speed-up.</p>
 
       <div class="dp-perf-grid">
         <div class="dp-perf-card dp-perf-do">
-          <h3>Batch (multiple files or folder)</h3>
+          <h3 id="batch-multiple-files-or-folder">Batch (multiple files or folder)</h3>
           <pre style="margin:0"><code class="language-bash"># Pass multiple files
 docparse *.docx *.pptx *.xlsx
 
@@ -102,137 +109,114 @@ docparse *.docx *.pptx *.xlsx
 docparse ~/Documents/
 
 # Both auto-enable batch mode</code></pre>
-          <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0">58 files in <strong>2.5s</strong> (44ms/file)</p>
+          <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0">Start-up happens <strong>once</strong>, then each file takes milliseconds</p>
         </div>
         <div class="dp-perf-card dp-perf-dont">
-          <h3>Loop (recompiles each time)</h3>
+          <h3 id="loop-pays-start-up-every-time">Loop (pays start-up every time)</h3>
           <pre style="margin:0"><code class="language-bash"># Don't do this — each invocation
 # recompiles all 38 modules
 for f in *.docx; do
   docparse "$f"
 done</code></pre>
-          <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0">58 files in <strong>~25s</strong> (~430ms/file)</p>
+          <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 0">Start-up happens again for <strong>every file</strong></p>
         </div>
       </div>
 
-      <p>The <code>docparse</code> CLI detects multiple arguments automatically and passes <code>--batch</code> to AILANG. No extra flags needed.</p>
+      <p>The <code>docparse</code> CLI turns on batch mode by itself when you pass more than one file or a folder. No extra flags needed.</p>
 
-      <h2 id="tracing">Tracing Control</h2>
-      <p>AILANG's auto-trace collector creates ~2.7M objects per run when <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> or <code>GOOGLE_CLOUD_PROJECT</code> is set. The <code>docparse</code> CLI disables this by default for a 2&ndash;5x speedup.</p>
+      <h2 id="tracing">Turn Off Tracing</h2>
+      <p>AILANG records a detailed trace of each run when <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> or <code>GOOGLE_CLOUD_PROJECT</code> is set, and that slows parsing. The <code>docparse</code> CLI turns tracing off by default.</p>
 
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>File</th><th>With Trace</th><th>No Trace</th><th>Speedup</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Alice EPUB (185KB)</td><td>2.59s</td><td><span class="dp-preserved">1.26s</span></td><td>2.1x</td></tr>
-          <tr><td>Moby Dick EPUB (797KB)</td><td>9.79s</td><td><span class="dp-preserved">2.82s</span></td><td>3.5x</td></tr>
-          <tr><td>10MB DOCX</td><td>1.95s</td><td><span class="dp-preserved">0.40s</span></td><td>4.9x</td></tr>
-        </tbody>
-      </table>
 
-      <p>If you call <code>ailang run</code> directly (bypassing the CLI wrapper), set the environment variable yourself:</p>
-
-      <pre><code class="language-bash"># Direct ailang invocation with tracing disabled
-AILANG_NO_TRACE=1 ailang run --batch --entry main --caps IO,FS,Env \
-  --max-recursion-depth 50000 docparse/main.ail file1.docx file2.pptx
-
-# Re-enable tracing for debugging
-AILANG_NO_TRACE=0 docparse report.docx</code></pre>
-
-      <h2 id="folder-benchmark">Folder Benchmark</h2>
-      <p>58 files across 11 formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, EPUB, HTML, Markdown, CSV, TSV), including a 10MB DOCX and 11MB PPTX. Same files, same machine, measured wall-clock time.</p>
-
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>Tool</th><th>Files Parsed</th><th>Total Time</th><th>Per File</th><th>Quality</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Kreuzberg v4.7.2</td><td>55/58</td><td>318ms</td><td>6ms</td><td>71.3%</td></tr>
-          <tr><td>MarkItDown v0.1.5</td><td>46/58</td><td>905ms</td><td>20ms</td><td>67.9%</td></tr>
-          <tr style="font-weight:600"><td>AILANG Parse v0.3.0</td><td>58/58</td><td>2.54s</td><td>44ms</td><td>92%</td></tr>
-          <tr><td>Unstructured v0.22.16</td><td>39/58</td><td>3.46s</td><td>89ms</td><td>62.1%</td></tr>
-          <tr><td>Pandoc v3.9.0</td><td>51/58</td><td>3.64s</td><td>71ms</td><td>74.6%</td></tr>
-          <tr><td>Docling v2.84.0</td><td>42/58</td><td>8.64s</td><td>206ms</td><td>64.0%</td></tr>
-        </tbody>
-      </table>
-      </div>
-
-      <div class="dp-callout">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>No quality compromise.</strong> The fastest tools skip 3&ndash;19 files and score 20+ points lower on structural quality. AILANG Parse parses every file at 92% composite — competitive speed, best extraction. See <a href="benchmarks.html" style="color:var(--dp-blue);font-weight:600">full benchmark results</a>.</div>
-      </div>
+      <p>To turn tracing back on for debugging:</p>
+      <pre><code class="language-bash">AILANG_NO_TRACE=0 docparse report.docx</code></pre>
 
       <h2 id="cli-vs-api">CLI vs API Server</h2>
 
       <div class="dp-perf-grid">
         <div class="dp-perf-card">
-          <h3>CLI (docparse)</h3>
+          <h3 id="cli-docparse">CLI (docparse)</h3>
           <p style="font-size:13px;color:var(--text-secondary)">Best for: batch processing folders, CI/CD pipelines, one-off conversions.</p>
           <ul style="font-size:13px;margin:8px 0 0;padding-left:16px">
-            <li>Batch mode amortises compilation</li>
-            <li>Zero network overhead</li>
-            <li>Processes local files directly</li>
+            <li>Start-up cost paid once per batch</li>
+            <li>No network round trip</li>
+            <li>Reads local files directly</li>
           </ul>
         </div>
         <div class="dp-perf-card">
-          <h3>API Server</h3>
+          <h3 id="api-server">API Server</h3>
           <p style="font-size:13px;color:var(--text-secondary)">Best for: web apps, real-time parsing, multi-user access.</p>
           <ul style="font-size:13px;margin:8px 0 0;padding-left:16px">
-            <li>AILANG modules stay compiled in memory</li>
-            <li>No startup cost per request</li>
-            <li>Sub-100ms response for most files</li>
+            <li>The parser stays loaded between requests</li>
+            <li>No start-up cost per request</li>
+            <li>Each request takes only the time to parse</li>
           </ul>
         </div>
       </div>
 
-      <p>For sustained throughput (e.g., processing uploads), the API server avoids compilation overhead entirely. For batch jobs against local files, the CLI with folder input is optimal.</p>
+      <p>For a steady stream of documents, such as user uploads, the API server has no start-up cost per file. For batch jobs on local files, pass a folder to the CLI.</p>
 
-      <h2 id="single-file">Single-File Overhead</h2>
-      <p>Parsing a single file via <code>docparse report.docx</code> takes ~400&ndash;500ms regardless of file size. This is AILANG runtime startup (module compilation), not parse time. The actual parse of a 5KB DOCX is <1ms.</p>
-
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>File</th><th>Single File</th><th>In Batch</th><th>Startup Overhead</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>sample.docx (5KB)</td><td>411ms</td><td>~2ms</td><td>~409ms</td></tr>
-          <tr><td>tables.docx (31KB)</td><td>466ms</td><td>~5ms</td><td>~461ms</td></tr>
-          <tr><td>10MB DOCX</td><td>472ms</td><td>~70ms</td><td>~402ms</td></tr>
-          <tr><td>Moby Dick EPUB (797KB)</td><td>2.78s</td><td>~2.3s</td><td>~480ms</td></tr>
-        </tbody>
-      </table>
-      <p style="font-size:12px;color:var(--text-muted)">AILANG incremental compilation caching (M-INCREMENTAL-TYPECHECK) will reduce startup further in a future release.</p>
+      <h2 id="single-file">Single-File Start-Up</h2>
+      <p>Parsing one file with <code>docparse report.docx</code> takes a fraction of a second, and most of that is start-up, not parsing. The time barely changes with file size for Office files. If you have more than one file, pass them together.</p>
 
       <h2 id="tips">Quick Performance Tips</h2>
       <ol>
         <li><strong>Always batch.</strong> Pass folders or globs: <code>docparse ~/inbox/</code> or <code>docparse *.docx *.xlsx</code></li>
-        <li><strong>Use the CLI wrapper.</strong> <code>docparse</code> sets <code>AILANG_NO_TRACE=1</code> and auto-enables batch mode.</li>
-        <li><strong>Use the API for real-time.</strong> Compilation stays in memory — every request is pure parse time.</li>
-        <li><strong>Skip AI for Office files.</strong> DOCX/PPTX/XLSX/ODF parsing is deterministic and needs no AI model. Images still require <code>--ai</code>; PDFs default to <code>--ai</code> but can opt into local deterministic backends via <code>--pdf-backend docling</code> (~5× faster) or <code>--pdf-backend liteparse</code> (~40× faster) — see <a href="pdf-parsing.html#local-backends">PDF parsing</a>.</li>
-        <li><strong>Profile if needed.</strong> Pass <code>-cpuprofile profile.out</code> or <code>-memprofile mem.out</code> to <code>ailang run</code> for Go pprof analysis.</li>
+        <li><strong>Use the <code>docparse</code> CLI.</strong> It sets <code>AILANG_NO_TRACE=1</code> and turns on batch mode for you.</li>
+        <li><strong>Use the API for real-time work.</strong> The parser stays loaded, so each request takes only the time to parse.</li>
+        <li><strong>Skip AI for Office files.</strong> DOCX, <a href="pptx-parsing.html">PPTX</a>, XLSX and ODF files need no AI model. Images need <code>--ai</code>. PDFs are read on your machine without AI by default; choose the AI backend only for scans. See <a href="pdf-parsing.html">PDF parsing</a>.</li>
+
       </ol>
 
       <div class="dp-faq" id="faq">
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How fast is AILANG Parse compared to other document parsers?</summary>
-          <div class="dp-faq-answer"><p>58 mixed Office files (22.9MB, 11 formats) in 2.5 seconds using batch mode. Faster than Unstructured (3.5s), Pandoc (3.6s), and Docling (8.6s) while parsing every file.</p></div>
+          <div class="dp-faq-answer"><p>Once the parser has started, each Office file takes milliseconds, so a folder of documents is done in about the time one file takes on its own. Parse times for every parser we test are recorded with the <a href="benchmarks.html">benchmark results</a>.</p></div>
         </details>
         <details>
           <summary>Why is AILANG Parse slow on a single file?</summary>
-          <div class="dp-faq-answer"><p>Single-file invocations pay ~400ms of AILANG runtime startup. Use batch mode (pass multiple files or a folder) to amortise this — per-file time drops to ~44ms.</p></div>
+          <div class="dp-faq-answer"><p>Every run has a fixed start-up time before parsing begins. Batch mode pays it once: pass several files or a folder to <code>docparse</code>, and each extra file adds only milliseconds.</p></div>
         </details>
         <details>
-          <summary>How do I enable batch mode?</summary>
-          <div class="dp-faq-answer"><p>The <code>docparse</code> CLI enables it automatically when you pass multiple files or a folder. Just run <code>docparse ~/Documents/</code>. No flags needed.</p></div>
+          <summary>How do I enable batch mode in AILANG Parse?</summary>
+          <div class="dp-faq-answer"><p>The <code>docparse</code> CLI turns on batch mode by itself when you pass several files or a folder. Run <code>docparse ~/Documents/</code> or <code>docparse *.docx *.pptx</code>. No flags needed.</p></div>
         </details>
         <details>
           <summary>What does AILANG_NO_TRACE do?</summary>
-          <div class="dp-faq-answer"><p>Disables auto-trace collection (2.7M objects per run when OTEL endpoints are configured). Gives 2&ndash;5x speedup. The <code>docparse</code> CLI sets this by default.</p></div>
+          <div class="dp-faq-answer"><p><code>AILANG_NO_TRACE=1</code> turns off trace collection, which slows parsing when OpenTelemetry endpoints are configured. The <code>docparse</code> CLI sets it by default.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="selfhost.html" class="dp-doc-card" data-find="run locally install the command-line tool and parse on your own machine. install cli local self-host offline">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Run locally</div>
+          <div class="dp-doc-card-desc">Install the command-line tool and parse on your own machine.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="benchmarks.html" class="dp-doc-card" data-find="benchmarks the leading parsers scored on the same office files, with results you can rerun. officedocbench markitdown docling llamaparse unstructured kreuzberg pandoc extend scores">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Benchmarks</div>
+          <div class="dp-doc-card-desc">The leading parsers scored on the same Office files, with results you can rerun.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="api.html" class="dp-doc-card" data-find="api and sdks rest api with python, javascript, go and r clients. rest api sdk python javascript go r key">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">API and SDKs</div>
+          <div class="dp-doc-card-desc">REST API with Python, JavaScript, Go and R clients.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

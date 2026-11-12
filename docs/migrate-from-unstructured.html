@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Migrate from Unstructured — AILANG Parse</title>
+<title>Migrate from Unstructured to AILANG Parse for Office Documents</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 98.1% structural fidelity vs 58.9%, no per-page billing on Office files. Keep Unstructured for PDFs.">
-<meta property="og:title" content="Migrate from Unstructured — AILANG Parse">
-<meta property="og:description" content="Switch from Unstructured to AILANG Parse for Office documents in one line of code. Drop-in API compatibility, 98.1% structural fidelity vs 58.9%, no per-page billing on Office files. Keep Unstructured for PDFs.">
+<meta name="description" content="Switch from Unstructured to AILANG Parse for Office documents by changing one line. Same API shape, 98.1% against 58.9% on the open OfficeDocBench, and no per-page billing on Office files. Keep Unstructured for PDFs.">
+<meta property="og:title" content="Migrate from Unstructured to AILANG Parse for Office Documents">
+<meta property="og:description" content="Switch from Unstructured to AILANG Parse for Office documents by changing one line. Same API shape, 98.1% against 58.9% on the open OfficeDocBench, and no per-page billing on Office files. Keep Unstructured for PDFs.">
 <meta property="og:type" content="article">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,13 +22,17 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Change the URL from api.unstructured.io to docparse.ailang.sunholo.com. The /general/v0/general endpoint accepts the same multipart file upload (-F files=@file.docx), same header (unstructured-api-key), and returns the same response format. See the Quick Migration section for curl and Python examples."}},
-    {"@type": "Question", "name": "Is AILANG Parse a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office document parsing, yes. AILANG Parse implements the same /general/v0/general endpoint with the same multipart upload format (-F files=@file.docx) and the same unstructured-api-key header. Change the URL and API key — your existing code works unchanged. For PDFs and scanned documents, keep using Unstructured — its ML pipeline is purpose-built for those formats."}},
-    {"@type": "Question", "name": "Can I use both Unstructured and AILANG Parse together?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and this is the recommended pattern. Route Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB, EML, TEX, RTF) through AILANG Parse for deterministic structural parsing, and route PDFs and scanned images through Unstructured where its ML pipeline excels. A simple file-extension check in your routing layer is all you need."}},
-    {"@type": "Question", "name": "What Office formats does AILANG Parse support that Unstructured doesn't parse well?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB — with full structural fidelity including track changes, merged cells, and comments."}}
+    {"@type": "Question", "name": "How do I migrate from Unstructured to AILANG Parse?", "acceptedAnswer": {"@type": "Answer", "text": "Change the URL from api.unstructured.io to docparse.ailang.sunholo.com and swap your API key. The /general/v0/general endpoint accepts the same multipart upload (-F files=@file.docx) and the same unstructured-api-key header, and returns the same response format. See the Quick Migration section for curl and Python examples."}},
+    {"@type": "Question", "name": "Is AILANG Parse a drop-in replacement for Unstructured?", "acceptedAnswer": {"@type": "Answer", "text": "For Office documents, yes. AILANG Parse has the same /general/v0/general endpoint, the same multipart upload format (-F files=@file.docx) and the same unstructured-api-key header. Change the URL and API key, and your existing code keeps working. For PDFs and scanned documents, keep using Unstructured: its ML pipeline is built for those formats."}},
+    {"@type": "Question", "name": "Can I use both Unstructured and AILANG Parse together?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, and we recommend it. Send Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB, EML, TEX, RTF) to AILANG Parse, and send PDFs and scanned images to Unstructured, where its ML pipeline is strong. A file-extension check in your code is all you need."}},
+    {"@type": "Question", "name": "What Office formats does AILANG Parse support that Unstructured doesn't parse well?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown and EPUB. AILANG Parse keeps their structure, including track changes, merged cells and comments."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Compare", "item": "https://www.sunholo.com/ailang-parse/docs.html#compare"}, {"@type": "ListItem", "position": 4, "name": "Unstructured vs AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/migrate-from-unstructured.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -36,9 +40,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#compare">Compare</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Unstructured vs AILANG Parse</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Migrate</span> from Unstructured</h1>
-    <p class="subtitle reveal reveal-delay-1">One line of code. Full structural fidelity for Office documents.</p>
+    <p class="subtitle reveal reveal-delay-1">Change the URL and the key. Keep the structure of your Office documents.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -47,7 +55,7 @@
     <aside class="dp-docs-sidebar reveal">
       <nav>
         <a href="#why-migrate" class="active">Why Migrate</a>
-        <a href="#one-line-change">One-Line Change</a>
+        <a href="#one-line-change">Quick Migration</a>
         <a href="#routing-pattern">Routing Pattern</a>
         <a href="#what-you-gain">What You Gain</a>
         <a href="#self-hosting">Self-Hosting</a>
@@ -59,9 +67,8 @@
     <main class="dp-docs-content">
 
       <h2 id="why-migrate">Why Migrate</h2>
-      <p>Unstructured converts Office documents to PDF before parsing, destroying structural data &mdash; track changes, merged cells, comments, headers, footers, text boxes &mdash; that exists in the source XML. AILANG Parse reads the XML directly. Deterministic, structural, fast.</p>
-
-      <p>On the <a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> structural benchmark, AILANG Parse scores <strong><span data-bench="ailang_parse.composite">98.1%</span></strong> with 100% format coverage, compared to Unstructured's <strong><span data-bench="unstructured.composite">58.9%</span></strong> composite (<span data-bench="unstructured.adjusted">51.4%</span> coverage-adjusted &mdash; Unstructured parses <span data-bench="unstructured.coverage">87.4%</span> of the benchmark files).</p>
+      <p class="dp-lede"><strong>Unstructured vs AILANG Parse for Office documents.</strong> Both turn Word, Excel and PowerPoint files into elements for RAG. On the open <a href="benchmarks.html">OfficeDocBench</a>, Unstructured returned tracked changes in <span data-bench="unstructured.features.track_changes.detected">0</span> of <span data-bench="unstructured.features.track_changes.total">3</span> files that contain them and comments in <span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files; AILANG Parse returned them in every one. AILANG Parse accepts the same API requests, so you switch by changing the URL and the key. Overall it scores <span data-bench="ailang_parse.composite">98.1%</span> and Unstructured <span data-bench="unstructured.composite">58.9%</span>.</p>
+      <p>Unstructured reads <span data-bench="unstructured.coverage">87.4%</span> of the benchmark files. Counting the files it can&rsquo;t read as zero, its score is <span data-bench="unstructured.adjusted">51.4%</span>. AILANG Parse reads all of them.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -69,9 +76,9 @@
       </div>
 
       <h2 id="one-line-change">Quick Migration</h2>
-      <p>AILANG Parse is a true drop-in replacement. Change the URL &mdash; your existing code works unchanged:</p>
+      <p>AILANG Parse accepts the same requests as Unstructured. Change the URL and the API key, and your existing code keeps working:</p>
 
-      <h3>curl &mdash; One URL change</h3>
+      <h3 id="curl-one-url-change">curl &mdash; One URL change</h3>
       <pre><code class="language-bash"># Before: Unstructured
 curl -X POST "https://api.unstructured.io/general/v0/general" \
   -H "unstructured-api-key: $UNSTRUCTURED_KEY" \
@@ -82,7 +89,7 @@ curl -X POST "https://docparse.ailang.sunholo.com/general/v0/general" \
   -H "unstructured-api-key: $DOCPARSE_API_KEY" \
   -F "files=@report.docx"</code></pre>
 
-      <h3>Python</h3>
+      <h3 id="python">Python</h3>
       <pre><code class="language-python"># Before: Unstructured
 resp = requests.post(
     "https://api.unstructured.io/general/v0/general",
@@ -100,12 +107,12 @@ resp = requests.post(
       <div class="dp-callout" style="margin:16px 0">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         <div>
-          The <code>/general/v0/general</code> endpoint accepts both multipart file upload (<code>-F "files=@file.docx"</code>) and JSON body requests (<code>{"filepath": "sample_id"}</code>). API key can be passed via the <code>unstructured-api-key</code> header or as an <code>apiKey</code> form field. The response format is fully compatible with existing Unstructured client code.
+          The <code>/general/v0/general</code> endpoint accepts a multipart file upload (<code>-F "files=@file.docx"</code>) or a JSON body (<code>{"filepath": "sample_id"}</code>). Pass your API key in the <code>unstructured-api-key</code> header or as an <code>apiKey</code> form field. The response has the same format, so existing Unstructured client code can read it.
         </div>
       </div>
 
       <h2 id="routing-pattern">Routing Pattern</h2>
-      <p>For mixed-format pipelines, the recommended approach is to route Office formats through AILANG Parse and PDFs through Unstructured. A simple file-extension check is all you need:</p>
+      <p>If your pipeline handles mixed formats, send Office formats to AILANG Parse and PDFs to Unstructured. A file-extension check is all you need:</p>
 
       <pre><code class="language-python">import requests
 from pathlib import Path
@@ -141,29 +148,27 @@ def parse_document(filepath: str) -> dict:
 
     return resp.json()</code></pre>
 
-      <p>This gives you the best of both worlds: structural fidelity for Office documents and ML-powered extraction for PDFs and scans.</p>
+      <p>You keep the structure of your Office documents and still get ML-based extraction for PDFs and scans.</p>
 
       <h2 id="what-you-gain">What You Gain</h2>
-      <table class="dp-config-table">
-        <thead>
-          <tr><th>Feature</th><th>Unstructured</th><th>AILANG Parse</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Track Changes</td><td>None (lost in PDF conversion)</td><td>Full &mdash; insertions, deletions, author, date</td></tr>
-          <tr><td>Merged Cells</td><td>Flattened to text</td><td>Structural &mdash; row/column spans preserved</td></tr>
-          <tr><td>Comments</td><td>Dropped</td><td>Author-attributed with anchor positions</td></tr>
-          <tr><td>Headers / Footers</td><td>Dropped or mixed into body</td><td>Separate blocks with page context</td></tr>
-          <tr><td>Text Boxes</td><td>Dropped</td><td>Extracted as positioned blocks</td></tr>
-          <tr><td>Footnotes / Endnotes</td><td>Dropped</td><td>Preserved with reference markers</td></tr>
-          <tr><td>Dependencies</td><td>Python + heavy libraries</td><td>Zero &mdash; single binary, no runtime deps</td></tr>
-          <tr><td>Determinism</td><td>Non-deterministic (ML inference)</td><td>Deterministic &mdash; same input always gives same output</td></tr>
-          <tr><td>OfficeDocBench (composite)</td><td data-bench="unstructured.composite">58.9%</td><td data-bench="ailang_parse.composite">98.1%</td></tr>
-          <tr><td>Coverage-adjusted</td><td data-bench="unstructured.adjusted">51.4%</td><td data-bench="ailang_parse.adjusted">98.1%</td></tr>
-        </tbody>
-      </table>
+      <div style="overflow-x:auto"><table class="dp-config-table">
+<thead><tr><th>What is kept</th><th>Unstructured</th><th>AILANG Parse</th></tr></thead>
+<tbody>
+<tr><td>Tracked changes returned</td><td><span data-bench="unstructured.features.track_changes.detected">0</span> of <span data-bench="unstructured.features.track_changes.total">3</span> files</td><td><span data-bench="ailang_parse.features.track_changes.detected">3</span> of <span data-bench="ailang_parse.features.track_changes.total">3</span> files</td></tr>
+<tr><td>Comments returned</td><td><span data-bench="unstructured.features.comments.detected">0</span> of <span data-bench="unstructured.features.comments.total">2</span> files</td><td><span data-bench="ailang_parse.features.comments.detected">2</span> of <span data-bench="ailang_parse.features.comments.total">2</span> files</td></tr>
+<tr><td>Headers and footers returned</td><td><span data-bench="unstructured.features.headers_footers.detected">1</span> of <span data-bench="unstructured.features.headers_footers.total">2</span> files</td><td><span data-bench="ailang_parse.features.headers_footers.detected">3</span> of <span data-bench="ailang_parse.features.headers_footers.total">3</span> files</td></tr>
+<tr><td>Text boxes returned</td><td><span data-bench="unstructured.features.text_boxes.detected">0</span> of <span data-bench="unstructured.features.text_boxes.total">2</span> files</td><td><span data-bench="ailang_parse.features.text_boxes.detected">2</span> of <span data-bench="ailang_parse.features.text_boxes.total">2</span> files</td></tr>
+<tr><td>Speaker notes returned</td><td><span data-bench="unstructured.features.speaker_notes.detected">0</span> of <span data-bench="unstructured.features.speaker_notes.total">1</span> files</td><td><span data-bench="ailang_parse.features.speaker_notes.detected">1</span> of <span data-bench="ailang_parse.features.speaker_notes.total">1</span> files</td></tr>
+<tr><td>Table cells: position, merges, formulas</td><td><span data-bench="unstructured.structural_features.table_cells.score">78.1%</span></td><td><span data-bench="ailang_parse.structural_features.table_cells.score">100.0%</span></td></tr>
+<tr><td>List type and depth</td><td><span data-bench="unstructured.structural_features.list_items.score">0.0%</span></td><td><span data-bench="ailang_parse.structural_features.list_items.score">80.0%</span></td></tr>
+<tr><td>Overall score, on the files it could read</td><td><span data-bench="unstructured.composite">58.9%</span></td><td><span data-bench="ailang_parse.composite">98.1%</span></td></tr>
+<tr><td>Overall score, counting unreadable files as zero</td><td><span data-bench="unstructured.adjusted">51.4%</span></td><td><span data-bench="ailang_parse.adjusted">98.1%</span></td></tr>
+</tbody>
+</table></div>
+      <p style="font-size:12px;color:var(--text-secondary)">Measured on <a href="benchmarks.html">OfficeDocBench</a>: how many of the test files containing each feature the parser returned it for, and the benchmark scores. Every figure is read from the published results.</p>
 
       <h2 id="self-hosting">Self-Hosting</h2>
-      <p>Run AILANG Parse locally with Docker &mdash; no external dependencies for Office formats:</p>
+      <p>Run AILANG Parse locally with Docker. Office formats need nothing else installed:</p>
 
       <pre><code class="language-bash"># Clone and build
 git clone https://github.com/sunholo-data/ailang-parse.git
@@ -177,29 +182,59 @@ docker run -v $(pwd):/data docparse /data/report.docx
 docker run -e GOOGLE_API_KEY="your-key" \
   -v $(pwd):/data docparse --ai gemini-3.5-flash-lite /data/document.pdf</code></pre>
 
-      <p>The Dockerfile downloads the AILANG binary and includes every parser. Office parsing works immediately with zero configuration. Add a <code>GOOGLE_API_KEY</code> environment variable to enable AI parsing of image files and scanned PDFs.</p>
+      <p>The Docker image includes every parser. Office parsing works straight away, with no configuration. Set the <code>GOOGLE_API_KEY</code> environment variable to turn on AI parsing of images and <a href="pdf-parsing.html">scanned PDFs</a>.</p>
 
-      <p>For detailed configuration options, capability budgets, and AI model setup, see the <a href="selfhost.html" style="color:var(--dp-blue)">Self-Host Guide</a>.</p>
+      <p>For configuration options and AI model setup, see the <a href="selfhost.html" style="color:var(--dp-blue)">Self-Host Guide</a>.</p>
 
       <div class="dp-faq" id="faq">
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I migrate from Unstructured to AILANG Parse?</summary>
-          <div class="dp-faq-answer"><p>Change the URL from <code>api.unstructured.io</code> to <code>docparse.ailang.sunholo.com</code> and swap your API key. The <code>/general/v0/general</code> endpoint accepts the same multipart upload (<code>-F "files=@file.docx"</code>) and the same <code>unstructured-api-key</code> header. See the <a href="#one-line-change">Quick Migration</a> section for curl and Python examples.</p></div>
+          <div class="dp-faq-answer"><p>Change the URL from <code>api.unstructured.io</code> to <code>docparse.ailang.sunholo.com</code> and swap your API key. The <code>/general/v0/general</code> endpoint accepts the same multipart upload (<code>-F "files=@file.docx"</code>) and the same <code>unstructured-api-key</code> header, and returns the same response format. See the <a href="#one-line-change">Quick Migration</a> section for curl and Python examples.</p></div>
         </details>
         <details>
           <summary>Is AILANG Parse a drop-in replacement for Unstructured?</summary>
-          <div class="dp-faq-answer"><p>For Office document parsing, yes. AILANG Parse implements the same <code>/general/v0/general</code> endpoint with the same multipart upload format and the same <code>unstructured-api-key</code> header. Change the URL and API key &mdash; your existing code works unchanged. For PDFs and scanned documents, keep using Unstructured &mdash; its ML pipeline is purpose-built for those formats.</p></div>
+          <div class="dp-faq-answer"><p>For Office documents, yes. AILANG Parse has the same <code>/general/v0/general</code> endpoint, the same multipart upload format and the same <code>unstructured-api-key</code> header. Change the URL and API key, and your existing code keeps working. For PDFs and scanned documents, keep using Unstructured: its ML pipeline is built for those formats.</p></div>
         </details>
         <details>
           <summary>Can I use both Unstructured and AILANG Parse together?</summary>
-          <div class="dp-faq-answer"><p>Yes, and this is the recommended pattern. Route Office formats (DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB, EML, TEX, RTF) through AILANG Parse for deterministic structural parsing, and route PDFs and scanned images through Unstructured where its ML pipeline excels. A simple file-extension check in your routing layer is all you need. See the <a href="#routing-pattern">Routing Pattern</a> section for a complete example.</p></div>
+          <div class="dp-faq-answer"><p>Yes, and we recommend it. Send Office formats (<a href="docx-parsing.html">DOCX</a>, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, EPUB, EML, TEX, RTF) to AILANG Parse, and send PDFs and scanned images to Unstructured, where its ML pipeline is strong. A file-extension check in your code is all you need. See the <a href="#routing-pattern">Routing Pattern</a> section for a complete example.</p></div>
         </details>
         <details>
           <summary>What Office formats does AILANG Parse support that Unstructured doesn't parse well?</summary>
-          <div class="dp-faq-answer"><p>DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown, and EPUB &mdash; with full structural fidelity including track changes, merged cells, and comments.</p></div>
+          <div class="dp-faq-answer"><p>DOCX, PPTX, XLSX, ODT, ODP, ODS, CSV, HTML, Markdown and EPUB. AILANG Parse keeps their structure, including track changes, <a href="tables.html">merged cells</a> and comments.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="benchmarks.html" class="dp-doc-card" data-find="benchmarks the leading parsers scored on the same office files, with results you can rerun. officedocbench markitdown docling llamaparse unstructured kreuzberg pandoc extend scores">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Benchmarks</div>
+          <div class="dp-doc-card-desc">The leading parsers scored on the same Office files, with results you can rerun.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="api.html" class="dp-doc-card" data-find="api and sdks rest api with python, javascript, go and r clients. rest api sdk python javascript go r key">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">API and SDKs</div>
+          <div class="dp-doc-card-desc">REST API with Python, JavaScript, Go and R clients.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="vs-pdf-conversion.html" class="dp-doc-card" data-find="direct parsing vs pdf conversion what is lost when a word file is turned into a pdf before parsing. docx vs pdf conversion ocr">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Direct parsing vs PDF conversion</div>
+          <div class="dp-doc-card-desc">What is lost when a Word file is turned into a PDF before parsing.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

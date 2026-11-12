@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Connect from Claude, ChatGPT or Codex — AILANG Parse</title>
+<title>Use AILANG Parse in Claude, ChatGPT or Codex: Connector Setup</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
 <link rel="alternate" type="text/markdown" title="LLM-friendly docs (llms.txt)" href="llms.txt">
-<meta name="description" content="Add the AILANG Parse connector to Claude, Claude Code, ChatGPT or Codex: setup, sign-in, the tools it provides, revoking access and troubleshooting.">
-<meta property="og:title" content="Connect from Claude, ChatGPT or Codex — AILANG Parse">
-<meta property="og:description" content="Add the AILANG Parse connector to Claude, Claude Code, ChatGPT or Codex: setup, sign-in, the tools it provides, revoking access and troubleshooting.">
+<meta name="description" content="Use AILANG Parse inside Claude, ChatGPT or Codex: add one URL, sign in, and your assistant can read, convert and edit Word, Excel, PowerPoint and PDF files. Setup steps, sign-in, tools, revoking access and troubleshooting.">
+<meta property="og:title" content="Use AILANG Parse in Claude, ChatGPT or Codex: Connector Setup">
+<meta property="og:description" content="Use AILANG Parse inside Claude, ChatGPT or Codex: add one URL, sign in, and your assistant can read, convert and edit Word, Excel, PowerPoint and PDF files. Setup steps, sign-in, tools, revoking access and troubleshooting.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,12 +18,60 @@
 <link rel="stylesheet" href="css/prism.css">
 <link rel="stylesheet" href="css/docs-layout.css">
 <link rel="stylesheet" href="css/components.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "How do I use AILANG Parse in ChatGPT?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Turn on Developer mode in ChatGPT’s settings, open Plugins, choose Add custom MCP server, paste https://docparse.ailang.sunholo.com/mcp/connect/ and choose OAuth. Sign in when ChatGPT opens the sign-in page, then type @ in a conversation and select the plugin. Developer mode is available on some ChatGPT plans only."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I add AILANG Parse to Claude?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "In claude.ai or Claude Desktop, open Customize → Connectors, click Add custom connector, paste https://docparse.ailang.sunholo.com/mcp/connect/, leave the OAuth client ID and secret empty, then click Connect and sign in. In Claude Code, run claude mcp add --transport http docparse https://docparse.ailang.sunholo.com/mcp/connect/."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need an API key?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. You sign in with Google or GitHub in your browser and approve the connection. Usage through the connector counts against your AILANG Parse plan."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What can the assistant do once it is connected?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It can read a document (Office, PDF, HTML, Markdown, email or an image) with its tables, headings, comments and tracked changes; convert it to Word, PowerPoint, Excel, OpenDocument, HTML, Markdown or Quarto; and apply edits. Editing returns a copy, so your original file is never changed."
+      }
+    }
+  ]
+}
+</script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Connect", "item": "https://www.sunholo.com/ailang-parse/docs.html#connect"}, {"@type": "ListItem", "position": 4, "name": "ChatGPT, Claude and Codex", "item": "https://www.sunholo.com/ailang-parse/connect.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
 <div id="header-mount"></div>
 
 <div class="page" data-no-cta>
+
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#connect">Connect</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">ChatGPT, Claude and Codex</span></nav>
+<!-- /nav:crumbs -->
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal">Connect from <span class="dp-accent">Claude, ChatGPT</span> or Codex</h1>
@@ -49,6 +97,7 @@
         <a href="#revoke">Revoking access</a>
         <a href="#troubleshooting">Troubleshooting</a>
         <a href="#agents">Agents without a browser</a>
+        <a href="#faq">Common questions</a>
         <a href="#privacy">Privacy &amp; support</a>
       </nav>
     </aside>
@@ -57,9 +106,11 @@
     <main class="dp-docs-content">
 
       <h2 id="overview">Overview</h2>
-      <p>The AILANG Parse connector is a remote <a href="mcp.html">MCP server</a> that lets an AI assistant parse, convert and edit documents with your AILANG Parse account. You add one URL to the assistant and sign in once in your browser. You never copy an API key.</p>
+      <p class="dp-lede">The AILANG Parse connector lets the AI assistant you already use read, convert and edit your documents: Word, Excel, PowerPoint, PDF and more, with tables, comments and <a href="track-changes.html">tracked changes</a> kept. You add one URL to the assistant and sign in once in your browser. You never copy an API key.</p>
       <pre><code>https://docparse.ailang.sunholo.com/mcp/connect/</code></pre>
+      <p>The technical details, if your assistant asks for them:</p>
       <ul>
+        <li><strong>Type:</strong> a remote <a href="mcp.html">MCP server</a>.</li>
         <li><strong>Transport:</strong> Streamable HTTP.</li>
         <li><strong>Sign-in:</strong> OAuth 2.1 with PKCE. The assistant registers itself automatically (client ID metadata documents), so there is no client ID or secret to enter: leave any OAuth client fields empty.</li>
         <li><strong>Account:</strong> you sign in with Google or GitHub. Usage through the connector counts against your plan, like any other request.</li>
@@ -79,7 +130,7 @@
         <li>Click <em>Add</em>, then <em>Connect</em> to sign in.</li>
         <li>In a conversation, use the <em>+</em> button &rarr; <em>Connectors</em> to switch it on.</li>
       </ol>
-      <p>On Team and Enterprise plans an organisation Owner first adds the connector under <em>Organization settings &rarr; Connectors</em>; members then click <em>Connect</em>. Free plans are limited to one custom connector. See Anthropic&rsquo;s guide: <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Get started with custom connectors using remote MCP</a>. A listing in Claude&rsquo;s connector directory is coming; once it is live you will be able to add AILANG Parse from there without pasting the URL.</p>
+      <p>On Team and Enterprise plans an organisation Owner first adds the connector under <em>Organization settings &rarr; Connectors</em>; members then click <em>Connect</em>. Free plans are limited to one custom connector. See Anthropic&rsquo;s guide: <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Get started with custom connectors using remote MCP</a>.</p>
 
       <h3 id="codex">Codex</h3>
       <pre><code>codex mcp add docparse --url https://docparse.ailang.sunholo.com/mcp/connect/
@@ -87,7 +138,7 @@ codex mcp login docparse</code></pre>
       <p><code>codex mcp login</code> opens the sign-in page in your browser and stores the result for later sessions.</p>
 
       <h3 id="chatgpt">ChatGPT</h3>
-      <p>ChatGPT adds custom MCP servers as plugins (formerly &ldquo;apps&rdquo; or &ldquo;connectors&rdquo;). Custom MCP servers need <em>Developer mode</em>, which is available on some plans only and may have to be enabled by your workspace admin.</p>
+      <p>ChatGPT adds custom MCP servers as plugins (also called &ldquo;apps&rdquo; or &ldquo;connectors&rdquo;). This needs <em>Developer mode</em>, which is available on some plans only. Your workspace admin may have to enable it.</p>
       <ol>
         <li>Turn on <em>Developer mode</em> in ChatGPT&rsquo;s settings (under <em>Apps &amp; Connectors &rarr; Advanced</em> on most accounts).</li>
         <li>Open <em>Plugins</em> in ChatGPT (<code>chatgpt.com/plugins</code>), select <em>+</em> and choose <em>Add custom MCP server</em>.</li>
@@ -97,7 +148,7 @@ codex mcp login docparse</code></pre>
       </ol>
       <p>OpenAI moves these settings from time to time; their current instructions are in <a href="https://developers.openai.com/apps-sdk/deploy/connect-chatgpt">Connect from ChatGPT</a>.</p>
 
-      <h3>Other MCP clients</h3>
+      <h3 id="other-mcp-clients">Other MCP clients</h3>
       <p>Any client that supports remote MCP servers over Streamable HTTP with OAuth can use the same URL.</p>
 
       <h2 id="sign-in">Signing in</h2>
@@ -111,7 +162,7 @@ codex mcp login docparse</code></pre>
       <p><strong>What a connection is.</strong> The app receives an access key for your account, labelled <code>oauth: &lt;app host&gt;</code> (for example <code>oauth: claude.ai</code>). The key lasts 24 hours. The app renews it automatically with a refresh token valid for 30 days; each renewal replaces the old key. If the app is not used for 30 days, you sign in again.</p>
 
       <h2 id="tools">Tools</h2>
-      <p>The connector provides these tools (checked against the live server on 5 November 2026). None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
+      <p>The connector provides these tools. None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
       <table class="dp-config-table">
         <thead>
           <tr><th>Tool</th><th>What it does</th><th>Sign-in</th><th>Hints</th></tr>
@@ -119,13 +170,13 @@ codex mcp login docparse</code></pre>
         <tbody>
           <tr>
             <td><code>mcpParse</code><br><small>Parse document</small></td>
-            <td>Reads a document (Office, PDF, HTML, Markdown, email, images and more) into structured blocks, Markdown, HTML or A2UI, keeping tables, headings, comments and tracked changes. <code>outputFormat: "summary"</code> returns a few KB (counts, the first 50 headings, warnings). Long results come in <a href="#large">parts</a>. Scanned PDFs: <code>pdfBackend: "ai"</code>.</td>
+            <td>Reads a document (Office, PDF, HTML, Markdown, email, images and more) into structured blocks, Markdown, HTML or A2UI, keeping tables, headings, <a href="comments.html">comments</a> and tracked changes. <code>outputFormat: "summary"</code> returns a short overview (counts, the first 50 headings, warnings). Long results come in <a href="#large">parts</a>. Scanned PDFs: <code>pdfBackend: "ai"</code>.</td>
             <td>Required</td>
             <td>Read-only</td>
           </tr>
           <tr>
             <td><code>uploadDocument</code><br><small>Upload a document</small></td>
-            <td>Shows the AILANG Parse upload card in the conversation, with a <em>Choose file</em> button. The card uploads the file you pick, summarises it, and gives the assistant a <code>fileRef</code> for the other tools. In claude.ai and Claude Desktop, and other apps that show MCP Apps cards.</td>
+            <td>Shows the AILANG Parse upload card in the conversation, with a <em>Choose file</em> button. The card uploads the file you pick, summarises it, and gives the assistant a <code>fileRef</code> for the other tools. Works in claude.ai, Claude Desktop and other apps that show MCP Apps cards.</td>
             <td>Required</td>
             <td>Not read-only (stores your upload); not destructive</td>
           </tr>
@@ -137,7 +188,7 @@ codex mcp login docparse</code></pre>
           </tr>
           <tr>
             <td><code>mcpConvert</code><br><small>Convert document</small></td>
-            <td>Creates a document in another format (Word, PowerPoint, Excel, OpenDocument, HTML, Markdown, Quarto), either from Markdown the assistant writes or from an existing document. The result includes a private download link valid for one hour.</td>
+            <td>Creates a document in another format (Word, PowerPoint, <a href="xlsx-parsing.html">Excel</a>, OpenDocument, HTML, Markdown, Quarto), either from Markdown the assistant writes or from an existing document. The result includes a private download link valid for one hour.</td>
             <td>Required</td>
             <td>Read-only</td>
           </tr>
@@ -173,7 +224,7 @@ codex mcp login docparse</code></pre>
           </tr>
         </tbody>
       </table>
-      <p>The list also contains <code>uploadViaHost</code> (<em>Receive upload from widget</em>). Only the upload card calls it, to send the file through the app when the app does not let the card upload directly; it is marked app-only, so the assistant does not use it.</p>
+      <p>The list also contains <code>uploadViaHost</code> (<em>Receive upload from widget</em>). Only the upload card calls it, to send the file through the app when the app does not let the card upload directly. The assistant does not use it.</p>
       <p>The tool list can change as the service improves; your assistant always shows the current list and descriptions.</p>
 
       <h2 id="documents">Giving it a document</h2>
@@ -193,7 +244,7 @@ codex mcp login docparse</code></pre>
           </tr>
           <tr>
             <td>Attached to a ChatGPT message</td>
-            <td><code>mcpParse</code>, <code>mcpConvert</code> and <code>editDocument</code> take a <code>file</code> argument that ChatGPT fills in (<code>openai/fileParams</code>): ChatGPT gives AILANG Parse a temporary download link to the attachment.</td>
+            <td>ChatGPT passes the attachment to <code>mcpParse</code>, <code>mcpConvert</code> or <code>editDocument</code> in their <code>file</code> argument, as a temporary download link.</td>
           </tr>
           <tr>
             <td>On the web</td>
@@ -201,7 +252,7 @@ codex mcp login docparse</code></pre>
           </tr>
           <tr>
             <td>Short text the assistant already has (Markdown, HTML, CSV)</td>
-            <td><code>content</code> plus a <code>filename</code> whose extension picks the parser. For a new document, the assistant writes Markdown and sends it to <code>mcpConvert</code>.</td>
+            <td><code>content</code> plus a <code>filename</code> whose extension tells AILANG Parse the format. For a new document, the assistant writes Markdown and sends it to <code>mcpConvert</code>.</td>
           </tr>
           <tr>
             <td>Just trying it out</td>
@@ -212,22 +263,22 @@ codex mcp login docparse</code></pre>
       <p>If none of these works (for example the sandbox has no network access), the tool descriptions tell the assistant to say so, not to read the file some other way and present that as AILANG Parse&rsquo;s result.</p>
 
       <h3 id="upload-links">Upload links (<code>createUpload</code>)</h3>
-      <p>Each link holds a single-use token valid for 10 minutes. The result has the upload descriptor and a ready-made line; the assistant replaces <code>&lt;path&gt;</code> with the file&rsquo;s path and runs it where the file is:</p>
+      <p>Each link works once and is valid for 10 minutes. It comes with a ready-made command; the assistant replaces <code>&lt;path&gt;</code> with the file&rsquo;s path and runs it where the file is:</p>
       <pre><code>curl -sS -F token=&lt;token&gt; -F file=@&lt;path&gt; https://docparse.ailang.sunholo.com/uploads</code></pre>
-      <p>The receipt includes <code>{"fileRef":"mcp-file://docparse/file_&hellip;","name":"report.docx","mimeType":"&hellip;","sizeBytes":&hellip;,"sha256":"&hellip;"}</code>. For several files the assistant sets <code>count</code> (up to 20) and runs one line per file; a token used twice is refused. In claude.ai&rsquo;s code sandbox, <code>docparse.ailang.sunholo.com</code> has to be allowed by your network settings, or the assistant falls back to the upload card.</p>
+      <p>The receipt includes <code>{"fileRef":"mcp-file://docparse/file_&hellip;","name":"report.docx","mimeType":"&hellip;","sizeBytes":&hellip;,"sha256":"&hellip;"}</code>. For several files the assistant sets <code>count</code> (up to 20) and runs one command per file; a link used twice is refused. In claude.ai&rsquo;s code sandbox, <code>docparse.ailang.sunholo.com</code> has to be allowed by your network settings, or the assistant falls back to the upload card.</p>
 
       <h3 id="fileref">Reusing an upload (<code>fileRef</code>)</h3>
-      <p>Every upload, from the card or a link, ends in a <code>fileRef</code> (<code>mcp-file://docparse/file_&hellip;</code>) that <code>mcpParse</code>, <code>mcpConvert</code> and <code>editDocument</code> accept. It belongs to your account only: another account gets &ldquo;not found&rdquo;. An upload nobody uses is refused after 1 hour. After its first use the same account can use it again for 30 minutes (more parts, another format, a conversion), never more than 1 hour after upload. Then the assistant needs a fresh upload. See the <a href="privacy.html#ai-assistants">privacy policy</a> for how long the stored copy is kept.</p>
+      <p>Every upload, from the card or a link, produces a <code>fileRef</code> (<code>mcp-file://docparse/file_&hellip;</code>) that <code>mcpParse</code>, <code>mcpConvert</code> and <code>editDocument</code> accept. It belongs to your account only: another account gets &ldquo;not found&rdquo;. An upload nobody uses is refused after 1 hour. After its first use the same account can use it again for 30 minutes (more parts, another format, a conversion), never more than 1 hour after upload. Then the assistant needs a fresh upload. See the <a href="privacy.html#ai-assistants">privacy policy</a> for how long the stored copy is kept.</p>
 
       <h2 id="large">Large documents</h2>
       <ul>
-        <li><strong>Look first:</strong> <code>outputFormat: "summary"</code> returns the file name, format, counts (blocks, headings, tables, images, tracked changes, comments), an outline of the first 50 headings and any warnings, in a few KB. The upload card uses it.</li>
-        <li><strong>Parts:</strong> a result longer than <code>maxChars</code> (a string of digits, default <code>"80000"</code>, range <code>"2000"</code>&ndash;<code>"120000"</code>) comes back as its first part with <code>page: {index, of, nextCursor, &hellip;}</code>. The assistant calls <code>mcpParse</code> again with the same document and <code>cursor: &lt;nextCursor&gt;</code> until there is no <code>nextCursor</code>. Parts never split a block. Each part counts as one request.</li>
+        <li><strong>Look first:</strong> <code>outputFormat: "summary"</code> returns the file name, format, counts (blocks, headings, tables, images, tracked changes, comments), an outline of the first 50 headings and any warnings. The upload card uses it.</li>
+        <li><strong>Parts:</strong> a result longer than <code>maxChars</code> (a number, default <code>80000</code>, range <code>2000</code>&ndash;<code>120000</code>) comes back as its first part with <code>page: {index, of, nextCursor, &hellip;}</code>. The assistant calls <code>mcpParse</code> again with the same document and <code>cursor: &lt;nextCursor&gt;</code> until there is no <code>nextCursor</code>. Parts never split a block. Each part counts as one request.</li>
         <li><strong>Scanned PDFs:</strong> a PDF with no usable text layer returns <code>PDF_TEXT_LAYER_SPARSE</code>. Retry with <code>pdfBackend: "ai"</code>: each page is read by an AI model (about 5 seconds a page), the call counts as an AI request, and the same <code>pdfBackend</code> goes with every <code>cursor</code> call. The AI result is cached for 30 minutes for your account, so reading further parts does not repeat the work.</li>
       </ul>
 
       <h2 id="using">Using it</h2>
-      <p>Ask naturally, for example &ldquo;parse this contract and list the tracked changes&rdquo;, &ldquo;turn these notes into a PowerPoint&rdquo; or &ldquo;try AILANG Parse on a sample DOCX&rdquo;. The assistant can give AILANG Parse a document in the ways listed under <a href="#documents">Giving it a document</a>. Created files come back with a download link that is valid for one hour.</p>
+      <p>Ask naturally, for example &ldquo;parse this contract and list the tracked changes&rdquo;, &ldquo;turn these notes into a PowerPoint&rdquo; or &ldquo;try AILANG Parse on a sample <a href="docx-parsing.html">DOCX</a>&rdquo;. The assistant can give AILANG Parse a document in the ways listed under <a href="#documents">Giving it a document</a>. Created files come back with a download link that is valid for one hour.</p>
 
       <h2 id="revoke">Revoking access</h2>
       <ul>
@@ -237,25 +288,25 @@ codex mcp login docparse</code></pre>
 
       <h2 id="troubleshooting">Troubleshooting</h2>
 
-      <h3>After signing in, the browser shows a localhost page or &ldquo;unable to connect&rdquo;</h3>
-      <p>Desktop and command-line apps (Claude Code, Codex) receive the sign-in on a temporary local address such as <code>http://localhost:&hellip;</code>. That listener only runs while the app is waiting, so keep the app open until it confirms the connection, then try again from the app. If the app runs on a different machine from your browser (for example over SSH), copy the full <code>localhost</code> URL from the browser&rsquo;s address bar and paste it back into the app when it asks; Claude Code supports this.</p>
+      <h3 id="after-signing-in-the-browser-shows-a-localhost-p">After signing in, the browser shows a localhost page or &ldquo;unable to connect&rdquo;</h3>
+      <p>Desktop and command-line apps (Claude Code, Codex) receive the sign-in on a temporary local address such as <code>http://localhost:&hellip;</code>. That address only works while the app is waiting, so keep the app open until it confirms the connection. If it has stopped waiting, start the sign-in again from the app. If the app runs on a different machine from your browser (for example over SSH), copy the full <code>localhost</code> URL from the browser&rsquo;s address bar and paste it back into the app when it asks; Claude Code supports this.</p>
 
-      <h3>The sign-in popup does not appear</h3>
+      <h3 id="the-sign-in-popup-does-not-appear">The sign-in popup does not appear</h3>
       <p>Your browser is blocking popups. Allow popups for <code>docparse.ailang.sunholo.com</code> and click the sign-in button again.</p>
 
-      <h3>&ldquo;This sign-in request has expired or was already used&rdquo;</h3>
+      <h3 id="this-sign-in-request-has-expired-or-was-already-">&ldquo;This sign-in request has expired or was already used&rdquo;</h3>
       <p>Each sign-in request is valid for 10 minutes and can be used once. Close the tab and start the connection again from the app (Claude Code: <code>/mcp</code> &rarr; <em>Authenticate</em>; Codex: <code>codex mcp login docparse</code>; Claude and ChatGPT: <em>Connect</em> on the connector).</p>
 
-      <h3>&ldquo;Needs you to sign in again&rdquo;, &ldquo;not authenticated&rdquo; or a 401 error</h3>
+      <h3 id="needs-you-to-sign-in-again-not-authenticated-or-">&ldquo;Needs you to sign in again&rdquo;, &ldquo;not authenticated&rdquo; or a 401 error</h3>
       <p>The access key expired and could not be renewed. Keys last 24 hours and are renewed only while the app is in use; refresh tokens expire after 30 days, and revoking the key on the dashboard also ends the connection. Re-authenticate from the app as above.</p>
 
-      <h3>A tool says you have reached your plan&rsquo;s limit</h3>
+      <h3 id="a-tool-says-you-have-reached-your-plan-s-limit">A tool says you have reached your plan&rsquo;s limit</h3>
       <p>Your monthly allowance is used up. It resets at the start of each month. You can see your usage, and manage your account, on the <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a>, or ask the assistant to run <code>mcpAccount</code>.</p>
 
-      <h3>A link cannot be fetched</h3>
+      <h3 id="a-link-cannot-be-fetched">A link cannot be fetched</h3>
       <p>Links must be publicly reachable over <code>https://</code>. Pages behind a login cannot be read; give the assistant the file itself instead.</p>
 
-      <h3>The connector shows no tools, or old tools</h3>
+      <h3 id="the-connector-shows-no-tools-or-old-tools">The connector shows no tools, or old tools</h3>
       <p>Reconnect or refresh the connector in the app (ChatGPT: open the plugin and select <em>Refresh</em>; Claude Code: <code>/mcp</code>).</p>
 
       <h2 id="agents">Agents without a browser</h2>
@@ -266,9 +317,59 @@ codex mcp login docparse</code></pre>
       </ul>
       <p>Details are on the <a href="mcp.html">MCP server page</a>.</p>
 
+      <div class="dp-faq" id="faq">
+        <h2 id="common-questions">Common questions</h2>
+        <details>
+          <summary>How do I use AILANG Parse in ChatGPT?</summary>
+          <div class="dp-faq-answer"><p>Turn on Developer mode in ChatGPT&rsquo;s settings, open Plugins, choose <strong>Add custom MCP server</strong>, paste <code>https://docparse.ailang.sunholo.com/mcp/connect/</code> and choose OAuth. Sign in when ChatGPT opens the sign-in page, then type @ in a conversation and select the plugin. Developer mode is available on some ChatGPT plans only.</p></div>
+        </details>
+        <details>
+          <summary>How do I add AILANG Parse to Claude?</summary>
+          <div class="dp-faq-answer"><p>In claude.ai or Claude Desktop, open Customize &rarr; Connectors, click <strong>Add custom connector</strong>, paste <code>https://docparse.ailang.sunholo.com/mcp/connect/</code>, leave the OAuth client ID and secret empty, then click Connect and sign in. In Claude Code, run <code>claude mcp add --transport http docparse https://docparse.ailang.sunholo.com/mcp/connect/</code>.</p></div>
+        </details>
+        <details>
+          <summary>Do I need an API key?</summary>
+          <div class="dp-faq-answer"><p>No. You sign in with Google or GitHub in your browser and approve the connection. Usage through the connector counts against your AILANG Parse plan.</p></div>
+        </details>
+        <details>
+          <summary>What can the assistant do once it is connected?</summary>
+          <div class="dp-faq-answer"><p>It can read a document (Office, PDF, HTML, Markdown, email or an image) with its tables, headings, comments and tracked changes; convert it to Word, <a href="pptx-parsing.html">PowerPoint</a>, Excel, OpenDocument, HTML, Markdown or Quarto; and apply edits. Editing returns a copy, so your original file is never changed.</p></div>
+        </details>
+      </div>
+
       <h2 id="privacy">Privacy &amp; support</h2>
       <p>The assistant sends AILANG Parse only the tool call: the document and options you ask it to work on, never your conversation. AILANG Parse acts only on files that are explicitly passed to its tools. How connections, keys and created files are stored is described in our <a href="privacy.html#ai-assistants">privacy policy</a>; see also the <a href="terms.html">terms</a>.</p>
       <p>Need help? Email <a href="mailto:docparse@sunholo.com">docparse@sunholo.com</a> or open an issue at <a href="https://github.com/sunholo-data/ailang-parse/issues">github.com/sunholo-data/ailang-parse/issues</a>.</p>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="mcp.html" class="dp-doc-card" data-find="mcp server the tools an ai agent gets, and how to configure any mcp client. mcp model context protocol agent tools cursor vs code">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">MCP server</div>
+          <div class="dp-doc-card-desc">The tools an AI agent gets, and how to configure any MCP client.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="claude-code.html" class="dp-doc-card" data-find="claude code plugin install the plugin and parse documents from your terminal. claude code plugin skill codex">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Claude Code plugin</div>
+          <div class="dp-doc-card-desc">Install the plugin and parse documents from your terminal.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="pricing.html" class="dp-doc-card" data-find="pricing per document, not per page. free tier included. price cost plans free pro business">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Pricing</div>
+          <div class="dp-doc-card-desc">Per document, not per page. Free tier included.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

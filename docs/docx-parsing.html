@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
 <meta name="description" content="Parse DOCX files to structured JSON in milliseconds. Extract track changes, comments, tables with merged cells, headers, footers, and images. No PDF conversion step.">
 <meta property="og:title" content="DOCX Parsing API — AILANG Parse">
-<meta property="og:description" content="Parse DOCX files to structured JSON. Track changes, comments, merged cells, headers/footers — all preserved. Milliseconds, not seconds.">
+<meta property="og:description" content="Parse Word documents to structured JSON. Track changes, comments, merged cells, headers and footers are kept. Takes milliseconds.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/docx-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -125,13 +125,17 @@
     {"@type": "Question", "name": "How do I parse a DOCX file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .docx file to the AILANG Parse API or use the Python/JS/Go SDK. The parser reads Office Open XML directly and returns structured JSON with typed blocks for paragraphs, tables, images, and metadata."}},
     {"@type": "Question", "name": "Does DOCX parsing preserve track changes?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every insertion, deletion, and format change is extracted with author name, timestamp, and the original vs revised text. See the track changes documentation for details."}},
     {"@type": "Question", "name": "Are comments extracted from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each comment is extracted with author, date, the anchored text range, and reply threads. Comments appear as typed blocks alongside the paragraphs they reference."}},
-    {"@type": "Question", "name": "How are tables with merged cells handled?", "acceptedAnswer": {"@type": "Answer", "text": "Merged cells (gridSpan for horizontal, vMerge for vertical) are resolved into a clean row/column structure with explicit merge metadata. No guessing from visual layout."}},
-    {"@type": "Question", "name": "Does AILANG Parse convert DOCX to PDF first?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads the Office Open XML directly — the .docx zip contains document.xml, styles.xml, and relationship files that encode the full document structure. No rendering or PDF conversion step."}},
-    {"@type": "Question", "name": "What about headers, footers, and text boxes?", "acceptedAnswer": {"@type": "Answer", "text": "Headers and footers are extracted as separate section blocks with their content preserved. Text boxes (w:txbxContent) are extracted inline at their anchor position in the document flow."}},
-    {"@type": "Question", "name": "How fast is DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical DOCX files parse in under 50ms. The parser reads XML directly with no external dependencies, no subprocess spawning, and no rendering engine. 98.1% composite on OfficeDocBench."}}
+    {"@type": "Question", "name": "How are tables with merged cells handled?", "acceptedAnswer": {"@type": "Answer", "text": "You get clean rows and columns, with merged cells marked by gridSpan (across columns) and vMerge (down rows). Nothing is guessed from the visual layout."}},
+    {"@type": "Question", "name": "Does AILANG Parse convert DOCX to PDF first?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads the Office Open XML directly: the .docx file holds document.xml, styles.xml and related files that describe the whole document. Nothing is rendered or converted to PDF, and LibreOffice is not needed."}},
+    {"@type": "Question", "name": "What about headers, footers, and text boxes?", "acceptedAnswer": {"@type": "Answer", "text": "Headers and footers come out as separate section blocks. Text boxes (w:txbxContent) appear at the point in the text where they are anchored."}},
+    {"@type": "Question", "name": "How fast is DOCX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical files parse in under 50ms, with no other software to install. AILANG Parse scores 98.1% on the OfficeDocBench benchmark."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Formats", "item": "https://www.sunholo.com/ailang-parse/docs.html#formats"}, {"@type": "ListItem", "position": 4, "name": "Word (DOCX)", "item": "https://www.sunholo.com/ailang-parse/docx-parsing.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -139,9 +143,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#formats">Formats</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Word (DOCX)</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">DOCX Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Parse Word documents to structured JSON in milliseconds. Track changes, comments, tables, headers, footers, images &mdash; all preserved as typed blocks.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse Word documents to structured JSON in milliseconds. Track changes, comments, tables, headers, footers and images are all kept, each as its own typed block.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own file in the Workbench &rarr;</a></div>
   </section>
 
@@ -166,13 +174,13 @@
     <main class="dp-docs-content">
 
       <h2 id="problem">Your DOCX Is Already Structured Data</h2>
-      <p>A .docx file is a zip archive containing XML. Paragraphs, styles, tables, revisions, comments &mdash; all encoded in <code>document.xml</code>, <code>styles.xml</code>, and relationship files. Most parsers ignore this and render the document to PDF or plain text first, destroying the structure in the process.</p>
+      <p>A .docx file is a zip archive of XML files, in the Office Open XML format (OOXML). Paragraphs, styles, tables, revisions and comments are all recorded in <code>document.xml</code>, <code>styles.xml</code> and the files that link them. Many parsers convert the document to PDF or plain text first, and that structure is lost.</p>
 
-      <p>AILANG Parse reads the Office Open XML directly. Track changes get author and timestamp. Merged cells get explicit <code>gridSpan</code>/<code>vMerge</code> metadata. Comments stay anchored to their text ranges. Nothing is flattened, nothing is lost.</p>
+      <p>AILANG Parse reads the Office Open XML directly. Tracked changes keep their author and timestamp. Merged cells are marked with <code>gridSpan</code> (merged across columns) and <code>vMerge</code> (merged down rows). Comments stay attached to the text they refer to.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><span data-bench="ailang_parse.composite">98.1%</span> on OfficeDocBench (<span data-bench="total_files">87</span> files across 11 formats, 100% format coverage). PDF-first parsers score 51&ndash;62% coverage-adjusted on the same benchmark because rendering destroys structural metadata. <a href="benchmarks.html">See benchmarks</a>.</div>
+        <div>AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> on OfficeDocBench (<span data-bench="total_files">87</span> files across <span data-bench="format_count">11</span> formats, and it reads every one). Parsers that convert to PDF first score 51&ndash;62% on the same benchmark once the formats they cannot read are counted, because the conversion drops this structure. <a href="benchmarks.html">See benchmarks</a>.</div>
       </div>
 
       <h2 id="raw-vs-structured">Raw Office XML vs Structured Output</h2>
@@ -252,34 +260,34 @@
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
           <h4>Paragraphs &amp; Styles</h4>
-          <p>Every paragraph preserves its style name (Heading 1, Normal, ListBullet, etc.) and inline formatting. Run-level bold, italic, underline, and font changes are captured.</p>
+          <p>Every paragraph keeps its style name (Heading 1, Normal, ListBullet and so on). Bold, italic, underline and font changes inside a paragraph are kept too.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Track Changes</h4>
-          <p>Insertions, deletions, and format changes with author name, timestamp, and original vs revised text. Full revision history, not just the accepted result. <a href="track-changes.html">Deep dive &rarr;</a></p>
+          <p>Insertions, deletions and format changes, each with the author, the timestamp and the text before and after. You get the revision history, not only the final text. <a href="track-changes.html">Deep dive &rarr;</a></p>
         </div>
         <div class="dp-feature-card">
           <h4>Comments &amp; Replies</h4>
-          <p>Each comment extracted with author, date, anchored text range, and threaded replies. Comments stay associated with the paragraph they reference. <a href="comments.html">Deep dive &rarr;</a></p>
+          <p>Each comment comes with its author, date, the text it is attached to and any replies. Comments stay with the paragraph they refer to. <a href="comments.html">Deep dive &rarr;</a></p>
         </div>
         <div class="dp-feature-card">
           <h4>Tables &amp; Merged Cells</h4>
-          <p>Full table structure with <code>gridSpan</code> (horizontal merge) and <code>vMerge</code> (vertical merge) resolved into explicit metadata. Header rows identified. <a href="tables.html">Deep dive &rarr;</a></p>
+          <p>Rows, columns and header rows, with merged cells marked by <code>gridSpan</code> (across columns) and <code>vMerge</code> (down rows). <a href="tables.html">Deep dive &rarr;</a></p>
         </div>
         <div class="dp-feature-card">
           <h4>Headers, Footers &amp; Text Boxes</h4>
-          <p>Header and footer content extracted as separate section blocks. Text boxes (<code>w:txbxContent</code>) extracted inline at their anchor position in the document flow.</p>
+          <p>Headers and footers come out as separate section blocks. Text boxes (<code>w:txbxContent</code>) appear at the point in the text where they are anchored.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Images &amp; Metadata</h4>
-          <p>Embedded images identified by relationship ID with dimensions and alt text. Picture size is read from the image itself. Document metadata (title, author, created date, revision count) extracted from core.xml properties.</p>
+          <p>Embedded images are listed with their relationship ID, dimensions and alt text. Picture size is read from the image itself. Document metadata (title, author, created date, revision count) comes from the file's properties.</p>
         </div>
       </div>
 
       <h2 id="track-changes">Track Changes</h2>
-      <p>DOCX track changes encode the full editing history: who changed what, when, and what the text looked like before. AILANG Parse extracts every revision as a structured change block with <code>type</code> (insert/delete/formatChange), <code>author</code>, <code>date</code>, and the affected text.</p>
+      <p>Track changes in a DOCX record the editing history: who changed what, when, and what the text said before. AILANG Parse returns every revision as a change with its <code>type</code> (insert/delete/formatChange), <code>author</code>, <code>date</code> and the affected text.</p>
 
-      <p>This is the metadata that disappears when you render to PDF. A legal team reviewing a contract needs to see that "Alice deleted <em>net-30</em> and inserted <em>net-60</em> on March 15th" &mdash; not just the final text.</p>
+      <p>This information disappears when a document is converted to PDF. A legal team reviewing a contract needs to see that "Alice deleted <em>net-30</em> and inserted <em>net-60</em> on March 15th", not only the final text.</p>
 
 <pre><code class="language-json">{
   "type": "text",
@@ -293,7 +301,7 @@
       <p>See <a href="track-changes.html">Track Changes extraction</a> for the full specification.</p>
 
       <h2 id="tables">Tables &amp; Merged Cells</h2>
-      <p>Office tables use <code>gridSpan</code> for horizontal merges and <code>vMerge</code> for vertical merges. AILANG Parse resolves these into a clean row/column structure with explicit merge metadata &mdash; no heuristic guessing from visual alignment.</p>
+      <p>Word tables mark cells merged across columns with <code>gridSpan</code> and cells merged down rows with <code>vMerge</code>. AILANG Parse returns clean rows and columns with those merges marked on each cell. Nothing is guessed from how the table looks.</p>
 
 <pre><code class="language-json">{
   "type": "table",
@@ -311,7 +319,7 @@
       <p>See <a href="tables.html">Tables &amp; Merged Cells</a> for the full specification.</p>
 
       <h2 id="comments">Comments</h2>
-      <p>DOCX comments are anchored to specific text ranges via <code>w:commentRangeStart</code>/<code>w:commentRangeEnd</code> markers. AILANG Parse extracts each comment with its author, timestamp, the anchored text, and any reply threads.</p>
+      <p>A DOCX comment is attached to a specific stretch of text, marked by <code>w:commentRangeStart</code>/<code>w:commentRangeEnd</code>. AILANG Parse returns each comment with its author, timestamp, the text it is attached to and any replies.</p>
 
 <pre><code class="language-json">{
   "type": "text",
@@ -335,27 +343,27 @@
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
           <h4>Legal Document Review</h4>
-          <p>Extract redlines from contracts with full author/date attribution. Track changes show exactly who modified which clause and when &mdash; the audit trail that disappears in PDF. Feed structured revisions to an LLM for clause-by-clause comparison.</p>
+          <p>Extract redlines from contracts with the author and date of each change. Track changes show who modified which clause and when, an audit trail that a PDF does not carry. Pass the revisions to an LLM for clause-by-clause comparison.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Contract Analysis</h4>
-          <p>Parse contracts into typed blocks: headings map to clause structure, tables capture obligation matrices, comments surface negotiation context. Downstream code identifies key terms, dates, and parties without regex on raw text.</p>
+          <p>Parse contracts into typed blocks. Headings give the clause structure, tables hold the obligations, and comments show the negotiation. Your code can find key terms, dates and parties without pattern-matching on raw text.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Regulatory Compliance</h4>
-          <p>Audit trails require knowing who changed what and when. Track changes metadata provides this directly. Parse submission documents, compare revisions programmatically, and generate compliance reports from structured data instead of manual review.</p>
+          <p>An audit trail has to show who changed what and when. Track changes give you that directly. Parse submission documents, compare revisions in code, and build compliance reports from structured data instead of manual review.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Academic Paper Processing</h4>
-          <p>Extract heading hierarchy, citation tables, figure references, and reviewer comments from manuscript DOCX files. The structured output feeds directly into reference management, plagiarism detection, or automated formatting pipelines.</p>
+          <p>Extract the heading hierarchy, citation tables, figure references and reviewer comments from manuscript DOCX files. The output can go straight into reference management, plagiarism detection or automated formatting.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Document Migration</h4>
-          <p>Convert DOCX archives to any output format: Markdown for docs-as-code, HTML for web publishing, Quarto for reproducible reports. Structure preservation means headings, tables, and images survive the conversion intact.</p>
+          <p>Convert DOCX archives to other formats: Markdown for docs-as-code, HTML for web publishing, Quarto for reproducible reports. Headings, tables and images survive the conversion.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>AI Document Understanding</h4>
-          <p>Feed structured JSON to LLMs instead of raw text. The model sees typed blocks (heading, table, comment) with metadata &mdash; not a flat string. Token efficiency improves and the model can reason about document structure, not just content.</p>
+          <p>Give LLMs structured JSON instead of raw text. The model sees typed blocks (heading, table, comment) with their metadata, not one flat string, so it can reason about the document's structure as well as its content.</p>
         </div>
       </div>
 
@@ -366,27 +374,26 @@
 
       <h2 id="try-it">Try It</h2>
 
-      <h3>CLI</h3>
+      <h3 id="cli">CLI</h3>
       <pre><code class="language-bash"># Parse a DOCX file
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail report.docx
+docparse report.docx
 
 # Convert DOCX to Markdown
-./bin/docparse report.docx --convert output.md
+docparse report.docx --convert output.md
 
 # Convert DOCX to HTML
-./bin/docparse report.docx --convert output.html</code></pre>
+docparse report.docx --convert output.html</code></pre>
 
-      <h3>API</h3>
+      <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_docx_formatting","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
 
-      <h3>Python SDK</h3>
+      <h3 id="python-sdk">Python SDK</h3>
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
-result = client.parse("contract.docx", output_format="json")
+result = client.parse_file("contract.docx")
 
 # Document metadata
 print(result.metadata.title)
@@ -395,7 +402,7 @@ print(result.metadata.author)
 # Iterate structured blocks
 for block in result.blocks:
     if block.type == "table":
-        print(f"Table: {len(block.rows)} rows, merged={block.has_merges}")
+        print(f"Table: {len(block.rows)} rows")
     if hasattr(block, "changes") and block.changes:
         for change in block.changes:
             print(f"{change.author} {change.type}d: {change.text}")
@@ -423,21 +430,52 @@ for block in result.blocks:
         </details>
         <details>
           <summary>How are tables with merged cells handled?</summary>
-          <div class="dp-faq-answer"><p>Merged cells (<code>gridSpan</code> for horizontal, <code>vMerge</code> for vertical) are resolved into a clean row/column structure with explicit merge metadata.</p></div>
+          <div class="dp-faq-answer"><p>You get clean rows and columns, with merged cells marked by <code>gridSpan</code> (across columns) and <code>vMerge</code> (down rows).</p></div>
         </details>
         <details>
           <summary>Does AILANG Parse convert DOCX to PDF first?</summary>
-          <div class="dp-faq-answer"><p>No. It reads Office Open XML directly from the .docx zip archive. No rendering, no PDF conversion, no LibreOffice dependency. See <a href="vs-pdf-conversion.html">why this matters</a>.</p></div>
+          <div class="dp-faq-answer"><p>No. It reads the Office Open XML directly from the .docx file. Nothing is rendered or converted to PDF, and LibreOffice is not needed. See <a href="vs-pdf-conversion.html">why this matters</a>.</p></div>
         </details>
         <details>
           <summary>What about headers, footers, and text boxes?</summary>
-          <div class="dp-faq-answer"><p>Headers and footers are extracted as separate section blocks. Text boxes (<code>w:txbxContent</code>) are extracted inline at their anchor position.</p></div>
+          <div class="dp-faq-answer"><p>Headers and footers come out as separate section blocks. Text boxes (<code>w:txbxContent</code>) appear at the point in the text where they are anchored.</p></div>
         </details>
         <details>
           <summary>How fast is DOCX parsing?</summary>
-          <div class="dp-faq-answer"><p>Typical files parse in under 50ms. No external dependencies, no subprocess spawning. <span data-bench="ailang_parse.composite">98.1%</span> composite on <a href="benchmarks.html">OfficeDocBench</a>.</p></div>
+          <div class="dp-faq-answer"><p>Typical files parse in under 50ms, with no other software to install. AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> on the <a href="benchmarks.html">OfficeDocBench</a> benchmark.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <nav class="dp-format-switch" aria-label="Other formats"><span class="dp-format-switch-label">Other formats</span><span class="dp-chip dp-chip--here" aria-current="page">DOCX</span><a class="dp-chip" href="xlsx-parsing.html">XLSX</a><a class="dp-chip" href="pptx-parsing.html">PPTX</a><a class="dp-chip" href="pdf-parsing.html">PDF</a><a class="dp-chip" href="html-parsing.html">HTML</a><a class="dp-chip" href="email-parsing.html">Email</a><a class="dp-chip" href="odt-parsing.html">ODT</a><a class="dp-chip" href="ods-parsing.html">ODS</a><a class="dp-chip" href="odp-parsing.html">ODP</a><a class="dp-chip" href="epub-parsing.html">EPUB</a><a class="dp-chip" href="latex-parsing.html">LaTeX</a><a class="dp-chip" href="rtf-parsing.html">RTF</a></nav>
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="track-changes.html" class="dp-doc-card" data-find="track changes every insertion, deletion and move, with who made it and when. tracked changes redlines revisions contracts legal">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Track changes</div>
+          <div class="dp-doc-card-desc">Every insertion, deletion and move, with who made it and when.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="docx-to-markdown.html" class="dp-doc-card" data-find="word (docx) to markdown clean markdown with comments, tracked changes and lists kept. compared with markitdown. docx to markdown word md markitdown rag llm">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Word (DOCX) to Markdown</div>
+          <div class="dp-doc-card-desc">Clean Markdown with comments, tracked changes and lists kept. Compared with MarkItDown.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="vs-pdf-conversion.html" class="dp-doc-card" data-find="direct parsing vs pdf conversion what is lost when a word file is turned into a pdf before parsing. docx vs pdf conversion ocr">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Direct parsing vs PDF conversion</div>
+          <div class="dp-doc-card-desc">What is lost when a Word file is turned into a PDF before parsing.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

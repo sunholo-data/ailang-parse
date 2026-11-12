@@ -123,15 +123,19 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "How do I parse an EML file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .eml file to the AILANG Parse API or use the Python/JS/Go SDK. The parser returns structured JSON with typed blocks for headers, body text, HTML content, and attachments."}},
-    {"@type": "Question", "name": "Does email parsing require AI or an API key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Email parsing is fully deterministic — it uses RFC 5322 and MIME spec parsing, not AI. It runs in the browser via WASM or server-side with zero external dependencies."}},
+    {"@type": "Question", "name": "Does email parsing require AI or an API key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Email is parsed by following the RFC 5322 and MIME standards, not with AI, so the same file always gives the same result. It runs in your browser (using WebAssembly) or on a server, with nothing else to install."}},
     {"@type": "Question", "name": "What email encodings are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Base64 body decoding, quoted-printable (including multi-byte UTF-8), and RFC 2047 encoded-words for international headers (both B and Q encoding)."}},
-    {"@type": "Question", "name": "Can I parse MBOX archives with multiple messages?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction."}},
-    {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks (text, heading, section, table) with metadata (title from Subject, author from From, date from Date). Downstream code handles all formats identically."}},
-    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the --deep flag, PDF, DOCX, PPTX, and XLSX attachments are also extracted and parsed. PDF attachments use a free backend ladder: pdftotext first, escalating automatically to local OCR (docling) when the PDF has no text layer, such as a scanned contract."}},
+    {"@type": "Question", "name": "Can I parse MBOX archives with multiple messages?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. An MBOX file is split into its individual messages, following RFC 4155. Each message becomes a separate section block with its headers and body parsed."}},
+    {"@type": "Question", "name": "What is the output format for parsed emails?", "acceptedAnswer": {"@type": "Answer", "text": "The same block format as for DOCX, XLSX and HTML parsing: typed blocks (text, heading, section, table) plus metadata (title from Subject, author from From, date from Date). Your code handles every format the same way."}},
+    {"@type": "Question", "name": "Are email attachments parsed automatically?", "acceptedAnswer": {"@type": "Answer", "text": "Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed automatically. With the --deep flag, PDF, DOCX, PPTX, and XLSX attachments are parsed too. PDF attachments are read with pdftotext first. If the PDF has no text layer, as with a scanned contract, the parser switches automatically to local OCR (docling). Both are free."}},
     {"@type": "Question", "name": "Can I reconstruct email threads from an MBOX file?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Use the --threaded flag. Messages are grouped into conversation threads using Message-ID/In-Reply-To/References headers, with quoted text stripped from replies."}}
   ]
 }
 </script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Formats", "item": "https://www.sunholo.com/ailang-parse/docs.html#formats"}, {"@type": "ListItem", "position": 4, "name": "Email (EML, MBOX)", "item": "https://www.sunholo.com/ailang-parse/email-parsing.html"}]}</script>
+<!-- /nav:ld -->
+
 </head>
 <body>
 
@@ -139,9 +143,13 @@
 
 <div class="page">
 
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#formats">Formats</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Email (EML, MBOX)</span></nav>
+<!-- /nav:crumbs -->
+
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Email Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Parse EML and MBOX files to structured JSON. Headers, body, attachments, MIME parts &mdash; all as typed blocks. Deterministic, no AI needed.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse EML and MBOX files to structured JSON. Headers, body, attachments and MIME parts (the sections of a multi-part email) come out as typed blocks. Deterministic, no AI needed.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own file in the Workbench &rarr;</a></div>
   </section>
 
@@ -168,13 +176,13 @@
     <main class="dp-docs-content">
 
       <h2 id="problem">Raw Email Is Noise</h2>
-      <p>A typical email from Gmail or Outlook is 2,000+ lines of wire-format RFC 5322. MIME boundaries, base64-encoded attachments, folded headers across multiple lines, quoted-printable escape sequences. Feed that to an LLM and you're burning tokens on <code>ARC-Seal: i=1; a=rsa-sha256; t=1775136695; cv=none;</code> instead of the actual message.</p>
+      <p>A typical email from Gmail or Outlook is 2,000+ lines in the raw RFC 5322 mail format: MIME boundaries, base64-encoded attachments, headers folded over several lines, quoted-printable escape sequences. Give that to an LLM and it spends tokens on <code>ARC-Seal: i=1; a=rsa-sha256; t=1775136695; cv=none;</code> instead of the message.</p>
 
-      <p>AILANG Parse reads the RFC 5322 structure directly and outputs clean, typed blocks &mdash; the same format as <a href="comments.html">DOCX</a>, <a href="tables.html">XLSX</a>, and <a href="docs.html">HTML</a> parsing. Your pipeline handles email identically to every other format.</p>
+      <p>AILANG Parse reads the RFC 5322 structure directly and returns clean typed blocks, in the same format as <a href="comments.html">DOCX</a>, <a href="tables.html">XLSX</a> and <a href="docs.html">HTML</a> parsing. Your code handles email the same way as every other format.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>A 125 KB Google Cloud invoice email: 2,076 lines raw, 4 structured blocks. The parser extracts the message content, resolves the PDF attachment's text (with <code>--deep</code>), and maps Subject/From/Date to typed metadata &mdash; in under 2 seconds, with zero AI calls.</div>
+        <div>A 125 KB Google Cloud invoice email is 2,076 lines raw and 4 structured blocks once parsed. The parser extracts the message, reads the text of the PDF attachment (with <code>--deep</code>) and turns Subject, From and Date into metadata, in under 2 seconds and without AI.</div>
       </div>
 
       <h2 id="raw-vs-structured">Raw .eml vs Structured Output</h2>
@@ -253,24 +261,24 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
           <h4>Headers &rarr; Structured Metadata</h4>
-          <p>Subject maps to <code>title</code>, From to <code>author</code>, Date to <code>created</code>. Multi-line folded headers (RFC 5322 &sect;2.2.3) are automatically unfolded into single values.</p>
+          <p>Subject becomes <code>title</code>, From becomes <code>author</code>, Date becomes <code>created</code>. Headers folded over several lines (RFC 5322 &sect;2.2.3) are joined back into single values.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Body Text</h4>
-          <p>Plain text bodies become <code>TextBlock</code>. For multipart/alternative emails, both text and HTML parts are extracted as separate blocks.</p>
+          <p>A plain text body becomes a text block. For multipart/alternative emails (the same message as text and as HTML), both parts come out as separate blocks.</p>
         </div>
         <div class="dp-feature-card">
           <h4>MIME Multipart</h4>
-          <p>Multipart/mixed (body + attachments), multipart/alternative (text + HTML), and nested multipart structures are all resolved by boundary splitting.</p>
+          <p>Multipart/mixed (body + attachments), multipart/alternative (text + HTML) and multipart messages nested inside each other are all split into their parts.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Attachments &mdash; Parsed Inline</h4>
-          <p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed inline as <code>SectionBlock</code> with kind <code>attachment</code>. With <code>--deep</code>, PDF and Office attachments are resolved too &mdash; PDFs with an automatic OCR fallback. Images are identified by filename and MIME type. <a href="#attachment-chain">See details below</a>.</p>
+          <p>Text-based attachments (CSV, HTML, Markdown, nested EML) are decoded and parsed in place, each as a section block with kind <code>attachment</code>. With <code>--deep</code>, PDF and Office attachments are parsed too, and scanned PDFs are read with OCR automatically. Images are listed by filename and MIME type. <a href="#attachment-chain">See details below</a>.</p>
         </div>
       </div>
 
       <h2 id="encodings">Encoding Support</h2>
-      <p>Real-world email uses three encoding layers. AILANG Parse handles all of them:</p>
+      <p>Email uses three kinds of encoding. AILANG Parse decodes all of them:</p>
 
       <table class="dp-config-table">
         <thead>
@@ -298,22 +306,22 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
         </tbody>
       </table>
 
-      <p style="margin-top:16px">Multi-byte UTF-8 sequences spanning consecutive <code>=XX</code> pairs are accumulated and decoded together &mdash; accented characters (<em>caf&eacute;</em>, <em>r&eacute;sum&eacute;</em>, <em>Z&uuml;rich</em>), CJK, and emoji all work correctly.</p>
+      <p style="margin-top:16px">A UTF-8 character spread over several <code>=XX</code> pairs is decoded as one character, so accented characters (<em>caf&eacute;</em>, <em>r&eacute;sum&eacute;</em>, <em>Z&uuml;rich</em>), CJK and emoji all come out right.</p>
 
       <h2 id="mbox">MBOX Archives</h2>
-      <p>MBOX files (RFC 4155) contain multiple emails separated by <code>From&nbsp;</code> envelope lines. AILANG Parse splits them into individual messages, each wrapped in a <code>SectionBlock</code> with kind <code>mbox-message</code>. Every message gets full header/body/attachment parsing.</p>
+      <p>An MBOX file (RFC 4155) holds many emails, separated by lines beginning <code>From&nbsp;</code>. AILANG Parse splits it into individual messages, each in a section block with kind <code>mbox-message</code>. Headers, body and attachments are parsed for every message.</p>
 
-      <p>This makes MBOX ideal for bulk email processing: export a Gmail label or Thunderbird folder as MBOX, parse it in one call, and get structured JSON for every message in the archive.</p>
+      <p>This makes MBOX a good fit for processing email in bulk: export a Gmail label or Thunderbird folder as MBOX, parse it in one call, and get structured JSON for every message in the archive.</p>
 
-      <h2 id="attachment-chain">Attachment Chain Parsing</h2>
+      <h2 id="attachment-chain">Attachment Parsing</h2>
 
-      <p>Emails are documents that contain other documents. A budget email has a CSV; a contract email has HTML or a forwarded <code>.eml</code>. AILANG Parse decodes and parses text-based attachments inline &mdash; one API call extracts the email <em>and</em> its attachment content.</p>
+      <p>Emails are documents that contain other documents. A budget email has a CSV; a contract email has HTML or a forwarded <code>.eml</code>. AILANG Parse decodes and parses text-based attachments in place, so one API call returns the email <em>and</em> the content of its attachments.</p>
 
-      <p>Supported inline formats: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). With the <code>--deep</code> flag, <strong>PDF</strong>, <strong>DOCX</strong>, <strong>PPTX</strong>, and <strong>XLSX</strong> attachments are also extracted and parsed. Image attachments are identified by filename and MIME type.</p>
+      <p>Parsed automatically: <strong>CSV</strong>, <strong>TSV</strong>, <strong>HTML</strong>, <strong>Markdown</strong>, <strong>plain text</strong>, and <strong>nested EML</strong> (message/rfc822). With the <code>--deep</code> flag, <strong>PDF</strong>, <strong>DOCX</strong>, <strong>PPTX</strong>, and <strong>XLSX</strong> attachments are parsed too. Image attachments are listed by filename and MIME type.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>PDF attachments resolve as of v0.26.0.</strong> Measuring a real 65,000-message archive found 8,323 attachments, of which <strong>2,455 were PDF</strong> and <strong>zero</strong> were DOCX, XLSX or PPTX. Until v0.26.0 the resolver preserved bytes only for OOXML &mdash; so the most common attachment type in real mail contributed its filename and not one word of its contents.</div>
+        <div><strong>PDF attachments are read, not just listed.</strong> In a real 65,000-message archive, <strong>2,455</strong> of 8,323 attachments were PDF and <strong>none</strong> were DOCX, XLSX or PPTX. PDF is the attachment type that matters most in mail, so its text is parsed along with the message.</div>
       </div>
 
 <pre><code class="language-json">{
@@ -331,11 +339,10 @@ YXJrSW5mbyA8PCAvTWFya2VkIHRydWUgPj
   ]
 }</code></pre>
 
-      <p>With <code>--deep</code>, PDF and Office attachments get the same treatment &mdash; a DOCX attachment is decoded, extracted, and parsed into paragraphs and tables:</p>
+      <p>With <code>--deep</code>, PDF and Office attachments are handled the same way. A DOCX attachment is decoded and parsed into paragraphs and tables:</p>
 
 <pre><code class="language-bash"># Parse email + resolve Office attachments
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail invoice-email.eml --deep</code></pre>
+docparse invoice-email.eml --deep</code></pre>
 
 <pre><code class="language-json">{
   "type": "section",
@@ -352,39 +359,38 @@ ailang run --entry main --caps IO,FS,Env \
 
       <h3 id="pdf-attachments">PDF Attachments &mdash; With Automatic OCR</h3>
 
-      <p>PDF attachments resolve through a backend ladder that escalates only when it has to. <code>pdftotext</code> runs first: free, roughly instant, and correct for any born-digital PDF. If it comes back empty &mdash; the signature of a scanned or photographed document &mdash; the parser escalates to <strong>docling</strong>, a local OCR pass.</p>
+      <p>PDF attachments are read in two steps, and the second runs only when needed. <code>pdftotext</code> runs first: it is free, close to instant, and right for any PDF that was created digitally and so has a text layer. If it returns nothing, which is what a scanned or photographed document looks like, the parser switches to <strong>docling</strong>, which runs OCR on your own machine.</p>
 
       <table class="dp-config-table">
         <thead>
-          <tr><th>Tier</th><th>Cost</th><th>Speed</th><th>Handles</th><th>Automatic?</th></tr>
+          <tr><th>Backend</th><th>Cost</th><th>Speed</th><th>Handles</th><th>Automatic?</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>pdftotext</code></td><td>Free</td><td>~0s</td><td>Born-digital text layer</td><td>Yes &mdash; default</td></tr>
-          <tr><td><code>docling</code></td><td>Free</td><td>~9s</td><td>Scans, photos (local OCR)</td><td>Yes &mdash; on empty result</td></tr>
-          <tr><td><code>ai</code></td><td>Paid</td><td>Varies</td><td>Hardest layouts</td><td><strong>Never</strong> &mdash; opt in explicitly</td></tr>
+          <tr><td><code>pdftotext</code></td><td>Free</td><td>~0s</td><td>PDFs with a text layer</td><td>Yes &mdash; default</td></tr>
+          <tr><td><code>docling</code></td><td>Free</td><td>~9s</td><td>Scans, photos (local OCR)</td><td>Yes &mdash; when <code>pdftotext</code> finds no text</td></tr>
+          <tr><td><code>ai</code></td><td>Paid</td><td>Varies</td><td>Hardest layouts</td><td><strong>Never</strong> &mdash; only when you choose it</td></tr>
         </tbody>
       </table>
 
-      <p>Both automatic tiers are free, which is why escalation needs no permission. The <code>ai</code> backend costs money, so it is never entered on your behalf &mdash; a parser that silently spends is the wrong default. An explicit <code>--pdf-backend</code> choice is always respected rather than overridden.</p>
+      <p>Both automatic steps are free, so the parser moves from one to the other without asking. The <code>ai</code> backend costs money, so it is never used unless you choose it. If you set <code>--pdf-backend</code> yourself, that choice is always used.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Verified on an email carrying the same contract twice &mdash; once digital, once rasterised. Both yield <em>"The Seller shall indemnify the Buyer against all claims"</em>; the second purely via OCR. Note that <code>liteparse</code> is <strong>not</strong> an OCR tier: it infers headings from font sizes in the existing text layer, so it fails on scans exactly as <code>pdftotext</code> does.</div>
+        <div>Example: an email carrying the same contract twice, once as a digital PDF and once as a scan. Both return <em>"The Seller shall indemnify the Buyer against all claims"</em>, the second through OCR alone. Note that <code>liteparse</code> does <strong>not</strong> do OCR: it works out headings from font sizes in the existing text layer, so it cannot read scans any more than <code>pdftotext</code> can.</div>
       </div>
 
-      <p>An unreadable attachment never aborts the run. One bad file in a mailbox is not a reason to abandon the message &mdash; or, in batch mode, the remaining files.</p>
+      <p>An attachment that cannot be read never stops the run. The rest of the message is still parsed and, in batch mode, so are the remaining files.</p>
 
-      <p>Forwarded emails (<code>message/rfc822</code> attachments) are parsed recursively &mdash; the inner email gets full header and body extraction, nested inside the attachment block.</p>
+      <p>Forwarded emails (<code>message/rfc822</code> attachments) are parsed too: the inner email's headers and body appear nested inside the attachment block.</p>
 
       <h2 id="thread-reconstruction">Thread Reconstruction</h2>
 
-      <p>Individual emails are often unintelligible without their thread. AILANG Parse reconstructs conversation threads from MBOX archives using <code>Message-ID</code>, <code>In-Reply-To</code>, and <code>References</code> headers.</p>
+      <p>A single email often makes no sense without the rest of its thread. AILANG Parse rebuilds conversation threads from MBOX archives using the <code>Message-ID</code>, <code>In-Reply-To</code> and <code>References</code> headers.</p>
 
 <pre><code class="language-bash"># Threaded mode: groups messages into conversations
-ailang run --entry main --caps IO,FS,Env \
-  docparse/main.ail archive.mbox --threaded</code></pre>
+docparse archive.mbox --threaded</code></pre>
 
-      <p>Output: each thread becomes a <code>SectionBlock</code> with kind <code>thread</code>, containing the normalized subject, participant list, and chronologically-ordered messages with quoted text stripped.</p>
+      <p>Each thread becomes a section block with kind <code>thread</code>. It holds the cleaned-up subject, the list of participants, and the messages in date order with quoted text removed.</p>
 
 <pre><code class="language-json">{
   "type": "section",
@@ -398,42 +404,42 @@ ailang run --entry main --caps IO,FS,Env \
   ]
 }</code></pre>
 
-      <p>Thread reconstruction gives LLMs the full conversation context for summarization, triage, or automated response &mdash; without the noise of repeated quoted text.</p>
+      <p>This gives an LLM the whole conversation for summarization, triage or automated replies, without the same quoted text repeated in every message.</p>
 
       <h2 id="use-cases">Use Cases</h2>
 
-      <p>Emails are documents that contain other documents. Structured parsing makes them composable with the rest of your data pipeline.</p>
+      <p>Once parsed, emails can be processed like any other document in your data pipeline.</p>
 
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
           <h4>AI Email Triage &amp; Routing</h4>
-          <p>Feed structured email JSON to an LLM for classification, routing, or auto-response. A 2,000-line raw email becomes 4 typed blocks &mdash; the model reasons about content, not DKIM signatures. Classification accuracy improves because tokens are spent on the actual message, not transport headers.</p>
+          <p>Give an LLM structured email JSON for classification, routing or automatic replies. A 2,000-line raw email becomes 4 typed blocks, so the model works on the message and not on DKIM signatures and delivery headers.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Inbox Monitoring Agents</h4>
-          <p>An AI agent watching a mailbox (IMAP, local <code>.eml</code> files, or Gmail API exports) parses each email to structured JSON, extracts the message + attachment manifest, and takes action. The agent sees <code>[attachment: invoice.pdf, application/pdf]</code> &mdash; not 1,500 lines of base64.</p>
+          <p>An AI agent watching a mailbox (IMAP, local <code>.eml</code> files, or Gmail API exports) parses each email to structured JSON, gets the message and a list of its attachments, and acts on it. The agent sees <code>[attachment: invoice.pdf, application/pdf]</code>, not 1,500 lines of base64.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Email-to-Knowledge-Base</h4>
-          <p>Parse MBOX exports from Gmail labels or Thunderbird folders into structured blocks, embed them in a vector database. Metadata (author, date, subject) becomes filterable dimensions alongside semantic search on body content. One <code>ailang run --batch</code> call processes an entire archive.</p>
+          <p>Parse MBOX exports from Gmail labels or Thunderbird folders into structured blocks and embed them in a vector database. You can filter on metadata (author, date, subject) as well as search the body text. One <code>ailang run --batch</code> call processes a whole archive.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Multi-Format Document Pipelines</h4>
-          <p>CSV, HTML, and Markdown attachments are parsed inline automatically. A single API call returns the email body <em>and</em> the table data from the attached spreadsheet &mdash; no second parse step needed. With <code>--deep</code>, PDF and Office attachments are resolved in the same pass, scanned PDFs included via local OCR.</p>
+          <p>CSV, HTML and Markdown attachments are parsed automatically. One API call returns the email body <em>and</em> the table data from the attached spreadsheet, with no second parse step. With <code>--deep</code>, PDF and Office attachments are parsed in the same pass, including scanned PDFs through local OCR.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Compliance &amp; E-Discovery</h4>
-          <p>Bulk MBOX processing with the full delivery chain preserved (Received headers, DKIM, SPF results) for forensic analysis, while body content is cleanly separated for legal review. Attachment manifests provide a complete inventory without extracting binary data.</p>
+          <p>Process MBOX archives in bulk. The delivery headers (Received, DKIM, SPF results) are kept for forensic analysis, and the body text is separate for legal review. The attachment list gives a complete inventory without extracting the binary data.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Customer Support Automation</h4>
-          <p>Parse inbound support emails to extract the customer query, thread context, and any attached screenshots or documents. The structured output feeds directly into ticket creation, sentiment analysis, or automated response generation &mdash; with the original email metadata preserved for routing.</p>
+          <p>Parse inbound support emails to extract the customer's question, the thread context and any attached screenshots or documents. The output can go straight into ticket creation, sentiment analysis or automated replies, and the email's metadata is kept for routing.</p>
         </div>
       </div>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Batch mode:</strong> <code>ailang run --batch</code> compiles once and parses N files, so the AILANG runtime startup is paid once per batch instead of once per file. Useful for processing entire mailbox directories in a single invocation.</div>
+        <div><strong>Batch mode:</strong> <code>docparse *.eml</code> parses many files in one run, so the startup time is spent once per batch and not once per file. Useful for processing a whole mailbox directory in one command.</div>
       </div>
 
       <h2 id="example-output">Example: GitHub Notification</h2>
@@ -466,29 +472,27 @@ ailang run --entry main --caps IO,FS,Env \
   ]
 }</code></pre>
 
-      <p>28 raw headers (DKIM chains, ARC seals, SPF results) reduced to the headers that matter. The body is clean text, ready for an LLM to reason about build failures.</p>
+      <p>The 28 raw headers (DKIM chains, ARC seals, SPF results) are reduced to the ones that matter. The body is clean text, ready for an LLM to reason about the build failure.</p>
 
       <h2 id="try-it">Try It</h2>
 
-      <h3>CLI</h3>
+      <h3 id="cli">CLI</h3>
       <pre><code class="language-bash" data-src="examples/cli/parse-email.sh"># Parse an EML email file
-ailang run --entry main --caps IO,FS,Env \
-  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail inbox.eml
+docparse inbox.eml
 
 # Parse an MBOX archive (multiple messages)
-ailang run --entry main --caps IO,FS,Env \
-  ~/.ailang/cache/registry/sunholo/ailang_parse/*/docparse/main.ail archive.mbox</code></pre>
+docparse archive.mbox</code></pre>
 
-      <h3>API</h3>
+      <h3 id="api">API</h3>
       <pre><code class="language-bash">curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   -H "Content-Type: application/json" \
   -d '{"filepath":"sample_eml_welcome","outputFormat":"markdown","apiKey":"YOUR_API_KEY"}'</code></pre>
 
-      <h3>Python SDK</h3>
+      <h3 id="python-sdk">Python SDK</h3>
       <pre><code class="language-python">from ailang_parse import DocParse
 
 client = DocParse(api_key="YOUR_API_KEY")
-result = client.parse("inbox.eml", output_format="json")
+result = client.parse_file("inbox.eml")
 
 # Metadata extracted from headers
 print(result.metadata.title)   # Subject line
@@ -514,7 +518,7 @@ for block in result.blocks:
         </details>
         <details>
           <summary>Does email parsing require AI or an API key?</summary>
-          <div class="dp-faq-answer"><p>No. Email parsing is fully deterministic &mdash; RFC 5322 and MIME spec parsing, not AI. It runs in the <a href="index.html#try-it">browser via WASM</a> or server-side with zero external dependencies.</p></div>
+          <div class="dp-faq-answer"><p>No. Email is parsed by following the RFC 5322 and MIME standards, not with AI, so the same file always gives the same result. It runs in your <a href="index.html#try-it">browser</a> (using WebAssembly) or on a server, with nothing else to install.</p></div>
         </details>
         <details>
           <summary>What email encodings are supported?</summary>
@@ -522,21 +526,52 @@ for block in result.blocks:
         </details>
         <details>
           <summary>Can I parse MBOX archives with multiple messages?</summary>
-          <div class="dp-faq-answer"><p>Yes. MBOX files are split on RFC 4155 envelope lines. Each message becomes a separate section block, parsed independently with full header and body extraction.</p></div>
+          <div class="dp-faq-answer"><p>Yes. An MBOX file is split into its individual messages, following RFC 4155. Each message becomes a separate section block with its headers and body parsed.</p></div>
         </details>
         <details>
           <summary>What is the output format for parsed emails?</summary>
-          <div class="dp-faq-answer"><p>The same Block ADT used for DOCX, XLSX, and HTML parsing: typed blocks with metadata. Downstream code handles all formats identically. See <a href="docs.html">the docs</a> for the full schema.</p></div>
+          <div class="dp-faq-answer"><p>The same block format as for DOCX, XLSX and HTML parsing: typed blocks plus metadata. Your code handles every format the same way. See <a href="docs.html">the docs</a> for the full schema.</p></div>
         </details>
         <details>
           <summary>Are email attachments parsed automatically?</summary>
-          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed inline automatically. With the <code>--deep</code> flag, PDF, DOCX, PPTX, and XLSX attachments are also extracted and parsed. PDF attachments use a free backend ladder: <code>pdftotext</code> first, escalating automatically to local OCR (<code>docling</code>) when the PDF has no text layer &mdash; a scanned contract, say.</p></div>
+          <div class="dp-faq-answer"><p>Text-based attachments (CSV, HTML, Markdown, nested EML) are parsed automatically. With the <code>--deep</code> flag, PDF, DOCX, PPTX, and XLSX attachments are parsed too. PDF attachments are read with <code>pdftotext</code> first. If the PDF has no text layer, as with a scanned contract, the parser switches automatically to local OCR (<code>docling</code>). Both are free.</p></div>
         </details>
         <details>
           <summary>Can I reconstruct email threads from an MBOX file?</summary>
           <div class="dp-faq-answer"><p>Yes. Use the <code>--threaded</code> flag. Messages are grouped into conversation threads using Message-ID/In-Reply-To/References headers, with quoted text stripped from replies.</p></div>
         </details>
       </div>
+
+<!-- nav:related -->
+      <nav class="dp-format-switch" aria-label="Other formats"><span class="dp-format-switch-label">Other formats</span><a class="dp-chip" href="docx-parsing.html">DOCX</a><a class="dp-chip" href="xlsx-parsing.html">XLSX</a><a class="dp-chip" href="pptx-parsing.html">PPTX</a><a class="dp-chip" href="pdf-parsing.html">PDF</a><a class="dp-chip" href="html-parsing.html">HTML</a><span class="dp-chip dp-chip--here" aria-current="page">Email</span><a class="dp-chip" href="odt-parsing.html">ODT</a><a class="dp-chip" href="ods-parsing.html">ODS</a><a class="dp-chip" href="odp-parsing.html">ODP</a><a class="dp-chip" href="epub-parsing.html">EPUB</a><a class="dp-chip" href="latex-parsing.html">LaTeX</a><a class="dp-chip" href="rtf-parsing.html">RTF</a></nav>
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="pdf-parsing.html" class="dp-doc-card" data-find="pdf pdfs with real text are read with no ai and no key. ai for scans, when you ask for it. pdf parsing ocr scanned pdftotext">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">PDF</div>
+          <div class="dp-doc-card-desc">PDFs with real text are read with no AI and no key. AI for scans, when you ask for it.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="html-parsing.html" class="dp-doc-card" data-find="html tables, headings and lists from web pages and email bodies. html web page parsing">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">HTML</div>
+          <div class="dp-doc-card-desc">Tables, headings and lists from web pages and email bodies.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="chunking.html" class="dp-doc-card" data-find="chunking for rag split documents into embedding-sized pieces without cutting a table or losing its heading. chunk rag embeddings split">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Chunking for RAG</div>
+          <div class="dp-doc-card-desc">Split documents into embedding-sized pieces without cutting a table or losing its heading.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
 
     </main>
   </div>

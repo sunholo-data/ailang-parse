@@ -49,8 +49,26 @@ jobs:
 
       # The inline numbers in data-bench elements are what crawlers, no-JS
       # readers and LLMs see. They sat at v1 scores for weeks after the v2 run.
-      - name: Check benchmark fallbacks match the published summary
+      # The same check stamps meta descriptions and FAQ data from the summary,
+      # fails on a score typed by hand, and fails when the published AILANG
+      # Parse score was not measured on the version in ailang.toml.
+      # Prices, plan limits and format lists come from the hosted API
+      # (/api/v1/pricing, /api/v1/formats) into docs/js/site-data.js, and from
+      # there into every data-dp element. Passes with a warning if the API is
+      # unreachable.
+      - name: Site pricing and formats match the hosted API
+        run: python3 docs/scripts/sync-site-data.py --check
+      - name: Prices and format counts in the pages match site-data.js
+        run: node docs/scripts/stamp-prices.js --check
+
+      - name: Benchmark figures on the site come from the published summary
         run: python3 docs/scripts/sync-bench-fallbacks.py --check
+
+      # Breadcrumbs, related pages, the docs index, the footer columns and the
+      # llms.txt page list are written from docs/data/site-map.json. Fails when
+      # a page is missing from the map or a stamped block is out of date.
+      - name: Navigation between pages matches the site map
+        run: python3 docs/scripts/stamp-site-nav.py --check
 
       - name: Package exports cover every imported module (consumers load only exports)
         run: python3 docs/scripts/check-exports.py
