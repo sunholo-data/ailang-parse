@@ -144,19 +144,84 @@ def sync(html, summary):
     return OPEN_TAG.sub(lambda m: sync_tag(m.group(0), summary), html)
 
 
-PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_.]*)\}")
+PLACEHOLDER = re.compile(r"\{(dp:)?([a-z_][a-z0-9_.]*)\}")
+_SITE_DATA = None
+
+
+def site_data():
+    """DP_DATA from docs/js/site-data.js (prices, limits, format counts)."""
+    global _SITE_DATA
+    if _SITE_DATA is None:
+        import subprocess
+
+        src = (DOCS / "js/site-data.js").read_text()
+        out = subprocess.run(
+            ["node", "-e", "process.stdout.write(JSON.stringify(new Function(require('fs').readFileSync(0,'utf8')+';return DP_DATA')()))"],
+            input=src, capture_output=True, text=True, check=True,
+        ).stdout
+        _SITE_DATA = json.loads(out)
+    return _SITE_DATA
+
+
+def fmt_dp(value):
+    """Mirror dpFormat in js/site-data.js."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == -1 or value >= 1000000:
+            return "Unlimited"
+        if value >= 1000:
+            return f"{value:,}"
+    return str(value)
 
 
 def render(template, summary, where):
-    """Fill `{adapter.path}` placeholders, formatted as the page shows them."""
+    """Fill placeholders, formatted as the page shows them.
+
+    `{adapter.path}` is a benchmark value; `{dp:path}` is a price, plan limit
+    or format count from site-data.js.
+    """
 
     def fill(m):
-        value = resolve(summary, m.group(1))
+        if m.group(1):
+            value = site_data()
+            for part in m.group(2).split("."):
+                value = value.get(part) if isinstance(value, dict) else None
+            if value is None or isinstance(value, (dict, list)):
+                raise SystemExit(f"{where}: no value for {m.group(0)} in site-data.js")
+            return fmt_dp(value)
+        value = resolve(summary, m.group(2))
         if value is None or isinstance(value, (dict, list)):
-            raise SystemExit(f"{where}: no value for {{{m.group(1)}}} in the summary")
-        return fmt_text(value, m.group(1))
+            raise SystemExit(f"{where}: no value for {m.group(0)} in the summary")
+        return fmt_text(value, m.group(2))
 
     return PLACEHOLDER.sub(fill, template)
+
+
+def stamp_jsonld(html, templates, summary, page):
+    """Write rendered templates into JSON-LD strings.
+
+    Keys are "<block index>:<path>", for example "0:offers/1/description": the
+    second offer's description in the page's first JSON-LD block. The block is
+    re-serialised, so it keeps one stable layout.
+    """
+    if not templates:
+        return html
+    blocks = list(JSONLD.finditer(html))
+    edits = {}
+    for key, template in templates.items():
+        index, path = key.split(":", 1)
+        m = blocks[int(index)]
+        data = edits.setdefault(int(index), json.loads(m.group(2)))
+        node = data
+        parts = path.split("/")
+        for part in parts[:-1]:
+            node = node[int(part)] if isinstance(node, list) else node[part]
+        last = int(parts[-1]) if isinstance(node, list) else parts[-1]
+        node[last] = render(template, summary, f"{page} {key}")
+    for index in sorted(edits, reverse=True):
+        m = blocks[index]
+        body = "\n" + json.dumps(edits[index], indent=2, ensure_ascii=False) + "\n"
+        html = html[: m.start(2)] + body + html[m.end(2):]
+    return html
 
 
 def stamp_meta(html, templates, summary, page):
@@ -193,7 +258,7 @@ def faq_with_figures(html):
     return {
         plain(m.group("q")): plain(m.group("a"))
         for m in VISIBLE_FAQ.finditer(html)
-        if "data-bench=" in m.group("a")
+        if "data-bench=" in m.group("a") or "data-dp=" in m.group("a")
     }
 
 
@@ -221,16 +286,19 @@ def sync_faq(html):
     return JSONLD.sub(fix_block, html)
 
 
-SCORE = re.compile(r"\b\d{1,3}\.\d%|PR #\d+")
+# A benchmark score, a PR reference, or a count of formats typed as text.
+SCORE = re.compile(r"\b\d{1,3}\.\d%|PR #\d+|\b\d{1,2}\+? (?:input |output |supported |document )?formats\b", re.I)
+DP_ELEMENT = re.compile(r'<[a-zA-Z][a-zA-Z0-9]*\b[^>]*\sdata-dp="[^"]+"[^>]*>[^<]*<')
 STATIC = re.compile(r"<!-- bench:static\b.*?<!-- /bench:static -->", re.S)
 
 
-def lint(html, stamped_meta):
+def lint(html, stamped_meta, stamped_jsonld=False):
     """Hand-typed scores on a benchmark page: (line, text) for each one found."""
     blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))  # keep line numbers
     text = STATIC.sub(blank, html)
     text = ELEMENT.sub(blank, text)
     text = OPEN_TAG.sub(blank, text)
+    text = DP_ELEMENT.sub(blank, text)
     text = JSONLD.sub(lambda m: m.group(0) if '"FAQPage"' in m.group(2) else blank(m), text)
     for question in faq_with_figures(html):  # derived answers are checked where they are written
         text = re.sub(
@@ -242,6 +310,8 @@ def lint(html, stamped_meta):
     text = re.sub(r'\sstyle="[^"]*"', blank, text)
     for key in stamped_meta:
         text = re.sub(rf'<meta\s+(?:name|property)="{re.escape(key)}"[^>]*>', blank, text)
+    if stamped_jsonld:  # this page's non-FAQ structured data is written from templates
+        text = JSONLD.sub(lambda m: m.group(0) if '"FAQPage"' in m.group(2) else blank(m), text)
     return [
         (text.count("\n", 0, m.start()) + 1, m.group(0)) for m in SCORE.finditer(text)
     ]
@@ -272,11 +342,14 @@ def main():
     typed = []
     for page in sorted(DOCS.glob("*.html")):
         old = page.read_text()
-        meta = templates.get(page.name, {})  # every page is linted, bound or not
+        entry = dict(templates.get(page.name, {}))  # every page is linted, bound or not
+        jsonld = entry.pop("jsonld", {})
+        meta = entry
         new = sync(old, summary)
         new = stamp_meta(new, meta, summary, page.name)
+        new = stamp_jsonld(new, jsonld, summary, page.name)
         new = sync_faq(new)
-        typed += [(page.name, line, found) for line, found in lint(new, meta)]
+        typed += [(page.name, line, found) for line, found in lint(new, meta, bool(jsonld))]
         if new != old:
             drift.append(page.name)
             if not check:

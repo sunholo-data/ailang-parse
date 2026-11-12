@@ -1,4 +1,4 @@
-# Write the document in Markdown, then convert it to any of the 9 formats.
+# Write the document in Markdown, then convert it to any output format.
 # Front matter sets the document properties.
 cat > report.md <<'MD'
 ---
