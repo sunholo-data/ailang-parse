@@ -11,6 +11,13 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: poppler backend failed on PDFs with control characters
+
+- `--pdf-backend poppler` raised `ParseError: not well-formed (invalid token)` on PDFs whose fonts
+  map glyphs to control codes, which is common in LaTeX math. poppler writes those characters into
+  its XML output, raw and as numeric references, and XML 1.0 forbids them. They are now removed
+  before parsing. On 15 arXiv papers this took the backend from 4 parsed to 14.
+
 ## [v0.55.6](https://github.com/sunholo-data/ailang-parse/compare/v0.55.5...v0.55.6) — 2026-11-10
 
 ### Website: Word to Markdown page, MarkItDown on the benchmarks page

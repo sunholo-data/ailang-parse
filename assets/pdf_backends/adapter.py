@@ -599,6 +599,17 @@ def _pp_strip_ns(xml_text: str) -> str:
     return re.sub(r'\sxmlns="[^"]+"', "", xml_text, count=1)
 
 
+# Characters XML 1.0 forbids. poppler copies them through from PDFs whose
+# fonts map glyphs to control codes (common in LaTeX math), both raw and as
+# numeric references, and one of them makes the whole document unparseable.
+_PP_XML_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+_PP_XML_BAD_REF = re.compile(r"&#(?:x0*(?:[0-8bBcC]|[eE]|1[0-9a-fA-F])|0*(?:[0-8]|1[124-9]|2[0-9]|3[01]));")
+
+
+def _pp_xml_clean(xml_text: str) -> str:
+    return _PP_XML_BAD_REF.sub("", _PP_XML_BAD.sub("", xml_text))
+
+
 def _pp_key(text: str) -> str:
     """Same normalisation as pdf_furniture.ail's pdfFurnitureKey: lower case,
     whitespace collapsed, digit runs (and spaces between digits) -> '#'."""
@@ -613,7 +624,7 @@ def _pp_parse_bbox(xml_text: str) -> list[dict]:
     if "<doc" not in xml_text:
         return []
     body = xml_text[xml_text.index("<doc"):xml_text.rindex("</doc>") + 6]
-    root = _ET.fromstring(_pp_strip_ns(body))
+    root = _ET.fromstring(_pp_xml_clean(_pp_strip_ns(body)))
     pages = []
     for page in root.iter("page"):
         lines = []
@@ -634,7 +645,7 @@ def _pp_parse_html(xml_text: str) -> list[dict]:
     italic, href}]}]. Coordinates are pdftohtml's pixels; the caller scales."""
     if not xml_text or "<pdf2xml" not in xml_text:
         return []
-    root = _ET.fromstring(xml_text[xml_text.index("<pdf2xml"):])
+    root = _ET.fromstring(_pp_xml_clean(xml_text[xml_text.index("<pdf2xml"):]))
     fonts: dict[str, dict] = {}
     pages = []
     for page in root.iter("page"):
