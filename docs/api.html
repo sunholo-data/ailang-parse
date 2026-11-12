@@ -888,7 +888,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
   <!-- Supported Formats — rendered from /api/v1/formats -->
   <section class="dp-api-section reveal">
     <h2 id="formats">Supported Formats</h2>
-    <p>The <code>/api/v1/parse</code> endpoint accepts all of these formats. Office and text formats are parsed without AI, so the same file always gives the same result. PDFs and images use AI.</p>
+    <p>The <code>/api/v1/parse</code> endpoint accepts all of these formats. Office and text formats are parsed without AI, so the same file always gives the same result. PDFs are read without AI by default; choose the AI backend (<code>pdfBackend: "ai"</code>) for scans. Images use AI.</p>
     <div id="formats-mount">
       <div class="dp-loading"><div class="dp-loading-spinner"></div><div>Loading formats...</div></div>
     </div>
@@ -897,7 +897,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
       <div class="dp-format-grid">
         <div class="dp-format-card"><div class="dp-format-card-title">Office (Deterministic)</div><div class="dp-format-card-exts">.docx .pptx .xlsx .odt .odp .ods</div></div>
         <div class="dp-format-card"><div class="dp-format-card-title">Text (Native)</div><div class="dp-format-card-exts">.csv .md .html .epub</div></div>
-        <div class="dp-format-card"><div class="dp-format-card-title">Images &amp; PDF (AI)</div><div class="dp-format-card-exts">.pdf .png .jpg .webp .gif .tiff</div></div>
+        <div class="dp-format-card"><div class="dp-format-card-title">Images (AI) and PDF (your choice of backend)</div><div class="dp-format-card-exts">.pdf .png .jpg .webp .gif .tiff</div></div>
       </div>
     </noscript>
     <p style="font-size:12px;color:var(--text-muted)">Video and audio parsing is available in the CLI and in the browser. See Run Locally.</p>
@@ -934,7 +934,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         <a href="mailto:docparse@sunholo.com?subject=Custom%20plan%20enquiry" class="dp-btn dp-btn--ghost" style="font-size:11px;padding:4px 14px;text-decoration:none;border-color:var(--emerald);color:var(--emerald)">Custom &mdash; let&rsquo;s talk</a>
         <span style="color:var(--text-muted)">&mdash; we&rsquo;re flexible on volume, on-premises hosting, SLAs and pricing.</span>
       </div>
-      <p style="font-size:12px;color:var(--text-muted);margin-top:6px"><strong style="color:var(--dp-blue)">Make your quota go further:</strong> Office formats (<a href="docx-parsing.html">DOCX</a>, PPTX, XLSX, ODF) are parsed without AI, at <strong>zero AI cost</strong>. A 5&thinsp;MB DOCX <a href="vs-pdf-conversion.html">converted to PDF</a> typically grows to 10&ndash;30&thinsp;MB and then requires an AI parse. Send the original Office file whenever you can, and save your AI quota for scanned documents and images.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:6px"><strong style="color:var(--dp-blue)">Make your quota go further:</strong> Office formats (<a href="docx-parsing.html">DOCX</a>, PPTX, XLSX, ODF) are parsed without AI, at <strong>zero AI cost</strong>. A DOCX <a href="vs-pdf-conversion.html">converted to PDF</a> is larger and has lost its structure. Send the original Office file whenever you can, and save your AI quota for scanned documents and images.</p>
     </div>
     <p style="font-size:12px;color:var(--text-muted)">The limits on AI calls and file access are built into the parser by AILANG, the language it is written in. They are a hard guarantee, not a rate limiter added on top.</p>
     <div style="margin-top:20px;padding:16px 20px;border:1px solid var(--border);border-radius:8px;background:var(--surface)">
@@ -1209,7 +1209,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/auth/device/poll \
           <tr><td style="padding:4px 8px">sample_eml_release</td><td style="padding:4px 8px">EML (release notes, text + HTML)</td><td style="padding:4px 8px">No</td></tr>
           <tr><td style="padding:4px 8px">sample_eml_bug</td><td style="padding:4px 8px">EML (encoded headers, CC, attachments)</td><td style="padding:4px 8px">No</td></tr>
           <tr><td style="padding:4px 8px">sample_mbox_thread</td><td style="padding:4px 8px">MBOX (4-message reply thread)</td><td style="padding:4px 8px">No</td></tr>
-          <tr><td style="padding:4px 8px">sample_pdf</td><td style="padding:4px 8px">PDF (table report)</td><td style="padding:4px 8px">Yes</td></tr>
+          <tr><td style="padding:4px 8px">sample_pdf</td><td style="padding:4px 8px">PDF (table report)</td><td style="padding:4px 8px">No (only with the AI backend)</td></tr>
           <tr><td style="padding:4px 8px">sample_mp3</td><td style="padding:4px 8px">Audio (transcription)</td><td style="padding:4px 8px">Yes</td></tr>
           <tr><td style="padding:4px 8px">sample_mp4</td><td style="padding:4px 8px">Video (visual+audio)</td><td style="padding:4px 8px">Yes</td></tr>
         </tbody>
@@ -1296,7 +1296,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         <tbody>
           <tr><td style="padding:4px 8px">Office (DOCX, PPTX, XLSX, OD*)</td><td style="padding:4px 8px">Deterministic</td></tr>
           <tr><td style="padding:4px 8px">Text (HTML, MD, CSV, EPUB)</td><td style="padding:4px 8px">Deterministic</td></tr>
-          <tr><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">AI</td></tr>
+          <tr><td style="padding:4px 8px">PDF</td><td style="padding:4px 8px">Deterministic by default; AI if you choose <code>pdfBackend: "ai"</code></td></tr>
           <tr><td style="padding:4px 8px">Image (PNG, JPG, etc.)</td><td style="padding:4px 8px">AI</td></tr>
         </tbody>
       </table>
@@ -1624,7 +1624,7 @@ function renderFormats(data) {
   var groups = [
     { title: 'Office (Deterministic)', exts: office },
     { title: 'Text (Native)', exts: text },
-    { title: 'Images & PDF (AI)', exts: aiFormats }
+    { title: 'Images (AI) and PDF (your choice of backend)', exts: aiFormats }
   ];
   // Add generation formats
   if (data.generate && data.generate.length > 0) {
