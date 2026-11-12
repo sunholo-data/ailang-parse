@@ -11,6 +11,20 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: Markdown to PowerPoint put every heading on one slide (#160)
+
+- A source with no slides of its own (Markdown, DOCX, HTML) went onto a single slide, however it
+  was divided, in both PPTX and ODP output. `docparse notes.md --convert slides.pptx` gave one
+  slide for two `#` headings, two `##` headings, or headings separated by `---`.
+- Slides are now divided as Pandoc divides them (`pptxSlideBreaks` in `pptx_layout`, used by both
+  generators). The slide level is the highest heading level followed directly by content; each
+  heading at that level starts a slide and is its title, a heading above it is a section title
+  slide of its own, and deeper headings stay on their slide. A `---` rule always starts a new
+  slide. A rule followed by a heading is one break, so a deck converted to Markdown and back keeps
+  its slides (plus a title slide for the author/title block written before the first one).
+- A document with no headings and no rules is unchanged: one slide, paginated when it overflows.
+  Decks and PDFs, which carry their own slides, are unchanged.
+
 ## [v0.57.1](https://github.com/sunholo-data/ailang-parse/compare/v0.57.0...v0.57.1) — 2026-11-12
 
 ### Fixed: PDF annotations inside compressed object streams were not found
