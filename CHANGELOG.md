@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.56.0](https://github.com/sunholo-data/ailang-parse/compare/v0.55.7...v0.56.0) — 2026-11-12
+
 ### PDF: the poppler backend reads research papers
 
 `--pdf-backend poppler` now finds 84% of section headings on the arXiv headings benchmark, up from
