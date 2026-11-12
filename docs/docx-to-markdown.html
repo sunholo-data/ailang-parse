@@ -192,7 +192,7 @@
     {"@type": "Question", "name": "Does DOCX to Markdown keep comments and tracked changes?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each comment is kept next to the text it is anchored to, with its author and date. Tracked insertions, deletions and moves are kept as marked revisions, so the Markdown shows the current text and what was changed. Many converters accept every change silently or drop comments."}},
     {"@type": "Question", "name": "Do I need a GPU or an AI model to convert Word to Markdown?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads the Office XML inside the .docx directly. It is deterministic: the same file always gives the same Markdown, it runs offline, and nothing is sent anywhere."}},
     {"@type": "Question", "name": "How does it compare with MarkItDown, Docling or Pandoc on Word files?", "acceptedAnswer": {"@type": "Answer", "text": "On the 33 Word files in the open OfficeDocBench v2, AILANG Parse scores 97.1%, against 56.7% for Kreuzberg, 53.5% for Pandoc, 49.1% for Docling and 42.8% for MarkItDown. The test files, scoring code and per-file results are public on the benchmarks page."}},
-    {"@type": "Question", "name": "What about PDFs and scanned documents?", "acceptedAnswer": {"@type": "Answer", "text": "The same command converts PDFs to Markdown, reading them with a local backend: pdftotext or poppler for born-digital PDFs, docling for scans. When the original Word file exists, convert that instead: reading a PDF is where structure is lost."}}
+    {"@type": "Question", "name": "What about PDFs and scanned documents?", "acceptedAnswer": {"@type": "Answer", "text": "The same command converts PDFs, using a PDF reader on your machine: pdftotext or poppler for PDFs that contain real text, docling for scans. Where the original Word file exists, convert that instead. A PDF keeps less structure than the Word file it came from."}}
   ]
 }
 </script>
@@ -407,7 +407,7 @@ Please review the technical specification before the meeting.
           <tr><td>Images</td><td>Image blocks in the JSON. Add <code>--describe</code> for AI-written image descriptions (opt-in).</td></tr>
         </tbody>
       </table>
-      <p>Parsing without <code>--convert</code> (<code>docparse contract.docx</code>, or the folder command below) writes the Markdown together with a <code>.json</code> holding the same content as typed blocks (heading, list with item levels, table with cell spans, comment, change), for pipelines that want structure rather than text. See <a href="docx-parsing.html">DOCX Parsing</a> for that output.</p>
+      <p>Parsing without <code>--convert</code> (<code>docparse contract.docx</code>, or the folder command below) writes the Markdown together with a <code>.json</code> file. The JSON holds the same content as labelled blocks (heading, list with item levels, table with cell spans, comment, change), for pipelines that need structure rather than text. See <a href="docx-parsing.html">DOCX Parsing</a> for that output.</p>
 
       <h2 id="run">Run it</h2>
       <p>Install the CLI (it also sets up the AILANG runtime):</p>
@@ -420,7 +420,7 @@ docparse ~/contracts/ --output-dir ~/contracts-md/
 
 # Quarto Markdown instead, ready for `quarto render`
 docparse contract.docx --convert contract.qmd</code></pre>
-      <p>Batch mode compiles the parser once and then converts every file in the folder, so a large folder is far faster than a loop over single files. The Markdown from a folder run is identical to <code>--convert</code> on each file.</p>
+      <p>Point it at a folder and it converts every file in one run, which is far faster than a loop over single files. The Markdown is identical to running <code>--convert</code> on each file.</p>
 
       <h2 id="api">Over the API</h2>
       <p>The hosted API runs the same converter. <code>POST /api/v1/convert</code> with <code>target=md</code> returns the Markdown in the JSON response:</p>
@@ -433,13 +433,13 @@ docparse contract.docx --convert contract.qmd</code></pre>
 
 client = DocParse(api_key="dp_...")
 print(client.convert_file("contract.docx", target="md").text)</code></pre>
-      <p>Direct uploads are capped at 32&nbsp;MB by the hosting platform; send larger files by URL. Keys, plan limits and the other input modes are in the <a href="api.html">API reference</a>.</p>
+      <p>Upload files up to 32&nbsp;MB directly. Send larger files by URL. API keys, plan limits and the other ways to send a file are in the <a href="api.html">API reference</a>.</p>
 
-      <h2 id="outputs">Other outputs from the same read</h2>
+      <h2 id="outputs">Other output formats</h2>
       <p>Change the extension after <code>--convert</code>: <code>.html</code>, <code>.qmd</code>, <code>.odt</code>, or back to <code>.docx</code> in your own template with <code>--reference-doc</code> (see <a href="document-generation.html">Document Generation</a>). The same command converts <code>.odt</code>, <code>.pptx</code>, <code>.xlsx</code>, <code>.html</code> and <code>.epub</code> to Markdown too.</p>
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Most of your documents are PDFs? The same command converts them to Markdown with a local reader: <code>--pdf-backend poppler</code> for born-digital PDFs, <code>docling</code> for scans. A PDF has already lost the structure a Word file carries, so where the <code>.docx</code> still exists, convert that. See <a href="pdf-parsing.html">PDF Parsing</a>.</div>
+        <div>Most of your documents are PDFs? The same command converts them to Markdown on your machine: <code>--pdf-backend poppler</code> for PDFs that contain real text, <code>--pdf-backend docling</code> for scans. A PDF keeps less structure than a Word file, so where the <code>.docx</code> still exists, convert that. See <a href="pdf-parsing.html">PDF Parsing</a>.</div>
       </div>
 
       <div class="dp-faq" id="faq">
@@ -462,7 +462,7 @@ print(client.convert_file("contract.docx", target="md").text)</code></pre>
         </details>
         <details>
           <summary>What about PDFs and scanned documents?</summary>
-          <div class="dp-faq-answer"><p>The same command converts PDFs, read by a local backend: <code>pdftotext</code> or <code>poppler</code> for born-digital PDFs, <code>docling</code> for scans. Where the original Word file exists, convert that instead: reading a PDF is where structure is lost.</p></div>
+          <div class="dp-faq-answer"><p>The same command converts PDFs, using a PDF reader on your machine: <code>pdftotext</code> or <code>poppler</code> for PDFs that contain real text, <code>docling</code> for scans. Where the original Word file exists, convert that instead. A PDF keeps less structure than the Word file it came from.</p></div>
         </details>
       </div>
 

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Why AILANG Parse? Stop Parsing Photos of Your Documents</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Every document parser converts DOCX to PDF before extracting text — destroying structured data, then spending compute to recover it. AILANG Parse reads Office XML directly. Here's why that matters.">
+<meta name="description" content="Many document parsers convert DOCX to PDF before reading it. That throws away structure, then spends compute trying to recover it. AILANG Parse reads the Office XML directly. Here's why that matters.">
 <meta property="og:title" content="Why AILANG Parse? Stop Parsing Photos of Your Documents">
-<meta property="og:description" content="Your DOCX is already structured XML. Why are you destroying it? AILANG Parse reads Office XML directly — track changes, merged cells, comments preserved. No AI calls, zero dependencies.">
+<meta property="og:description" content="Your DOCX is already structured XML. AILANG Parse reads it directly and keeps track changes, merged cells and comments. No AI calls, zero dependencies.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -132,11 +132,11 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "Why does converting DOCX to PDF lose data?", "acceptedAnswer": {"@type": "Answer", "text": "A DOCX is structured XML. Converting to PDF flattens it into visual rendering, destroying track changes, merge attributes, and comments. AILANG Parse reads the XML directly."}},
-    {"@type": "Question", "name": "How should I parse Office documents for a RAG pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse extracts a typed Block ADT that preserves heading hierarchy, table structure, and metadata — producing cleaner chunks than PDF-first parsers that flatten everything into paragraphs."}},
-    {"@type": "Question", "name": "Is DOCX or PDF better for AI ingestion?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX is dramatically better when the source was authored in Word or Google Docs. AILANG Parse reads DOCX XML directly — no AI calls, no per-page billing. PDF conversion pipelines re-OCR every page and lose structural data like merged cells, track changes and comments."}},
-    {"@type": "Question", "name": "What problems does PDF conversion cause for LLM document processing?", "acceptedAnswer": {"@type": "Answer", "text": "PDF conversion flattens tables, strips revision metadata, and makes reading order unreliable. AILANG Parse eliminates all three by reading Office XML directly."}},
-    {"@type": "Question", "name": "What is structural document extraction?", "acceptedAnswer": {"@type": "Answer", "text": "Preserving semantic structure — headings, table cells, merged cells, tracked changes — not just flat text. AILANG Parse produces a typed Block ADT where each element is a distinct structured type."}}
+    {"@type": "Question", "name": "Why does converting DOCX to PDF lose data?", "acceptedAnswer": {"@type": "Answer", "text": "A DOCX is structured XML. Converting it to PDF keeps only how the page looks, so track changes, merged-cell information and comments are lost. AILANG Parse reads the XML directly."}},
+    {"@type": "Question", "name": "How should I parse Office documents for a RAG pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse returns typed blocks that keep heading levels, table structure and metadata. That gives cleaner chunks than PDF-first parsers, which flatten everything into paragraphs."}},
+    {"@type": "Question", "name": "Is DOCX or PDF better for AI ingestion?", "acceptedAnswer": {"@type": "Answer", "text": "DOCX is better when the source was written in Word or Google Docs. AILANG Parse reads the DOCX XML directly, with no AI calls and no per-page billing. PDF conversion pipelines run OCR on every page and lose structure such as merged cells, track changes and comments."}},
+    {"@type": "Question", "name": "What problems does PDF conversion cause for LLM document processing?", "acceptedAnswer": {"@type": "Answer", "text": "PDF conversion flattens tables, drops track changes and makes reading order unreliable. AILANG Parse avoids all three by reading the Office XML directly."}},
+    {"@type": "Question", "name": "What is structural document extraction?", "acceptedAnswer": {"@type": "Answer", "text": "It means keeping a document's structure (headings, table cells, merged cells, tracked changes), not just its text. AILANG Parse returns typed blocks, so a heading, a table and a tracked change each come back as their own kind of element."}}
   ]
 }
 </script>
@@ -159,7 +159,7 @@
       <nav>
         <a href="#assumption" class="active">The Assumption</a>
         <a href="#what-gets-lost">What Gets Lost</a>
-        <a href="#why-nobody">Why Nobody Did This</a>
+        <a href="#why-nobody">Why Parsers Use PDF</a>
         <a href="#numbers">The Numbers</a>
         <a href="#alongside">Works Alongside Other Tools</a>
         <a href="#try-it">Try It</a>
@@ -172,14 +172,14 @@
 
       <h2 id="assumption">The Invisible Assumption</h2>
 
-      <p>Most business documents originate as <strong>Office files</strong> &mdash; DOCX, PPTX, XLSX. Yet the default instinct is: export to PDF, then parse. Converting DOCX to PDF before parsing is <strong>destroying structured data and then spending compute trying to recover it.</strong></p>
+      <p>Most business documents start as <strong>Office files</strong>: DOCX, PPTX, XLSX. Yet the usual approach is to export to PDF, then parse. That <strong>throws away structured data, then spends compute trying to recover it.</strong></p>
 
       <div class="dp-analogy">
         <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         <div>It's like taking a photograph of a spreadsheet and then using computer vision to read the numbers &mdash; when you could just open the file.</div>
       </div>
 
-      <p>A DOCX file is not opaque binary. It's a ZIP archive containing well-structured XML, governed by the ECMA-376 standard. Track changes have author attribution and timestamps. Tables have explicit merge spans. Comments are threaded. Headers and footers are section-scoped. <em>All of this information is right there in the XML.</em></p>
+      <p>A DOCX file is a ZIP archive of structured XML, defined by the ECMA-376 standard. Track changes carry an author and a timestamp. Tables say which cells are merged. Comments are threaded. Each section has its own headers and footers. <em>All of this is right there in the XML.</em></p>
 
       <h2 id="what-gets-lost">What Gets Lost</h2>
 
@@ -190,71 +190,71 @@
         <tbody>
           <tr>
             <td>Track changes</td>
-            <td class="dp-preserved">Author, date, and change type preserved</td>
-            <td class="dp-lost">Completely lost &mdash; either accepted or rejected view only</td>
+            <td class="dp-preserved">Author, date and change type kept</td>
+            <td class="dp-lost">Lost. You get the accepted or the rejected view only</td>
           </tr>
           <tr>
             <td>Merged cells</td>
-            <td class="dp-preserved">Structural colspan/rowspan from XML</td>
-            <td class="dp-lost">Flattened or mangled by layout detection</td>
+            <td class="dp-preserved">Exact colspan/rowspan, read from the XML</td>
+            <td class="dp-lost">Flattened, or guessed wrongly from the layout</td>
           </tr>
           <tr>
             <td>Comments</td>
-            <td class="dp-preserved">Author-attributed, threaded, with anchors</td>
-            <td class="dp-lost">Dropped entirely in PDF rendering</td>
+            <td class="dp-preserved">Author, thread and the text each comment is attached to</td>
+            <td class="dp-lost">Dropped</td>
           </tr>
           <tr>
             <td>Headers / footers</td>
-            <td class="dp-preserved">Per-section, first/even/odd distinct</td>
+            <td class="dp-preserved">Kept per section, with first, even and odd pages separate</td>
             <td class="dp-lost">Mixed into body text or ignored</td>
           </tr>
           <tr>
             <td>Text boxes</td>
-            <td class="dp-preserved">Position, content, and z-order preserved</td>
-            <td class="dp-lost">Lost or garbled by spatial analysis</td>
+            <td class="dp-preserved">Position, content and stacking order kept</td>
+            <td class="dp-lost">Lost or garbled</td>
           </tr>
           <tr>
             <td>Metadata</td>
             <td class="dp-preserved">Title, author, dates, keywords, revision count</td>
-            <td class="dp-lost">Stripped or partially preserved</td>
+            <td class="dp-lost">Stripped or only partly kept</td>
           </tr>
           <tr>
             <td>Footnotes</td>
-            <td class="dp-preserved">Numbered, linked to reference points</td>
-            <td class="dp-lost">Detached from context, misattributed</td>
+            <td class="dp-preserved">Numbered and linked to where they are cited</td>
+            <td class="dp-lost">Detached from the text they belong to</td>
           </tr>
           <tr>
             <td>Hyperlinks</td>
-            <td class="dp-preserved">URL targets from relationship XML</td>
-            <td class="dp-lost">Visual blue text &mdash; URL lost</td>
+            <td class="dp-preserved">Link text together with its URL</td>
+            <td class="dp-lost">Blue text only. The URL is lost</td>
           </tr>
         </tbody>
       </table>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Every row in this table represents real-world data that legal, compliance, and audit teams rely on. Track changes in a contract are not cosmetic &mdash; they are the negotiation history. Losing them is not a quality tradeoff; it is data destruction.</div>
+        <div>Legal, compliance and audit teams rely on every row in this table. Track changes in a contract are the negotiation history. Losing them is losing data, not a small drop in quality.</div>
       </div>
 
-      <h2 id="why-nobody">Why Nobody Did This Before</h2>
+      <h2 id="why-nobody">Why Parsers Use PDF</h2>
 
-      <p>The OOXML specification is <strong>over 5,000 pages</strong>. Track changes alone involve multiple XML namespaces with move tracking and range markers that span paragraph boundaries. Merged cells in DOCX tables use a different model than HTML colspan &mdash; they use <code>vMerge</code> and <code>gridSpan</code> attributes that reference a separate grid definition. Numbered lists resolve through a chain of abstract numbering definitions, numbering instances, and style overrides.</p>
+      <p>The OOXML specification is <strong>over 5,000 pages</strong>. Track changes alone span several XML namespaces, with moves and ranges that cross paragraph boundaries. Merged cells in DOCX tables do not work like HTML colspan: they use <code>vMerge</code> and <code>gridSpan</code> attributes that point to a separate grid definition. Numbered lists are worked out through several layers of numbering definitions and style overrides.</p>
 
-      <p>Nobody wanted to write a correct parser from scratch. The rational economic choice was: convert to PDF (which LibreOffice already handles) and parse the PDF (which has a mature ecosystem). The structured data loss was the price of tractability.</p>
+      <p>Writing a correct parser from scratch is a very large job. The cheaper choice was to convert to PDF, which LibreOffice already does, and parse the PDF, which has mature tools. Losing the structure was the price.</p>
 
       <h3>What changed</h3>
 
-      <p>AILANG made it tractable. AI agents write the extraction logic from the ECMA-376 spec, and <strong>Z3 formal verification</strong> catches edge cases that manual testing would miss. The result: 63 verified contracts across 31 modules, covering filter bounds, structural invariants, and 1:1 mapper preservation.</p>
+      <p>AILANG made it practical. AI agents write the parsing code from the ECMA-376 spec, and <strong>Z3 formal verification</strong> catches edge cases that manual testing would miss. The result: 63 verified contracts across 31 modules.</p>
 
-      <p>The moat is not the parser itself &mdash; it is the <strong>parser-building system</strong>. When a new OOXML edge case appears, an AI agent reads the relevant spec section, writes the extraction logic, and Z3 proves it correct for all inputs. The gap between "discovered" and "fixed" collapses from weeks to hours.</p>
+      <p>The same process handles new cases. When a new OOXML edge case turns up, an AI agent reads the relevant part of the spec and writes the parsing code, and Z3 checks it against its contracts. A fix takes hours, not weeks.</p>
 
       <h2 id="numbers">The Numbers</h2>
 
-      <p><a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> is the first structural benchmark specifically for Office document parsing &mdash; testing track changes, merged cells, comments, headers/footers, text boxes, images, and metadata across 69 test files in 11 formats.</p>
+      <p><a href="benchmarks.html" style="color:var(--dp-blue)">OfficeDocBench</a> is an open benchmark built for Office document parsing. It tests track changes, merged cells, comments, headers and footers, text boxes, images and metadata across <span data-bench="total_files">87</span> test files in <span data-bench="format_count">11</span> formats.</p>
 
       <p>How parsers compare:</p>
 
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Coverage-adjusted composite (penalises tools that skip formats):</p>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Overall score, counting files a tool cannot read as zero:</p>
 
       <div style="margin: 24px 0 28px">
         <div class="dp-score-row">
@@ -308,42 +308,42 @@
         </div>
       </div>
 
-      <p>The gap comes almost entirely from track changes, merged cells, comments, and the long tail of formats most tools skip &mdash; structural features that don't survive PDF conversion.</p>
+      <p>Most of the gap comes from track changes, merged cells, comments and the formats most tools skip. These are the features that don't survive PDF conversion.</p>
 
-      <p>These scores are also our development targets &mdash; the AI agent optimizes against OfficeDocBench. When you see <span data-bench="ailang_parse.composite">98.1%</span>, you're seeing eval-driven development, not cherry-picked benchmarks. <a href="benchmarks.html#eval-driven" style="color:var(--dp-blue)">How eval-driven development works &rarr;</a></p>
+      <p>We build against this benchmark: the tests come first, and the parser is written to pass them. So <span data-bench="ailang_parse.composite">98.1%</span> is the score we work towards, not a hand-picked result. <a href="benchmarks.html#eval-driven" style="color:var(--dp-blue)">How we build against the benchmark &rarr;</a></p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>How it runs:</strong> Zero AI calls, zero network requests, zero per-page billing. Deterministic output &mdash; same input always produces the same blocks. <a href="benchmarks.html" style="color:var(--dp-blue)">Full methodology and results &rarr;</a></div>
+        <div><strong>How it runs:</strong> No AI calls, no network requests and no per-page billing. The same input always gives the same output. <a href="benchmarks.html" style="color:var(--dp-blue)">Full methodology and results &rarr;</a></div>
       </div>
 
       <div style="display:flex;gap:12px;align-items:center;padding:16px 20px;border-radius:8px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);margin-top:16px;font-size:13px;color:var(--text-secondary);line-height:1.6">
         <svg viewBox="0 0 24 24" style="width:18px;height:18px;min-width:18px;stroke:#a855f7;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        <div><strong style="color:#a855f7">Help us raise the bar.</strong> Submit documents that challenge our parser to <a href="mailto:docparse@sunholo.com" style="color:#a855f7;font-weight:600">docparse@sunholo.com</a>. If they improve our eval corpus, you get 1 month of Business tier free. <a href="benchmarks.html#submit-document" style="color:#a855f7">Details &rarr;</a></div>
+        <div><strong style="color:#a855f7">Help us find our gaps.</strong> Send documents that our parser gets wrong to <a href="mailto:docparse@sunholo.com" style="color:#a855f7;font-weight:600">docparse@sunholo.com</a>. If we add one to our test set, you get 1 month of Business tier free. <a href="benchmarks.html#submit-document" style="color:#a855f7">Details &rarr;</a></div>
       </div>
 
       <h2 id="alongside">Works Alongside Your Existing Pipeline</h2>
 
       <p>AILANG Parse reads Office formats directly from XML. For PDFs, scanned documents, and images, tools like Unstructured, Docling, and LlamaParse have mature OCR pipelines and layout analysis.</p>
 
-      <p>The typical approach elsewhere is to convert to PDF (losing structure), use basic text extractors (missing track changes), or skip Office formats entirely. AILANG Parse handles Office formats with full structural fidelity &mdash; use it standalone or alongside your existing PDF pipeline.</p>
+      <p>Other tools usually convert Office files to PDF and lose structure, extract plain text and miss track changes, or skip Office formats altogether. AILANG Parse keeps the structure of Office files. Use it on its own or next to your existing PDF pipeline.</p>
 
       <div class="dp-enhance-grid">
         <div class="dp-enhance-card">
           <h4>With Unstructured</h4>
-          <p>Route DOCX/PPTX/XLSX through AILANG Parse for structural extraction. Route PDFs through Unstructured's layout analysis. Merge into a unified block stream.</p>
+          <p>Send DOCX, PPTX and XLSX to AILANG Parse. Send PDFs to Unstructured for layout analysis. Combine the results into one list of blocks.</p>
         </div>
         <div class="dp-enhance-card">
           <h4>With Docling</h4>
-          <p>Use AILANG Parse for Office formats where Docling converts to PDF internally. Use Docling for scientific papers and PDF-native documents where its table detection excels.</p>
+          <p>Use AILANG Parse for the Office formats that Docling converts to PDF internally. Use Docling for scientific papers and documents that start as PDF, where its table detection is strong.</p>
         </div>
         <div class="dp-enhance-card">
           <h4>With LlamaParse</h4>
-          <p>AILANG Parse handles deterministic Office parsing locally &mdash; no API calls. Send only PDFs and images to LlamaParse's cloud API to reduce cost and latency.</p>
+          <p>Parse Office files locally with AILANG Parse, with no API calls. Send only PDFs and images to LlamaParse's cloud API, which cuts cost and waiting time.</p>
         </div>
         <div class="dp-enhance-card">
           <h4>Standalone</h4>
-          <p>AILANG Parse includes its own AI-backed PDF parsing via any model (Gemini, Claude, Ollama). One tool, every format, pluggable AI.</p>
+          <p>AILANG Parse can also read PDFs, using an AI model you choose (Gemini, Claude, Ollama). One tool for every format.</p>
         </div>
       </div>
 
@@ -370,23 +370,23 @@
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>Why does converting DOCX to PDF lose data?</summary>
-          <div class="dp-faq-answer"><p>A DOCX is structured XML. Converting to PDF flattens it into visual rendering, destroying track changes, merge attributes, and comments. AILANG Parse reads the XML directly.</p></div>
+          <div class="dp-faq-answer"><p>A DOCX is structured XML. Converting it to PDF keeps only how the page looks, so track changes, merged-cell information and comments are lost. AILANG Parse reads the XML directly.</p></div>
         </details>
         <details>
           <summary>How should I parse Office documents for a RAG pipeline?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse extracts a typed <a href="api.html">Block ADT</a> that preserves heading hierarchy, table structure, and metadata &mdash; producing cleaner chunks than PDF-first parsers that flatten everything into paragraphs.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse returns <a href="api.html">typed blocks</a> that keep heading levels, table structure and metadata. That gives cleaner chunks than PDF-first parsers, which flatten everything into paragraphs.</p></div>
         </details>
         <details>
           <summary>Is DOCX or PDF better for AI ingestion?</summary>
-          <div class="dp-faq-answer"><p>DOCX is dramatically better when the source was authored in Word or Google Docs. AILANG Parse reads DOCX XML directly &mdash; no AI calls, no per-page billing &mdash; while PDF conversion pipelines re-OCR every page and lose structural data like merged cells, track changes and comments.</p></div>
+          <div class="dp-faq-answer"><p>DOCX is better when the source was written in Word or Google Docs. AILANG Parse reads the DOCX XML directly, with no AI calls and no per-page billing. PDF conversion pipelines run OCR on every page and lose structure such as merged cells, track changes and comments.</p></div>
         </details>
         <details>
           <summary>What problems does PDF conversion cause for LLM document processing?</summary>
-          <div class="dp-faq-answer"><p>PDF conversion flattens tables, strips revision metadata, and makes reading order unreliable. AILANG Parse eliminates all three by reading Office XML directly.</p></div>
+          <div class="dp-faq-answer"><p>PDF conversion flattens tables, drops track changes and makes reading order unreliable. AILANG Parse avoids all three by reading the Office XML directly.</p></div>
         </details>
         <details>
           <summary>What is structural document extraction?</summary>
-          <div class="dp-faq-answer"><p>Preserving semantic structure &mdash; headings, table cells, merged cells, tracked changes &mdash; not just flat text. AILANG Parse produces a typed Block ADT where each element is a distinct structured type.</p></div>
+          <div class="dp-faq-answer"><p>It means keeping a document's structure (headings, table cells, merged cells, tracked changes), not just its text. AILANG Parse returns typed blocks, so a heading, a table and a tracked change each come back as their own kind of element.</p></div>
         </details>
       </div>
 

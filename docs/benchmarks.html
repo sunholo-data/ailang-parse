@@ -418,13 +418,13 @@
     <aside class="dp-docs-sidebar reveal">
       <nav>
         <a href="#head-to-head" class="active">Head-to-Head</a>
-        <a href="#full-suite">Full Suite</a>
-        <a href="#performance">Performance</a>
-        <a href="#exclusive-features">Structural Fidelity</a>
-        <a href="#feature-heatmap">Feature Detection Heatmap</a>
+        <a href="#full-suite">Full Results</a>
+        <a href="#performance">Parsing Times</a>
+        <a href="#exclusive-features">Fidelity by Feature</a>
+        <a href="#feature-heatmap">Scores by Format</a>
         <a href="#what-we-measure">What We Measure</a>
         <a href="#why-ailang">Why AILANG</a>
-        <a href="#eval-driven">Eval-Driven Development</a>
+        <a href="#eval-driven">Built Against the Tests</a>
         <a href="#submit-document">Help Us Find Gaps</a>
         <a href="#pdf-benchmark">PDF Benchmark</a>
         <a href="#arxivbench">arxivbench (LaTeX)</a>
@@ -503,7 +503,7 @@
       </tbody>
     </table>
     </div>
-    <p style="font-size:12px;color:var(--text-muted)">v1 and v2 use different scoring protocols and corpora &mdash; read each block as its own series, not one continuous line. Every run above is reproducible: clone <a href="https://github.com/sunholo-data/ailang-parse/tree/main/benchmarks/officedocbench">the benchmark folder on GitHub</a> and <a href="#run-benchmarks">run it yourself</a>.</p>
+    <p style="font-size:12px;color:var(--text-muted)">Versions 1 and 2 use different files and different scoring, so read each as its own series. You can reproduce every run above: clone <a href="https://github.com/sunholo-data/ailang-parse/tree/main/benchmarks/officedocbench">the benchmark folder on GitHub</a> and <a href="#run-benchmarks">run it yourself</a>.</p>
   </section>
 
   <hr class="dp-divider">
@@ -547,35 +547,35 @@
   <!-- Why AILANG -->
   <section class="dp-bench-section dp-ailang-section reveal">
     <h2 id="why-ailang">Why AILANG?</h2>
-    <p>AILANG Parse is written in <a href="https://ailang.sunholo.com" style="color:var(--dp-blue)">AILANG</a>, a language designed for building AI-native applications. AILANG isn't incidental to the results &mdash; it's <em>why</em> AILANG Parse achieves them.</p>
+    <p>AILANG Parse is written in <a href="https://ailang.sunholo.com" style="color:var(--dp-blue)">AILANG</a>, a language designed for building AI-native applications. The language is a large part of the reason for these results.</p>
 
     <div class="dp-ailang-grid">
       <div class="dp-ailang-card">
-        <h4>Deterministic by Default</h4>
-        <p>AILANG's effect system separates pure parsing logic from IO. The <code>pure func</code> annotation guarantees the XML&rarr;Block pipeline produces identical output for identical input &mdash; no hidden state, no ambient randomness. That&rsquo;s why structural recall scores <span data-bench="ailang_parse.structural_recall">99.3%</span>.</p>
+        <h4>Same Input, Same Output</h4>
+        <p>The parsing code is marked <code>pure func</code>, and the compiler enforces it: that code cannot read files, call the network or use randomness. The same document always gives the same output. Structural recall is <span data-bench="ailang_parse.structural_recall">99.3%</span>.</p>
       </div>
       <div class="dp-ailang-card">
-        <h4>Algebraic Data Types</h4>
-        <p>The Block ADT (9 variants: Text, Heading, Table, Image, Audio, Video, List, Section, Change) is exhaustively matched by the compiler. Adding a new block type is a compile error until every parser and formatter handles it. Other parsers typically use untyped dictionaries.</p>
+        <h4>Typed Blocks</h4>
+        <p>Every parser returns the same 9 block types: Text, Heading, Table, Image, Audio, Video, List, Section and Change. The compiler checks that every parser and every output format handles all of them, so a block type cannot be half supported. Other parsers typically return untyped dictionaries.</p>
       </div>
       <div class="dp-ailang-card">
         <h4>Zero Runtime Dependencies</h4>
-        <p>Every parser is AILANG + stdlib. No Python, no Java, no system libraries. ZIP extraction, XML parsing, and format routing are all AILANG code with inline tests and Z3-verified contracts. The entire parser fits in a single binary.</p>
+        <p>Every parser is written in AILANG with only its standard library. No Python, no Java, no system libraries. Unzipping, XML parsing and format detection are all AILANG code, with tests and Z3-verified contracts. The whole parser fits in a single binary.</p>
       </div>
     </div>
     <div class="dp-ailang-grid" style="grid-template-columns: repeat(2, 1fr)">
       <div class="dp-ailang-card">
-        <h4>Contracts + Inline Tests</h4>
-        <p>50+ contracts verified by Z3 at build time &mdash; format detection returns valid categories, mappers preserve element counts, filters respect bounds. Inline <code>tests [...]</code> on every function catch regressions before CI.</p>
+        <h4>Contracts and Tests</h4>
+        <p>Z3 verifies 50+ contracts at build time. For example, format detection can only return a known format, and converting a list of elements never adds or drops one. Tests written next to the functions (<code>tests [...]</code>) catch regressions early.</p>
       </div>
       <div class="dp-ailang-card">
-        <h4>AI as an Effect</h4>
-        <p>PDF and image parsing use AILANG's <code>AI</code> effect &mdash; the model is pluggable (<code>--ai gemini-3.5-flash-lite</code>, <code>--ai claude-haiku</code>, <code>--ai granite-docling</code>). Office parsing doesn't use AI at all: it's deterministic XML extraction. The benchmark scores reflect the code, not the model.</p>
+        <h4>AI Only for PDFs and Images</h4>
+        <p>PDF and image parsing use an AI model that you choose (<code>--ai gemini-3.5-flash-lite</code>, <code>--ai claude-haiku</code>, <code>--ai granite-docling</code>). Office parsing uses no AI at all: it reads the XML directly. The benchmark scores reflect the code, not a model.</p>
       </div>
     </div>
 
     <h3 style="font-family:var(--font-display);font-size:17px;font-weight:700;margin:24px 0 12px">See the Code</h3>
-    <p>Here's how AILANG Parse extracts track changes &mdash; a feature unique to direct XML parsing:</p>
+    <p>Here is how AILANG Parse reads track changes straight from the XML:</p>
 
     <div class="dp-source-block">
       <div class="dp-source-header">
@@ -642,7 +642,7 @@ export pure func detectFormat(ext: string) -> string
 
     <div class="dp-bench-callout">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Learn more about AILANG</strong> &mdash; effect system, algebraic types, Z3 contracts, pluggable AI, and compiles to Go or WASM: <a href="https://ailang.sunholo.com" style="color:var(--dp-blue);font-weight:600">ailang.sunholo.com</a></div>
+      <div><strong>Learn more about AILANG</strong>, including its type system, Z3 contracts, pluggable AI, and compilation to Go or WASM: <a href="https://ailang.sunholo.com" style="color:var(--dp-blue);font-weight:600">ailang.sunholo.com</a></div>
     </div>
   </section>
 
@@ -650,30 +650,30 @@ export pure func detectFormat(ext: string) -> string
 
   <!-- Eval-Driven Development -->
   <section class="dp-bench-section reveal" id="eval-driven">
-    <h2>Eval-Driven Development</h2>
-    <p>AILANG Parse is not hand-coded and then benchmarked. The benchmarks come first, and AI writes the parsing code against them. This is why the scores are high &mdash; and why we want to find documents that lower them.</p>
+    <h2>Built Against the Tests</h2>
+    <p>We don't write the parser first and measure it afterwards. The tests come first, and AI writes the parsing code to pass them. That is why the scores are high, and why we want to find documents that lower them.</p>
 
     <div class="dp-eval-steps">
       <div class="dp-eval-step">
         <div class="dp-eval-step-num">01</div>
-        <h4>Define the eval</h4>
-        <p>We write a test file with known structure &mdash; merged cells, track changes, speaker notes, threaded comments &mdash; and hand-verify the expected output as ground truth.</p>
+        <h4>Write the test</h4>
+        <p>We write a test file with known structure, such as merged cells, track changes, speaker notes and threaded comments, and check the expected answer by hand.</p>
       </div>
       <div class="dp-eval-step">
         <div class="dp-eval-step-num">02</div>
         <h4>AI writes the parser</h4>
-        <p>An AI agent reads the relevant spec (ECMA-376 for Office, RFC 5322 for email, and more as we expand) and writes AILANG extraction code, targeting the eval. Z3 contracts verify correctness.</p>
+        <p>An AI agent reads the relevant spec (ECMA-376 for Office, RFC 5322 for email) and writes AILANG parsing code to pass the test. Z3 contracts check the code.</p>
       </div>
       <div class="dp-eval-step">
         <div class="dp-eval-step-num">03</div>
         <h4>Score improves</h4>
-        <p>The eval score goes up because the code was written specifically to pass it. This is the point &mdash; and it's why finding new test cases that <em>lower</em> the score is so valuable.</p>
+        <p>The score goes up because the code was written to pass the test. That is the point, and it is why new test cases that <em>lower</em> the score are so valuable.</p>
       </div>
     </div>
 
     <div class="dp-bench-callout">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div><strong>Traditional parsers are hand-coded and then measured.</strong> AILANG Parse inverts this. And because we test for structural features that other parsers skip entirely &mdash; track changes, merged cells, comments, threaded annotations &mdash; the comparison tables above reveal real capability gaps, not just scoring differences.</div>
+      <div><strong>Most parsers are written first and measured later.</strong> AILANG Parse does it the other way round. We also test for structure that many parsers do not return, such as track changes, comments and bookmarks, so the tables above show real differences in what each parser can do.</div>
     </div>
   </section>
 
@@ -682,9 +682,9 @@ export pure func detectFormat(ext: string) -> string
   <!-- Help Us Find Our Gaps -->
   <section class="dp-bench-section reveal" id="submit-document">
     <h2>Help Us Find Our Gaps</h2>
-    <p>AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> on OfficeDocBench v2, and the benchmark includes checks we don&rsquo;t pass yet. ECMA-376 alone is over 5,000 pages, and we're expanding into email, calendar, and more formats. There are documents in the wild that will break our parser. <strong>We want to find them.</strong></p>
+    <p>AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> on OfficeDocBench v2, and the benchmark includes checks we don&rsquo;t pass yet. The Office specification (ECMA-376) alone is over 5,000 pages. Some real documents will break our parser. <strong>We want to find them.</strong></p>
 
-    <p>If you have a document that AILANG Parse doesn't handle well, send it to us. If it reveals a gap that gets added to our eval corpus, you get <strong>1 month of Business tier free</strong> (worth &euro;99).</p>
+    <p>If you have a document that AILANG Parse doesn't handle well, send it to us. If it shows a gap and we add it to our test set, you get <strong>1 month of Business tier free</strong> (worth &euro;99).</p>
 
     <div style="margin:20px 0">
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;font-size:12px;text-align:center;max-width:700px">
@@ -694,15 +694,15 @@ export pure func detectFormat(ext: string) -> string
         </div>
         <div style="background:var(--bg-card);border:1px solid var(--border);padding:14px 10px">
           <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">2. We parse</div>
-          <div style="color:var(--text-muted)">We run it through the pipeline</div>
+          <div style="color:var(--text-muted)">We run it through the parser</div>
         </div>
         <div style="background:var(--bg-card);border:1px solid var(--border);padding:14px 10px">
-          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">3. New eval</div>
-          <div style="color:var(--text-muted)">If it reveals a gap, it enters the corpus</div>
+          <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">3. New test</div>
+          <div style="color:var(--text-muted)">If it shows a gap, we add it to the test set</div>
         </div>
         <div style="background:var(--bg-card);border:1px solid var(--border);padding:14px 10px">
           <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">4. AI fixes</div>
-          <div style="color:var(--text-muted)">AI writes new code to pass the eval</div>
+          <div style="color:var(--text-muted)">AI writes new code to pass the test</div>
         </div>
         <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:0 var(--radius-sm) var(--radius-sm) 0;padding:14px 10px">
           <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px">5. You win</div>
@@ -719,7 +719,7 @@ export pure func detectFormat(ext: string) -> string
       <span style="font-size:12px;color:var(--text-muted)">docparse@sunholo.com</span>
     </div>
 
-    <p style="font-size:12px;color:var(--text-muted);line-height:1.5">Your document is used only for eval purposes. We can anonymize content before adding it to the benchmark corpus. Documents that don't reveal new gaps are deleted. Any format welcome &mdash; Office, email, calendar, or anything else you throw at us.</p>
+    <p style="font-size:12px;color:var(--text-muted);line-height:1.5">We use your document only for testing. We can anonymize it before adding it to the benchmark files. Documents that don't show a new gap are deleted. Any format is welcome: Office, email, calendar or anything else.</p>
   </section>
 
   <hr class="dp-divider">
@@ -727,7 +727,7 @@ export pure func detectFormat(ext: string) -> string
   <!-- PDF Benchmark -->
   <section class="dp-bench-section reveal">
     <h2 id="pdf-benchmark">PDF Benchmark (OmniDocBench)</h2>
-    <p>For PDFs, AILANG Parse delegates to whatever AI model you plug in via AILANG's <code>AI</code> effect. The benchmark measures the model's accuracy, not our parsing code &mdash; and we're transparent about that.</p>
+    <p>For PDFs, AILANG Parse uses the AI model you choose. So this benchmark measures the model's accuracy, not our parsing code.</p>
 
     <table class="dp-results-table">
       <thead>
@@ -753,9 +753,9 @@ export pure func detectFormat(ext: string) -> string
   <!-- arxivbench -->
   <section class="dp-bench-section reveal">
     <h2 id="arxivbench">arxivbench &mdash; LaTeX / arXiv papers</h2>
-    <p>The same deterministic-vs-OCR story as OfficeDocBench, but for scientific papers. arxivbench scores each parser on 19 peer-reviewed arXiv papers spanning ML, physics, math, and CS. Truth counts are extracted directly from the <code>.tex</code> source; score is <code>min(observed, truth) / truth</code> averaged across papers. <a href="latex-parsing.html">Full LaTeX parsing docs &rarr;</a></p>
+    <p>The same comparison for scientific papers: reading the source directly against running OCR on a PDF. arxivbench scores each parser on 19 peer-reviewed arXiv papers in ML, physics, math and CS. The expected counts come straight from the <code>.tex</code> source. The score is <code>min(observed, truth) / truth</code>, averaged across papers. <a href="latex-parsing.html">Full LaTeX parsing docs &rarr;</a></p>
 
-    <p style="font-size:13px;color:var(--text-muted)"><strong>All scores below measure structural preservation</strong> &mdash; whether the parser emits each element as a typed, separable block. Raw text capture is a different bar: OCR parsers scoring 0% on bibliography still usually have the reference-list <em>text</em> in their output, just as flat paragraphs rather than as one entry per <code>\bibitem</code>.</p>
+    <p style="font-size:13px;color:var(--text-muted)"><strong>All scores below measure structure</strong>: whether the parser returns each element as its own typed block. Capturing the text is a lower bar. OCR parsers that score 0% on bibliography usually still have the reference-list <em>text</em> in their output, but as flat paragraphs, not one entry per <code>\bibitem</code>.</p>
 
     <div class="dp-arxiv-table-scroll" style="overflow-x:auto;max-width:100%"><table class="dp-results-table">
       <thead>
@@ -789,7 +789,7 @@ export pure func detectFormat(ext: string) -> string
 
     <div class="dp-bench-callout">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <div>Every PDF-based parser scores <strong>0% on structured equations</strong> and <strong>0% on structured bibliography</strong>. <em>This isn't about whether the text appears in the output</em> &mdash; OCR'd equations usually do, as flattened (often mangled) unicode. What's missing is the <strong>structure downstream RAG needs</strong>: the LaTeX source of each equation as a separable block, citation keys that backlink to bibliography records, and reference entries as typed data rather than paragraphs of prose. Pandoc (the other source-based parser) fails outright on 4 of 19 papers due to custom <code>\newcolumntype</code> macros and plain-TeX primitives. AILANG degrades gracefully on those constructs instead of aborting.</div>
+      <div>Every PDF-based parser in this table scores <strong>0% on structured equations</strong> and <strong>0% on structured bibliography</strong>. <em>The text is usually in the output</em>: OCR'd equations appear as flattened, often garbled, Unicode. What's missing is the <strong>structure a RAG pipeline needs</strong>: the LaTeX source of each equation as its own block, citation keys that link to bibliography records, and reference entries as data, not paragraphs. Pandoc, the other parser that reads the source, fails on 4 of 19 papers because of custom <code>\newcolumntype</code> macros and plain-TeX commands. AILANG Parse keeps going on those papers and returns what it can read.</div>
     </div>
 
     <p style="margin-top:18px"><strong>Reproduce:</strong></p>
@@ -801,7 +801,7 @@ export pure func detectFormat(ext: string) -> string
   <!-- Run It Yourself -->
   <section class="dp-bench-section reveal" id="run-benchmarks">
     <h2>Run the Benchmarks</h2>
-    <p>Every number on this page comes from <code>benchmarks/officedocbench/results/summary.json</code>, regenerated whenever the eval runs. Three ways to reproduce, depending on what you have installed:</p>
+    <p>The OfficeDocBench numbers on this page come from <code>benchmarks/officedocbench/results/summary.json</code>, which is rewritten on every benchmark run. There are three ways to reproduce them, depending on what you have installed:</p>
     <pre><code class="language-bash"># 1. AILANG Parse only — instant, no extra dependencies
 uv run benchmarks/officedocbench/eval_officedocbench.py
 
@@ -811,8 +811,8 @@ uv run benchmarks/officedocbench/eval_officedocbench.py --adapter kreuzberg
 # 3. Every parser
 uv pip install -e '.[competitors]'
 uv run benchmarks/officedocbench/eval_officedocbench.py --all</code></pre>
-    <p>Useful flags: <code>--format docx</code> filters to one format, <code>--json</code> / <code>--latex</code> change report output.</p>
-    <p>The <code>--all</code> run writes <code>summary.json</code> (canonical) plus a mirror at <code>docs/data/officedocbench-summary.json</code>. Every score, parser version and run date on this site is read from that file, so nothing here is typed by hand. Adding your own parser? Implement <code>OfficeDocBenchAdapter</code> in <code>adapters/</code> and register it in <code>eval_officedocbench.py:load_adapter()</code>.</p>
+    <p>Useful flags: <code>--format docx</code> limits the run to one format; <code>--json</code> and <code>--latex</code> change the report format.</p>
+    <p>The <code>--all</code> run writes <code>summary.json</code> and a copy at <code>docs/data/officedocbench-summary.json</code>. The OfficeDocBench scores, parser versions and run dates on this site are read from that file, not typed by hand. To add your own parser, implement <code>OfficeDocBenchAdapter</code> in <code>adapters/</code> and register it in <code>eval_officedocbench.py:load_adapter()</code>.</p>
   </section>
 
   <div class="dp-faq" id="faq" style="max-width:800px;margin:48px auto 0;padding-top:24px;border-top:2px solid var(--border)">
@@ -824,7 +824,7 @@ uv run benchmarks/officedocbench/eval_officedocbench.py --all</code></pre>
     <details><summary>How are the expected answers checked?</summary><div class="dp-faq-answer"><p>Sixty-one Office files have answers taken directly from their source XML, and the files are pinned by hash. Eight more have selected answers checked against their source HTML or XML; the rest of the version 1 answers were written by hand and have not been rechecked. Separate tests confirm that known mistakes lower the score.</p></div></details>
     <details>
       <summary>How can I submit a document that doesn't parse correctly?</summary>
-      <div class="dp-faq-answer"><p>Email it to <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a>. If your document reveals a parsing gap that gets added to our eval corpus, you receive <strong>1 month of Business tier free</strong> (worth &euro;99). You can anonymize content before sending. We accept any format &mdash; Office, email, calendar, or anything else. See the <a href="#submit-document">Document Submission Program</a> for details.</p></div>
+      <div class="dp-faq-answer"><p>Email it to <a href="mailto:docparse@sunholo.com" style="color:var(--dp-blue)">docparse@sunholo.com</a>. If it shows a parsing gap and we add it to our test set, you get <strong>1 month of Business tier free</strong> (worth &euro;99). You can anonymize content before sending. We accept any format: Office, email, calendar or anything else. See <a href="#submit-document">Help Us Find Our Gaps</a> for details.</p></div>
     </details>
   </div>
 

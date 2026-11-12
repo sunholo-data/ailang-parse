@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LaTeX & arXiv Parsing — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Parse LaTeX and arXiv papers deterministically from source. 100% equation, 100% bibliography, 93% citation coverage — where PDF-OCR parsers score 0%.">
+<meta name="description" content="Parse LaTeX and arXiv papers from the .tex source. On 19 arXiv test papers, 100% of bibliography entries and 93% of citations are kept as structured data, where the PDF-based parsers tested score 0% on equations and bibliography.">
 <meta property="og:title" content="LaTeX & arXiv Parsing — AILANG Parse">
-<meta property="og:description" content="Deterministic LaTeX parser for scientific RAG. Reads .tex source directly — no OCR. 19/19 arXiv papers parsed with full equation and bibliography fidelity.">
+<meta property="og:description" content="LaTeX parser for scientific RAG. Reads the .tex source directly, with no OCR. 19 of 19 arXiv test papers parsed, with equations kept as LaTeX and every bibliography entry structured.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/latex-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -30,15 +30,15 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "Why parse the .tex source instead of the PDF?",
-     "acceptedAnswer": {"@type": "Answer", "text": "The .tex file is the authored source. PDF is a rendering that loses equation structure, citation keys, and bibliography metadata. OCR-based parsers score 0% on equations and bibliography because those signals don't survive rendering."}},
+     "acceptedAnswer": {"@type": "Answer", "text": "The .tex file is what the author wrote. The PDF is a rendering of it that loses equation structure, citation keys and bibliography metadata. The PDF-based parsers we tested score 0% on equations and bibliography because that information is not in the PDF."}},
     {"@type": "Question", "name": "Does AILANG Parse handle multi-file LaTeX papers?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Yes. \\input and \\include directives are resolved recursively with a depth cap of 10 and cycle detection. Multi-file papers like the Vaswani Attention paper and BERT parse end-to-end."}},
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. Files pulled in with \\input and \\include are followed up to 10 levels deep, and circular includes are skipped. Multi-file papers such as Vaswani's Attention paper and BERT parse in full."}},
     {"@type": "Question", "name": "What about custom macros and \\newcommand?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Standard LaTeX sectioning, math environments, tables, figures, lists, theorems, and citations are supported. Deeply macro-driven papers (harvmac sectioning, custom \\newcolumntype) degrade gracefully — the paper still parses, with macro-defined structure counted lower. Pandoc fails outright on these; AILANG keeps going."}},
+     "acceptedAnswer": {"@type": "Answer", "text": "Standard LaTeX sectioning, math environments, tables, figures, lists, theorems and citations are supported. Papers that rely heavily on custom macros (harvmac sectioning, custom \\newcolumntype) still parse, but less of the structure defined by those macros is recognized. Pandoc fails on these papers; AILANG Parse does not."}},
     {"@type": "Question", "name": "Can I get the raw LaTeX equations back?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Yes. Equations are preserved as raw LaTeX inside TextBlock entries with style set to equation. This is what downstream LLMs and RAG systems actually want — don't render to MathML or Unicode."}},
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. Equations are kept as raw LaTeX in TextBlock entries with style set to equation. They are not converted to MathML or Unicode."}},
     {"@type": "Question", "name": "Is arXiv source freely available?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Yes. arXiv provides bulk .tex source for ~89% of its 2M+ papers. The remaining ~11% are PDF-only submissions; those fall through to the PDF parsing path."}}
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. arXiv provides bulk .tex source for ~89% of its 2M+ papers. The remaining ~11% are PDF-only submissions; use PDF parsing for those."}}
   ]
 }
 </script>
@@ -50,8 +50,8 @@
 <div class="page">
 
   <section class="hero" style="margin-bottom:32px">
-    <h1 class="reveal"><span class="dp-accent">LaTeX & arXiv</span> parsing — deterministic, from source</h1>
-    <p class="subtitle reveal reveal-delay-1">Every PDF-OCR parser scores 0% on equations and bibliography. AILANG Parse reads the <code>.tex</code> source directly — 100% equation preservation, 93% citation coverage, 19/19 papers on the arxivbench corpus.</p>
+    <h1 class="reveal"><span class="dp-accent">LaTeX & arXiv</span> parsing, straight from the source</h1>
+    <p class="subtitle reveal reveal-delay-1">The PDF-based parsers we tested score 0% on equations and bibliography. AILANG Parse reads the <code>.tex</code> source directly: equations stay as LaTeX, 100% of bibliography entries and 93% of citations are kept, and all 19 papers in the arxivbench test set parse.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -72,17 +72,17 @@
     <main class="dp-docs-content">
 
       <h2 id="problem">The Problem</h2>
-      <p>Scientific RAG runs on a corpus that's LaTeX-native: <strong>arXiv alone holds 2M+ papers, ~89% with <code>.tex</code> source available</strong>. Every mainstream document parser — Docling, LlamaParse, MarkItDown, Unstructured — converts those papers to PDF first, then OCRs the rendering. Equations become garbled unicode. Citations lose their keys. Bibliography entries disappear into the reference list as plain text.</p>
+      <p>Scientific papers are mostly written in LaTeX: <strong>arXiv alone holds 2M+ papers, ~89% with <code>.tex</code> source available</strong>. Document parsers such as Docling, LlamaParse, MarkItDown and Unstructured work from the PDF instead of the source. Equations come out as garbled Unicode. Citations lose their keys. Bibliography entries become plain text in the reference list.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>On the <a href="benchmarks.html">arxivbench</a> corpus of 19 peer-reviewed papers, every PDF-based parser scores <strong>0% on structured equations</strong> and <strong>0% on structured bibliography entries</strong>. The raw text is usually still there in the output — what's gone is the structure downstream RAG needs: the LaTeX source of each equation, citation keys that back-link to their bibliography entries, and reference records as typed blocks rather than paragraphs of prose.</div>
+        <div>On the <a href="benchmarks.html">arxivbench</a> test set of 19 peer-reviewed papers, every PDF-based parser tested scores <strong>0% on structured equations</strong> and <strong>0% on structured bibliography entries</strong>. The text is usually still in the output. What is missing is the structure a RAG system needs: the LaTeX source of each equation, citation keys that link to their bibliography entries, and references as separate records instead of paragraphs of prose.</div>
       </div>
 
       <h2 id="how-it-works">How It Works</h2>
-      <p>AILANG Parse treats <code>.tex</code> as a first-class input format alongside DOCX and XLSX. The parser is pure, deterministic AILANG — no OCR, no rendering step, no model calls.</p>
+      <p>AILANG Parse reads <code>.tex</code> files directly, as it does DOCX and XLSX. There is no OCR, no rendering and no AI model, so the same file always gives the same result.</p>
 
-      <p>The <code>\input</code> / <code>\include</code> resolver runs before the pure parser, reading referenced files depth-first with a cycle detector and a depth cap of 10. Unresolved references become LaTeX comments so the downstream parser stays effect-free. Equations, citations, and bibliography entries are mapped onto the existing Block ADT — no new variants needed.</p>
+      <p>Files pulled in with <code>\input</code> or <code>\include</code> are read first and merged into the paper, up to 10 levels deep. A file that cannot be found is skipped and the rest of the paper still parses. Equations, citations and bibliography entries come out in the same block format as every other AILANG Parse format.</p>
 
       <pre><code class="language-bash"># Parse an arXiv paper directly from .tex source
 ./bin/docparse data/test_files/arxiv/vaswani_attention/ms.tex
@@ -95,9 +95,9 @@
 #   Extracted 125 blocks.</code></pre>
 
       <h2 id="coverage">Coverage on arxivbench</h2>
-      <p>Every adapter is scored against structural truth extracted from the raw <code>.tex</code> source. Score = <code>min(observed, truth) / truth</code>, averaged across papers where truth &gt; 0.</p>
+      <p>Each parser is scored against counts taken from the raw <code>.tex</code> source (the "truth"). Score = <code>min(observed, truth) / truth</code>, averaged across papers where truth &gt; 0.</p>
 
-      <p><strong>What the scores measure:</strong> structural preservation, not raw text capture. A PDF-OCR parser scoring 0% on equations can still read the rendered equation as flattened text — what it can't produce is the LaTeX source of the equation as a separable, re-renderable block. Same for bibliography: OCR parsers dump the reference list as paragraphs; they don't emit each entry as a typed record with its citation key. Downstream RAG pipelines need the structure, not the prose.</p>
+      <p><strong>What the scores measure:</strong> whether structure is kept, not whether the text is captured. A PDF-based parser that scores 0% on equations may still output the equation as flattened text. What it cannot give you is the equation's LaTeX source as a separate block you can render again. The same goes for the bibliography: PDF-based parsers output the reference list as paragraphs, not one record per entry with its citation key. A RAG system needs the structure, not only the prose.</p>
 
       <table class="dp-config-table coverage-table">
         <thead>
@@ -124,12 +124,12 @@
         </tbody>
       </table>
 
-      <p>Pandoc also reads <code>.tex</code> source but fails outright on 4 of 19 papers — custom <code>\newcolumntype</code> macros, <code>\input harvmac</code>, and a handful of package-specific primitives. AILANG degrades gracefully: the paper still parses, with unrecognized constructs preserved as raw text rather than killing the run.</p>
+      <p>Pandoc also reads <code>.tex</code> source, but fails on 4 of the 19 papers because of custom <code>\newcolumntype</code> macros, <code>\input harvmac</code> and a few package-specific commands. AILANG Parse still parses those papers and keeps anything it does not recognize as raw text.</p>
 
       <h2 id="multi-file">Multi-File Papers</h2>
-      <p>Most papers over ~15 pages ship as a thin <code>main.tex</code> or <code>ms.tex</code> that pulls in per-section files via <code>\input{background}</code>, <code>\input{introduction}</code>, and so on. Parsing just the wrapper captures almost nothing — the real content lives behind the directives.</p>
+      <p>Most papers over ~15 pages have a short <code>main.tex</code> or <code>ms.tex</code> that pulls in one file per section with <code>\input{background}</code>, <code>\input{introduction}</code> and so on. Parsing only that top file captures almost nothing, because the content is in the files it includes.</p>
 
-      <p>Resolution is depth-first with a depth cap of 10 and cycle detection via a visited-set. Paths are tried in the order <code>&lt;basedir&gt;/&lt;arg&gt;.tex</code> → <code>&lt;basedir&gt;/&lt;arg&gt;</code>. Unresolved or cyclic references become LaTeX comments so downstream code stays silent.</p>
+      <p>AILANG Parse follows these includes up to 10 levels deep. For each one it looks for <code>&lt;basedir&gt;/&lt;arg&gt;.tex</code>, then <code>&lt;basedir&gt;/&lt;arg&gt;</code>. A file that cannot be found, or that includes itself in a loop, is skipped without an error.</p>
 
       <pre><code class="language-bash"># Vaswani "Attention Is All You Need" — 10 \input files
 ./bin/docparse data/test_files/arxiv/vaswani_attention/ms.tex
@@ -147,7 +147,7 @@
 # Extracted 125 blocks.</code></pre>
 
       <h2 id="example-output">Example Output</h2>
-      <p>Equations are preserved as raw LaTeX inside <code>TextBlock</code> entries with <code>style: "equation"</code>. This is what LLMs and downstream RAG systems actually want — don't render to MathML or Unicode; keep the source.</p>
+      <p>Equations are kept as raw LaTeX in <code>TextBlock</code> entries with <code>style: "equation"</code>. They are not converted to MathML or Unicode, because LLMs and RAG systems need the source.</p>
 
       <pre><code class="language-json">{
   "blocks": [
@@ -179,32 +179,32 @@
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
           <h4>Scientific RAG &amp; Research Copilots</h4>
-          <p>Retrieval-augmented QA over arXiv, bioRxiv, OpenReview. Equation fidelity and structured citations are table stakes — retrieval on OCR'd PDFs surfaces garbled math and drops bibliography entries entirely. Parse <code>.tex</code> source and your embeddings finally index what the paper actually says.</p>
+          <p>Question answering over arXiv, bioRxiv or OpenReview needs correct equations and structured citations. Retrieval over OCR'd PDFs returns garbled math and loses bibliography entries. Parse the <code>.tex</code> source and your embeddings index what the paper actually says.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Literature Review Automation</h4>
-          <p>Build citation graphs from 10,000 papers without hand-curation. Bibliography entries come out structured with preserved keys, so you can cross-reference <code>\cite{vaswani2017}</code> across the corpus and follow the graph programmatically.</p>
+          <p>Build citation graphs from 10,000 papers without manual work. Bibliography entries come out structured, with their keys, so you can match <code>\cite{vaswani2017}</code> across the papers and follow the graph in code.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Equation Search &amp; Extraction</h4>
-          <p>Equations are preserved as raw LaTeX inside <code>TextBlock</code> entries. Train math embeddings, build an "image-to-LaTeX" evaluator, or power formula-search UIs — downstream tools finally see the source the author wrote, not an OCR approximation.</p>
+          <p>Equations are kept as raw LaTeX in <code>TextBlock</code> entries. Train math embeddings, build an "image-to-LaTeX" evaluator or power formula search. Your tools see the source the author wrote, not an OCR approximation.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Conference &amp; Journal Pipelines</h4>
-          <p>Submission intake for ACL, NeurIPS, ICML, physics venues. Authors submit <code>.tex</code>; reviewers need structured content. Parse once, convert to Markdown or HTML for the review portal, keep the original LaTeX as ground truth.</p>
+          <p>Handle submissions for ACL, NeurIPS, ICML or physics venues. Authors submit <code>.tex</code>; reviewers need structured content. Parse once, convert to Markdown or HTML for the review portal, and keep the original LaTeX as the reference.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Academic Plagiarism Detection</h4>
-          <p>Section-level and equation-level comparison across a paper corpus. Structured blocks make it possible to compare <em>what</em> two papers claim in Section 3, not just whether their PDFs happen to share ngrams after OCR mangling.</p>
+          <p>Compare papers section by section and equation by equation. Structured blocks let you compare <em>what</em> two papers claim in Section 3, not only whether their PDFs happen to share word sequences after OCR.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Preprint &amp; Thesis Archives</h4>
-          <p>University repositories, lab internal knowledge bases, grant-writing archives. Multi-file papers with <code>\input{chapter-1}</code> structure parse end-to-end — the long-tail use case PDF-first tools simply can't reach.</p>
+          <p>University repositories, internal lab knowledge bases, grant-writing archives. Multi-file documents built with <code>\input{chapter-1}</code> parse in full from the source.</p>
         </div>
       </div>
 
       <h2 id="try-it">Try It</h2>
-      <p>LaTeX is one of <span data-dp="formats.input_count">16</span> supported input formats. The parser is pure AILANG — zero model calls, zero OCR, fully deterministic.</p>
+      <p>LaTeX is one of <span data-dp="formats.input_count">16</span> supported input formats. Parsing uses no AI model and no OCR, and the same file always gives the same result.</p>
 
       <pre><code class="language-bash"># Upload a .tex file
 curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
@@ -225,23 +225,23 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>Why parse the .tex source instead of the PDF?</summary>
-          <div class="dp-faq-answer"><p>The <code>.tex</code> file is the authored source. PDF is a rendering that loses equation structure, citation keys, and bibliography metadata. OCR-based parsers score 0% on equations and bibliography because those signals don't survive rendering. See the <a href="#coverage">coverage table</a>.</p></div>
+          <div class="dp-faq-answer"><p>The <code>.tex</code> file is what the author wrote. The PDF is a rendering of it that loses equation structure, citation keys and bibliography metadata. The PDF-based parsers we tested score 0% on equations and bibliography because that information is not in the PDF. See the <a href="#coverage">coverage table</a>.</p></div>
         </details>
         <details>
           <summary>Does AILANG Parse handle multi-file LaTeX papers?</summary>
-          <div class="dp-faq-answer"><p>Yes. <code>\input</code> and <code>\include</code> directives are resolved recursively with a depth cap of 10 and cycle detection. Multi-file papers like Vaswani's Attention paper and BERT parse end-to-end. See <a href="#multi-file">Multi-File Papers</a>.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Files pulled in with <code>\input</code> and <code>\include</code> are followed up to 10 levels deep, and circular includes are skipped. Multi-file papers such as Vaswani's Attention paper and BERT parse in full. See <a href="#multi-file">Multi-File Papers</a>.</p></div>
         </details>
         <details>
           <summary>What about custom macros and \newcommand?</summary>
-          <div class="dp-faq-answer"><p>Standard LaTeX sectioning, math environments, tables, figures, lists, theorems, and citations are supported. Deeply macro-driven papers (harvmac sectioning, custom <code>\newcolumntype</code>) degrade gracefully — the paper still parses, with macro-defined structure counted lower. Pandoc fails outright on these; AILANG keeps going.</p></div>
+          <div class="dp-faq-answer"><p>Standard LaTeX sectioning, math environments, tables, figures, lists, theorems and citations are supported. Papers that rely heavily on custom macros (harvmac sectioning, custom <code>\newcolumntype</code>) still parse, but less of the structure defined by those macros is recognized. Pandoc fails on these papers; AILANG Parse does not.</p></div>
         </details>
         <details>
           <summary>Can I get the raw LaTeX equations back?</summary>
-          <div class="dp-faq-answer"><p>Yes. Equations are preserved as raw LaTeX inside <code>TextBlock</code> entries with <code>style: "equation"</code>. This is what downstream LLMs and RAG systems actually want — don't render to MathML or Unicode.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Equations are kept as raw LaTeX in <code>TextBlock</code> entries with <code>style: "equation"</code>. They are not converted to MathML or Unicode.</p></div>
         </details>
         <details>
           <summary>Is arXiv source freely available?</summary>
-          <div class="dp-faq-answer"><p>Yes. arXiv provides bulk <code>.tex</code> source for ~89% of its 2M+ papers. The remaining ~11% are PDF-only submissions; those fall through to the <a href="pdf-parsing.html">PDF parsing path</a>.</p></div>
+          <div class="dp-faq-answer"><p>Yes. arXiv provides bulk <code>.tex</code> source for ~89% of its 2M+ papers. The remaining ~11% are PDF-only submissions; use <a href="pdf-parsing.html">PDF parsing</a> for those.</p></div>
         </details>
         <details>
           <summary>Does it handle .tar.gz arXiv source bundles?</summary>

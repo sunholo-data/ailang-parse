@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Track Changes Extraction — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Extract track changes from DOCX with full author attribution, timestamps, and change types. AILANG Parse reads revision markup directly from Office XML — no PDF conversion, no data loss.">
+<meta name="description" content="Extract tracked changes from Word (DOCX) files with author, date and change type. AILANG Parse reads the revision marks in the file itself, so nothing is lost to a PDF conversion.">
 <meta property="og:title" content="Track Changes Extraction — AILANG Parse">
-<meta property="og:description" content="Extract track changes from DOCX with full author attribution, timestamps, and change types. AILANG Parse reads revision markup directly from Office XML — no PDF conversion, no data loss.">
+<meta property="og:description" content="Extract tracked changes from Word (DOCX) files with author, date and change type. AILANG Parse reads the revision marks in the file itself, so nothing is lost to a PDF conversion.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -33,10 +33,10 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I extract track changes from a DOCX file programmatically?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads w:ins, w:del, and w:moveTo/w:moveFrom revision markup directly from the DOCX XML, returning each revision with author, timestamp, and change type."}},
-    {"@type": "Question", "name": "Do other document parsers preserve track changes from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "No. All major parsers either convert to PDF (stripping revisions) or use libraries that ignore revision elements."}},
-    {"@type": "Question", "name": "Can I get track change author and date information from a DOCX?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. AILANG Parse extracts w:author and w:date from every revision element, with ISO 8601 timestamps for filtering, sorting, or audit trails."}},
-    {"@type": "Question", "name": "What does deterministic document parsing mean?", "acceptedAnswer": {"@type": "Answer", "text": "Same input always produces the same output. AILANG Parse uses rule-based extraction verified by Z3 formal contracts — no ML models, no variability."}}
+    {"@type": "Question", "name": "How do I extract track changes from a DOCX file programmatically?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the revision marks in the DOCX (w:ins, w:del, w:moveTo/w:moveFrom) and returns each change with its author, timestamp and change type."}},
+    {"@type": "Question", "name": "Do other document parsers preserve track changes from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "The four other parsers compared on this page do not. A parser either converts the file to PDF, which removes the changes, or extracts plain text and ignores revision marks."}},
+    {"@type": "Question", "name": "Can I get track change author and date information from a DOCX?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every change comes with its author (w:author) and date (w:date). Dates are ISO 8601 timestamps, so you can filter, sort or build an audit trail."}},
+    {"@type": "Question", "name": "What does deterministic document parsing mean?", "acceptedAnswer": {"@type": "Answer", "text": "The same file always gives the same output. AILANG Parse reads the file by fixed rules and uses no machine-learning model, so nothing varies between runs."}}
   ]
 }
 </script>
@@ -49,7 +49,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Track Changes</span> Extraction</h1>
-    <p class="subtitle reveal reveal-delay-1">Author attribution, timestamps, and change types &mdash; directly from the XML.</p>
+    <p class="subtitle reveal reveal-delay-1">Who changed what, and when, read straight from the Word file.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -74,65 +74,65 @@
 
       <h2 id="the-problem">The Problem</h2>
 
-      <p>Track changes are the negotiation history of a document. In legal contract review, every insertion and deletion carries meaning: who changed what, when, and why.</p>
+      <p>Track changes are the negotiation history of a document. In contract review, every insertion and deletion matters: who changed what, and when.</p>
 
-      <p>Yet most document parsers drop them.</p>
+      <p>Most document parsers drop them.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Track changes in contracts are legally significant data. Losing them is data destruction, not a quality tradeoff.</div>
+        <div>Track changes in a contract can be legally significant. A parser that drops them has lost data, not just formatting.</div>
       </div>
 
       <h2 id="how-it-works">How It Works</h2>
 
-      <p>A DOCX file is a ZIP archive containing XML files governed by the ECMA-376 (Office Open XML) standard. Track changes are stored as inline revision markup within the document body XML (<code>word/document.xml</code>).</p>
+      <p>A DOCX file is a ZIP archive of XML files that follow the Office Open XML standard (OOXML, ECMA-376). Word stores each tracked change as a revision mark inside the document text (<code>word/document.xml</code>).</p>
 
-      <p>AILANG Parse reads these XML elements directly:</p>
+      <p>AILANG Parse reads these marks directly:</p>
 
       <ul>
-        <li><code>w:ins</code> &mdash; Insertions. The element wraps the inserted content and carries <code>w:author</code> and <code>w:date</code> attributes.</li>
-        <li><code>w:del</code> &mdash; Deletions. Wraps the deleted content (which Word preserves in the XML even though it is struck through in the UI).</li>
-        <li><code>w:rPrChange</code> &mdash; Run property changes. Records formatting modifications (bold, italic, font size, color) with before/after state.</li>
+        <li><code>w:ins</code>: insertions. It wraps the inserted text and carries the author (<code>w:author</code>) and date (<code>w:date</code>).</li>
+        <li><code>w:del</code>: deletions. It wraps the deleted text, which Word keeps in the file even though it shows it struck through.</li>
+        <li><code>w:rPrChange</code>: formatting changes (bold, italic, font size, color), with the formatting before and after.</li>
       </ul>
 
-      <p>Each revision element includes the author name and an ISO 8601 timestamp, both extracted verbatim. AILANG Parse does not interpret or resolve the changes &mdash; it preserves them as structured data so downstream consumers can decide how to handle them.</p>
+      <p>Each mark carries the author name and an ISO 8601 timestamp, and both are returned exactly as written. AILANG Parse does not accept or reject the changes. It returns them as data, so your application decides what to do with them.</p>
 
-      <h3>The Block ADT</h3>
+      <h3>Changes in the output</h3>
 
-      <p>AILANG Parse represents all document content as a flat list of typed blocks. The Block ADT has 9 variants: <code>Text</code>, <code>Heading</code>, <code>Table</code>, <code>Image</code>, <code>Audio</code>, <code>Video</code>, <code>List</code>, <code>Section</code>, and <code>Change</code>.</p>
+      <p>AILANG Parse returns a document as a flat list of blocks. There are 9 block types: <code>Text</code>, <code>Heading</code>, <code>Table</code>, <code>Image</code>, <code>Audio</code>, <code>Video</code>, <code>List</code>, <code>Section</code>, and <code>Change</code>.</p>
 
-      <p>Track changes map to the <code>Change</code> variant, which carries:</p>
+      <p>Each tracked change becomes a <code>Change</code> block, which carries:</p>
       <ul>
-        <li><strong>type</strong> &mdash; <code>"insertion"</code>, <code>"deletion"</code>, or <code>"formatChange"</code></li>
-        <li><strong>author</strong> &mdash; the author name from the revision markup</li>
-        <li><strong>date</strong> &mdash; the ISO 8601 timestamp</li>
-        <li><strong>content</strong> &mdash; the affected text</li>
+        <li><strong>type</strong>: <code>"insertion"</code>, <code>"deletion"</code>, or <code>"formatChange"</code></li>
+        <li><strong>author</strong>: the author name from the revision mark</li>
+        <li><strong>date</strong>: the ISO 8601 timestamp</li>
+        <li><strong>content</strong>: the text that changed</li>
       </ul>
 
-      <p>This means track changes are first-class citizens in the output, not annotations or metadata bolted onto text blocks. They flow through the same pipeline as every other block type &mdash; into JSON, into format conversion, into Quarto Markdown (which renders them as CriticMarkup).</p>
+      <p>A change is a block like any other, not a note attached to a text block. It appears in the JSON and in converted output, including Quarto Markdown, where it is written as CriticMarkup.</p>
 
       <h2 id="what-gets-extracted">What Gets Extracted</h2>
 
       <table class="dp-config-table">
         <thead>
-          <tr><th>Change Type</th><th>OOXML Element</th><th>Extracted Data</th></tr>
+          <tr><th>Change type</th><th>OOXML element</th><th>What you get</th></tr>
         </thead>
         <tbody>
-          <tr><td>Insertions</td><td>w:ins</td><td>Author, date, inserted text content</td></tr>
-          <tr><td>Deletions</td><td>w:del</td><td>Author, date, deleted text content (preserved from XML)</td></tr>
-          <tr><td>Formatting</td><td>w:rPrChange</td><td>Author, date, property change description</td></tr>
-          <tr><td>Move from</td><td>w:moveFrom</td><td>Author, date, original location content</td></tr>
-          <tr><td>Move to</td><td>w:moveTo</td><td>Author, date, destination content</td></tr>
-          <tr><td>Section props</td><td>w:sectPrChange</td><td>Author, date, section property modification</td></tr>
-          <tr><td>Paragraph props</td><td>w:pPrChange</td><td>Author, date, paragraph formatting change</td></tr>
+          <tr><td>Insertions</td><td>w:ins</td><td>Author, date, inserted text</td></tr>
+          <tr><td>Deletions</td><td>w:del</td><td>Author, date, deleted text</td></tr>
+          <tr><td>Formatting</td><td>w:rPrChange</td><td>Author, date, description of the formatting change</td></tr>
+          <tr><td>Move from</td><td>w:moveFrom</td><td>Author, date, the text at its original position</td></tr>
+          <tr><td>Move to</td><td>w:moveTo</td><td>Author, date, the text at its new position</td></tr>
+          <tr><td>Section settings</td><td>w:sectPrChange</td><td>Author, date, the section setting that changed</td></tr>
+          <tr><td>Paragraph formatting</td><td>w:pPrChange</td><td>Author, date, the paragraph formatting that changed</td></tr>
         </tbody>
       </table>
 
-      <p>All change types preserve the full author string and ISO 8601 date from the XML. Nothing is inferred, approximated, or dropped.</p>
+      <p>Every change type keeps the full author name and ISO 8601 date from the file. Nothing is guessed.</p>
 
       <h2 id="example-output">Example Output</h2>
 
-      <p>Given a DOCX contract with tracked edits from two authors, AILANG Parse produces output like this:</p>
+      <p>For a DOCX contract with tracked edits from two authors, AILANG Parse returns output like this:</p>
 
       <pre><code class="language-json">[
   {
@@ -178,11 +178,11 @@
   }
 ]</code></pre>
 
-      <p>Every change is a discrete block with its own author and timestamp. Downstream consumers can filter by author, reconstruct the document at any point in its revision history, or render the changes visually (as AILANG Parse does when converting to Quarto Markdown with CriticMarkup).</p>
+      <p>Every change is its own block with its own author and timestamp. You can filter by author, sort by date, or show the changes visually, as AILANG Parse does when it converts to Quarto Markdown with CriticMarkup.</p>
 
       <h2 id="other-parsers">Other Parsers</h2>
 
-      <p>No other document parser we tested extracts track changes from DOCX files. This is not a matter of degree &mdash; the feature is entirely absent.</p>
+      <p>None of the four other parsers in this table returns track changes from DOCX files.</p>
 
       <table class="dp-compare-table">
         <thead>
@@ -191,13 +191,13 @@
         <tbody>
           <tr>
             <td>AILANG Parse</td>
-            <td class="dp-preserved">Full extraction &mdash; author, date, type, content</td>
-            <td>Reads w:ins, w:del, w:rPrChange directly from OOXML</td>
+            <td class="dp-preserved">Extracted: author, date, type, content</td>
+            <td>Reads w:ins, w:del, w:rPrChange from the DOCX itself</td>
           </tr>
           <tr>
             <td>Unstructured</td>
             <td class="dp-lost">Not extracted</td>
-            <td>Converts DOCX to text; revision markup is discarded</td>
+            <td>Converts DOCX to text; revision marks are discarded</td>
           </tr>
           <tr>
             <td>Docling</td>
@@ -207,21 +207,21 @@
           <tr>
             <td>LlamaParse</td>
             <td class="dp-lost">Not extracted</td>
-            <td>Cloud API returns accepted-view text only</td>
+            <td>Returns the text as if every change had been accepted</td>
           </tr>
           <tr>
             <td>MarkItDown</td>
             <td class="dp-lost">Not extracted</td>
-            <td>Converts DOCX to Markdown; revision markup is stripped</td>
+            <td>Converts DOCX to Markdown; revision marks are removed</td>
           </tr>
         </tbody>
       </table>
 
-      <p>The reason is architectural. PDF-first parsers lose track changes in the rendering step, and text extraction libraries do not handle revision markup. AILANG Parse reads the OOXML revision elements directly.</p>
+      <p>The reason is how they read the file. A parser that converts to PDF first loses the changes in that conversion, and plain text extraction ignores revision marks. AILANG Parse reads the revision marks in the DOCX.</p>
 
       <h2 id="try-it">Try It</h2>
 
-      <p>Upload a DOCX with track changes and see the Change blocks appear in the output. Compare it to what your current parser returns &mdash; the revision data is either there or it is not.</p>
+      <p>Upload a DOCX with track changes and see the <code>Change</code> blocks in the output. Compare it with what your current parser returns.</p>
 
       <div class="dp-why-ctas">
         <a href="index.html#try-it" class="dp-btn dp-btn--primary">
@@ -238,24 +238,24 @@
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I extract track changes from a DOCX file programmatically?</summary>
-          <div class="dp-faq-answer"><p>AILANG Parse reads <code>w:ins</code>, <code>w:del</code>, and <code>w:moveTo</code>/<code>w:moveFrom</code> revision markup directly from the DOCX XML, returning each revision with author, timestamp, and change type.</p></div>
+          <div class="dp-faq-answer"><p>AILANG Parse reads the revision marks in the DOCX (<code>w:ins</code>, <code>w:del</code>, <code>w:moveTo</code>/<code>w:moveFrom</code>) and returns each change with its author, timestamp and change type.</p></div>
         </details>
         <details>
           <summary>Do other document parsers preserve track changes from DOCX files?</summary>
-          <div class="dp-faq-answer"><p>No. All major parsers either convert to PDF (stripping revisions) or use libraries that ignore revision elements. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
+          <div class="dp-faq-answer"><p>The four other parsers compared on this page do not. A parser either converts the file to PDF, which removes the changes, or extracts plain text and ignores revision marks. See the <a href="vs-pdf-conversion.html">comparison page</a> for details.</p></div>
         </details>
         <details>
           <summary>Can I get track change author and date information from a DOCX?</summary>
-          <div class="dp-faq-answer"><p>Yes. AILANG Parse extracts <code>w:author</code> and <code>w:date</code> from every revision element, with ISO 8601 timestamps for filtering, sorting, or audit trails.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Every change comes with its author (<code>w:author</code>) and date (<code>w:date</code>). Dates are ISO 8601 timestamps, so you can filter, sort or build an audit trail.</p></div>
         </details>
         <details>
           <summary>What does deterministic document parsing mean?</summary>
-          <div class="dp-faq-answer"><p>Same input always produces the same output. AILANG Parse uses rule-based extraction verified by Z3 formal contracts &mdash; no ML models, no variability.</p></div>
+          <div class="dp-faq-answer"><p>The same file always gives the same output. AILANG Parse reads the file by fixed rules and uses no machine-learning model, so nothing varies between runs.</p></div>
         </details>
       </div>
 
       <h2 id="format-guides" style="margin-top:40px">Format Guides</h2>
-      <p>Track changes are supported in DOCX and PPTX files. See the full format guides for everything AILANG Parse extracts:</p>
+      <p>AILANG Parse reads track changes from DOCX and PPTX files. The format guides list everything else it extracts:</p>
       <p>
         <a href="docx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">DOCX Parsing &rarr;</a> &nbsp;&middot;&nbsp;
         <a href="pptx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">PPTX Parsing &rarr;</a>

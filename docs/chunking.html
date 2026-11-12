@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Document Chunking for RAG — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Split parsed documents into embedding-sized chunks with four deterministic strategies. Blocks are never split, tables keep their contents, and every chunk carries the heading it came from. No AI, no cost.">
+<meta name="description" content="Split parsed documents into chunks sized for embeddings, with four strategies. No paragraph or table is cut in half, tables keep their contents, and every chunk carries the heading it came from. No AI, no extra cost.">
 <meta property="og:title" content="Document Chunking for RAG — AILANG Parse">
-<meta property="og:description" content="Split parsed documents into embedding-sized chunks with four deterministic strategies. Blocks are never split, tables keep their contents, and every chunk carries the heading it came from.">
+<meta property="og:description" content="Split parsed documents into chunks sized for embeddings, with four strategies. No paragraph or table is cut in half, tables keep their contents, and every chunk carries the heading it came from.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -74,9 +74,9 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I chunk documents for a RAG pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse chunks the parsed Block ADT rather than raw text, so chunk boundaries fall on real document structure. Four deterministic strategies are available: Auto, FixedSize, ByStructure, and BySection. Chunking is free and requires no AI call."}},
-    {"@type": "Question", "name": "Does chunking split tables in half?", "acceptedAnswer": {"@type": "Answer", "text": "No. Blocks are never split. A table stays whole even when it exceeds the token budget, because an oversized intact table is more useful than two halves of one."}},
-    {"@type": "Question", "name": "Are chunk token counts exact?", "acceptedAnswer": {"@type": "Answer", "text": "No. Token counts are estimates based on words multiplied by 1.3. There is no tokenizer and no model call, which keeps chunking free and deterministic. Leave headroom when sizing against a hard model limit."}},
+    {"@type": "Question", "name": "How do I chunk documents for a RAG pipeline?", "acceptedAnswer": {"@type": "Answer", "text": "Parse the document, then call chunkDocument with one of four strategies: Auto, FixedSize, ByStructure or BySection. Chunks are built from the parsed blocks, not raw text, so they end at real boundaries such as headings. Chunking is free and needs no AI call."}},
+    {"@type": "Question", "name": "Does chunking split tables in half?", "acceptedAnswer": {"@type": "Answer", "text": "No. A table stays whole even when it is larger than the token limit, because a whole table is more useful than two halves of one."}},
+    {"@type": "Question", "name": "Are chunk token counts exact?", "acceptedAnswer": {"@type": "Answer", "text": "No. They are estimates, calculated as words × 1.3, with no tokenizer and no model call. Leave headroom if chunks must fit under a hard model limit."}},
     {"@type": "Question", "name": "Can I cite the source of a retrieved chunk?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every chunk carries headingContext (the nearest heading above it), sectionKind, a start and end block index, and a hasTable flag, so a passage can be shown with the clause it came from."}}
   ]
 }
@@ -90,7 +90,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">Document Chunking</span> for RAG</h1>
-    <p class="subtitle reveal reveal-delay-1">Four deterministic strategies. Blocks are never split, tables keep their contents, and every chunk knows where it came from.</p>
+    <p class="subtitle reveal reveal-delay-1">Four strategies, the same chunks every run. No paragraph or table is cut in half, tables keep their contents, and every chunk records where it came from.</p>
   </section>
 
   <div class="dp-docs-layout">
@@ -101,7 +101,7 @@
         <a href="#the-problem" class="active">The Problem</a>
         <a href="#strategies">Four Strategies</a>
         <a href="#guarantees">What It Guarantees</a>
-        <a href="#provenance">Citation Provenance</a>
+        <a href="#provenance">Citing the Source</a>
         <a href="#tokens">Token Estimates</a>
         <a href="#try-it">Try It</a>
         <a href="#faq">FAQ</a>
@@ -113,36 +113,36 @@
 
       <h2 id="the-problem">Chunking Decides What Is Findable</h2>
 
-      <p>An embedding has a finite window. Text past it is not represented at all &mdash; not ranked lower, not weakly matched. Absent. Whatever falls outside the window cannot be retrieved by any query, no matter how well the rest of the pipeline works.</p>
+      <p>An embedding model reads a limited amount of text. Anything past that limit is not ranked lower. It is not in the embedding at all, so no query can find it, however good the rest of the pipeline is.</p>
 
-      <p>That failure is quiet, which is what makes it expensive. Measured on a real 65,000-message mail archive: appending PDF attachment text to message bodies and embedding the first 3,000 characters left <strong>14 million characters</strong> of successfully-extracted text outside every vector. The parser did its job. The text was in the output. It simply was not in any embedding, and so it was invisible to search.</p>
+      <p>Nothing reports this, so it is easy to miss. In one 65,000-message mail archive, PDF attachment text was appended to each message body and the first 3,000 characters were embedded. That left <strong>14 million characters</strong> of extracted text outside every embedding. The text had been parsed correctly, but search could not find it.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>AILANG Parse chunks the typed <a href="api.html">Block ADT</a>, not raw text. Boundaries fall on real document structure &mdash; a heading, a slide, a sheet, an attachment &mdash; instead of an arbitrary character offset that lands mid-sentence or mid-table.</div>
+        <div>AILANG Parse chunks the <a href="api.html">parsed blocks</a> of a document (headings, paragraphs, tables), not raw text. A chunk ends at a real boundary such as a heading, a slide, a sheet or an attachment, not at a character count in the middle of a sentence or a table.</div>
       </div>
 
-      <h2 id="strategies">Four Strategies <span class="dp-pill dp-pill-new">v0.27+</span></h2>
+      <h2 id="strategies">Four Strategies</h2>
 
       <table class="dp-config-table">
         <thead>
-          <tr><th>Strategy</th><th>Boundary</th><th>Best for</th></tr>
+          <tr><th>Strategy</th><th>Where a chunk ends</th><th>Best for</th></tr>
         </thead>
         <tbody>
           <tr>
             <td><code>Auto</code></td>
-            <td>Picked from the document's actual composition</td>
-            <td>The default when you do not want to think about it</td>
+            <td>Chosen from what the document contains</td>
+            <td>The default when you do not want to choose</td>
           </tr>
           <tr>
             <td><code>FixedSize</code></td>
-            <td>Token budget, with configurable overlap</td>
-            <td>Flat prose with no headings to lean on</td>
+            <td>At a token limit, with an overlap you set</td>
+            <td>Plain prose with no headings</td>
           </tr>
           <tr>
             <td><code>ByStructure</code></td>
             <td>A new chunk at each heading</td>
-            <td>Contracts, reports, specs &mdash; anything with a hierarchy</td>
+            <td>Contracts, reports, specs: anything with headings</td>
           </tr>
           <tr>
             <td><code>BySection</code></td>
@@ -152,41 +152,41 @@
         </tbody>
       </table>
 
-      <p><code>Auto</code> inspects what the document actually contains rather than trusting its file extension: tabular and slide formats go to <code>BySection</code>, documents with headings go to <code>ByStructure</code>, and everything else falls back to <code>FixedSize</code>.</p>
+      <p><code>Auto</code> looks at what the document contains, not at its file extension. Spreadsheets and slide decks use <code>BySection</code>, documents with headings use <code>ByStructure</code>, and everything else uses <code>FixedSize</code>.</p>
 
       <h3>Why there is no <code>BySimilarity</code></h3>
 
-      <p>Semantic chunking is a reasonable idea and it is deliberately absent. It needs an AI round-trip, and a chunker that silently costs money on every document is the wrong default. Chunking here stays deterministic and free &mdash; same input, same chunks, no API key, no per-document charge.</p>
+      <p>There is no semantic (embedding-based) chunking. It would need an AI call for every document, and that costs money. Chunking here is free and repeatable: the same input gives the same chunks, with no API key and no charge per document.</p>
 
       <h2 id="guarantees">What It Guarantees</h2>
 
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
           <h4>Blocks Are Never Split</h4>
-          <p>A table stays whole even when it exceeds the token budget. An oversized intact table beats two halves of one &mdash; half a payment schedule is not half as useful, it is misleading.</p>
+          <p>A paragraph or a table is never cut in two. A table stays whole even when it is larger than the token limit, because half a payment schedule is misleading.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Tables Keep Their Contents</h4>
-          <p>Chunk text uses a chunk-specific renderer rather than the summary renderer, which prints a table as the placeholder <code>[table]</code>. Without this, a chunk would claim to cover a payment schedule while containing none of it.</p>
+          <p>A chunk that contains a table includes the text of every cell, not a placeholder such as <code>[table]</code>. A chunk that covers a payment schedule contains the payment schedule.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Deterministic</h4>
-          <p>No model call, no sampling, no variability. The same document produces the same chunks on every run, so your index is reproducible and diffable.</p>
+          <p>No AI model is involved. The same document gives the same chunks on every run, so you can rebuild your index and compare it with the last one.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Free</h4>
-          <p>Chunking adds no cost to a parse. It is pure computation over blocks you already have.</p>
+          <p>Chunking adds no cost to a parse. It works on the blocks the parse already returned.</p>
         </div>
       </div>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>The table-rendering guarantee is measurable: <code>tables.docx</code> went from <strong>10</strong> to <strong>61</strong> estimated tokens once cell contents were included in chunk text. The earlier number was a chunk that pointed at a table without carrying any of it.</div>
+        <div>An example: the table chunk from <code>tables.docx</code> is <strong>61</strong> estimated tokens with its cell contents. With only a <code>[table]</code> placeholder it would be <strong>10</strong>, and would contain none of the table.</div>
       </div>
 
-      <h2 id="provenance">Citation Provenance</h2>
+      <h2 id="provenance">Citing the Source</h2>
 
-      <p>A retrieved passage is much less useful when the reader cannot see which clause it came from. Every chunk carries the context needed to cite it:</p>
+      <p>A retrieved passage is far less useful when the reader cannot see which clause it came from. Every chunk carries what you need to cite it:</p>
 
 <pre><code class="language-json">{
   "id": 3,
@@ -199,17 +199,17 @@
   "hasTable": false
 }</code></pre>
 
-      <p><code>headingContext</code> is the nearest heading above the chunk, so a passage lifted out of a contract can be shown with the clause heading it sits under. <code>startBlockIndex</code> and <code>endBlockIndex</code> map the chunk back to the exact block range in the parsed document, and <code>hasTable</code> lets a retrieval layer treat tabular chunks differently &mdash; rendering them as a grid, say, rather than as a wall of prose.</p>
+      <p><code>headingContext</code> is the nearest heading above the chunk, so a passage from a contract can be shown with its clause heading. <code>startBlockIndex</code> and <code>endBlockIndex</code> say which blocks of the parsed document the chunk covers. <code>hasTable</code> tells your application the chunk contains a table, so it can show it as a grid and not as running text.</p>
 
       <h2 id="tokens">Token Counts Are Estimates</h2>
 
-      <p>Counts come from <code>words &times; 1.3</code>. There is no tokenizer in the parser and no model call &mdash; that is the trade that keeps chunking free and deterministic, and it is accurate enough to size chunks sensibly.</p>
+      <p>Token counts are calculated as <code>words &times; 1.3</code>. No tokenizer and no model is used, which keeps chunking free and repeatable. The estimate is accurate enough to size chunks.</p>
 
-      <p>It is not accurate enough to sit flush against a hard model limit. If you are packing chunks into a context window with no slack, leave headroom rather than treating <code>tokenCount</code> as exact.</p>
+      <p>It is not exact. If your chunks must fit under a hard model limit, leave some headroom and do not treat <code>tokenCount</code> as exact.</p>
 
       <h2 id="try-it">Try It</h2>
 
-      <p>Chunking operates on a parsed document, so it composes with every format the parser supports &mdash; the same call chunks a DOCX contract, a PPTX deck, or an email with a PDF attachment.</p>
+      <p>Chunking works on a parsed document, so it works for every format AILANG Parse reads. The same call chunks a DOCX contract, a PPTX deck or an email with a PDF attachment.</p>
 
 <pre><code class="language-ailang">import docparse/services/chunker (chunkDocument, Auto, ByStructure, Chunk)
 
@@ -224,28 +224,28 @@ let chunks = chunkDocument(doc, ByStructure({maxTokens: 512, groupUnderHeadings:
       <div class="dp-faq">
         <details>
           <summary>How do I chunk documents for a RAG pipeline?</summary>
-          <div class="dp-faq-answer"><p>Parse the document, then call <code>chunkDocument</code> with a strategy. Because chunking runs over the typed Block ADT rather than raw text, boundaries land on real structure. It is deterministic and free &mdash; no AI call.</p></div>
+          <div class="dp-faq-answer"><p>Parse the document, then call <code>chunkDocument</code> with one of four strategies: <code>Auto</code>, <code>FixedSize</code>, <code>ByStructure</code> or <code>BySection</code>. Chunks are built from the parsed blocks, not raw text, so they end at real boundaries such as headings. Chunking is free and needs no AI call.</p></div>
         </details>
         <details>
           <summary>Does chunking split tables in half?</summary>
-          <div class="dp-faq-answer"><p>No. Blocks are never split. A table stays whole even when it exceeds the token budget, because an oversized intact table is more useful than two halves of one.</p></div>
+          <div class="dp-faq-answer"><p>No. A table stays whole even when it is larger than the token limit, because a whole table is more useful than two halves of one.</p></div>
         </details>
         <details>
           <summary>Are chunk token counts exact?</summary>
-          <div class="dp-faq-answer"><p>No &mdash; they are estimates (<code>words &times; 1.3</code>). There is no tokenizer and no model call. Leave headroom when sizing against a hard model limit.</p></div>
+          <div class="dp-faq-answer"><p>No. They are estimates, calculated as <code>words &times; 1.3</code>, with no tokenizer and no model call. Leave headroom if chunks must fit under a hard model limit.</p></div>
         </details>
         <details>
           <summary>Can I cite the source of a retrieved chunk?</summary>
-          <div class="dp-faq-answer"><p>Yes. Each chunk carries <code>headingContext</code>, <code>sectionKind</code>, a start and end block index, and <code>hasTable</code>, so a passage can be shown with the clause it came from.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Every chunk carries <code>headingContext</code> (the nearest heading above it), <code>sectionKind</code>, a start and end block index, and a <code>hasTable</code> flag, so a passage can be shown with the clause it came from.</p></div>
         </details>
         <details>
           <summary>Why is there no semantic (embedding-based) chunking?</summary>
-          <div class="dp-faq-answer"><p>It needs an AI round-trip, and a chunker that silently costs money on every document is the wrong default. Chunking stays deterministic and free.</p></div>
+          <div class="dp-faq-answer"><p>It would need an AI call for every document, and that costs money. Chunking here is free, and the same input always gives the same chunks.</p></div>
         </details>
       </div>
 
       <h2 id="format-guides" style="margin-top:40px">Format Guides</h2>
-      <p>Chunking runs on any parsed document. See what gets extracted first:</p>
+      <p>Chunking works on any parsed document. The format guides show what each parse returns:</p>
       <p>
         <a href="docx-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">DOCX Parsing &rarr;</a> &nbsp;&middot;&nbsp;
         <a href="pdf-parsing.html" style="color:var(--dp-blue);text-decoration:none;font-weight:600">PDF Parsing &rarr;</a> &nbsp;&middot;&nbsp;

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ODP Parsing API — Parse OpenDocument Presentations to Structured JSON — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Parse ODP (OpenDocument Presentation / LibreOffice Impress) files to structured JSON. Per-slide blocks, text, tables, images, lists. No LibreOffice subprocess and no PPTX conversion step.">
+<meta name="description" content="Parse ODP (OpenDocument Presentation / LibreOffice Impress) files to structured JSON. Text, tables, images and lists are kept, slide by slide. Reads the file directly: no LibreOffice install and no conversion to PPTX.">
 <meta property="og:title" content="ODP Parsing API — AILANG Parse">
-<meta property="og:description" content="Native OpenDocument Presentation parsing — slide-by-slide structured output, no LibreOffice subprocess.">
+<meta property="og:description" content="Parse OpenDocument Presentation files to structured JSON, slide by slide, with no LibreOffice install.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/odp-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,11 +36,11 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I parse an ODP file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Drop the .odp file into the AILANG Parse Workbench, send it to the API, or use the Python/JS/Go/R SDK. The parser reads OpenDocument Presentation XML directly from the .odp zip — no LibreOffice subprocess and no PPTX conversion."}},
-    {"@type": "Question", "name": "Are slides extracted individually?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every draw:page becomes its own SectionBlock with a slide name, and the text frames, tables, lists, and images inside the slide come through as typed blocks within that section."}},
-    {"@type": "Question", "name": "Does ODP parsing need LibreOffice installed?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads ODF content.xml directly from the .odp zip archive. No soffice subprocess, no headless rendering, no PPTX conversion step."}},
-    {"@type": "Question", "name": "What slide elements are extracted?", "acceptedAnswer": {"@type": "Answer", "text": "Text boxes (draw:text-box), tables (table:table), images (draw:image), lists (text:list), and headings (text:h with outline level). Each slide becomes a SectionBlock containing typed blocks for everything inside."}},
-    {"@type": "Question", "name": "Does ODP parsing run in the browser?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ODP parsing runs in WebAssembly via the same AILANG parser used by the CLI. Files never leave the browser tab — try it in the Workbench."}}
+    {"@type": "Question", "name": "How do I parse an ODP file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Drop the .odp file into the AILANG Parse Workbench, send it to the API, or use the Python/JS/Go/R SDK. The parser reads the OpenDocument Presentation XML directly, with no LibreOffice install and no conversion to PPTX."}},
+    {"@type": "Question", "name": "Are slides extracted individually?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Every slide (draw:page) becomes its own section block with the slide's name. The text, tables, lists and images on that slide are typed blocks inside the section."}},
+    {"@type": "Question", "name": "Does ODP parsing need LibreOffice installed?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads content.xml directly from the .odp file. LibreOffice (soffice) is never run, and nothing is converted to PPTX."}},
+    {"@type": "Question", "name": "What slide elements are extracted?", "acceptedAnswer": {"@type": "Answer", "text": "Text boxes (draw:text-box), tables (table:table), images (draw:image), lists (text:list), and headings (text:h with outline level). Each slide becomes a section block holding typed blocks for everything on it."}},
+    {"@type": "Question", "name": "Does ODP parsing run in the browser?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. An ODP file is parsed in your browser tab (using WebAssembly) by the same parser the CLI uses. It never leaves your device. Try it in the Workbench."}}
   ]
 }
 </script>
@@ -53,7 +53,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">ODP Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Native OpenDocument Presentation parsing for LibreOffice Impress files. Per-slide blocks with text frames, tables, images, and lists &mdash; extracted directly from <code>content.xml</code>. No LibreOffice subprocess, no PPTX conversion step.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse OpenDocument Presentation files from LibreOffice Impress to structured JSON. Text, tables, images and lists are kept, slide by slide. The file is read directly, with no LibreOffice install and no conversion to PPTX.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own ODP in the Workbench &rarr;</a></div>
   </section>
 
@@ -74,13 +74,13 @@
     <main class="dp-docs-content">
 
       <h2 id="problem">Slides as Structured Data</h2>
-      <p>An <code>.odp</code> file is a zip archive with one big <code>content.xml</code> describing every slide as a <code>draw:page</code> element. Inside each slide, text frames, tables, lists, and images sit as <code>draw:frame</code> children with the ODF <code>text:</code>, <code>table:</code>, and <code>draw:</code> namespaces. None of this maps to PowerPoint's <code>p:</code> schema.</p>
+      <p>An <code>.odp</code> file is a zip archive whose <code>content.xml</code> describes every slide as a <code>draw:page</code> element, in the OpenDocument Format (ODF). Inside each slide, text, tables, lists and images sit in <code>draw:frame</code> elements, using ODF's <code>text:</code>, <code>table:</code> and <code>draw:</code> elements. These are different from PowerPoint's XML.</p>
 
-      <p>Parsers that pipe ODP through LibreOffice to convert to PPTX or PDF lose slide structure, lose master-slide context, and add seconds of latency per file. AILANG Parse reads ODF directly: each <code>draw:page</code> becomes a <code>SectionBlock</code> with a slide name, and the contents come through as typed blocks within it.</p>
+      <p>Parsers that run LibreOffice to convert ODP to PPTX or PDF first can lose the slide structure and the master-slide context, and they add seconds per file. AILANG Parse reads the ODF directly. Each slide (<code>draw:page</code>) becomes a section block with the slide's name, holding its contents as typed blocks.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>The same Block ADT used by the <a href="pptx-parsing.html">PPTX parser</a> &mdash; one downstream pipeline handles both formats without branching on file extension.</div>
+        <div>ODP and <a href="pptx-parsing.html">PPTX</a> files come out in the same block format, so one piece of code handles both.</div>
       </div>
 
       <h2 id="raw-vs-structured">Raw ODF XML vs Structured Output</h2>
@@ -150,33 +150,33 @@
 
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
-          <h4>Per-Slide SectionBlocks</h4>
-          <p>Every <code>draw:page</code> becomes a <code>SectionBlock</code> with <code>kind: "slide:&lt;name&gt;"</code>. Slide names come from <code>draw:name</code> attributes when present, falling back to a generic label otherwise.</p>
+          <h4>One Section per Slide</h4>
+          <p>Every <code>draw:page</code> becomes a section block with <code>kind: "slide:&lt;name&gt;"</code>. The slide name comes from the <code>draw:name</code> attribute, or a generic label when there is none.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Text Frames &amp; Headings</h4>
-          <p>Text inside <code>draw:text-box</code> elements comes through as text and heading blocks. <code>text:h</code> elements preserve their outline level (1&ndash;6); <code>text:p</code> elements become normal text blocks.</p>
+          <p>Text inside <code>draw:text-box</code> elements becomes heading and text blocks. <code>text:h</code> elements keep their level (1&ndash;6); <code>text:p</code> elements become text blocks.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Tables on Slides</h4>
-          <p>Tables can sit directly inside slides or inside frames. Both paths come through as <code>TableBlock</code> with rows, headers, and merged cells preserved &mdash; same shape as the DOCX/PPTX parser.</p>
+          <p>A table can sit directly on a slide or inside a frame. Either way it becomes a table block with its rows, headers and merged cells, in the same format as for DOCX and PPTX.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Bullet &amp; Numbered Lists</h4>
-          <p><code>text:list</code> elements become typed list blocks. Each <code>text:list-item</code> becomes an entry in the list; empty items are filtered out.</p>
+          <p><code>text:list</code> elements become list blocks. Each <code>text:list-item</code> is one entry. Empty items are left out.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Images</h4>
-          <p>Embedded images (<code>draw:image</code>) extracted with their <code>xlink:href</code> path and inferred MIME type. Image references stay anchored to the slide they appeared on.</p>
+          <p>Embedded images (<code>draw:image</code>) come with their path in the file (<code>xlink:href</code>) and file type (MIME type). Each image stays with the slide it appears on.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Metadata</h4>
-          <p>Document metadata from <code>meta.xml</code> &mdash; <code>dc:title</code>, <code>dc:creator</code>, <code>dc:date</code>. Useful for indexing slide decks by author or date in bulk pipelines.</p>
+          <p>Document metadata comes from <code>meta.xml</code>: <code>dc:title</code>, <code>dc:creator</code>, <code>dc:date</code>. Useful for indexing many slide decks by author or date.</p>
         </div>
       </div>
 
       <h2 id="slide-structure">Slide-by-Slide Structure</h2>
-      <p>Because each slide becomes its own <code>SectionBlock</code>, downstream code can iterate slides cleanly without flattening the deck into one continuous stream. Want just the headings? Filter to <code>type: "section"</code> with <code>kind</code> matching <code>"slide:*"</code>, then walk each slide's children for <code>type: "heading"</code>. Want just slides with tables? Same shape, different filter.</p>
+      <p>Each slide is its own section block, so your code can go through the deck slide by slide. Want only the headings? Take the blocks with <code>type: "section"</code> and a <code>kind</code> matching <code>"slide:*"</code>, then pick out each slide's <code>type: "heading"</code> blocks. Want only the slides with tables? Use the same approach with a different filter.</p>
 
 <pre><code class="language-python">from ailang_parse import DocParse
 
@@ -203,11 +203,11 @@ for slide in result.blocks:
         </div>
         <div class="dp-usecase-card">
           <h4>Mixed-Office Pipelines</h4>
-          <p>Organisations with a Linux/LibreOffice contingent end up with mixed PPTX/ODP archives. One parser, one Block ADT, one downstream pipeline. See <a href="pptx-parsing.html">PPTX parsing</a> for the PowerPoint counterpart.</p>
+          <p>Organisations where some people use LibreOffice end up with mixed PPTX and ODP archives. One parser and one output format cover both. See <a href="pptx-parsing.html">PPTX parsing</a> for the PowerPoint counterpart.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Slide-Level RAG</h4>
-          <p>Each slide becomes its own retrievable chunk with explicit boundaries. Embed the slide as a unit instead of a windowed chunk of flattened text &mdash; the model gets a coherent slide instead of half of slide 4 plus half of slide 5.</p>
+          <p>Each slide can be retrieved as one chunk. Embed the slide as a unit instead of a fixed-size piece of flattened text, so the model gets a whole slide and not half of slide 4 plus half of slide 5.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Outline Extraction</h4>
@@ -215,18 +215,18 @@ for slide in result.blocks:
         </div>
         <div class="dp-usecase-card">
           <h4>Browser-Based Review</h4>
-          <p>Drop an ODP into the <a href="workbench.html">Workbench</a> &mdash; the parser runs in WebAssembly, the file never leaves your browser. Useful when slide decks are confidential.</p>
+          <p>Drop an ODP into the <a href="workbench.html">Workbench</a>. It is parsed in your browser tab and never leaves your device. Useful when slide decks are confidential.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Format Migration</h4>
-          <p>Convert ODP archives to PPTX, HTML, or Markdown. Slide structure, text frames, lists, and images survive the conversion intact &mdash; no rendering pass required.</p>
+          <p>Convert ODP archives to PPTX, HTML or Markdown. Slides, text, lists and images survive the conversion, and nothing has to be rendered.</p>
         </div>
       </div>
 
       <h2 id="try-it">Try It</h2>
 
       <h3>Workbench (in-browser)</h3>
-      <p>Drop an ODP file into the <a href="workbench.html">Workbench</a> &mdash; parsing runs in WebAssembly with the same AILANG parser used by the CLI. No upload, no signup.</p>
+      <p>Drop an ODP file into the <a href="workbench.html">Workbench</a>. It is parsed in your browser by the same parser the CLI uses. No upload, no signup.</p>
 
       <h3>CLI</h3>
       <pre><code class="language-bash"># Parse an ODP file
@@ -253,23 +253,23 @@ for slide in result.blocks:
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I parse an ODP file to JSON?</summary>
-          <div class="dp-faq-answer"><p>Drop it into the <a href="workbench.html">Workbench</a>, send it to the <a href="api.html">API</a>, or use the Python/JS/Go/R SDK. The parser reads OpenDocument Presentation XML directly &mdash; no LibreOffice subprocess.</p></div>
+          <div class="dp-faq-answer"><p>Drop it into the <a href="workbench.html">Workbench</a>, send it to the <a href="api.html">API</a>, or use the Python/JS/Go/R SDK. The parser reads the OpenDocument Presentation XML directly, with no LibreOffice install and no conversion to PPTX.</p></div>
         </details>
         <details>
           <summary>Are slides extracted individually?</summary>
-          <div class="dp-faq-answer"><p>Yes. Every <code>draw:page</code> becomes its own <code>SectionBlock</code> with a slide name. Text frames, tables, lists, and images inside that slide come through as typed blocks within the section.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Every slide (<code>draw:page</code>) becomes its own section block with the slide's name. The text, tables, lists and images on that slide are typed blocks inside the section.</p></div>
         </details>
         <details>
           <summary>Does ODP parsing need LibreOffice installed?</summary>
-          <div class="dp-faq-answer"><p>No. <code>content.xml</code> is read directly from the <code>.odp</code> zip. No <code>soffice</code> subprocess, no headless rendering, no PPTX conversion.</p></div>
+          <div class="dp-faq-answer"><p>No. <code>content.xml</code> is read directly from the <code>.odp</code> file. LibreOffice (<code>soffice</code>) is never run, and nothing is converted to PPTX.</p></div>
         </details>
         <details>
           <summary>What slide elements are extracted?</summary>
-          <div class="dp-faq-answer"><p>Text frames (<code>draw:text-box</code>), headings (<code>text:h</code>), paragraphs (<code>text:p</code>), tables (<code>table:table</code>), lists (<code>text:list</code>), and images (<code>draw:image</code>) &mdash; each anchored to the slide it lives on.</p></div>
+          <div class="dp-faq-answer"><p>Text frames (<code>draw:text-box</code>), headings (<code>text:h</code>), paragraphs (<code>text:p</code>), tables (<code>table:table</code>), lists (<code>text:list</code>), and images (<code>draw:image</code>). Each stays with the slide it is on.</p></div>
         </details>
         <details>
           <summary>Does ODP parsing run in the browser?</summary>
-          <div class="dp-faq-answer"><p>Yes. The same AILANG parser used by the CLI compiles to WebAssembly. Files never leave the browser tab.</p></div>
+          <div class="dp-faq-answer"><p>Yes. The file is parsed in your browser tab (using WebAssembly) by the same parser the CLI uses. It never leaves your device.</p></div>
         </details>
       </div>
 

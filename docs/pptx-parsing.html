@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
 <meta name="description" content="Parse PPTX files to structured JSON. Extract slide text, speaker notes, tables, shapes, and layouts from PowerPoint presentations. Deterministic, no AI needed.">
 <meta property="og:title" content="PPTX Parsing API — AILANG Parse">
-<meta property="og:description" content="Parse PowerPoint presentations to structured JSON. Slides, speaker notes, tables, shapes — all extracted. Milliseconds, not seconds.">
+<meta property="og:description" content="Parse PowerPoint presentations to structured JSON. Slide text, speaker notes, tables and shapes are kept. Takes milliseconds.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/pptx-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -120,11 +120,11 @@
   "@type": "FAQPage",
   "mainEntity": [
     {"@type": "Question", "name": "How do I parse a PPTX file to JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the .pptx file to the AILANG Parse API or use the Python/JS/Go SDK. The parser reads PresentationML directly and returns structured JSON with slide content, speaker notes, tables, and metadata."}},
-    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Speaker notes from notesSlide XML are extracted as section blocks with kind \"notes\", each wrapping the note text with style \"speaker-notes\". Each slide's notes section follows that slide directly and carries name \"Slide N\"; slides come out in the deck's presentation order. The note text is preserved in full; character formatting inside a note is not currently carried."}},
-    {"@type": "Question", "name": "How are tables in slides handled?", "acceptedAnswer": {"@type": "Answer", "text": "Tables within slides are extracted with full row/column structure, merged cells (gridSpan/vMerge), and cell content. They appear as table blocks within their parent slide section."}},
+    {"@type": "Question", "name": "Are speaker notes extracted from PPTX files?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each slide's notes come out as a section with kind \"notes\", placed directly after that slide and named after it (\"Slide N\"). The note text has style \"speaker-notes\" and is kept in full. Character formatting inside a note is not kept. Slides come out in the deck's presentation order."}},
+    {"@type": "Question", "name": "How are tables in slides handled?", "acceptedAnswer": {"@type": "Answer", "text": "Tables on slides keep their rows, columns, merged cells (gridSpan/vMerge) and cell text. Each appears as a table block inside its slide's section."}},
     {"@type": "Question", "name": "Does PPTX parsing preserve slide order?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Slides are parsed in presentation order as defined in presentation.xml. Each slide becomes a section block numbered by its position."}},
-    {"@type": "Question", "name": "What about shapes and text boxes in slides?", "acceptedAnswer": {"@type": "Answer", "text": "All text-bearing shapes (titles, subtitles, content placeholders, freeform text boxes) are extracted. Shape text is ordered by placeholder type then position on the slide."}},
-    {"@type": "Question", "name": "How fast is PPTX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical presentations parse in under 50ms. No rendering engine or LibreOffice dependency. 98.1% composite on OfficeDocBench."}}
+    {"@type": "Question", "name": "What about shapes and text boxes in slides?", "acceptedAnswer": {"@type": "Answer", "text": "Text is read from every shape that holds it (titles, subtitles, content placeholders, free text boxes). It is ordered title first, then by position on the slide."}},
+    {"@type": "Question", "name": "How fast is PPTX parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Typical presentations parse in under 50ms. Nothing is rendered and LibreOffice is not needed. AILANG Parse scores 98.1% on the OfficeDocBench benchmark."}}
   ]
 }
 </script>
@@ -137,7 +137,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">PPTX Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Parse PowerPoint presentations to structured JSON. Slide text, speaker notes, tables, shapes &mdash; extracted per slide with full metadata.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse PowerPoint presentations to structured JSON. Slide text, speaker notes, tables and shapes are kept, slide by slide.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own file in the Workbench &rarr;</a></div>
   </section>
 
@@ -159,13 +159,13 @@
     <main class="dp-docs-content">
 
       <h2 id="problem">Presentations Are Visual Containers That Defeat Text Extraction</h2>
-      <p>A .pptx file is a zip archive containing PresentationML &mdash; XML that encodes slides, shapes, text frames, tables, and speaker notes. Most parsers render slides to images or flatten them to plain text, losing the distinction between title, body, notes, and table content.</p>
+      <p>A .pptx file is a zip archive of PresentationML, the XML format that records slides, shapes, text, tables and speaker notes. Many parsers turn slides into images or plain text, so you can no longer tell title, body, notes and table apart.</p>
 
-      <p>AILANG Parse reads PresentationML directly. Each slide becomes a section block with typed content: titles, body text, tables, and speaker notes are all separate blocks. The parser extracts from shape placeholders in layout order, so content appears in reading sequence.</p>
+      <p>AILANG Parse reads PresentationML directly. Each slide becomes a section, and its title, body text, tables and speaker notes are separate blocks. Content comes out in reading order: title first, then the rest by position on the slide.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>Speaker notes often contain more substance than the slide itself &mdash; talking points, data sources, follow-up actions. PDF-first parsers drop them entirely because notes aren't part of the rendered slide.</div>
+        <div>Speaker notes often say more than the slide itself: talking points, data sources, follow-up actions. A parser that converts slides to PDF first loses them, because notes are not part of the slide image.</div>
       </div>
 
       <h2 id="raw-vs-structured">Raw PresentationML vs Structured Output</h2>
@@ -261,34 +261,34 @@ timeline: Q3 launch"
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
           <h4>Slide Text &amp; Titles</h4>
-          <p>Title and subtitle placeholders are extracted as headings. Body content placeholders become text blocks. Text is ordered by placeholder type (title first) then by position on the slide.</p>
+          <p>Titles and subtitles become headings. Body text becomes text blocks. Text is ordered title first, then by position on the slide.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Speaker Notes</h4>
-          <p>Notes from <code>notesSlide</code> XML are extracted as text blocks with <code>style: "speaker-notes"</code>, associated with their parent slide. The content that presenters actually say &mdash; not just what the audience sees.</p>
+          <p>Notes, which PowerPoint stores in <code>notesSlide</code> files, come out as text with <code>style: "speaker-notes"</code>, placed with the slide they belong to. You get what the presenter says, not only what the audience sees.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Tables within Slides</h4>
-          <p>Slide-embedded tables are extracted with full row/column structure, merged cells, and cell content. They appear as <code>table</code> blocks within their parent slide section. <a href="tables.html">Deep dive &rarr;</a></p>
+          <p>Tables on slides keep their rows, columns, merged cells and cell text. Each appears as a <code>table</code> block inside its slide's section. <a href="tables.html">Deep dive &rarr;</a></p>
         </div>
         <div class="dp-feature-card">
           <h4>Shape &amp; Text Box Content</h4>
-          <p>All text-bearing shapes are extracted: content placeholders, freeform text boxes, callout shapes. Text within grouped shapes is flattened into reading order.</p>
+          <p>Text is read from every shape that holds it: placeholders, free text boxes, callouts. Text inside grouped shapes is placed in reading order.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Slide Ordering</h4>
-          <p>Slides are parsed in presentation order as defined in <code>presentation.xml</code>. Each slide becomes a numbered <code>SectionBlock</code> with <code>kind: "slide"</code>.</p>
+          <p>Slides come out in presentation order, as set in <code>presentation.xml</code>. Each slide becomes a numbered section with <code>kind: "slide"</code>.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Comments &amp; Metadata</h4>
-          <p>Slide-level comments are extracted with author and date. Presentation metadata (title, author, slide count, created date) comes from core properties. <a href="comments.html">Comment details &rarr;</a></p>
+          <p>Comments on slides come with their author and date. Presentation metadata (title, author, slide count, created date) comes from the file's properties. <a href="comments.html">Comment details &rarr;</a></p>
         </div>
       </div>
 
       <h2 id="speaker-notes">Speaker Notes</h2>
-      <p>PPTX stores speaker notes in separate <code>notesSlide</code> XML files, one per slide. These contain the presenter's talking points, data sources, and context that doesn't appear on the projected slide. AILANG Parse extracts each note as a section block with <code>kind: "notes"</code>, wrapping the note text with <code>style: "speaker-notes"</code>. Each notes section sits directly after the slide it belongs to and names it (<code>name: "Slide 3"</code>) &mdash; the link comes from the slide's own relationships, not from matching <code>notesSlide3.xml</code> to <code>slide3.xml</code>. Slides come out in the deck's presentation order (<code>ppt/presentation.xml</code>), not file-name order.</p>
+      <p>PPTX stores speaker notes in separate <code>notesSlide</code> files, one per slide. They hold the presenter's talking points, data sources and context that is not on the projected slide. AILANG Parse returns each slide's notes as a section with <code>kind: "notes"</code>, holding the note text with <code>style: "speaker-notes"</code>. The notes section comes directly after its slide and names it (<code>name: "Slide 3"</code>). Notes are matched to slides by the links inside the file, not by file name, and slides come out in the deck's presentation order (<code>ppt/presentation.xml</code>).</p>
 
-      <p>This is critical for AI applications: the notes often contain more actionable content than the slide bullet points. A training deck's slide says "Security Best Practices" &mdash; the notes contain the actual procedures and exceptions.</p>
+      <p>This matters for AI applications, because the notes often hold more usable detail than the bullet points. A training slide says "Security Best Practices"; the notes hold the actual procedures and exceptions.</p>
 
 <pre><code class="language-json">[
   {"type": "heading", "level": 1, "text": "Security Best Practices"},
@@ -301,7 +301,7 @@ timeline: Q3 launch"
 ]</code></pre>
 
       <h2 id="slide-tables">Tables in Slides</h2>
-      <p>Presentation slides frequently contain data tables &mdash; quarterly results, comparison matrices, feature lists. These use the same <code>a:tbl</code> markup as DOCX tables, with <code>gridSpan</code> for horizontal merges and <code>vMerge</code> for vertical merges.</p>
+      <p>Slides often contain data tables: quarterly results, comparisons, feature lists. PowerPoint stores them as <code>a:tbl</code> elements and, like Word, marks cells merged across columns with <code>gridSpan</code> and cells merged down rows with <code>vMerge</code>.</p>
 
 <pre><code class="language-json">{
   "type": "table",
@@ -325,27 +325,27 @@ timeline: Q3 launch"
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
           <h4>Training Material Indexing</h4>
-          <p>Parse corporate training decks into structured blocks. Speaker notes contain the detailed procedures and context that slides only summarize. Index both slide content and notes for enterprise search and knowledge base systems.</p>
+          <p>Parse corporate training decks into structured blocks. Speaker notes hold the detailed procedures and context that the slides only summarize. Index both slide content and notes for enterprise search and knowledge bases.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Meeting Deck Summarization</h4>
-          <p>Feed structured slide JSON to an LLM for meeting prep summaries. The model sees title hierarchy, bullet points, data tables, and speaker notes as separate typed blocks &mdash; producing better summaries than working from flattened text.</p>
+          <p>Give an LLM structured slide JSON to prepare meeting summaries. The model sees titles, bullet points, data tables and speaker notes as separate typed blocks instead of one run of flattened text.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Compliance Presentation Review</h4>
-          <p>Regulatory presentations (board reports, audit findings, risk assessments) need systematic review. Structured parsing enables automated checks: required sections present, data tables match expected formats, comments from reviewers captured.</p>
+          <p>Regulatory presentations (board reports, audit findings, risk assessments) need systematic review. With structured output you can automate checks: required sections are present, data tables match the expected format, reviewer comments are captured.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Sales Enablement Search</h4>
-          <p>Sales teams maintain hundreds of decks. Parse them into structured JSON for semantic search: find slides about specific products, pricing tables, competitive comparisons. Speaker notes surface the positioning and objection handling that isn't on the slide.</p>
+          <p>Sales teams maintain hundreds of decks. Parse them into structured JSON for semantic search: find slides about specific products, pricing tables, competitive comparisons. Speaker notes bring out the positioning and objection handling that is not on the slide.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Presentation-to-Document</h4>
-          <p>Convert PPTX to Markdown, HTML, or Quarto for documentation. Slide titles become headings, bullet points become lists, tables are preserved, and speaker notes can be included as annotations or footnotes.</p>
+          <p>Convert PPTX to Markdown, HTML or Quarto for documentation. Slide titles become headings, bullet points become lists, tables are kept, and speaker notes can be included as annotations or footnotes.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>AI Slide Analysis</h4>
-          <p>Give LLMs the full slide context: title, body, table data, and speaker notes as typed blocks. The model can identify key messages, extract action items from notes, and cross-reference data tables across slides &mdash; tasks impossible with flat text extraction.</p>
+          <p>Give LLMs the full context of each slide: title, body, table data and speaker notes as typed blocks. The model can identify key messages, extract action items from notes and cross-reference data tables across slides. These tasks are much harder with flattened text.</p>
         </div>
       </div>
 
@@ -402,11 +402,11 @@ for block in result.blocks:
         </details>
         <details>
           <summary>Are speaker notes extracted from PPTX files?</summary>
-          <div class="dp-faq-answer"><p>Yes. Notes from <code>notesSlide</code> XML are extracted as text blocks with <code>style: "speaker-notes"</code>, associated with their parent slide.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Each slide's notes come out as a section with <code>kind: "notes"</code>, placed directly after that slide and named after it (<code>name: "Slide 3"</code>). The note text has <code>style: "speaker-notes"</code> and is kept in full. Character formatting inside a note is not kept.</p></div>
         </details>
         <details>
           <summary>How are tables in slides handled?</summary>
-          <div class="dp-faq-answer"><p>Tables are extracted with full row/column structure, merged cells, and cell content. See <a href="tables.html">table extraction docs</a>.</p></div>
+          <div class="dp-faq-answer"><p>Tables on slides keep their rows, columns, merged cells and cell text. See <a href="tables.html">table extraction docs</a>.</p></div>
         </details>
         <details>
           <summary>Does PPTX parsing preserve slide order?</summary>
@@ -414,11 +414,11 @@ for block in result.blocks:
         </details>
         <details>
           <summary>What about shapes and text boxes in slides?</summary>
-          <div class="dp-faq-answer"><p>All text-bearing shapes (titles, subtitles, content placeholders, freeform text boxes) are extracted and ordered by placeholder type then position.</p></div>
+          <div class="dp-faq-answer"><p>Text is read from every shape that holds it (titles, subtitles, content placeholders, free text boxes). It is ordered title first, then by position on the slide.</p></div>
         </details>
         <details>
           <summary>How fast is PPTX parsing?</summary>
-          <div class="dp-faq-answer"><p>Typical presentations parse in under 50ms. No rendering engine or LibreOffice dependency. <span data-bench="ailang_parse.composite">98.1%</span> composite on <a href="benchmarks.html">OfficeDocBench</a>.</p></div>
+          <div class="dp-faq-answer"><p>Typical presentations parse in under 50ms. Nothing is rendered and LibreOffice is not needed. AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> on the <a href="benchmarks.html">OfficeDocBench</a> benchmark.</p></div>
         </details>
       </div>
 

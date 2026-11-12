@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HTML Parsing API — Parse HTML to Structured JSON — AILANG Parse</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Parse HTML to structured JSON. Extract tables, headings, lists, and semantic structure from web pages and email bodies. Same Block ADT as Office formats.">
+<meta name="description" content="Parse HTML to structured JSON. Extract headings, tables and lists from web pages and email bodies, in the same block format as Word, Excel and PowerPoint files.">
 <meta property="og:title" content="HTML Parsing API — AILANG Parse">
-<meta property="og:description" content="Parse HTML to structured JSON. Tables, headings, lists, semantic structure — all extracted into typed blocks. Deterministic, no AI needed.">
+<meta property="og:description" content="Parse HTML to structured JSON. Headings, tables and lists become typed blocks. Deterministic, no AI needed.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/html-parsing.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -119,12 +119,12 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "How do I parse HTML to structured JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the HTML file or content to the AILANG Parse API or use the Python/JS/Go SDK. The parser extracts semantic structure — headings, paragraphs, tables, lists — into typed blocks."}},
-    {"@type": "Question", "name": "Does HTML parsing handle messy or malformed HTML?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The parser handles unclosed tags, nested tables, inline styles, and real-world email HTML. It sanitizes the input while preserving semantic structure."}},
-    {"@type": "Question", "name": "Are HTML tables extracted with structure?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. HTML tables are extracted with headers (from thead or first row), rows, colspan/rowspan merges, and cell content. Nested tables are flattened into the parent structure."}},
-    {"@type": "Question", "name": "Can I parse email HTML bodies?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Email HTML (from multipart/alternative emails) is parsed the same way. Use with EML parsing for full email extraction — the HTML body becomes structured blocks alongside headers and attachments."}},
-    {"@type": "Question", "name": "Is the output the same as Office format parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. HTML parsing produces the same Block ADT as DOCX, XLSX, and PPTX parsing. Headings, text, tables, and lists are all typed blocks. Your downstream code handles all formats identically."}},
-    {"@type": "Question", "name": "How fast is HTML parsing?", "acceptedAnswer": {"@type": "Answer", "text": "HTML parsing is deterministic and runs in milliseconds. No AI needed, no external dependencies. Even complex email HTML with deeply nested tables parses in under 100ms."}}
+    {"@type": "Question", "name": "How do I parse HTML to structured JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Send the HTML file or content to the AILANG Parse API or use the Python/JS/Go SDK. The parser turns headings, paragraphs, tables and lists into typed blocks."}},
+    {"@type": "Question", "name": "Does HTML parsing handle messy or malformed HTML?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Unclosed tags, nested tables, inline styles and real-world email HTML are all handled. The parser cleans up the markup and keeps the content structure."}},
+    {"@type": "Question", "name": "Are HTML tables extracted with structure?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. HTML tables keep their headers (from thead or the first row), rows, colspan/rowspan merges and cell text. Tables used only for layout are dropped and their content kept."}},
+    {"@type": "Question", "name": "Can I parse email HTML bodies?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Email HTML is parsed the same way as any other HTML. Use EML parsing to get the whole email: the HTML body becomes structured blocks alongside the headers and attachments."}},
+    {"@type": "Question", "name": "Is the output the same as Office format parsing?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. HTML parsing returns the same typed blocks as DOCX, XLSX and PPTX parsing: headings, text, tables and lists. Your code can handle every format the same way."}},
+    {"@type": "Question", "name": "How fast is HTML parsing?", "acceptedAnswer": {"@type": "Answer", "text": "HTML parsing takes milliseconds. Even complex email HTML with deeply nested tables parses in under 100ms. No AI is involved and nothing else needs to be installed."}}
   ]
 }
 </script>
@@ -137,7 +137,7 @@
 
   <section class="hero" style="margin-bottom:32px">
     <h1 class="reveal"><span class="dp-accent">HTML Parsing</span> API</h1>
-    <p class="subtitle reveal reveal-delay-1">Parse HTML to structured JSON. Tables, headings, lists, semantic structure &mdash; extracted into the same typed blocks as Office formats. Deterministic, no AI needed.</p>
+    <p class="subtitle reveal reveal-delay-1">Parse HTML to structured JSON. Headings, tables and lists become the same typed blocks you get from Office files. No AI is involved, so the same page always gives the same result.</p>
     <div class="reveal reveal-delay-2" style="text-align:center;margin-top:14px"><a href="workbench.html" class="dp-btn dp-btn--secondary" style="font-size:12px;padding:8px 18px;text-decoration:none">Try parsing your own file in the Workbench &rarr;</a></div>
   </section>
 
@@ -158,18 +158,18 @@
     <main class="dp-docs-content">
 
       <h2 id="problem">HTML Varies Wildly</h2>
-      <p>Clean semantic HTML with proper <code>&lt;h1&gt;</code>, <code>&lt;table&gt;</code>, and <code>&lt;article&gt;</code> tags is easy to parse. Real-world HTML is not. Email clients generate deeply nested table layouts with inline styles. CMS exports mix semantic markup with presentation markup. Web scrapes contain navigation, ads, and boilerplate alongside content.</p>
+      <p>Clean HTML with proper <code>&lt;h1&gt;</code>, <code>&lt;table&gt;</code> and <code>&lt;article&gt;</code> tags is easy to parse. Most real HTML is not like that. Email clients produce deeply nested table layouts with inline styles. CMS exports mix content markup with styling markup. Scraped web pages carry navigation, ads and boilerplate next to the content.</p>
 
-      <p>AILANG Parse strips the presentation layer and extracts semantic structure: headings, paragraphs, tables, and lists become typed blocks. The same Block ADT output as <a href="docx-parsing.html">DOCX</a> and <a href="xlsx-parsing.html">XLSX</a> parsing &mdash; your pipeline handles all formats identically.</p>
+      <p>AILANG Parse removes the styling and layout and keeps the content: headings, paragraphs, tables and lists become typed blocks. The output uses the same block format as <a href="docx-parsing.html">DOCX</a> and <a href="xlsx-parsing.html">XLSX</a> parsing, so your code handles every format the same way.</p>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div>HTML parsing is fully deterministic &mdash; no AI calls, no API keys needed. Even complex email HTML with nested tables and inline styles parses in under 100ms.</div>
+        <div>HTML parsing uses no AI, so the same page always gives the same result. Even complex email HTML with nested tables and inline styles parses in under 100ms.</div>
       </div>
 
       <div class="dp-callout">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <div><strong>Real-world HTML is handled.</strong> Boolean attributes (<code>crossorigin</code>, <code>disabled</code>, <code>defer</code>, <code>open</code>, &hellip;), overlapping or unclosed tags (<code>&lt;a&gt;&lt;p&gt;&hellip;&lt;/a&gt;</code>), inline <code>&lt;script&gt;</code> blocks containing JSX or template literals, and IE conditional comments are all parsed without AI, and the same page always gives the same result.</div>
+        <div><strong>Messy HTML is handled.</strong> Attributes with no value (<code>crossorigin</code>, <code>disabled</code>, <code>defer</code>, <code>open</code>, &hellip;), overlapping or unclosed tags (<code>&lt;a&gt;&lt;p&gt;&hellip;&lt;/a&gt;</code>), inline <code>&lt;script&gt;</code> blocks containing JSX or template literals, and IE conditional comments all parse.</div>
       </div>
 
       <h2 id="raw-vs-structured">Raw HTML vs Structured Output</h2>
@@ -251,26 +251,26 @@
       <div class="dp-feature-grid">
         <div class="dp-feature-card">
           <h4>Heading Hierarchy</h4>
-          <p>HTML heading tags (<code>&lt;h1&gt;</code> through <code>&lt;h6&gt;</code>) are extracted with their level preserved. Headings created with CSS styling (large bold text in <code>&lt;div&gt;</code> or <code>&lt;span&gt;</code>) are normalized when identifiable.</p>
+          <p>Heading tags (<code>&lt;h1&gt;</code> through <code>&lt;h6&gt;</code>) keep their level. Headings made with styling alone (large bold text in a <code>&lt;div&gt;</code> or <code>&lt;span&gt;</code>) are treated as headings where they can be identified.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Tables with Merges</h4>
-          <p>HTML tables are extracted with headers (from <code>&lt;thead&gt;</code> or first row), rows, and <code>colspan</code>/<code>rowspan</code> resolved into <code>gridSpan</code>/<code>vMerge</code> metadata. Nested layout tables are collapsed. <a href="tables.html">Deep dive &rarr;</a></p>
+          <p>Tables keep their headers (from <code>&lt;thead&gt;</code> or the first row) and rows. Merged cells (<code>colspan</code>/<code>rowspan</code>) are marked with <code>gridSpan</code>/<code>vMerge</code>. Tables used only for layout are dropped and their content kept. <a href="tables.html">Deep dive &rarr;</a></p>
         </div>
         <div class="dp-feature-card">
           <h4>Lists</h4>
-          <p>Ordered (<code>&lt;ol&gt;</code>) and unordered (<code>&lt;ul&gt;</code>) lists are extracted as text blocks with list styling preserved. Nested lists maintain their hierarchy.</p>
+          <p>Ordered (<code>&lt;ol&gt;</code>) and unordered (<code>&lt;ul&gt;</code>) lists come out as text blocks that keep their list style. Nested lists keep their levels.</p>
         </div>
         <div class="dp-feature-card">
           <h4>Content Extraction</h4>
-          <p>Navigation, headers, footers, ads, and boilerplate are stripped. The parser identifies main content areas and extracts meaningful text, tables, and structure.</p>
+          <p>Navigation, page headers and footers, ads and boilerplate are removed. The parser finds the main content and returns its text, tables and structure.</p>
         </div>
       </div>
 
       <h2 id="email-html">Email HTML</h2>
-      <p>Email HTML is its own challenge. Email clients require table-based layouts with inline styles for compatibility across Outlook, Gmail, Apple Mail, and dozens of other renderers. A simple newsletter can be 500+ lines of nested <code>&lt;table&gt;</code> tags wrapping a few paragraphs and a data table.</p>
+      <p>Email HTML is harder still. To look right in Outlook, Gmail, Apple Mail and dozens of other mail programs, emails are built from tables with inline styles. A simple newsletter can be 500+ lines of nested <code>&lt;table&gt;</code> tags around a few paragraphs and one data table.</p>
 
-      <p>AILANG Parse distinguishes layout tables (used for positioning) from data tables (containing actual tabular data). Layout tables are collapsed; data tables are extracted with full structure. Combined with <a href="email-parsing.html">EML parsing</a>, you get headers, metadata, and the HTML body all as structured blocks.</p>
+      <p>AILANG Parse tells layout tables (used for positioning) apart from data tables (holding real tabular data). Layout tables are dropped and their content kept; data tables keep their full structure. Together with <a href="email-parsing.html">EML parsing</a>, you get an email's headers, metadata and HTML body as structured blocks.</p>
 
 <pre><code class="language-bash"># Parse an HTML file directly
 ailang run --entry main --caps IO,FS,Env \
@@ -285,27 +285,27 @@ ailang run --entry main --caps IO,FS,Env \
       <div class="dp-usecase-grid">
         <div class="dp-usecase-card">
           <h4>Web Scraping Pipelines</h4>
-          <p>Parse scraped web pages into structured blocks for indexing, analysis, or RAG. Content extraction strips navigation and boilerplate. Tables are structured, not flattened to text. Headings provide document hierarchy for chunking strategies.</p>
+          <p>Parse scraped web pages into structured blocks for indexing, analysis or RAG. Navigation and boilerplate are removed. Tables stay as tables, not flattened text. Headings give you the document outline for chunking.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>CMS Content Migration</h4>
-          <p>Export content from WordPress, Drupal, or other CMS platforms as HTML, then parse into structured JSON for migration to a new system. Heading hierarchy, tables, and lists transfer cleanly. Inline styles and CMS-specific markup are stripped.</p>
+          <p>Export content from WordPress, Drupal or another CMS as HTML, then parse it into structured JSON to move to a new system. Headings, tables and lists carry over. Inline styles and CMS-specific markup are removed.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Email HTML Body Parsing</h4>
-          <p>Extract content from HTML email bodies: newsletter data tables, receipts, shipping notifications. Combined with <a href="email-parsing.html">EML parsing</a>, you get a complete structured view of the email &mdash; headers, plain text, HTML content, and attachments.</p>
+          <p>Extract content from HTML email bodies: newsletter data tables, receipts, shipping notifications. Together with <a href="email-parsing.html">EML parsing</a>, you get the whole email in structured form: headers, plain text, HTML content and attachments.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Documentation Conversion</h4>
-          <p>Convert HTML documentation to Markdown, Quarto, or other formats. Heading hierarchy, code blocks, tables, and lists transfer with structure preserved. Ideal for docs-as-code migrations or multi-format publishing.</p>
+          <p>Convert HTML documentation to Markdown, Quarto or other formats. Headings, code blocks, tables and lists keep their structure. Useful for moving to docs-as-code or publishing in several formats.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>AI Knowledge Ingestion</h4>
-          <p>Feed structured blocks to LLMs instead of raw HTML. The model processes typed headings, paragraphs, and tables &mdash; not tag soup. Token efficiency improves dramatically when you strip <code>&lt;div class="wrapper-outer-inner"&gt;</code> wrappers.</p>
+          <p>Give LLMs structured blocks instead of raw HTML. The model reads typed headings, paragraphs and tables, not markup, and spends no tokens on <code>&lt;div class="wrapper-outer-inner"&gt;</code> wrappers.</p>
         </div>
         <div class="dp-usecase-card">
           <h4>Report Standardization</h4>
-          <p>Normalize HTML reports from different sources into a consistent Block ADT. Whether the input is a well-structured report or an email-style table layout, the output is the same typed blocks your pipeline expects.</p>
+          <p>Turn HTML reports from different sources into one consistent block format. Whether the input is a well-structured report or an email-style table layout, the output is the same typed blocks.</p>
         </div>
       </div>
 
@@ -355,27 +355,27 @@ for block in result.blocks:
         <h2>Frequently Asked Questions</h2>
         <details>
           <summary>How do I parse HTML to structured JSON?</summary>
-          <div class="dp-faq-answer"><p>Send the HTML file to the <a href="api.html">AILANG Parse API</a> or use the Python/JS/Go SDK. The parser extracts semantic structure into typed blocks.</p></div>
+          <div class="dp-faq-answer"><p>Send the HTML file to the <a href="api.html">AILANG Parse API</a> or use the Python/JS/Go SDK. The parser turns headings, paragraphs, tables and lists into typed blocks.</p></div>
         </details>
         <details>
           <summary>Does HTML parsing handle messy or malformed HTML?</summary>
-          <div class="dp-faq-answer"><p>Yes. Unclosed tags, nested tables, inline styles, and real-world email HTML are all handled. The parser sanitizes input while preserving semantic structure.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Unclosed tags, nested tables, inline styles and real-world email HTML are all handled. The parser cleans up the markup and keeps the content structure.</p></div>
         </details>
         <details>
           <summary>Are HTML tables extracted with structure?</summary>
-          <div class="dp-faq-answer"><p>Yes. Headers, rows, <code>colspan</code>/<code>rowspan</code> merges are all extracted. Layout tables are collapsed; data tables are preserved. See <a href="tables.html">table extraction docs</a>.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Headers, rows and <code>colspan</code>/<code>rowspan</code> merges are kept. Tables used only for layout are dropped and their content kept. See <a href="tables.html">table extraction docs</a>.</p></div>
         </details>
         <details>
           <summary>Can I parse email HTML bodies?</summary>
-          <div class="dp-faq-answer"><p>Yes. Use with <a href="email-parsing.html">EML parsing</a> for full email extraction, or parse HTML files directly. Layout tables from email clients are collapsed automatically.</p></div>
+          <div class="dp-faq-answer"><p>Yes. Parse the HTML file directly, or use <a href="email-parsing.html">EML parsing</a> to get the whole email. Layout tables added by email clients are dropped automatically.</p></div>
         </details>
         <details>
           <summary>Is the output the same as Office format parsing?</summary>
-          <div class="dp-faq-answer"><p>Yes. Same Block ADT: headings, text, tables, lists. Your downstream code handles <a href="docx-parsing.html">DOCX</a>, <a href="xlsx-parsing.html">XLSX</a>, <a href="pptx-parsing.html">PPTX</a>, and HTML identically.</p></div>
+          <div class="dp-faq-answer"><p>Yes. HTML gives the same typed blocks: headings, text, tables, lists. Your code can handle <a href="docx-parsing.html">DOCX</a>, <a href="xlsx-parsing.html">XLSX</a>, <a href="pptx-parsing.html">PPTX</a> and HTML the same way.</p></div>
         </details>
         <details>
           <summary>How fast is HTML parsing?</summary>
-          <div class="dp-faq-answer"><p>Deterministic, under 100ms for complex email HTML. No AI needed, no external dependencies.</p></div>
+          <div class="dp-faq-answer"><p>Complex email HTML parses in under 100ms. No AI is involved and nothing else needs to be installed.</p></div>
         </details>
       </div>
 
