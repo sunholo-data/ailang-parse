@@ -11,6 +11,21 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: the AI PDF backend sent the whole file with every page request
+
+- A PDF of more than five pages is read page by page, so long output is never cut off. Each of
+  those requests carried the whole file with a prompt asking for page N, so the model read every
+  page on every call and input tokens grew with the square of the page count. A 39-page paper
+  cost about 874k input tokens where 22k would do. A further AI call only counted the pages.
+- With poppler available (`pdfinfo`, `pdfseparate`), `--pdf-backend ai` now splits the PDF and
+  sends one page per request, and counts pages without an AI call. If poppler is missing or
+  will not split the file, it falls back to the old behaviour. New module
+  `docparse/services/pdf_ai_pages`; `parsePdfResult` is unchanged for callers without Process.
+- On 12 arXiv papers (198 pages) input tokens fall from about 2.34M to about 0.11M. The model no
+  longer sees neighbouring pages when it reads a page.
+- CLI: the AI path is now granted the Clock capability. Without it a retry after a transient
+  provider error ended the run with "effect 'Clock' requires capability".
+
 ## [v0.56.0](https://github.com/sunholo-data/ailang-parse/compare/v0.55.7...v0.56.0) — 2026-11-12
 
 ### PDF: the poppler backend reads research papers

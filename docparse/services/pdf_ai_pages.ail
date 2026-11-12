@@ -1,0 +1,126 @@
+module docparse/services/pdf_ai_pages
+
+import std/ai (AIError)
+import std/clock (now)
+import std/crypto (sha256Hex)
+import std/env (getEnvOr)
+import std/fs (readFileBytes, mkdirAllResult, removeFileResult, removeDirResult)
+import std/process (exec)
+import std/bytes (toString as bytesToString)
+import std/string (length, find, substring, trim, split, stringToInt, intToStr, endsWith)
+import std/list (concat, filter, length as listLength)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import docparse/types/document (Block)
+import docparse/services/direct_ai_parser (parsePdfResult, parsePdfSinglePageResult)
+import docparse/services/pdf_annotations (extractAnnotations, annotationsAsBlocks)
+
+-- AI extraction of a long PDF, one page per request.
+--
+-- direct_ai_parser reads a PDF of more than five pages page by page, so a long
+-- document's output is never cut off by the output-token limit. It cannot
+-- split a PDF, so every one of those requests carries the WHOLE file with a
+-- prompt asking for page N: the model reads every page on every call, and
+-- input tokens grow with the square of the page count (a 39-page paper is
+-- about 874k input tokens where 22k would do).
+--
+-- With Process available, poppler does the split: `pdfinfo` counts the pages
+-- (no AI call for that either) and `pdfseparate` writes one PDF per page.
+-- Each request then carries one page. Poppler is already what every non-AI
+-- PDF backend runs on.
+--
+-- Anything that goes wrong before the first AI call (poppler missing, an
+-- encrypted file it will not split, no temp directory) falls back to
+-- parsePdfResult, the whole-file behaviour, so this can only cost less.
+
+-- Pages at or below this go to parsePdfResult, which reads a short PDF in one
+-- request. Keep in step with the threshold there.
+pure func pdfAiPagesSingleCallMax() -> int = 5
+
+-- "Pages:          12" from pdfinfo's output.
+export pure func pdfAiPagesCountFromInfo(info: string) -> int
+  ensures { result >= 0 }
+= pdfAiPagesCountLines(split(info, "\n"))
+
+pure func pdfAiPagesCountLines(lines: [string]) -> int
+  ensures { result >= 0 }
+= match lines {
+    [] => 0,
+    l :: rest =>
+      if find(l, "Pages:") == 0 then
+        match stringToInt(trim(substring(l, 6, length(l)))) {
+          Some(n) => if n > 0 then n else 0,
+          None => 0
+        }
+      else pdfAiPagesCountLines(rest)
+  }
+
+func pdfAiPagesCount(filepath: string) -> int ! {Process} =
+  match exec("pdfinfo", [filepath]) {
+    Err(_) => 0,
+    Ok(p) => if p.exitCode != 0 then 0 else pdfAiPagesCountFromInfo(bytesToString(p.stdout))
+  }
+
+export pure func pdfAiPagesPath(dir: string, page: int) -> string = "${dir}/page-${intToStr(page)}.pdf"
+
+-- A directory no other request shares: the temp root, then a digest of the
+-- file's path and the clock.
+func pdfAiPagesTempDir(filepath: string) -> string ! {Env, Clock} = {
+  let root = getEnvOr("TMPDIR", "/tmp");
+  let base = if endsWith(root, "/") then substring(root, 0, length(root) - 1) else root;
+  "${base}/ailang-pdfpages-${substring(sha256Hex("${filepath}|${intToStr(now())}"), 0, 24)}"
+}
+
+func pdfAiPagesSplit(filepath: string, dir: string) -> bool ! {FS, Process} =
+  match mkdirAllResult(dir) {
+    Err(_) => false,
+    Ok(_) => match exec("pdfseparate", [filepath, "${dir}/page-%d.pdf"]) {
+      Err(_) => false,
+      Ok(p) => p.exitCode == 0
+    }
+  }
+
+func pdfAiPagesCleanup(dir: string, page: int, total: int) -> () ! {FS} =
+  if page > total then { let _ = removeDirResult(dir); () }
+  else { let _ = removeFileResult(pdfAiPagesPath(dir, page)); pdfAiPagesCleanup(dir, page + 1, total) }
+
+-- Every page file must be there and non-empty before any AI call is made:
+-- after that point a failure cannot fall back without paying twice.
+func pdfAiPagesAllPresent(dir: string, page: int, total: int) -> bool ! {FS} =
+  if page > total then true
+  else match readFileBytes(pdfAiPagesPath(dir, page)) {
+    Err(_) => false,
+    Ok(data) => if length(data) == 0 then false else pdfAiPagesAllPresent(dir, page + 1, total)
+  }
+
+func pdfAiPagesExtract(dir: string, page: int, total: int, acc: [Block]) -> Result[[Block], AIError] ! {FS, AI, Clock} =
+  if page > total then Ok(acc)
+  else match readFileBytes(pdfAiPagesPath(dir, page)) {
+    -- Checked present a moment ago; a page that vanished contributes nothing.
+    Err(_) => pdfAiPagesExtract(dir, page + 1, total, acc),
+    Ok(data) => match parsePdfSinglePageResult(data, pdfAiPagesPath(dir, page)) {
+      Err(e) => Err(e),
+      Ok(blocks) => pdfAiPagesExtract(dir, page + 1, total, concat(acc, blocks))
+    }
+  }
+
+-- parsePdfResult for callers that can run a process: same result shape, same
+-- annotations layered in, one page per request on long PDFs.
+export func parsePdfPagedResult(filepath: string) -> Result[[Block], AIError] ! {FS, AI, Net, Env, Clock, Process} = {
+  let pages = pdfAiPagesCount(filepath);
+  if pages <= pdfAiPagesSingleCallMax() then parsePdfResult(filepath)
+  else {
+    let dir = pdfAiPagesTempDir(filepath);
+    if pdfAiPagesSplit(filepath, dir) && pdfAiPagesAllPresent(dir, 1, pages) then {
+      let extraction = pdfAiPagesExtract(dir, 1, pages, []);
+      let _ = pdfAiPagesCleanup(dir, 1, pages);
+      match extraction {
+        Err(e) => Err(e),
+        Ok(aiBlocks) => Ok(concat(aiBlocks, annotationsAsBlocks(extractAnnotations(filepath))))
+      }
+    } else {
+      let _ = pdfAiPagesCleanup(dir, 1, pages);
+      parsePdfResult(filepath)
+    }
+  }
+}

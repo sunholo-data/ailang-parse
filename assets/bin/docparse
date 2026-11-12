@@ -809,7 +809,10 @@ fi
 
 CAPS="IO,FS,Env"
 if $USE_AI; then
-  CAPS="${CAPS},AI"
+  # Clock: the AI path backs off before retrying a transient provider error,
+  # and names its per-page temp directory by the time. Without it either one
+  # ended the run with "effect 'Clock' requires capability".
+  CAPS="${CAPS},AI,Clock"
 fi
 if $NEEDS_PROCESS; then
   CAPS="${CAPS},Process"
