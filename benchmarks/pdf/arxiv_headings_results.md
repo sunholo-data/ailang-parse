@@ -10,6 +10,7 @@ section headings are the truth, each backend parses the published PDF.
 | **poppler** | 12/12 | 168/200 = 84% | 168/236 = 71% | 0.9 |
 | docling | 12/12 | 186/200 = 93% | 186/251 = 74% | 11.4 |
 | liteparse | 12/12 | 18/200 = 9% | 18/152 = 12% | 0.5 |
+| ai (gemini-3.5-flash-lite) | 12/12 | 178/200 = 89% | 178/272 = 65% | 89.8 |
 
 docling 2.113 and liteparse were run through the v0.55.6 CLI; neither changed since.
 
@@ -26,6 +27,9 @@ What the numbers mean:
   large text inside figures.
 - **docling** runs a layout model: nine points more recall than `poppler` at
   about twelve times the time per paper.
+- **ai** is a live model call per page: five points more recall than
+  `poppler`, lower precision, and about a hundred times the time per paper.
+  One run; expect it to vary between runs.
 - **liteparse** ranks by font size alone and reads whole-page rows, as
   `poppler` did before this work.
 - The truth is not exact. Some source headings never appear in the PDF as

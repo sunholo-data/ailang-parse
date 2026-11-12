@@ -33,6 +33,8 @@ ten benchmark documents; on 38 further repo documents heading level agreement ro
 - **A paragraph with a first-line indent stays one paragraph.**
 - Benchmark: `arxiv_headings.py` no longer counts an appendix letter ("A Experiments") as part of
   the heading text. Earlier numbers are restated with this matcher in the results file.
+- Benchmark results now include docling (93% recall, 74% precision, 11 s/paper), ai (89%, 65%,
+  90 s/paper) and liteparse (9%, 12%).
 
 ## [v0.55.7](https://github.com/sunholo-data/ailang-parse/compare/v0.55.6...v0.55.7) — 2026-11-12
 
