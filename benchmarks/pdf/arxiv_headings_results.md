@@ -7,27 +7,42 @@ section headings are the truth, each backend parses the published PDF.
 | Backend | Parsed | heading recall | heading precision | s/paper |
 |---|---|---|---|---|
 | pdftotext | 12/12 | 0/200 = 0% | — | 0.4 |
-| poppler | 12/12 | 37/200 = 18% | 37/150 = 25% | 0.9 |
+| **poppler** | 12/12 | 168/200 = 84% | 168/236 = 71% | 0.9 |
+| docling | 12/12 | 186/200 = 93% | 186/251 = 74% | 11.4 |
+| liteparse | 12/12 | 18/200 = 9% | 18/152 = 12% | 0.5 |
 
-docling, liteparse and ai were not run.
+docling 2.113 and liteparse were run through the v0.55.6 CLI; neither changed since.
 
-This is the hard counterpart to the structure round trip, where `poppler`
-finds 80% of headings in PDFs rendered from our own styled DOCX. Papers set
-headings in small caps or at body size, number them, and run two columns.
+This is the hard counterpart to the structure round trip, where the PDFs are
+rendered from our own styled DOCX. Papers set headings in small caps or at
+body size, number them, and run two columns.
 
 What the numbers mean:
 
 - **pdftotext** returns text only, so it reports no headings at all.
-- **poppler** finds headings by font size and weight. It misses headings set
-  at body size, and reports figure labels, running titles and author lines as
-  headings. Where a heading sits level with text in the other column, the two
-  come out as one block and the heading gets no credit.
-- The truth is not exact: the stored LaTeX can be a different version than the
-  PDF, and class files add headings the source never names. Compare backends
-  and runs with each other; do not read 18% as an absolute.
+- **poppler** reads two-column pages column by column, uses the PDF's outline
+  where there is one, and recognises numbered headings at body size. What it
+  still reports wrongly is mostly title-page lines (authors, affiliations) and
+  large text inside figures.
+- **docling** runs a layout model: nine points more recall than `poppler` at
+  about twelve times the time per paper.
+- **liteparse** ranks by font size alone and reads whole-page rows, as
+  `poppler` did before this work.
+- The truth is not exact. Some source headings never appear in the PDF as
+  written (the stored LaTeX is another version, or the name comes from a
+  macro). The other way round, "Abstract",
+  "References" and appendix sections are real headings the truth often lacks,
+  and they count against precision. Compare backends and runs with each other.
 
-Before v0.55.7 `poppler` failed outright on most of these PDFs (control
-characters in its XML output), which this benchmark now counts in `Parsed`.
+History of the `poppler` row (same 12 papers, current matcher):
+
+| Version | Parsed | recall | precision |
+|---|---|---|---|
+| v0.55.7 (control characters fixed) | 12/12 | 25% | 34% |
+| this run (columns, outline, numbered headings) | 12/12 | 84% | 71% |
+
+v0.55.7's first published figures (18% / 25%) used a matcher that counted an
+appendix letter as part of the heading text.
 
 Re-run: `python3 benchmarks/pdf/arxiv_headings.py --fetch`, then
 `python3 benchmarks/pdf/arxiv_headings.py --per-file`

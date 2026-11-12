@@ -11,6 +11,29 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### PDF: the poppler backend reads research papers
+
+`--pdf-backend poppler` now finds 84% of section headings on the arXiv headings benchmark, up from
+25%, and 71% of the headings it reports are real, up from 34%. No model is involved and the time
+per paper is unchanged (about 1 s). The structure round trip on rendered DOCX is unchanged on the
+ten benchmark documents; on 38 further repo documents heading level agreement rose from 68% to 90%.
+
+- **Two-column pages are read column by column.** A heading level with text in the other column
+  was read as one row with that text and lost. Text that spans both columns (title, abstract,
+  wide figures) still comes first. Tables are not split.
+- **The PDF's own outline is used.** Where a PDF carries bookmarks, a line matching an entry on
+  that page is a heading at the entry's level, including an entry wrapped over two lines.
+- **Numbered headings at body size**: "3.2 Method" or "1 INTRODUCTION" is a heading when the
+  title is bold or in capitals, or a multi-level number stands apart from the text above.
+- **TeX and URW bold fonts count as bold** (CMBX, Nimbus "Medi", "Demi", "-Bd").
+- **Small caps read as words**: "I NTRODUCTION" is now "INTRODUCTION".
+- **A heading wrapped over two lines is one heading**, not two.
+- **Not headings any more**: text set sideways in the margin (arXiv's stamp), a large symbol from
+  a formula, an e-mail line.
+- **A paragraph with a first-line indent stays one paragraph.**
+- Benchmark: `arxiv_headings.py` no longer counts an appendix letter ("A Experiments") as part of
+  the heading text. Earlier numbers are restated with this matcher in the results file.
+
 ## [v0.55.7](https://github.com/sunholo-data/ailang-parse/compare/v0.55.6...v0.55.7) — 2026-11-12
 
 ### Benchmarks: arXiv headings, a harder PDF test
