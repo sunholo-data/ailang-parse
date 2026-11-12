@@ -11,6 +11,22 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.57.1](https://github.com/sunholo-data/ailang-parse/compare/v0.57.0...v0.57.1) — 2026-11-12
+
+### Fixed: PDF annotations inside compressed object streams were not found
+
+- Highlights, notes and comments are stored as PDF objects. Word and LaTeX exports, and Acrobat's
+  reduced-size save, pack objects into compressed object streams, which a scan of the raw file
+  cannot see. Those annotations were skipped, with a warning that the result might be incomplete.
+- `pdf_annotations` now reads packed objects through `pdf_pages` (`pdfPackedObjects`), so an
+  annotation or a page's annotation list inside an object stream is found like any other. The
+  warning remains only for files `pdf_pages` cannot read (encrypted, or a structure it does not
+  follow).
+- New fixture `challenge_pdf_highlights_in_objstm.pdf` (invented content, written by
+  `benchmarks/pdf/make_objstm_annotation_fixture.py`): both highlights sit inside a compressed
+  object stream behind a compressed cross-reference stream. Before: 0 annotations. Now: 2, each
+  anchored to its text.
+
 ## [v0.57.0](https://github.com/sunholo-data/ailang-parse/compare/v0.56.0...v0.57.0) — 2026-11-12
 
 ### PDF pages are split natively, with no external tool

@@ -973,6 +973,40 @@ def check_pdf_objstm_annotations(output: dict) -> dict:
     }
 
 
+def check_pdf_annotations_in_objstm(output: dict) -> dict:
+    """Are annotations found when they are INSIDE a compressed object stream?
+
+    File: challenge_pdf_highlights_in_objstm.pdf
+    Expected: Word and LaTeX exports, and Acrobat's reduced-size save, pack the
+    page and its annotations into a FlateDecode /ObjStm and index them with a
+    compressed cross-reference stream. A scan of the raw bytes sees none of it.
+    Both highlights should be returned, anchored to the text they cover, with no
+    "may be incomplete" warning.
+    Spec: PDF 32000-1 §7.5.7 (Object Streams), §7.5.8 (Cross-Reference Streams)
+    Fixture: benchmarks/pdf/make_objstm_annotation_fixture.py
+    """
+    comments = _collect_comment_blocks(output)
+    found = 0
+    total = 3
+
+    if len(comments) == 2:
+        found += 1
+    if comments and all(c.get("anchored") for c in comments):
+        found += 1
+    if {c.get("author", "") for c in comments} == {"Laura", "Miguel"}:
+        found += 1
+
+    return {
+        "name": "PDF Annotations inside Object Streams",
+        "spec_ref": "§7.5.7",
+        "file": "challenge_pdf_highlights_in_objstm.pdf",
+        "score": found / total if total else 0,
+        "detected": found,
+        "total": total,
+        "detail": f"{found}/{total} checks on annotations packed in a compressed /ObjStm",
+    }
+
+
 def check_eml_pdf_attachments(output: dict) -> dict:
     """Are PDF attachments extracted, including scans that need OCR?
 
@@ -1161,6 +1195,7 @@ def run_gap_analysis(verbose: bool = False) -> list[dict]:
         "poi_comment.pptx": [check_pptx_comments],
         "challenge_pdf_highlights.pdf": [check_pdf_highlight_anchors],
         "challenge_pdf_highlights_objstm.pdf": [check_pdf_objstm_annotations],
+        "challenge_pdf_highlights_in_objstm.pdf": [check_pdf_annotations_in_objstm],
         "challenge_pdf_attachment.eml": [check_eml_pdf_attachments],
         "challenge_bookmarks.docx": [check_docx_bookmarks],
     }

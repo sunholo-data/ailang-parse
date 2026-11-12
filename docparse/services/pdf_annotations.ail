@@ -7,17 +7,21 @@ module docparse/services/pdf_annotations
 -- object layer — are invisible to it. This module recovers them by string-
 -- scanning the PDF object structure.
 --
--- Scope (v1): inline annotation objects only. PDFs that pack objects into
--- compressed /ObjStm streams need raw zlib inflate (ailang#223); for those we
--- bail out cleanly instead of returning partial data.
+-- Objects packed into compressed /ObjStm streams (any Word or LaTeX export,
+-- Acrobat's reduced-size save) are invisible to a scan of the raw bytes.
+-- pdf_pages reads them; they are appended to the scanned text as plain
+-- objects, so an annotation or a page's /Annots list inside one is found like
+-- any other. When pdf_pages cannot read the file (encrypted, or a structure it
+-- does not follow) the scan covers the plain objects only and says so.
 
 import std/string (length, substring, find, contains, startsWith, intToStr, charAt, charCode, trim, replace, split, stringToFloat)
 import std/list (map, filter, foldl, reverse, length as listLength, concat as listConcat)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/bytes (fromInts, toString as bytesToString)
-import std/fs (readFile)
+import std/fs (readFile, readFileBytes)
 import docparse/types/document (Block, TextBlock, SectionBlock, CommentBlock, mkSection)
+import docparse/services/pdf_pages (pdfPackedObjects)
 
 -- ============================================================
 -- Public API
@@ -46,8 +50,8 @@ export type PdfWord = {
 }
 
 -- Result of scanning a PDF for annotations.
--- `mayBeIncomplete` is true when the file also packs objects into compressed
--- /ObjStm streams, which this scanner cannot see inside.
+-- `mayBeIncomplete` is true when the file packs objects into compressed
+-- /ObjStm streams and they could not be read.
 export type AnnotationScan = {
   annotations: [Annotation],
   mayBeIncomplete: bool
@@ -65,11 +69,18 @@ export type AnnotationScan = {
 export func scanAnnotations(filepath: string) -> AnnotationScan ! {FS} {
   let content = readFile(filepath);
   if length(content) == 0 then {annotations: [], mayBeIncomplete: false}
-  else {
-    annotations: pdfannScanAndMap(content),
-    mayBeIncomplete: pdfannHasCompressedObjects(content)
+  else if not pdfannHasCompressedObjects(content) then {annotations: pdfannScanAndMap(content), mayBeIncomplete: false}
+  else match pdfannPacked(filepath) {
+    Ok(packed) => {annotations: pdfannScanAndMap("${content}\n${packed}"), mayBeIncomplete: false},
+    Err(_) => {annotations: pdfannScanAndMap(content), mayBeIncomplete: true}
   }
 }
+
+func pdfannPacked(filepath: string) -> Result[string, string] ! {FS} =
+  match readFileBytes(filepath) {
+    Err(e) => Err(e),
+    Ok(data) => pdfPackedObjects(data)
+  }
 
 -- Annotations only, for callers that don't surface the completeness warning.
 export func extractAnnotations(filepath: string) -> [Annotation] ! {FS} =

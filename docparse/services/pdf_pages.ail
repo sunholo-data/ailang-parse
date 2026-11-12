@@ -29,9 +29,9 @@ module docparse/services/pdf_pages
 
 import std/bytes (fromBase64, toBase64, toString as bstr, fromString as bfrom, slice, byteAt, length as blen, toInts, concatList)
 import std/deflate (inflateZlib)
-import std/string (length, substring, find, trim, split, stringToInt, intToStr, charAt, contains)
+import std/string (length, substring, find, trim, split, stringToInt, intToStr, charAt, contains, join)
 import std/list (map, filter, reverse, length as llen, concat, flatMap, nth_or, any)
-import std/map (fromList, lookup as mapLookup)
+import std/map (fromList, lookup as mapLookup, values as mapValues)
 import std/option (Option, Some, None, getOrElse)
 import std/result (Result, Ok, Err)
 
@@ -653,5 +653,30 @@ export func pdfPagesSplit(pdfBase64: string) -> Result[[string], string] =
     Some(data) => match pdfpgOpen(data) {
       Err(e) => Err(e),
       Ok(o) => pdfpgWriteAll(o.doc, o.pages, fromList(pdfpgSeenPairs(o.pages, [])), [])
+    }
+  }
+
+func pdfpgPackedText(doc: PdfpgDoc, entries: [PdfpgEntry], acc: [string]) -> [string] =
+  match entries {
+    [] => reverse(acc),
+    e :: rest =>
+      if e.kind != 2 then pdfpgPackedText(doc, rest, acc)
+      else {
+        let t = pdfpgObjText(doc, e.num);
+        pdfpgPackedText(doc, rest, if length(t) == 0 then acc else "${intToStr(e.num)} 0 obj\n${t}\nendobj\n" :: acc)
+      }
+  }
+
+-- Every object packed inside a compressed object stream, written out as a
+-- plain "N 0 obj ... endobj" each, in object-number order. A scan of the raw
+-- file cannot see these; appended to it, they are found like any other
+-- object. "" when the file packs nothing. Err when the file cannot be read
+-- (encrypted, or a structure this reader does not follow).
+export func pdfPackedObjects(pdfBase64: string) -> Result[string, string] =
+  match fromBase64(pdfBase64) {
+    None => Err("input is not base64"),
+    Some(data) => match pdfpgOpen(data) {
+      Err(e) => Err(e),
+      Ok(o) => Ok(join("", pdfpgPackedText(o.doc, mapValues(o.doc.x), [])))
     }
   }
