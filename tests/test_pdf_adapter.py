@@ -250,6 +250,23 @@ class Poppler(unittest.TestCase):
         blocks = self.blocks([page])[0]
         self.assertFalse(any(b["kind"] == "table" for b in blocks))
 
+    def test_control_characters_do_not_fail_the_parse(self):
+        # poppler copies control codes through from fonts that map glyphs to
+        # them (LaTeX math), raw and as numeric references. XML 1.0 forbids
+        # both, and one used to make the whole document unparseable.
+        bbox, html = poppler_xml([page_body(1), page_body(2)])
+        for bad in ("\x02", "\x0c", "&#1;", "&#x1F;", "&#031;", "\ufffe"):
+            dirty_bbox = bbox.replace("stops.", "stops." + bad)
+            dirty_html = html.replace("stops.", "stops." + bad)
+            self.assertNotEqual(dirty_bbox, bbox)
+            blocks, count = adapter._poppler_blocks(dirty_bbox, dirty_html)
+            self.assertEqual(count, 2)
+            self.assertEqual(blocks, adapter._poppler_blocks(bbox, html)[0])
+
+    def test_legal_references_are_kept(self):
+        self.assertEqual(adapter._pp_xml_clean("a&#9;b&#10;c&#13;d&#32;e&#x41;f&#100;g&amp;h\ti"),
+                         "a&#9;b&#10;c&#13;d&#32;e&#x41;f&#100;g&amp;h\ti")
+
     def test_geometry_only_without_pdftohtml(self):
         bbox, _ = poppler_xml([page_body(1), page_body(2)])
         blocks, _ = adapter._poppler_blocks(bbox, None)
