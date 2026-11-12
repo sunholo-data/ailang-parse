@@ -588,6 +588,7 @@ import xml.etree.ElementTree as _ET
 _PP_MARGIN = 0.09          # top/bottom share of the page where furniture sits
 _PP_HEADING_RATIO = 1.15   # size over body size that makes a heading
 _PP_BOLD_HEADING_RATIO = 1.05  # ... when the whole row is bold
+_PP_COLUMN_MIN_LINES = 8   # lines each side of a gutter before it is two columns
 _PP_IMAGE_MIN_PT = 24.0    # smaller images are rules, bullets and decorations
 _PP_IMAGE_BUDGET = 6_000_000  # raw image bytes per document: base64 inflates by 4/3
                               # and the hosted API caps adapter output at 10 MB
@@ -618,6 +619,26 @@ def _pp_key(text: str) -> str:
     return t
 
 
+def _pp_join_small_caps(words: list[dict]) -> list[dict]:
+    """Small caps reach us as two words, the full-height initial and the
+    shorter rest ("I" + "NTRODUCTION"), with no space between them. Join
+    them and mark the word, so the text reads right and the line can be
+    recognised as small caps."""
+    out: list[dict] = []
+    for w in words:
+        prev = out[-1] if out else None
+        if prev and w["x0"] - prev["x1"] <= 1.0 and w["x0"] >= prev["x1"] - 1.0 \
+                and prev["text"].isalpha() and prev["text"].isupper() and len(prev["text"]) <= 2 \
+                and not prev.get("small_caps") \
+                and w["text"][:1].isalpha() and w["text"].upper() == w["text"] \
+                and (w["y1"] - w["y0"]) < 0.93 * (prev["y1"] - prev["y0"]):
+            out[-1] = {"x0": prev["x0"], "y0": min(prev["y0"], w["y0"]), "x1": w["x1"],
+                       "y1": max(prev["y1"], w["y1"]), "text": prev["text"] + w["text"], "small_caps": True}
+        else:
+            out.append(w)
+    return out
+
+
 def _pp_parse_bbox(xml_text: str) -> list[dict]:
     """Pages from `pdftotext -bbox-layout`: [{w, h, lines: [line]}], each line
     {x0, y0, x1, y1, words: [{x0, y0, x1, y1, text}]} in points."""
@@ -632,12 +653,50 @@ def _pp_parse_bbox(xml_text: str) -> list[dict]:
             words = [{"x0": float(w.get("xMin")), "y0": float(w.get("yMin")),
                       "x1": float(w.get("xMax")), "y1": float(w.get("yMax")),
                       "text": w.text or ""} for w in line.iter("word") if (w.text or "").strip()]
+            words = _pp_join_small_caps(words)
             if words:
                 lines.append({"x0": min(w["x0"] for w in words), "y0": min(w["y0"] for w in words),
                               "x1": max(w["x1"] for w in words), "y1": max(w["y1"] for w in words),
                               "words": words})
         pages.append({"w": float(page.get("width")), "h": float(page.get("height")), "lines": lines})
     return pages
+
+
+# Font family names that mean bold. Besides the obvious ones: Computer Modern
+# bold extended (CMBX10, CMSSBX10), URW's "Medi" and "Demi" cuts (the Times
+# and Helvetica clones LaTeX embeds), and the "-Bd" suffix.
+_PP_BOLD_FAMILY = re.compile(r"bold|black|heavy|demi|cm(?:ss)?bx|-medi(?:ital)?$|[-_]bd(?:ital|it)?$")
+
+
+def _pp_outline(xml_text: str) -> dict[int, dict[str, int]]:
+    """The PDF's own outline (bookmarks) from `pdftohtml -xml`:
+    {page: {key: level}}, level 1 for top entries. The author's headings,
+    where the PDF carries them: no guessing from font size."""
+    if not xml_text or "<outline" not in xml_text:
+        return {}
+    root = _ET.fromstring(_pp_xml_clean(xml_text[xml_text.index("<pdf2xml"):]))
+    out: dict[int, dict[str, int]] = {}
+
+    def walk(node, level: int):
+        for child in node:
+            if child.tag == "item":
+                key = _pp_heading_key("".join(child.itertext()))
+                page = child.get("page") or ""
+                if len(key) >= 3 and page.isdigit():
+                    out.setdefault(int(page), {}).setdefault(key, min(level, 6))
+            elif child.tag == "outline":
+                walk(child, level + 1)
+
+    top = root.find("outline")
+    if top is not None:
+        walk(top, 1)
+    return out
+
+
+def _pp_heading_key(text: str) -> str:
+    """Heading text for matching a page line to an outline entry: letters and
+    digits only, without leading section numbering on either side."""
+    return re.sub(r"^\d+", "", re.sub(r"[^a-z0-9]", "", text.lower()))
 
 
 def _pp_parse_html(xml_text: str) -> list[dict]:
@@ -652,7 +711,7 @@ def _pp_parse_html(xml_text: str) -> list[dict]:
         for spec in page.iter("fontspec"):
             fam = (spec.get("family") or "").lower()
             fonts[spec.get("id")] = {"size": float(spec.get("size") or 0),
-                                     "bold": "bold" in fam or "black" in fam or "heavy" in fam,
+                                     "bold": bool(_PP_BOLD_FAMILY.search(fam)),
                                      "italic": "italic" in fam or "oblique" in fam}
         runs = []
         for t in page.iter("text"):
@@ -791,6 +850,90 @@ def _pp_rows(lines: list[dict]) -> list[list[dict]]:
     return [sorted(r, key=lambda l: l["x0"]) for r in rows]
 
 
+def _pp_segments(lines: list[dict], page_w: float) -> list[list[dict]]:
+    """A page's lines in reading-order groups. A one-column page is one
+    group. A two-column page becomes: what spans both columns above them,
+    the left column, the right column, and so on down the page, so a
+    heading in one column is not read as one row with the text beside it.
+
+    Two columns means a gutter near the middle that few lines cross, with
+    prose on both sides: enough lines, most of them filling their column. A
+    table has short cells and is left alone."""
+    if len(lines) < 2 * _PP_COLUMN_MIN_LINES:
+        return [lines]
+    best = None
+    x = 0.35 * page_w
+    while x <= 0.65 * page_w:
+        crossing = sum(1 for l in lines if l["x0"] < x - 1 and l["x1"] > x + 1)
+        score = (crossing, abs(x - page_w / 2))
+        if best is None or score < best[0]:
+            best = (score, x)
+        x += 2.0
+    gutter = best[1]
+    span = [l for l in lines if l["x0"] < gutter - 1 and l["x1"] > gutter + 1]
+    left = [l for l in lines if l not in span and (l["x0"] + l["x1"]) / 2 < gutter]
+    right = [l for l in lines if l not in span and (l["x0"] + l["x1"]) / 2 >= gutter]
+    if len(left) < _PP_COLUMN_MIN_LINES or len(right) < _PP_COLUMN_MIN_LINES or len(span) > 0.4 * len(lines):
+        return [lines]
+    for col in (left, right):
+        # Prose: enough lines that fill the column. Not the median line, since
+        # a column may also hold a table or a figure's labels.
+        col_w = max(l["x1"] for l in col) - min(l["x0"] for l in col)
+        full = sum(1 for l in col if l["x1"] - l["x0"] >= 0.8 * col_w)
+        if col_w < 0.25 * page_w or full < _PP_COLUMN_MIN_LINES:
+            return [lines]
+    span_ids = {id(l) for l in span}
+    left_ids = {id(l) for l in left}
+    groups: list[list[dict]] = []
+    run: list[dict] = []
+    cols: tuple[list[dict], list[dict]] = ([], [])
+    for l in sorted(lines, key=lambda l: (l["y0"], l["x0"])):
+        if id(l) in span_ids:
+            if cols[0] or cols[1]:
+                groups.extend(c for c in cols if c)
+                cols = ([], [])
+            run.append(l)
+        else:
+            if run:
+                groups.append(run)
+                run = []
+            cols[0 if id(l) in left_ids else 1].append(l)
+    if run:
+        groups.append(run)
+    groups.extend(c for c in cols if c)
+    return groups
+
+
+_PP_SECTION_NUMBER = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?$")
+
+
+def _pp_numbered_heading(row: list[dict], stands_apart: bool) -> int | None:
+    """Level of a section heading set at body size, recognised by its
+    number: "3.2 Method", "1 INTRODUCTION". The number alone is not enough
+    (list items and table rows start with numbers too), so the title must
+    also be bold or in capitals, or, for a multi-level number, stand apart
+    from the text above and stop short of the column's right edge (a numbered
+    paragraph runs on to it). Level is the number's depth plus one: the document
+    title is level 1."""
+    words = [w for l in row for w in l["words"]]
+    if len(row) > 2 or len(words) < 2:
+        return None
+    m = _PP_SECTION_NUMBER.match(words[0]["text"])
+    if not m or (len(row) == 2 and len(row[0]["words"]) != 1):
+        return None
+    title = " ".join(w["text"] for w in words[1:])
+    letters = sum(c.isalpha() for c in title)
+    if len(title) > 90 or letters < 3 or letters < 0.6 * len(title.replace(" ", "")) \
+            or not title[0].isupper() or title[-1] in ".,;:":
+        return None
+    depth = m.group(1).count(".") + 1
+    bold = all(w["bold"] for w in words[1:])
+    caps = title.upper() == title
+    if bold or caps or (depth >= 2 and stands_apart):
+        return min(depth + 1, 6)
+    return None
+
+
 def _pp_bullet(row: list[dict]) -> tuple[bool, bool, list[dict]] | None:
     """(is_item, ordered, content_lines) when the row is a list item: a lone
     bullet or number glyph left of the text, or text that starts with one."""
@@ -847,16 +990,21 @@ def _pp_line_gap(pages: list[dict]) -> float:
     9.6pt on multipage_spec), so a gap well above this starts a paragraph."""
     gaps = []
     for page in pages:
-        rows = _pp_rows(page["lines"])
-        for a, b in zip(rows, rows[1:]):
-            if len(a) == 1 and len(b) == 1 and abs(_pp_line_size(a[0]) - _pp_line_size(b[0])) <= 0.6:
-                gap = b[0]["y0"] - a[0]["y1"]
-                if -2 <= gap <= 1.5 * (a[0]["y1"] - a[0]["y0"]):
-                    gaps.append(gap)
+        for group in page.get("groups") or [page["lines"]]:
+            rows = _pp_rows(group)
+            for a, b in zip(rows, rows[1:]):
+                _pp_line_gap_pair(a, b, gaps)
     if not gaps:
         return 3.0
     gaps.sort()
     return gaps[len(gaps) // 5]
+
+
+def _pp_line_gap_pair(a: list[dict], b: list[dict], gaps: list[float]) -> None:
+    if len(a) == 1 and len(b) == 1 and abs(_pp_line_size(a[0]) - _pp_line_size(b[0])) <= 0.6:
+        gap = b[0]["y0"] - a[0]["y1"]
+        if -2 <= gap <= 1.5 * (a[0]["y1"] - a[0]["y0"]):
+            gaps.append(gap)
 
 
 def _pp_fold_into_cell(run: list[list[dict]], line: dict) -> bool:
@@ -1075,6 +1223,7 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
     -> bytes | None`, a PNG of that band of the page."""
     pages = _pp_parse_bbox(bbox_xml)
     html_pages = _pp_parse_html(html_xml or "")
+    outline = _pp_outline(html_xml or "")
     budget = [_PP_IMAGE_BUDGET]
     for i, page in enumerate(pages):
         _pp_style_words(page, html_pages[i] if i < len(html_pages) else None)
@@ -1094,6 +1243,12 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
         text = " ".join(_pp_line_text(l) for l in row)
         if len(text) > 150 or not any(c.isalpha() for c in text):
             return None
+        # A large integral sign or "x 1 x 2" from a formula is not a heading,
+        # nor is an author's e-mail line, nor text set sideways in the margin
+        # (arXiv's stamp), whose line box is taller than it is wide.
+        if not re.search(r"[^\W\d_]{3}", text) or "@" in text \
+                or any(l["y1"] - l["y0"] > 2 * (l["x1"] - l["x0"]) for l in row if len(_pp_line_text(l)) > 3):
+            return None
         smallest = min(_pp_line_size(l) for l in row)
         if smallest >= body * _PP_HEADING_RATIO:
             return max(_pp_line_size(l) for l in row)
@@ -1103,9 +1258,12 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
             return max(_pp_line_size(l) for l in row)
         return None
 
+    # Decks keep whole-page rows; documents are read column by column.
+    for page in pages:
+        page["groups"] = [page["lines"]] if slides else _pp_segments(page["lines"], page["w"])
     line_gap = _pp_line_gap(pages)
 
-    head_sizes = [heading_size(r) for p in pages for r in _pp_rows(p["lines"])]
+    head_sizes = [heading_size(r) for p in pages for g in p["groups"] for r in _pp_rows(g)]
     ranks = _rank_levels([s for s in head_sizes if s])
 
     blocks: list[dict] = []
@@ -1156,13 +1314,6 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
             flush_items()
             flush_table()
 
-        # Right edge of the page's text column: a paragraph line that stops
-        # well short of it ended its paragraph, however close the next line.
-        single = [r[0] for r in rows if len(r) == 1]
-        col_left = min((l["x0"] for l in single), default=0.0)
-        col_right = max((l["x1"] for l in single), default=page["w"])
-        short_line = 0.15 * max(col_right - col_left, 1.0)
-
         pending_images = _pp_body_images(page, html_pages[pi] if pi < len(html_pages) else None) \
             if load_image else []
 
@@ -1180,12 +1331,32 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
                 blocks.extend(diagram)
                 continue
 
+        segments = page["groups"]
+        page_outline = outline.get(pno, {})
+        seg_rows = [(si, r) for si, seg in enumerate(segments) for r in _pp_rows(seg)]
         prev_bottom = None
-        for row in rows:
-            emit_images_above(min(l["y0"] for l in row))
+        prev_seg = -1
+        taken: set[int] = set()      # rows already used as a heading's second line
+        last_head = None             # (row index, size, bottom) of the last size-based heading
+        for ri, (si, row) in enumerate(seg_rows):
+            if ri in taken:
+                prev_bottom = max(l["y1"] for l in row)
+                continue
+            if si != prev_seg:
+                flush_all()
+                prev_seg, prev_bottom = si, None
+                # Right edge of the text column: a paragraph line that stops
+                # well short of it ended its paragraph, however close the next line.
+                single = [r[0] for s, r in seg_rows if s == si and len(r) == 1]
+                col_left = min((l["x0"] for l in single), default=0.0)
+                col_right = max((l["x1"] for l in single), default=page["w"])
+                short_line = 0.15 * max(col_right - col_left, 1.0)
+            if len(segments) == 1:
+                emit_images_above(min(l["y0"] for l in row))
             text = " ".join(_pp_line_text(l) for l in row)
             top, bottom = min(l["y0"] for l in row), max(l["y1"] for l in row)
             height = bottom - top
+            first_in_group = prev_bottom is None
             gap = (top - prev_bottom) if prev_bottom is not None else 0.0
             prev_bottom = bottom
             key = _pp_key(text)
@@ -1214,10 +1385,38 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
                 # Wrapped continuation of the last list item, at any size.
                 items[-1] = (f"{items[-1][0]} {text}", 0)
                 continue
+            # The PDF's own outline names this row a heading, at its level.
+            row_key = _pp_heading_key(text)
+            if row_key in page_outline and len(text) <= 200:
+                flush_all()
+                blocks.append(_placed(_heading(text, page_outline[row_key]), pno))
+                continue
+            if len(row_key) >= 3 and ri + 1 < len(seg_rows) and seg_rows[ri + 1][0] == si:
+                # An outline entry that wraps onto a second line.
+                nxt = " ".join(_pp_line_text(l) for l in seg_rows[ri + 1][1])
+                joined = _pp_heading_key(f"{text} {nxt}")
+                if joined in page_outline and len(text) + len(nxt) <= 200:
+                    flush_all()
+                    blocks.append(_placed(_heading(f"{text} {nxt}", page_outline[joined]), pno))
+                    taken.add(ri + 1)
+                    continue
             size = heading_size(row)
             if size and not (bullet and not bullet[1]):
                 flush_all()
-                blocks.append(_placed(_heading(text, ranks.get(size, 3)), pno))
+                if last_head and last_head[0] == ri - 1 and last_head[1] == size and blocks \
+                        and blocks[-1].get("kind") == "heading" and top - last_head[2] < 0.6 * height \
+                        and not _PP_SECTION_NUMBER.match(row[0]["words"][0]["text"]):
+                    # The same heading, wrapped onto another line.
+                    blocks[-1]["text"] = f"{blocks[-1]['text']} {text}"
+                else:
+                    blocks.append(_placed(_heading(text, ranks.get(size, 3)), pno))
+                last_head = (ri, size, bottom)
+                continue
+            numbered = _pp_numbered_heading(row, (first_in_group or gap > line_gap + 0.5 * height)
+                                            and row[-1]["x1"] < col_right - short_line)
+            if numbered:
+                flush_all()
+                blocks.append(_placed(_heading(text, numbered), pno))
                 continue
 
             if bullet:
@@ -1251,7 +1450,9 @@ def _poppler_blocks(bbox_xml: str, html_xml: str | None, load_image=None,
             if para:
                 last = para[-1]
                 same_size = abs(_pp_line_size(last) - _pp_line_size(line)) <= 0.6
-                aligned = abs(line["x0"] - para[0]["x0"]) <= 4 or abs(line["x0"] - last["x0"]) <= 4
+                aligned = abs(line["x0"] - para[0]["x0"]) <= 4 or abs(line["x0"] - last["x0"]) <= 4 \
+                    or (len(para) == 1 and abs(line["x0"] - col_left) <= 4 and 4 < last["x0"] - col_left <= 40)
+                # ^ a first-line indent: the second line returns to the column's left edge.
                 indented = line["x0"] > last["x0"] + 4
                 close = gap <= line_gap + 0.25 * (last["y1"] - last["y0"])
                 ended = last["x1"] < col_right - short_line

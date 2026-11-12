@@ -267,6 +267,137 @@ class Poppler(unittest.TestCase):
         self.assertEqual(adapter._pp_xml_clean("a&#9;b&#10;c&#13;d&#32;e&#x41;f&#100;g&amp;h\ti"),
                          "a&#9;b&#10;c&#13;d&#32;e&#x41;f&#100;g&amp;h\ti")
 
+    # --- papers: two columns, numbered and small-caps headings, outlines ---
+
+    BODY_L = "left column prose that fills the whole width of its column"
+    BODY_R = "right column prose that fills the whole width of its column"
+
+    def two_columns(self, left_extra=(), right_extra=()):
+        """A two-column page: ten lines of prose a side from y=200, with
+        `left_extra` / `right_extra` lines placed above them in a column."""
+        page = [(50, 200 + i * 14, 290, 210 + i * 14, self.BODY_L, 10, False) for i in range(10)] + \
+               [(310, 200 + i * 14, 550, 210 + i * 14, self.BODY_R, 10, False) for i in range(10)]
+        return list(left_extra) + list(right_extra) + page
+
+    def test_heading_in_one_column_of_two(self):
+        # Level with the right column's text: read by whole-page rows it was
+        # one row with that text, and not a heading.
+        page = self.two_columns(left_extra=[(50, 172, 150, 186, "Method", 14, True)],
+                                right_extra=[(310, 172, 550, 182, self.BODY_R, 10, False)])
+        blocks = self.blocks([page])[0]
+        self.assertEqual([b["text"] for b in blocks if b["kind"] == "heading"], ["Method"])
+        self.assertFalse(any(b["kind"] == "table" for b in blocks))
+
+    def test_columns_are_read_left_then_right(self):
+        blocks = self.blocks([self.two_columns()])[0]
+        texts = [b["text"] for b in blocks if b["kind"] == "text"]
+        self.assertEqual(len(texts), 2)
+        self.assertTrue(texts[0].startswith("left column") and "right" not in texts[0])
+        self.assertTrue(texts[1].startswith("right column") and "left" not in texts[1])
+
+    def test_line_across_both_columns_comes_first(self):
+        page = self.two_columns(left_extra=[(50, 60, 550, 84, "A title across the whole page", 20, True)])
+        blocks = self.blocks([page])[0]
+        self.assertEqual((blocks[0]["kind"], blocks[0]["text"]), ("heading", "A title across the whole page"))
+
+    def test_table_is_not_split_into_columns(self):
+        rows = [(60, 100 + i * 14, f"Region {i}", f"{i}0") for i in range(12)]
+        page = [(x, y, x + 60, y + 10, a, 10, False) for (x, y, a, _) in rows] + \
+               [(400, y, 430, y + 10, b, 10, False) for (_, y, _, b) in rows]
+        blocks = self.blocks([page])[0]
+        self.assertEqual([b["kind"] for b in blocks], ["table"])
+
+    def numbered(self, number, title, bold, gap=30):
+        body = "Body text at the body size, long enough to fill the line fully."
+        return [(50, 100, 550, 110, body, 10, False), (50, 112, 550, 122, body, 10, False),
+                (50, 122 + gap, 50 + 8 * len(number), 132 + gap, number, 10, bold),
+                (50 + 8 * len(number) + 6, 122 + gap, 300, 132 + gap, title, 10, bold),
+                (50, 140 + gap, 550, 150 + gap, body, 10, False), (50, 152 + gap, 550, 162 + gap, body, 10, False)]
+
+    def headings(self, page):
+        return [(b["text"], b["level"]) for b in self.blocks([page])[0] if b["kind"] == "heading"]
+
+    def test_numbered_heading_at_body_size(self):
+        self.assertEqual(self.headings(self.numbered("3.2", "Causal Convolutions", True)),
+                         [("3.2 Causal Convolutions", 3)])
+        self.assertEqual(self.headings(self.numbered("1", "INTRODUCTION", False)), [("1 INTRODUCTION", 2)])
+        # Not bold, not capitals: a multi-level number standing apart is enough.
+        self.assertEqual(self.headings(self.numbered("3.2", "Causal Convolutions", False)),
+                         [("3.2 Causal Convolutions", 3)])
+
+    def test_numbered_text_that_is_not_a_heading(self):
+        self.assertEqual(self.headings(self.numbered("1", "Introduction", False)), [])       # a list item
+        self.assertEqual(self.headings(self.numbered("3.2", "Causal Convolutions", False, gap=2)), [])
+        self.assertEqual(self.headings(self.numbered("3.2", "we then define the loss", True)), [])
+        self.assertEqual(self.headings(self.numbered("2", "0.75 0.81 0.90", True)), [])       # a table row
+
+    def test_small_caps_are_rejoined(self):
+        words = [{"x0": 10.0, "y0": 0.0, "x1": 14.0, "y1": 10.0, "text": "I"},
+                 {"x0": 14.5, "y0": 2.0, "x1": 80.0, "y1": 10.0, "text": "NTRODUCTION"},
+                 {"x0": 84.0, "y0": 0.0, "x1": 88.0, "y1": 10.0, "text": "A"},
+                 {"x0": 92.0, "y0": 0.0, "x1": 120.0, "y1": 10.0, "text": "WORD"}]
+        self.assertEqual([w["text"] for w in adapter._pp_join_small_caps(words)], ["INTRODUCTION", "A", "WORD"])
+
+    def test_tex_bold_fonts(self):
+        for family in ("WMCLTX+CMBX10", "MBSETQ+NimbusRomNo9L-Medi", "Arial-BoldMT", "Helvetica-Bd"):
+            self.assertTrue(adapter._PP_BOLD_FAMILY.search(family.lower()), family)
+        for family in ("DGPCYE+CMR10", "ULKTDC+NimbusRomNo9L-Regu", "Roboto-Medium", "CMMI9"):
+            self.assertFalse(adapter._PP_BOLD_FAMILY.search(family.lower()), family)
+
+    def with_outline(self, pages, outline):
+        bbox, html = poppler_xml(pages)
+        return adapter._poppler_blocks(bbox, html.replace("</pdf2xml>", outline + "</pdf2xml>"))[0]
+
+    def test_outline_names_headings_and_levels(self):
+        # Body-size, not bold: only the PDF's outline says these are headings.
+        body = "Body text at the body size, long enough to fill the line fully."
+        page = [(50, 100, 200, 110, "1 Overview", 10, False), (50, 114, 550, 124, body, 10, False),
+                (50, 128, 550, 138, body, 10, False), (50, 150, 200, 160, "2 Scope", 10, False),
+                (50, 164, 550, 174, body, 10, False), (50, 178, 550, 188, body, 10, False)]
+        outline = '<outline><item page="1">1 Overview</item><outline><item page="1">Scope</item></outline></outline>'
+        blocks = self.with_outline([page], outline)
+        self.assertEqual([(b["text"], b["level"]) for b in blocks if b["kind"] == "heading"],
+                         [("1 Overview", 1), ("2 Scope", 2)])
+        # The same lines on another page are not headings.
+        blocks = self.with_outline([page], outline.replace('page="1"', 'page="2"'))
+        self.assertFalse(any(b["kind"] == "heading" for b in blocks))
+
+    def test_outline_entry_wrapped_over_two_lines(self):
+        body = "Body text at the body size, long enough to fill the line fully."
+        page = [(50, 100, 300, 110, "2 Towards Reducing Internal", 10, False),
+                (50, 112, 200, 122, "Covariate Shift", 10, False),
+                (50, 140, 550, 150, body, 10, False), (50, 154, 550, 164, body, 10, False)]
+        outline = '<outline><item page="1">2 Towards Reducing Internal Covariate Shift</item></outline>'
+        blocks = self.with_outline([page], outline)
+        self.assertEqual([b["text"] for b in blocks if b["kind"] == "heading"],
+                         ["2 Towards Reducing Internal Covariate Shift"])
+        self.assertFalse(any("Covariate Shift" == b.get("text") for b in blocks))
+
+    def test_wrapped_heading_is_one_heading(self):
+        body = "Body text at the body size, long enough to fill the line fully."
+        page = [(50, 60, 400, 80, "A long heading that wraps", 18, True), (50, 82, 250, 102, "onto a second line", 18, True),
+                (50, 130, 550, 140, body, 10, False), (50, 144, 550, 154, body, 10, False)]
+        self.assertEqual([h for h, _ in self.headings(page)], ["A long heading that wraps onto a second line"])
+
+    def test_formula_and_email_are_not_headings(self):
+        body = "Body text at the body size, long enough to fill the line fully."
+        page = [(50, 60, 70, 90, "Z", 24, False), (50, 100, 300, 116, "ann@example.test", 14, False),
+                (50, 130, 550, 140, body, 10, False), (50, 144, 550, 154, body, 10, False)]
+        self.assertEqual(self.headings(page), [])
+
+    def test_sideways_margin_text_is_not_a_heading(self):
+        body = "Body text at the body size, long enough to fill the line fully."
+        page = [(10, 200, 30, 560, "arXiv:0000.00000v1 [cs.XX] 1 Jan 2000", 20, False),
+                (50, 130, 550, 140, body, 10, False), (50, 144, 550, 154, body, 10, False)]
+        self.assertEqual(self.headings(page), [])
+
+    def test_first_line_indent_stays_in_its_paragraph(self):
+        page = [(64, 100, 550, 110, "An indented first line that runs to the right edge of", 10, False),
+                (50, 112, 550, 122, "the column and continues on the second line all the way", 10, False),
+                (50, 124, 300, 134, "and then stops.", 10, False)]
+        texts = [b["text"] for b in self.blocks([page])[0] if b["kind"] == "text"]
+        self.assertEqual(len(texts), 1)
+
     def test_geometry_only_without_pdftohtml(self):
         bbox, _ = poppler_xml([page_body(1), page_body(2)])
         blocks, _ = adapter._poppler_blocks(bbox, None)

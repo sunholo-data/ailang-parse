@@ -59,8 +59,9 @@ USER_AGENT = "ailang-parse-benchmarks/0.1 (https://github.com/sunholo-data/ailan
 MIN_TRUTH = 3  # a paper with fewer source headings says nothing about recall
 
 # Section numbering as it appears in a PDF, after sr.norm folded digits to '#':
-# "#.#. ", "a.# ", "b. ", "appendix a: ".
-_NUMBERING = re.compile(r"^(?:#(?:\.#)*\.?\s+|[a-z](?:\.#)+\.?\s+|[a-z]\.\s+|appendix\s+[a-z#]\.?:?\s*)")
+# "#.#. ", "a.# ", "b. ", "a " (an appendix letter), "appendix a: ". A leading
+# article "A" goes too, on both sides, so it costs nothing.
+_NUMBERING = re.compile(r"^(?:#(?:\.#)*\.?\s+|[a-z](?:\.#)+\.?\s+|[a-z]\.?\s+|appendix\s+[a-z#]\.?:?\s*)")
 
 
 def key(text: str) -> str:
