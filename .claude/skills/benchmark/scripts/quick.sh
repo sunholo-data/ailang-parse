@@ -23,4 +23,7 @@ uv run benchmarks/officedocbench/eval_officedocbench.py --adapter docparse
 # in sync.
 "$(dirname "${BASH_SOURCE[0]}")/refresh-summary.sh" --skip-postcheck
 
+# Rewrite the figures, meta descriptions and FAQ data in the pages.
+python3 docs/scripts/sync-bench-fallbacks.py
+
 "$(dirname "${BASH_SOURCE[0]}")/_postcheck.sh"

@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Connect from Claude, ChatGPT or Codex — AILANG Parse</title>
+<title>Use AILANG Parse in Claude, ChatGPT or Codex: Connector Setup</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
 <link rel="alternate" type="text/markdown" title="LLM-friendly docs (llms.txt)" href="llms.txt">
-<meta name="description" content="Add the AILANG Parse connector to Claude, Claude Code, ChatGPT or Codex: setup, sign-in, the tools it provides, revoking access and troubleshooting.">
-<meta property="og:title" content="Connect from Claude, ChatGPT or Codex — AILANG Parse">
-<meta property="og:description" content="Add the AILANG Parse connector to Claude, Claude Code, ChatGPT or Codex: setup, sign-in, the tools it provides, revoking access and troubleshooting.">
+<meta name="description" content="Use AILANG Parse inside Claude, ChatGPT or Codex: add one URL, sign in, and your assistant can read, convert and edit Word, Excel, PowerPoint and PDF files. Setup steps, sign-in, tools, revoking access and troubleshooting.">
+<meta property="og:title" content="Use AILANG Parse in Claude, ChatGPT or Codex: Connector Setup">
+<meta property="og:description" content="Use AILANG Parse inside Claude, ChatGPT or Codex: add one URL, sign in, and your assistant can read, convert and edit Word, Excel, PowerPoint and PDF files. Setup steps, sign-in, tools, revoking access and troubleshooting.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,6 +18,46 @@
 <link rel="stylesheet" href="css/prism.css">
 <link rel="stylesheet" href="css/docs-layout.css">
 <link rel="stylesheet" href="css/components.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "How do I use AILANG Parse in ChatGPT?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Turn on Developer mode in ChatGPT’s settings, open Plugins, choose Add custom MCP server, paste https://docparse.ailang.sunholo.com/mcp/connect/ and choose OAuth. Sign in when ChatGPT opens the sign-in page, then type @ in a conversation and select the plugin. Developer mode is available on some ChatGPT plans only."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I add AILANG Parse to Claude?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "In claude.ai or Claude Desktop, open Customize → Connectors, click Add custom connector, paste https://docparse.ailang.sunholo.com/mcp/connect/, leave the OAuth client ID and secret empty, then click Connect and sign in. In Claude Code, run claude mcp add --transport http docparse https://docparse.ailang.sunholo.com/mcp/connect/."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need an API key?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. You sign in with Google or GitHub in your browser and approve the connection. Usage through the connector counts against your AILANG Parse plan."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What can the assistant do once it is connected?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It can read a document (Office, PDF, HTML, Markdown, email or an image) with its tables, headings, comments and tracked changes; convert it to Word, PowerPoint, Excel, OpenDocument, HTML, Markdown or Quarto; and apply edits. Editing returns a copy, so your original file is never changed."
+      }
+    }
+  ]
+}
+</script>
 </head>
 <body>
 
@@ -49,6 +89,7 @@
         <a href="#revoke">Revoking access</a>
         <a href="#troubleshooting">Troubleshooting</a>
         <a href="#agents">Agents without a browser</a>
+        <a href="#faq">Common questions</a>
         <a href="#privacy">Privacy &amp; support</a>
       </nav>
     </aside>
@@ -57,9 +98,11 @@
     <main class="dp-docs-content">
 
       <h2 id="overview">Overview</h2>
-      <p>The AILANG Parse connector is a remote <a href="mcp.html">MCP server</a> that lets an AI assistant parse, convert and edit documents with your AILANG Parse account. You add one URL to the assistant and sign in once in your browser. You never copy an API key.</p>
+      <p class="dp-lede">The AILANG Parse connector lets the AI assistant you already use read, convert and edit your documents: Word, Excel, PowerPoint, PDF and more, with tables, comments and tracked changes kept. You add one URL to the assistant and sign in once in your browser. You never copy an API key.</p>
       <pre><code>https://docparse.ailang.sunholo.com/mcp/connect/</code></pre>
+      <p>The technical details, if your assistant asks for them:</p>
       <ul>
+        <li><strong>Type:</strong> a remote <a href="mcp.html">MCP server</a>.</li>
         <li><strong>Transport:</strong> Streamable HTTP.</li>
         <li><strong>Sign-in:</strong> OAuth 2.1 with PKCE. The assistant registers itself automatically (client ID metadata documents), so there is no client ID or secret to enter: leave any OAuth client fields empty.</li>
         <li><strong>Account:</strong> you sign in with Google or GitHub. Usage through the connector counts against your plan, like any other request.</li>
@@ -79,7 +122,7 @@
         <li>Click <em>Add</em>, then <em>Connect</em> to sign in.</li>
         <li>In a conversation, use the <em>+</em> button &rarr; <em>Connectors</em> to switch it on.</li>
       </ol>
-      <p>On Team and Enterprise plans an organisation Owner first adds the connector under <em>Organization settings &rarr; Connectors</em>; members then click <em>Connect</em>. Free plans are limited to one custom connector. See Anthropic&rsquo;s guide: <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Get started with custom connectors using remote MCP</a>. A listing in Claude&rsquo;s connector directory is coming; once it is live you will be able to add AILANG Parse from there without pasting the URL.</p>
+      <p>On Team and Enterprise plans an organisation Owner first adds the connector under <em>Organization settings &rarr; Connectors</em>; members then click <em>Connect</em>. Free plans are limited to one custom connector. See Anthropic&rsquo;s guide: <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Get started with custom connectors using remote MCP</a>.</p>
 
       <h3 id="codex">Codex</h3>
       <pre><code>codex mcp add docparse --url https://docparse.ailang.sunholo.com/mcp/connect/
@@ -111,7 +154,7 @@ codex mcp login docparse</code></pre>
       <p><strong>What a connection is.</strong> The app receives an access key for your account, labelled <code>oauth: &lt;app host&gt;</code> (for example <code>oauth: claude.ai</code>). The key lasts 24 hours. The app renews it automatically with a refresh token valid for 30 days; each renewal replaces the old key. If the app is not used for 30 days, you sign in again.</p>
 
       <h2 id="tools">Tools</h2>
-      <p>The connector provides these tools (checked against the live server on 5 November 2026). None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
+      <p>The connector provides these tools. None of them delete or overwrite anything you own: editing returns a modified copy, and your original document is never changed.</p>
       <table class="dp-config-table">
         <thead>
           <tr><th>Tool</th><th>What it does</th><th>Sign-in</th><th>Hints</th></tr>
@@ -265,6 +308,26 @@ codex mcp login docparse</code></pre>
         <li><strong>An API key</strong> created on the <a href="https://www.sunholo.com/docparse/dashboard.html">dashboard</a>.</li>
       </ul>
       <p>Details are on the <a href="mcp.html">MCP server page</a>.</p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Common questions</h2>
+        <details>
+          <summary>How do I use AILANG Parse in ChatGPT?</summary>
+          <div class="dp-faq-answer"><p>Turn on Developer mode in ChatGPT&rsquo;s settings, open Plugins, choose <strong>Add custom MCP server</strong>, paste <code>https://docparse.ailang.sunholo.com/mcp/connect/</code> and choose OAuth. Sign in when ChatGPT opens the sign-in page, then type @ in a conversation and select the plugin. Developer mode is available on some ChatGPT plans only.</p></div>
+        </details>
+        <details>
+          <summary>How do I add AILANG Parse to Claude?</summary>
+          <div class="dp-faq-answer"><p>In claude.ai or Claude Desktop, open Customize &rarr; Connectors, click <strong>Add custom connector</strong>, paste <code>https://docparse.ailang.sunholo.com/mcp/connect/</code>, leave the OAuth client ID and secret empty, then click Connect and sign in. In Claude Code, run <code>claude mcp add --transport http docparse https://docparse.ailang.sunholo.com/mcp/connect/</code>.</p></div>
+        </details>
+        <details>
+          <summary>Do I need an API key?</summary>
+          <div class="dp-faq-answer"><p>No. You sign in with Google or GitHub in your browser and approve the connection. Usage through the connector counts against your AILANG Parse plan.</p></div>
+        </details>
+        <details>
+          <summary>What can the assistant do once it is connected?</summary>
+          <div class="dp-faq-answer"><p>It can read a document (Office, PDF, HTML, Markdown, email or an image) with its tables, headings, comments and tracked changes; convert it to Word, PowerPoint, Excel, OpenDocument, HTML, Markdown or Quarto; and apply edits. Editing returns a copy, so your original file is never changed.</p></div>
+        </details>
+      </div>
 
       <h2 id="privacy">Privacy &amp; support</h2>
       <p>The assistant sends AILANG Parse only the tool call: the document and options you ask it to work on, never your conversation. AILANG Parse acts only on files that are explicitly passed to its tools. How connections, keys and created files are stored is described in our <a href="privacy.html#ai-assistants">privacy policy</a>; see also the <a href="terms.html">terms</a>.</p>

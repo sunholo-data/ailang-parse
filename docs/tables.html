@@ -51,7 +51,7 @@
     {"@type": "Question", "name": "How do I parse DOCX tables and preserve merged cells?", "acceptedAnswer": {"@type": "Answer", "text": "AILANG Parse reads the w:gridSpan (horizontal merge) and w:vMerge (vertical merge) attributes directly from DOCX XML. The output uses standard colspan and rowspan semantics, so the table structure is structurally correct — not guessed from visual layout like PDF-first parsers."}},
     {"@type": "Question", "name": "Why do most document parsers break table structures from DOCX files?", "acceptedAnswer": {"@type": "Answer", "text": "Most parsers convert DOCX to PDF first, which renders tables as positioned text blocks. ML models then try to reconstruct the table grid from visual coordinates, but merged cells, nested tables, and cells with multiple paragraphs create ambiguity that heuristics cannot resolve. AILANG Parse bypasses this entirely by reading the table XML directly."}},
     {"@type": "Question", "name": "How does AILANG Parse handle complex tables with nested content?", "acceptedAnswer": {"@type": "Answer", "text": "Each table cell in AILANG Parse's Block ADT can contain any block type — paragraphs, lists, nested tables, or even images. The parser reads the cell's XML subtree recursively, preserving the full content hierarchy. No flattening, no one-paragraph-per-cell limitation."}},
-    {"@type": "Question", "name": "How does AILANG Parse compare to other parsers for DOCX table extraction?", "acceptedAnswer": {"@type": "Answer", "text": "On OfficeDocBench, AILANG Parse scores 98.1% with 100% format coverage versus 36-71% composite (29-65% coverage-adjusted) for the other nine parsers. The gap is largest on merged cells: PDF conversion destroys merge attributes that AILANG Parse reads directly from the XML."}}
+    {"@type": "Question", "name": "How does AILANG Parse compare to other parsers for DOCX table extraction?", "acceptedAnswer": {"@type": "Answer", "text": "On OfficeDocBench, AILANG Parse scores 98.1% and reads every file. The scores for the other parsers are on the benchmarks page. The gap is largest on merged cells: converting to PDF discards the merge information that AILANG Parse reads directly from the XML."}}
   ]
 }
 </script>
@@ -85,6 +85,8 @@
 
     <!-- Content -->
     <main class="dp-docs-content">
+
+      <p class="dp-lede"><strong>Tables with merged cells, read correctly.</strong> When a merged cell is misread, values shift into the wrong column and a figure lands under the wrong quarter. Parsers that work from a PDF have to guess merges from the rendered page. AILANG Parse reads the merge information stored in the Word, Excel or PowerPoint file, so every value stays in its own row and column.</p>
 
       <h2 id="problem">The Problem</h2>
       <p>Tables are the hardest part of document parsing. Cells contain nested content, columns vary in width, and headers span multiple rows. But the real challenge is <strong>merged cells</strong> &mdash; a single cell that spans two columns, three rows, or both. Get the merge wrong and the data shifts: a revenue figure lands under the wrong quarter, a compliance field maps to the wrong entity.</p>
@@ -292,7 +294,7 @@
         </details>
         <details>
           <summary>How does AILANG Parse compare to other parsers for DOCX table extraction?</summary>
-          <div class="dp-faq-answer"><p>On <a href="benchmarks.html">OfficeDocBench</a>, AILANG Parse scores 98.1% with 100% format coverage versus 36-71% composite (29-65% coverage-adjusted) for the other nine parsers. The gap is largest on merged cells: PDF conversion destroys merge attributes that AILANG Parse reads directly from the XML.</p></div>
+          <div class="dp-faq-answer"><p>On <a href="benchmarks.html">OfficeDocBench</a>, AILANG Parse scores <span data-bench="ailang_parse.composite">98.1%</span> and reads every file. The scores for the other parsers are on the benchmarks page. The gap is largest on merged cells: converting to PDF discards the merge information that AILANG Parse reads directly from the XML.</p></div>
         </details>
       </div>
 

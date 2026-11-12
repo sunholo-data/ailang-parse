@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Word to Markdown, Nothing Dropped — AILANG Parse</title>
+<title>Word (DOCX) to Markdown: AILANG Parse vs MarkItDown</title>
 <link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
-<meta name="description" content="Convert DOCX to clean Markdown or text for LLMs, RAG and search. Comments, tracked changes, nested lists, merged cells, headers and footers come through. Local, deterministic, no GPU and no AI model.">
-<meta property="og:title" content="Word to Markdown, Nothing Dropped — AILANG Parse">
-<meta property="og:description" content="DOCX to clean Markdown with comments, tracked changes and list structure kept. Side-by-side output against MarkItDown on the same files.">
+<meta name="description" content="Microsoft MarkItDown and AILANG Parse both convert Word (DOCX) files to Markdown for RAG and LLMs. AILANG Parse also keeps comments, tracked changes, nested lists and merged cells. On 33 open test files it scores 97.1%; MarkItDown scores 42.8%. Local, no GPU, no AI model.">
+<meta property="og:title" content="Word (DOCX) to Markdown: AILANG Parse vs MarkItDown">
+<meta property="og:description" content="Microsoft MarkItDown and AILANG Parse both convert Word (DOCX) files to Markdown for RAG and LLMs. AILANG Parse also keeps comments, tracked changes, nested lists and merged cells. On 33 open test files it scores 97.1%; MarkItDown scores 42.8%. Local, no GPU, no AI model.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.sunholo.com/ailang-parse/docx-to-markdown.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -191,7 +191,7 @@
     {"@type": "Question", "name": "How do I convert a DOCX file to Markdown?", "acceptedAnswer": {"@type": "Answer", "text": "Run docparse contract.docx --convert contract.md. For a whole folder, run docparse ~/contracts/ --output-dir out/, which writes one .md (and one structured .json) per file. Over the hosted API, POST the file to /api/v1/convert with target=md."}},
     {"@type": "Question", "name": "Does DOCX to Markdown keep comments and tracked changes?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each comment is kept next to the text it is anchored to, with its author and date. Tracked insertions, deletions and moves are kept as marked revisions, so the Markdown shows the current text and what was changed. Many converters accept every change silently or drop comments."}},
     {"@type": "Question", "name": "Do I need a GPU or an AI model to convert Word to Markdown?", "acceptedAnswer": {"@type": "Answer", "text": "No. AILANG Parse reads the Office XML inside the .docx directly. It is deterministic: the same file always gives the same Markdown, it runs offline, and nothing is sent anywhere."}},
-    {"@type": "Question", "name": "How does it compare with MarkItDown, Docling or Pandoc on Word files?", "acceptedAnswer": {"@type": "Answer", "text": "On the DOCX files in the open OfficeDocBench v2 corpus, AILANG Parse scores 97.1% composite, against 56.7% for Kreuzberg, 53.5% for Pandoc, 49.1% for Docling and 42.8% for MarkItDown. The corpus, scorer and per-file results are public."}},
+    {"@type": "Question", "name": "How does it compare with MarkItDown, Docling or Pandoc on Word files?", "acceptedAnswer": {"@type": "Answer", "text": "On the 33 Word files in the open OfficeDocBench v2, AILANG Parse scores 97.1%, against 56.7% for Kreuzberg, 53.5% for Pandoc, 49.1% for Docling and 42.8% for MarkItDown. The test files, scoring code and per-file results are public on the benchmarks page."}},
     {"@type": "Question", "name": "What about PDFs and scanned documents?", "acceptedAnswer": {"@type": "Answer", "text": "The same command converts PDFs to Markdown, reading them with a local backend: pdftotext or poppler for born-digital PDFs, docling for scans. When the original Word file exists, convert that instead: reading a PDF is where structure is lost."}}
   ]
 }
@@ -253,10 +253,10 @@
 
     <main class="dp-docs-content">
 
-      <p>A Word file already knows which line is a heading, which paragraphs are a list and how deep, who commented on which sentence, and what was changed in review. Converting it to Markdown should keep all of that. Lose the comments and the redlines, and the text your LLM or search index sees is not the text the reviewers saw.</p>
-      <p>AILANG Parse reads the Office XML inside the <code>.docx</code> directly. There is no model in the loop, so the same file always gives the same Markdown, it runs on a laptop with no GPU, and the document never leaves the machine.</p>
+      <p class="dp-lede"><strong>MarkItDown vs AILANG Parse for Word documents.</strong> Microsoft MarkItDown and AILANG Parse both turn Word files into Markdown for RAG, search and LLM prompts. MarkItDown returns the body text without comments or tracked changes, and flattens nested lists. AILANG Parse keeps them, along with merged table cells, headers and footers, so your model reads what the reviewers read. On the <span data-bench="ailang_parse.per_format.docx.files">33</span> Word files in the open <a href="benchmarks.html">OfficeDocBench</a>, AILANG Parse scores <span data-bench="ailang_parse.per_format.docx.composite">97.1%</span> and MarkItDown <span data-bench="markitdown.per_format.docx.composite">42.8%</span>.</p>
+      <p>AILANG Parse reads the Office XML inside the <code>.docx</code> directly. No AI model is involved, so the same file always gives the same Markdown, it runs on a laptop with no GPU, and the document never leaves the machine.</p>
 
-      <h2 id="side-by-side">Side by side, same files</h2>
+      <h2 id="side-by-side">MarkItDown vs AILANG Parse, same files</h2>
       <p>Three Word files from the public <a href="benchmarks.html">OfficeDocBench</a> corpus, converted to Markdown by MarkItDown and by AILANG Parse. Both outputs are shown exactly as the tools printed them. Download a file and run both yourself.</p>
 
       <div class="d2m-pair">
@@ -376,8 +376,8 @@ Please review the technical specification before the meeting.
       </div>
       <p style="font-size:12px;color:var(--text-secondary)">Outputs captured on 10 November 2026 with MarkItDown 0.1.5 (<code>markitdown[docx]</code>) and the AILANG Parse CLI, from the files linked above. The <code>Timeline</code> section after the lists is the same in both and is cut here.</p>
 
-      <h2 id="scores">DOCX scores on an open benchmark</h2>
-      <p>The examples above are three files. <a href="benchmarks.html">OfficeDocBench v2</a> scores every parser on the same <span data-bench="ailang_parse.per_format.docx.files">33</span> Word files with source-verified assertions: headings, lists, tables, comments, tracked changes, notes, links and text. The DOCX composite:</p>
+      <h2 id="scores">Word file scores on an open benchmark</h2>
+      <p>The examples above are three files. <a href="benchmarks.html">OfficeDocBench v2</a> scores every parser on the same <span data-bench="ailang_parse.per_format.docx.files">33</span> Word files. It checks headings, lists, tables, comments, tracked changes, notes, links and text against the source file. Scores on Word files:</p>
 
       <div class="d2m-bars">
         <div class="d2m-bar d2m-bar--ours"><span class="d2m-bar-name">AILANG Parse</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="ailang_parse.per_format.docx.composite" data-bench-style="width" style="width:97.1%"></span></span><span class="d2m-bar-val" data-bench="ailang_parse.per_format.docx.composite">97.1%</span></div>
@@ -388,7 +388,7 @@ Please review the technical specification before the meeting.
         <div class="d2m-bar"><span class="d2m-bar-name">LlamaParse</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="llamaparse.per_format.docx.composite" data-bench-style="width" style="width:43.7%"></span></span><span class="d2m-bar-val" data-bench="llamaparse.per_format.docx.composite">43.7%</span></div>
         <div class="d2m-bar"><span class="d2m-bar-name">MarkItDown</span><span class="d2m-bar-track"><span class="d2m-bar-fill" data-bench="markitdown.per_format.docx.composite" data-bench-style="width" style="width:42.8%"></span></span><span class="d2m-bar-val" data-bench="markitdown.per_format.docx.composite">42.8%</span></div>
       </div>
-      <p>The corpus, the scorer, every adapter and the per-file results are public, so you can rerun the comparison or add your own files. Full tables, other formats and methodology are on the <a href="benchmarks.html#full-suite">benchmarks page</a>.</p>
+      <p>The test files, the scoring code and the per-file results are public, so you can rerun the comparison or add your own files. Full tables, other formats and the method are on the <a href="benchmarks.html#full-suite">benchmarks page</a>.</p>
 
       <h2 id="what-you-get">What you get</h2>
       <table class="dp-config-table">
@@ -457,8 +457,8 @@ print(client.convert_file("contract.docx", target="md").text)</code></pre>
           <div class="dp-faq-answer"><p>No. The <code>.docx</code> is read from its Office XML. The same file always gives the same Markdown, it runs offline, and nothing is sent anywhere. AI is only used if you ask for it with <code>--describe</code> or <code>--summarize</code>.</p></div>
         </details>
         <details>
-          <summary>How does it compare with MarkItDown, Docling or Pandoc?</summary>
-          <div class="dp-faq-answer"><p>On the <span data-bench="ailang_parse.per_format.docx.files">33</span> DOCX files of OfficeDocBench v2: AILANG Parse <span data-bench="ailang_parse.per_format.docx.composite">97.1%</span>, Kreuzberg <span data-bench="kreuzberg.per_format.docx.composite">56.7%</span>, Pandoc <span data-bench="pandoc.per_format.docx.composite">53.5%</span>, Docling <span data-bench="docling.per_format.docx.composite">49.1%</span>, MarkItDown <span data-bench="markitdown.per_format.docx.composite">42.8%</span>. See <a href="#scores">DOCX scores</a> and the <a href="benchmarks.html">benchmarks page</a>.</p></div>
+          <summary>How does it compare with MarkItDown, Docling or Pandoc on Word files?</summary>
+          <div class="dp-faq-answer"><p>On the <span data-bench="ailang_parse.per_format.docx.files">33</span> Word files in the open OfficeDocBench v2, AILANG Parse scores <span data-bench="ailang_parse.per_format.docx.composite">97.1%</span>, against <span data-bench="kreuzberg.per_format.docx.composite">56.7%</span> for Kreuzberg, <span data-bench="pandoc.per_format.docx.composite">53.5%</span> for Pandoc, <span data-bench="docling.per_format.docx.composite">49.1%</span> for Docling and <span data-bench="markitdown.per_format.docx.composite">42.8%</span> for MarkItDown. The test files, scoring code and per-file results are public on the <a href="benchmarks.html">benchmarks page</a>.</p></div>
         </details>
         <details>
           <summary>What about PDFs and scanned documents?</summary>

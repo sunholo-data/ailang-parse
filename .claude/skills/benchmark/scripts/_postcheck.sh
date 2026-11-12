@@ -69,37 +69,11 @@ if prev:
 
 print()
 
-# If composite changed, remind about SEO copy
-if ai_changed:
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("  Static SEO/JSON-LD copy needs manual update")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("  These pages contain the AILANG Parse composite as literal text")
-    print("  (search engines need it inline — they cannot use data-bench attrs):")
-    print()
-    static_files = [
-        "docs/docx-parsing.html",
-        "docs/pptx-parsing.html",
-        "docs/xlsx-parsing.html",
-        "docs/tables.html",
-        "docs/integrations.html",
-    ]
-    prev_pct = f"{prev_ai['composite']*100:.1f}%"
-    new_pct = f"{ailang['composite']*100:.1f}%"
-    for f in static_files:
-        print(f"    {f}")
-    print()
-    print(f"  Replace any occurrence of '{prev_pct}' with '{new_pct}' in the files")
-    print(f"  above. Re-check related claims (vs-pdf-conversion, migrate-from-*)")
-    print(f"  if competitor numbers also moved.")
-    print()
-
-# Pages already wired to data-bench will refresh automatically
+# Every figure on the site (visible text, meta descriptions, FAQ data) is
+# written from the summary by docs/scripts/sync-bench-fallbacks.py, which the
+# run scripts call and CI checks. Nothing is edited by hand.
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("  Auto-synced pages (no action needed):")
-print("    docs/index.html, docs/benchmarks.html, docs/why.html,")
-print("    docs/vs-pdf-conversion.html, docs/migrate-from-unstructured.html,")
-print("    docs/pricing.html")
+print("  Site figures are synced by docs/scripts/sync-bench-fallbacks.py")
 print()
 print("  Both summary files were updated:")
 print("    benchmarks/officedocbench/results/summary.json  (canonical)")

@@ -85,16 +85,14 @@ Used in `docs/*.html` and resolved by `docs/js/bench-data.js`.
 | `docs/vs-pdf-conversion.html` | `data-bench` (auto) |
 | `docs/migrate-from-unstructured.html` | `data-bench` (auto) |
 | `docs/pricing.html` | `data-bench` (auto) |
-| `docs/docx-parsing.html` | **manual** (JSON-LD SEO) |
-| `docs/pptx-parsing.html` | **manual** (JSON-LD SEO) |
-| `docs/xlsx-parsing.html` | **manual** (JSON-LD SEO) |
-| `docs/tables.html` | **manual** (JSON-LD SEO) |
-| `docs/integrations.html` | **manual** (JSON-LD SEO) |
+| every other page | linted: a typed score fails CI |
 
-The "manual" pages have the AILANG Parse composite as **literal text** in
-`<script type="application/ld+json">` blocks because search engines need it
-inline — they cannot evaluate JS-replaced text. The post-check script reminds
-you which files to update when the composite changes.
+No page is edited by hand. `docs/scripts/sync-bench-fallbacks.py` writes the
+`data-bench` fallbacks, stamps meta descriptions from `docs/data/bench-text.json`,
+and generates each FAQ structured-data answer that quotes a figure from the
+visible answer to the same question. `--check` in CI fails on drift, on a
+score typed outside a `data-bench` element, and when the published AILANG
+Parse version is not the one in `ailang.toml`.
 
 ## Why summary.json sorts by adjusted
 

@@ -582,6 +582,8 @@ def _write_summary(all_results: list[dict]) -> None:
                 ),
                 "name": ar["adapter"],
                 "version": ar.get("version", ""),
+                # The day this tool was actually run, so pages never type it.
+                "run_date": (ar.get("provenance", {}).get("completed_at") or "")[:10],
                 "files_ok": n_ok,
                 "files_total": n_total,
                 "coverage": round(coverage, 4),
@@ -634,11 +636,21 @@ def _write_summary(all_results: list[dict]) -> None:
     # Sort by adjusted (coverage-aware) score descending — the leaderboard order
     adapters_summary.sort(key=lambda a: a["adjusted"], reverse=True)
 
+    # Counts and dates the site states in prose. They are derived here so no
+    # page has to type "ten parsers" or a run date by hand.
+    run_dates = [a["run_date"] for a in adapters_summary if a["run_date"]]
     summary = {
         "schema_version": 2,
         "benchmark_version": BENCHMARK_VERSION,
-        "run_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        # Most recent tool run, not the day the summary was re-aggregated.
+        "run_date": max(run_dates)
+        if run_dates
+        else datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "total_files": total_files,
+        "tool_count": len(adapters_summary),
+        "format_count": len(
+            {fmt for a in adapters_summary for fmt in a["per_format"]}
+        ),
         "adapters": adapters_summary,
     }
 

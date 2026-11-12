@@ -30,7 +30,7 @@
     {"@type": "Question", "name": "What does the parser skip?",
      "acceptedAnswer": {"@type": "Answer", "text": "Header destinations (\\fonttbl, \\colortbl, \\stylesheet, \\info, \\listtable, themedata, panose, picture data, fields, etc.) are skipped as whole groups. Any starred destination ({\\*\\foo …}) is also skipped including its nested children. Formatting control words (\\b, \\i, \\fs, \\cf, …) are recognized and ignored."}},
     {"@type": "Question", "name": "Are tables preserved?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Tables are flattened in v0.20: \\cell becomes TAB, \\row becomes a paragraph break. This preserves the data but not the grid topology. Proper TableBlock emission for RTF is on the roadmap."}},
+     "acceptedAnswer": {"@type": "Answer", "text": "Tables are flattened: \\cell becomes a tab and \\row becomes a paragraph break. The data is kept but the grid is not."}},
     {"@type": "Question", "name": "Where does RTF still show up in real workflows?",
      "acceptedAnswer": {"@type": "Answer", "text": "Government forms (Danish Købsaftale, French CERFA), legal templates, court filings, ERP exports, older MailMerge pipelines, and any system that needs a format Word and TextEdit both render without a converter. RTF is still a default 'Save As' option in Microsoft Word."}}
   ]
@@ -107,7 +107,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
       <ul class="dp-list">
         <li><code>\fonttbl</code>, <code>\filetbl</code>, <code>\colortbl</code>, <code>\stylesheet</code>, <code>\listtable</code>, <code>\listoverridetable</code> — definition tables</li>
         <li><code>\info</code>, <code>\generator</code>, <code>\themedata</code>, <code>\latentstyles</code>, <code>\datastore</code> — document metadata blobs</li>
-        <li><code>\pict</code>, <code>\shppict</code>, <code>\nonshppict</code> — embedded image data (not yet extracted)</li>
+        <li><code>\pict</code>, <code>\shppict</code>, <code>\nonshppict</code> — embedded image data (not extracted)</li>
         <li><code>\field</code>, <code>\fldinst</code>, <code>\fldrslt</code> — field codes and hyperlink internals</li>
         <li><code>\bkmkstart</code>, <code>\bkmkend</code>, <code>\panose</code>, <code>\xmlnstbl</code> — minor structural markers</li>
         <li><strong>Any <code>{\*\foo …}</code></strong> — RTF specifies that starred destinations are "optional" and consumers free to skip; we do</li>
@@ -191,7 +191,7 @@ curl -X POST https://docparse.ailang.sunholo.com/api/v1/parse \
         </details>
         <details>
           <summary>Are tables preserved?</summary>
-          <div class="dp-faq-answer"><p>Tables are flattened in v0.20: <code>\cell</code> becomes TAB, <code>\row</code> becomes a paragraph break. This preserves the data but not the grid topology. Proper <code>TableBlock</code> emission for RTF is on the roadmap.</p></div>
+          <div class="dp-faq-answer"><p>Tables are flattened: <code>\cell</code> becomes a tab and <code>\row</code> becomes a paragraph break. The data is kept but the grid is not.</p></div>
         </details>
         <details>
           <summary>What about embedded images (\pict)?</summary>
