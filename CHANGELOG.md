@@ -11,6 +11,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.55.7](https://github.com/sunholo-data/ailang-parse/compare/v0.55.6...v0.55.7) — 2026-11-12
+
+### Benchmarks: arXiv headings, a harder PDF test
+
+- New `benchmarks/pdf/arxiv_headings.py`: section headings from a paper's LaTeX source are the
+  truth, each PDF backend parses the published PDF. It reports how many papers parsed, heading
+  recall, heading precision (the structure round trip has none) and seconds per paper.
+  `--fetch` downloads the PDFs; they are not in the repo.
+- First results in `benchmarks/pdf/arxiv_headings_results.md`: on 12 papers `poppler` finds 18% of
+  headings at 25% precision, against 80% recall on the rendered-DOCX round trip.
+
 ### Fixed: poppler backend failed on PDFs with control characters
 
 - `--pdf-backend poppler` raised `ParseError: not well-formed (invalid token)` on PDFs whose fonts
