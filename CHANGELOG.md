@@ -11,6 +11,8 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.57.0](https://github.com/sunholo-data/ailang-parse/compare/v0.56.0...v0.57.0) — 2026-11-12
+
 ### PDF pages are split natively, with no external tool
 
 - New `docparse/services/pdf_pages`: reads a PDF's structure in AILANG (classic and compressed
