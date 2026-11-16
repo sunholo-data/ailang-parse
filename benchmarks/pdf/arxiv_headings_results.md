@@ -51,3 +51,13 @@ appendix letter as part of the heading text.
 
 Re-run: `python3 benchmarks/pdf/arxiv_headings.py --fetch`, then
 `python3 benchmarks/pdf/arxiv_headings.py --per-file`
+
+The table on the site (`docs/pdf-parsing.html`, `docs/benchmarks.html`) is written from
+`arxiv_headings_summary.json`, never typed:
+
+    python3 benchmarks/pdf/arxiv_headings.py --publish              # local backends, idle machine only
+    python3 benchmarks/pdf/arxiv_headings.py --backends ai --publish  # paid, about 17 minutes
+    python3 docs/scripts/sync-pdf-bench.py
+
+`--publish` refuses to run on a busy machine, because the time per paper would be
+wrong. `--from-json FILE --measured DATE VERSION` publishes a run saved with `--json`.
