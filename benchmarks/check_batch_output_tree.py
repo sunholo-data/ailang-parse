@@ -12,9 +12,14 @@ Checks, against the real CLI:
      the two Proposal.docx outputs are different documents.
   2. A folder without -r: top level only, flat outputs (unchanged), and a note
      on stderr that subfolders were skipped.
-  3. Explicit files from two folders: mirrored below their common folder.
-  4. Files from one folder: flat outputs, exactly as before.
-  5. DOCPARSE_INPUT_ROOT set: separate runs over slices of one archive (the
+  3. Same-named files from two folders: mirrored below their common folder.
+  4. Differently named files from two folders: flat, exactly as before (a
+     first version mirrored every multi-folder batch, which moved the outputs
+     of `docparse ~/Downloads/a.docx ~/Desktop/b.docx` into subfolders).
+  5. Files from one folder: flat outputs, exactly as before.
+  6. -r on a folder whose documents all sit in one subfolder: mirrored
+     relative to the folder given, not flattened.
+  7. DOCPARSE_INPUT_ROOT set: separate runs over slices of one archive (the
      xargs -P recipe on the archives page) share one layout.
 
 Run from the repo root:  python3 benchmarks/check_batch_output_tree.py
@@ -86,7 +91,7 @@ def main():
         check(outputs(out) == ["Top level.docx.json"], f"top level only, flat: {outputs(out)}")
         check("Add -r" in r.stderr, "stderr says subfolders were skipped")
 
-        print("3. explicit files from two folders")
+        print("3. same-named files from two folders")
         out = tmp / "out3"
         r = run(["Archive/Clients/Acme Co/2019/Proposal.docx",
                  "Archive/Clients/Beta/old copies/Proposal.docx", "--output-dir", str(out)], tmp)
@@ -94,7 +99,14 @@ def main():
         check(outputs(out) == ["Acme Co/2019/Proposal.docx.json", "Beta/old copies/Proposal.docx.json"],
               f"mirrored below the common folder: {outputs(out)}")
 
-        print("4. files from one folder")
+        print("4. differently named files from two folders")
+        out = tmp / "out3b"
+        shutil.copy(OTHER, tmp / "elsewhere.docx")
+        r = run(["Archive/Top level.docx", "elsewhere.docx", "--output-dir", str(out)], tmp)
+        check(r.returncode == 0, "exit 0")
+        check(outputs(out) == ["Top level.docx.json", "elsewhere.docx.json"], f"flat, as before: {outputs(out)}")
+
+        print("5. files from one folder")
         flat = tmp / "flat"
         flat.mkdir()
         shutil.copy(SMALL, flat / "one.docx")
@@ -104,7 +116,16 @@ def main():
         check(r.returncode == 0, "exit 0")
         check(outputs(out) == ["one.docx.json", "two.docx.json"], f"flat, as before: {outputs(out)}")
 
-        print("5. DOCPARSE_INPUT_ROOT across separate runs")
+        print("6. -r where every document sits in one subfolder")
+        deep = tmp / "Deep"
+        (deep / "2019/Q1").mkdir(parents=True)
+        shutil.copy(SMALL, deep / "2019/Q1/memo.docx")
+        out = tmp / "out6"
+        r = run(["-r", str(deep), "--output-dir", str(out)], tmp)
+        check(r.returncode == 0, "exit 0")
+        check(outputs(out) == ["2019/Q1/memo.docx.json"], f"relative to the folder given: {outputs(out)}")
+
+        print("7. DOCPARSE_INPUT_ROOT across separate runs")
         out = tmp / "out5"
         env = dict(__import__("os").environ, DOCPARSE_INPUT_ROOT=str(arch))
         for one in ("Clients/Acme Co/2019/Proposal.docx", "Clients/Beta/old copies/Proposal.docx"):

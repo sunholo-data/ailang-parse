@@ -196,7 +196,7 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
     -- Proposal.docx.json (the second silently replaced the first). Under
     -- `ailang run --batch` main sees one file per run, so bin/docparse works
     -- the root out from the whole list and passes it as DOCPARSE_INPUT_ROOT.
-    let inputRoot = getEnvOr("DOCPARSE_INPUT_ROOT", mainCommonRoot(files));
+    let inputRoot = getEnvOr("DOCPARSE_INPUT_ROOT", if mainHasDuplicateNames(files) then mainCommonRoot(files) else "");
     let failed = parseFiles(files, opts, outDir, inputRoot, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
     if failed > 0 then exit(1) else ()
   }
@@ -696,11 +696,13 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
   println("=== AILANG Parse Complete ===")
 }
 
--- Output layout for a batch whose inputs span folders.
+-- Output layout when flat output names would be lost.
 --
--- inputRoot is the deepest folder containing every input ("" = they share one
--- folder, so outputs stay flat in outDir exactly as before; "." = relative
--- paths with no common folder below the cwd). Each file's outputs go to
+-- inputRoot comes from DOCPARSE_INPUT_ROOT (bin/docparse sets it for -r and
+-- for same-named inputs); without it, it is the deepest folder containing
+-- every input when two inputs share a file name, else "" (outputs flat in
+-- outDir exactly as before). "." = relative paths with no common folder
+-- below the cwd. Each file's outputs go to
 -- outDir/<its folder relative to inputRoot>. A path that would climb out of
 -- outDir ("..") falls back to the flat layout.
 pure func mainDirname(path: string) -> string {
@@ -733,6 +735,15 @@ pure func mainCommonRoot(files: [string]) -> string =
       if any(\g. mainDirname(g) != d0, rest)
       then foldl(\acc g. mainShrinkRoot(acc, g), if d0 == "" then "." else d0, rest)
       else ""
+    }
+  }
+
+pure func mainHasDuplicateNames(files: [string]) -> bool =
+  match files {
+    [] => false,
+    f :: rest => {
+      let name = mainBasename(f);
+      any(\g. mainBasename(g) == name, rest) || mainHasDuplicateNames(rest)
     }
   }
 

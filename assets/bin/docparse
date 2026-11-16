@@ -268,9 +268,9 @@ Output:
   Default <out> is the directory you ran from; --output-dir DIR overrides it. In batch
   mode each file's outputs are written as soon as that file finishes — you
   can inspect completed files mid-batch and nothing is lost on Ctrl+C.
-  When the inputs come from more than one folder (-r, or several paths), each
-  file's outputs go under <out> in its folder relative to the inputs' common
-  folder, so two files with the same name never overwrite each other.
+  With -r, outputs keep the folder structure under <out>. Two inputs with the
+  same name never overwrite each other: their folders are kept too.
+  DOCPARSE_INPUT_ROOT=DIR keeps folders relative to DIR (parallel runs).
 EOF
 }
 
@@ -782,13 +782,16 @@ hint_subfolders() {
 
 # Expand any directories in RESOLVED_FILES
 EXPANDED_FILES=()
+ANCHORS=()   # each folder argument (as "<dir>/.") and each file argument
 for f in "${RESOLVED_FILES[@]}"; do
   if [ -d "$f" ]; then
+    ANCHORS+=("${f%/}/.")
     hint_subfolders "$f"
     while IFS= read -r entry; do
       [ -n "$entry" ] && EXPANDED_FILES+=("$entry")
     done < <(expand_folder "$f")
   else
+    ANCHORS+=("$f")
     EXPANDED_FILES+=("$f")
   fi
 done
@@ -800,16 +803,20 @@ fi
 
 RESOLVED_FILES=("${EXPANDED_FILES[@]}")
 
-# --- Output layout for inputs from several folders ---
+# --- Output layout: keep folders when flat names would be lost ---
 # Outputs are named after the input file, so a/Proposal.docx and
 # b/Proposal.docx both wrote Proposal.docx.json and the second silently
-# replaced the first. When the inputs span folders, find the deepest folder
-# holding all of them; main.ail writes each file's outputs under
-# <out>/<its folder relative to that root>. Batch runs main once per file, so
-# the root travels as DOCPARSE_INPUT_ROOT. Paths are absolute by now.
-# A DOCPARSE_INPUT_ROOT already in the environment wins: parallel runs over
-# slices of one archive (xargs -P) set it to the archive folder so every slice
-# lays its outputs out the same way.
+# replaced the first. Folders are kept under <out> when:
+#   -r                    relative to the folder(s) given, so the output
+#                         tree mirrors the archive;
+#   two inputs share a    relative to the deepest folder holding them all;
+#   file name
+#   DOCPARSE_INPUT_ROOT   relative to that folder. Parallel runs over slices
+#                         of one archive (xargs -P) set it so every slice
+#                         lays its outputs out the same way.
+# Anything else stays flat, exactly as before. main.ail writes each file's
+# outputs under <out>/<its folder relative to the root>; batch runs main once
+# per file, so the root travels as DOCPARSE_INPUT_ROOT. Paths are absolute.
 INPUT_ROOT="${DOCPARSE_INPUT_ROOT:-}"
 if [ -n "$INPUT_ROOT" ]; then
   [[ "$INPUT_ROOT" = /* ]] || INPUT_ROOT="$(pwd)/$INPUT_ROOT"
@@ -817,21 +824,21 @@ if [ -n "$INPUT_ROOT" ]; then
     echo "Error: DOCPARSE_INPUT_ROOT is not a folder: $DOCPARSE_INPUT_ROOT" >&2
     exit 1
   }
-fi
-FIRST_DIR="$(dirname "${RESOLVED_FILES[0]}")"
-for f in "${RESOLVED_FILES[@]}"; do
-  [ -n "${DOCPARSE_INPUT_ROOT:-}" ] && break
-  if [ "$(dirname "$f")" != "$FIRST_DIR" ]; then
-    INPUT_ROOT="$FIRST_DIR"
-    break
+else
+  ROOT_OF=()
+  if $RECURSIVE; then
+    ROOT_OF=("${ANCHORS[@]}")
+  elif [ -n "$(printf '%s\n' "${RESOLVED_FILES[@]##*/}" | sort | uniq -d | head -1)" ]; then
+    ROOT_OF=("${RESOLVED_FILES[@]}")
   fi
-done
-if [ -n "$INPUT_ROOT" ] && [ -z "${DOCPARSE_INPUT_ROOT:-}" ]; then
-  for f in "${RESOLVED_FILES[@]}"; do
-    while [[ "$f" != "${INPUT_ROOT%/}/"* ]]; do
-      INPUT_ROOT="$(dirname "$INPUT_ROOT")"
+  if [ ${#ROOT_OF[@]} -gt 0 ]; then
+    INPUT_ROOT="$(dirname "${ROOT_OF[0]}")"
+    for f in "${ROOT_OF[@]}"; do
+      while [[ "$f" != "${INPUT_ROOT%/}/"* ]]; do
+        INPUT_ROOT="$(dirname "$INPUT_ROOT")"
+      done
     done
-  done
+  fi
 fi
 
 # --- Detect if AI is needed (check all files) ---
