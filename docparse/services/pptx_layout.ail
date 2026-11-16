@@ -363,6 +363,107 @@ export pure func odpPaginateShape(spec: string) -> string
 }
 
 -- =====================================================================
+-- Slide breaks for a document that has no slides
+-- =====================================================================
+
+-- A source with no SectionBlock(kind="slide") — Markdown, DOCX, HTML — used to
+-- go onto one slide, however it was divided (ailang-parse#160). It is split
+-- the way Pandoc splits slides:
+--
+--   * The slide level is the highest heading level that is followed directly
+--     by content (not by another heading) somewhere in the document.
+--   * A heading at the slide level starts a new slide and is its title.
+--   * A heading above it (fewer #) is a section title slide on its own.
+--   * Deeper headings stay inside the slide they fall in.
+--   * A horizontal rule ("---") always starts a new slide and is dropped.
+--
+-- Only top-level blocks are walked; other sections stay on the slide they fall
+-- in. A rule followed by a heading makes one break, not an empty slide, which
+-- is the shape markdown_writer gives a converted deck. A document with no
+-- headings and no rules comes back as the single slide it always was, and the
+-- result is never empty.
+export pure func pptxSlideBreaks(blocks: [Block]) -> [[Block]] {
+  let lvl = pptxSlideLevel(blocks, 0);
+  let slides = pptxBreakWalk(blocks, lvl, [], []);
+  match slides {
+    [] => [blocks],
+    _ => slides
+  }
+}
+
+-- 0 when no heading is followed by content: then only rules break slides.
+pure func pptxSlideLevel(blocks: [Block], best: int) -> int =
+  match blocks {
+    [] => best,
+    HeadingBlock(h) :: rest =>
+      let next = match rest {
+        [] => false,
+        b :: _ => pptxIsContent(b)
+      } in
+      let best2 = if next && (best == 0 || h.level < best) then h.level else best in
+      pptxSlideLevel(rest, best2),
+    _ :: rest => pptxSlideLevel(rest, best)
+  }
+
+pure func pptxIsContent(b: Block) -> bool =
+  match b {
+    HeadingBlock(_) => false,
+    _ => pptxIsRule(b) == false
+  }
+
+export pure func pptxIsRule(b: Block) -> bool =
+  match b {
+    TextBlock(t) => t.style == "hr",
+    _ => false
+  }
+
+-- `cur` is the open slide reversed, `acc` the finished slides reversed.
+pure func pptxBreakWalk(blocks: [Block], lvl: int, cur: [Block], acc: [[Block]]) -> [[Block]] =
+  match blocks {
+    [] => reverse(pptxCloseSlide(cur, acc)),
+    b :: rest =>
+      if pptxIsRule(b) then pptxBreakWalk(rest, lvl, [], pptxCloseSlide(cur, acc))
+      else match b {
+        HeadingBlock(h) =>
+          if lvl > 0 && h.level < lvl
+          then pptxBreakWalk(rest, lvl, [], [b] :: pptxCloseSlide(cur, acc))
+          else if lvl > 0 && h.level == lvl
+          then pptxBreakWalk(rest, lvl, [b], pptxCloseSlide(cur, acc))
+          else pptxBreakWalk(rest, lvl, b :: cur, acc),
+        _ => pptxBreakWalk(rest, lvl, b :: cur, acc)
+      }
+  }
+
+pure func pptxCloseSlide(cur: [Block], acc: [[Block]]) -> [[Block]] =
+  match cur {
+    [] => acc,
+    _ => reverse(cur) :: acc
+  }
+
+-- Slide breaks for a spec (pptxPaginateShape notation, plus "h2" for a
+-- level-2 heading and "hr" for a rule): slides separated by "/".
+export pure func pptxSlideBreaksShape(spec: string) -> string
+  tests [
+    ("h|t|h|t", "h,t/h,t"),
+    ("h2|t|h2|t", "h2,t/h2,t"),
+    ("h|t|hr|h|t", "h,t/h,t"),
+    ("hr|h|t|hr|h|t", "h,t/h,t"),
+    -- Title above the slide level is a slide on its own.
+    ("h|h2|t|h2|t", "h/h2,t/h2,t"),
+    -- h1 is followed by content, so it is the slide level; h2 stays inside.
+    ("h|t|h2|t|h|t", "h,t,h2,t/h,t"),
+    -- Content before the first heading is its own slide.
+    ("t|h|t", "t/h,t"),
+    ("t|hr|t", "t/t"),
+    ("t|t", "t,t"),
+    ("t|hr|hr|t", "t/t")
+  ]
+{
+  let blocks = map(pptxSpecBlock, split(spec, "|"));
+  join("/", map(\p. join(",", map(pptxKind, p)), pptxSlideBreaks(blocks)))
+}
+
+-- =====================================================================
 -- Test surface
 -- =====================================================================
 
@@ -393,8 +494,8 @@ export pure func pptxPaginateShape(spec: string) -> string
 
 pure func pptxKind(b: Block) -> string =
   match b {
-    HeadingBlock(_) => "h",
-    TextBlock(_) => "t",
+    HeadingBlock(h) => if h.level == 1 then "h" else "h${show(h.level)}",
+    TextBlock(t) => if t.style == "hr" then "hr" else "t",
     ListBlock(_) => "l",
     TableBlock(_) => "r",
     _ => "?"
@@ -405,6 +506,8 @@ pure func pptxSpecBlock(s: string) -> Block {
   let kind = match parts { k :: _ => k, [] => "" };
   let n = match parts { _ :: v :: _ => getOrElse(stringToInt(v), 0), _ => 0 };
   if kind == "h" then HeadingBlock({text: "Title", level: 1, runs: []})
+  else if kind == "h2" then HeadingBlock({text: "Title", level: 2, runs: []})
+  else if kind == "hr" then mkText("", "hr", 0)
   else if kind == "t" then mkText(pptxRepeatChar("x", n), "normal", 0)
   else if kind == "l" then ListBlock({items: map(\i. "item", pptxRange(n)), ordered: false, itemRuns: [], itemLevels: []})
   else if kind == "r" then TableBlock({rows: map(\i. [pptxCell("a"), pptxCell("b")], pptxRange(n)), headers: [pptxCell("H1"), pptxCell("H2")], caption: ""})

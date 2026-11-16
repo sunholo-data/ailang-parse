@@ -8,7 +8,7 @@ import std/result (Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl)
 import docparse/services/image_size (imageExtentEmu)
-import docparse/services/pptx_layout (pptxFitsSlots, pptxPaginate, pptxEstimateEmu, pptxFlowTopEmu, pptxFlowGapEmu, pptxUsableEmu, pptxFlatten, pptxTableFlowPt)
+import docparse/services/pptx_layout (pptxSlideBreaks, pptxFitsSlots, pptxPaginate, pptxEstimateEmu, pptxFlowTopEmu, pptxFlowGapEmu, pptxUsableEmu, pptxFlatten, pptxTableFlowPt)
 import docparse/services/image_embed (embedIsBinaryPayload, embedExt)
 import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pptxTplDropSpans, pptxTplDropElems, pptxTplInsertBeforeFirst, pptxTplInsertBeforeLast, pptxTplLastIndexOf)
 
@@ -61,7 +61,7 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
   ensures { length(result) > 0 }
 {
   -- Split blocks into slides: each SectionBlock(kind="slide") is a slide,
-  -- or if no slides, put all blocks on one slide
+  -- or if no slides, headings and rules divide them (pptxCollectSlides)
   let slideContents = pptxLayoutSlides(pptxCollectSlides(doc.blocks));
   let slideCount = pptxCountSlides(slideContents);
   let hasNotes = pptxAnyNotes(slideContents);
@@ -163,7 +163,8 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
 }
 
 -- Collect blocks into slide groups. SectionBlock(kind="slide") boundaries define slides.
--- If no slides, all blocks go onto one slide.
+-- With no slide sections (Markdown, DOCX, HTML), headings and rules divide the
+-- slides as Pandoc divides them (pptx_layout's pptxSlideBreaks).
 --
 -- A SectionBlock(kind="notes") is that slide's speaker notes: the PPTX and ODP
 -- parsers emit it directly AFTER its slide section, so it attaches to the
@@ -175,7 +176,7 @@ pure func pptxCollectSlides(blocks: [Block]) -> [PptxSlide] {
   let hasSlides = pptxHasSlideBlocks(blocks);
   if hasSlides
   then reverse(pptxSplitBySlides(blocks, []))
-  else [{blocks: blocks, notes: [], flow: false}]
+  else map(\bs. {blocks: bs, notes: [], flow: false}, pptxSlideBreaks(blocks))
 }
 
 pure func pptxHasSlideBlocks(blocks: [Block]) -> bool =
