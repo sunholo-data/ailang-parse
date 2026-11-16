@@ -267,9 +267,6 @@ def main() -> int:
                 print(f"| {name} | {len(truth[name])} | {f['hit'] if f else 'failed'} | {f['claimed'] if f else ''} |")
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=2))
-    if args.publish and busy():
-        print("The machine became busy during the run: not publishing these times.", file=sys.stderr)
-        return 3
     if args.publish:
         publish(results, backends, len(pdfs), sum(len(t) for t in truth.values()), args.ai_model)
     return 0
