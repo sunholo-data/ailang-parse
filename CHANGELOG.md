@@ -25,6 +25,35 @@ separately — see `sdks/` for per-SDK changelogs.
 - A document with no headings and no rules is unchanged: one slide, paginated when it overflows.
   Decks and PDFs, which carry their own slides, are unchanged.
 
+### Fixed: same-named files in a batch overwrote each other's output
+
+- Outputs were named after the input file alone, so `docparse a/Proposal.docx b/Proposal.docx`
+  wrote one `Proposal.docx.json` and the second file silently replaced the first. In an archive,
+  where the same name turns up in many folders, most of those documents were lost.
+- Folders are now kept under the output folder when flat names would be lost: with `-r`
+  (relative to the folder given, so `parsed/Clients/Acme/2019/Proposal.docx.json`), and whenever
+  two inputs share a file name (relative to their common folder). `DOCPARSE_INPUT_ROOT` sets the
+  root explicitly, so separate runs over slices of one archive (`xargs -P`) share one layout.
+  Every other batch is laid out flat, exactly as before.
+- `bin/docparse.cmd` (Windows) is unchanged.
+
+### Added: `-r` / `--recursive` for folder inputs
+
+- A folder input read only its top level, with no sign that subfolders were skipped.
+  `docparse -r /archive --output-dir parsed/` now takes in every subfolder. Without `-r`, a folder
+  whose subfolders hold documents prints a note saying so.
+- Regression: `benchmarks/check_batch_output_tree.py` (CI) runs the CLI on a nested tree with
+  same-named files: `-r`, same-named and differently named paths from two folders, one folder,
+  `-r` on a single subfolder, and `DOCPARSE_INPUT_ROOT` across two runs.
+
+### Added: archive throughput benchmark and the document archives page
+
+- `benchmarks/throughput/` builds an archive-shaped mix of Word, PowerPoint and Excel files
+  (invented text, random images, fixed seed) and times `docparse` with 1 to N processes.
+  Results: `benchmarks/throughput/results/latest.json`.
+- `docs/document-archives.html`: how long a large archive takes, how to run it on every core,
+  and what takes longer (big spreadsheets, scanned PDFs, image descriptions).
+
 ## [v0.57.1](https://github.com/sunholo-data/ailang-parse/compare/v0.57.0...v0.57.1) — 2026-11-12
 
 ### Fixed: PDF annotations inside compressed object streams were not found
