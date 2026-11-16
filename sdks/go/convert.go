@@ -24,18 +24,20 @@ type ConvertOptions struct {
 	GCSRef     string // gs://bucket/path, Business tier only
 	PDFBackend string // "", pdftotext, poppler, ai (see ParseOptions.PDFBackend)
 
-	// ReferenceDoc styles the generated document (DOCX target only) after a
-	// template's theme, fonts, headers/footers and page setup — the CLI's
-	// --reference-doc. A URL or gs:// ref here, not a local path (this
+	// ReferenceDoc styles the generated document after a template — a .docx
+	// for a docx target (theme, fonts, headers/footers, page setup), a .pptx
+	// for a pptx target (theme, masters, layouts) — the CLI's
+	// --reference-doc. A PDF converted to pptx/odp is read one slide per page
+	// unless PDFBackend names a backend other than poppler. A URL or gs:// ref here, not a local path (this
 	// method has no multipart upload).
 	ReferenceDoc string
 
 	// ReferenceSection picks which of the template's sections supplies the
-	// page setup. 1-based; zero means the template's last section.
+	// page setup. 1-based; zero means the template's last section. DOCX only.
 	ReferenceSection int
 
 	// TableStyle binds generated tables to one of the template's table
-	// styles, by styleId or Word name. Requires ReferenceDoc.
+	// styles, by styleId or Word name. Requires ReferenceDoc. DOCX only.
 	TableStyle string
 }
 
