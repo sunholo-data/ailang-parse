@@ -133,14 +133,17 @@ DocParse <- R6::R6Class(
     #' @param gcs_ref \code{gs://bucket/path}, Business tier only.
     #' @param pdf_backend One of \code{"" pdftotext poppler ai}; see
     #'   \code{parse}.
-    #' @param reference_doc Style the generated document (DOCX target only)
-    #'   after a template's theme, fonts, headers/footers and page setup —
-    #'   the CLI's \code{--reference-doc}. A URL or \code{gs://} ref here,
+    #' @param reference_doc Style the generated document after a template: a
+    #'   .docx for a docx target (theme, fonts, headers/footers, page setup),
+    #'   a .pptx for a pptx target (theme, masters, layouts) — the CLI's \code{--reference-doc}. A URL or \code{gs://} ref here,
     #'   not a local path; for a local template use \code{convert_file}.
     #' @param reference_section Which of the template's sections supplies
     #'   the page setup (1-based). Omit for the template's last section.
+    #'   DOCX only.
     #' @param table_style Bind generated tables to one of the template's
     #'   table styles, by styleId or Word name. Requires \code{reference_doc}.
+    #'   DOCX only. A PDF converted to pptx or odp is read one slide per page
+    #'   unless \code{pdf_backend} names a backend other than \code{poppler}.
     #' @return An \code{ailang_convert_result} S3 list. \code{$content} is a
     #'   raw vector regardless of how the wire encoded it.
     convert = function(filepath = NULL, target, source_url = NULL,
