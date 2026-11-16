@@ -557,6 +557,13 @@ jobs:
       - name: Image temp files hold each document's own bytes (exact)
         run: uv run benchmarks/check_image_temp_paths.py
 
+      # Outputs were named after the input file alone, so a/Proposal.docx and
+      # b/Proposal.docx wrote one Proposal.docx.json (the second replaced the
+      # first, silently), and folder inputs only read their top level. Runs the
+      # real CLI on a nested tree with -r, explicit paths and DOCPARSE_INPUT_ROOT.
+      - name: Batch outputs keep folders; same-named files never collide
+        run: python3 benchmarks/check_batch_output_tree.py
+
       # These two are named in .claude/rules/benchmarks.md as the guards for
       # "the blind spot" — parse-side goldens and "does the file open" both
       # pass structurally invalid output through — but neither had ever run in
