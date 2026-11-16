@@ -2,8 +2,8 @@ module docparse/main
 
 import std/fs (readFile, writeFile, writeFileBytes, fileExists, removeFile, mkdirAll)
 import std/json (encode)
-import std/string (length, intToStr, floatToStr, toLower, split, contains, stringToInt, startsWith)
-import std/list (last, concat, any, map, flatMap as listFlatMap, filter, length as listLength)
+import std/string (length, intToStr, floatToStr, toLower, split, contains, stringToInt, startsWith, endsWith, substring, join)
+import std/list (last, concat, any, map, flatMap as listFlatMap, filter, length as listLength, take, foldl)
 import std/option (Some, None)
 import std/bytes (fromBase64)
 import std/result (Ok, Err)
@@ -191,7 +191,13 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
       projectRoot: getEnvOr("DOCPARSE_PROJECT_ROOT", ""),
       noAttachmentData: hasFlag(args, "--no-attachment-data") || getEnvOr("DOCPARSE_NO_ATTACHMENT_DATA", "") == "1"
     };
-    let failed = parseFiles(files, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+    -- Inputs from more than one folder keep their folders below outDir, so
+    -- a/Proposal.docx and b/Proposal.docx no longer write the same
+    -- Proposal.docx.json (the second silently replaced the first). Under
+    -- `ailang run --batch` main sees one file per run, so bin/docparse works
+    -- the root out from the whole list and passes it as DOCPARSE_INPUT_ROOT.
+    let inputRoot = getEnvOr("DOCPARSE_INPUT_ROOT", mainCommonRoot(files));
+    let failed = parseFiles(files, opts, outDir, inputRoot, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
     if failed > 0 then exit(1) else ()
   }
 }
@@ -202,10 +208,10 @@ export func main() -> () ! {IO @limit=50000, FS @limit=5000, AI @limit=200, Env,
 -- non-zero WITHOUT aborting the remaining files: exit() inside the loop would
 -- drop every file after the first failure (the same ailang#607 shape the
 -- empty-extraction note in runParse documents).
-func parseFiles(files: [string], opts: ParseOptions, outDir: string, doSummarize: bool,
+func parseFiles(files: [string], opts: ParseOptions, outDir: string, inputRoot: string, doSummarize: bool,
                 convertTarget: string, referenceDoc: string, referenceSection: int,
                 tableStyle: string, slideSize: string) -> int ! {IO, FS, AI, Env, Net, Process, Clock} {
-  let failures = parseLoop(files, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+  let failures = parseLoop(files, opts, outDir, inputRoot, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
   if listLength(files) > 1 then {
     println("");
     println("Batch complete: ${show(listLength(files) - failures)}/${show(listLength(files))} parsed${if failures > 0 then ", ${show(failures)} failed" else ""}.")
@@ -213,14 +219,14 @@ func parseFiles(files: [string], opts: ParseOptions, outDir: string, doSummarize
   failures
 }
 
-func parseLoop(files: [string], opts: ParseOptions, outDir: string, doSummarize: bool,
+func parseLoop(files: [string], opts: ParseOptions, outDir: string, inputRoot: string, doSummarize: bool,
                convertTarget: string, referenceDoc: string, referenceSection: int,
                tableStyle: string, slideSize: string) -> int ! {IO, FS, AI, Env, Net, Process, Clock} {
   match files {
     [] => 0,
     f :: rest => {
-      let ok = parseOne(f, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
-      parseLoop(rest, opts, outDir, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize) + (if ok then 0 else 1)
+      let ok = parseOne(f, opts, mainOutDirFor(outDir, f, inputRoot), doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+      parseLoop(rest, opts, outDir, inputRoot, doSummarize, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize) + (if ok then 0 else 1)
     }
   }
 }
@@ -688,6 +694,61 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
 
   println("");
   println("=== AILANG Parse Complete ===")
+}
+
+-- Output layout for a batch whose inputs span folders.
+--
+-- inputRoot is the deepest folder containing every input ("" = they share one
+-- folder, so outputs stay flat in outDir exactly as before; "." = relative
+-- paths with no common folder below the cwd). Each file's outputs go to
+-- outDir/<its folder relative to inputRoot>. A path that would climb out of
+-- outDir ("..") falls back to the flat layout.
+pure func mainDirname(path: string) -> string {
+  let parts = split(path, "/");
+  let n = listLength(parts);
+  if n <= 1 then ""
+  else if n == 2 && startsWith(path, "/") then "/"
+  else join("/", take(n - 1, parts))
+}
+
+pure func mainUnder(root: string, path: string) -> bool =
+  if root == "." then startsWith(path, "/") == false
+  else if root == "/" then startsWith(path, "/")
+  else startsWith(path, "${root}/")
+
+pure func mainShrinkRoot(root: string, path: string) -> string =
+  if root == "" then ""
+  else if mainUnder(root, path) then root
+  else if root == "/" || root == "." then ""
+  else {
+    let up = mainDirname(root);
+    mainShrinkRoot(if up == "" then "." else up, path)
+  }
+
+pure func mainCommonRoot(files: [string]) -> string =
+  match files {
+    [] => "",
+    f :: rest => {
+      let d0 = mainDirname(f);
+      if any(\g. mainDirname(g) != d0, rest)
+      then foldl(\acc g. mainShrinkRoot(acc, g), if d0 == "" then "." else d0, rest)
+      else ""
+    }
+  }
+
+pure func mainOutputSubdir(filepath: string, inputRoot: string) -> string =
+  if inputRoot == "" || mainUnder(inputRoot, filepath) == false then ""
+  else {
+    let rel = if inputRoot == "." then filepath
+      else substring(filepath, length(inputRoot) + (if endsWith(inputRoot, "/") then 0 else 1), length(filepath));
+    let parts = split(rel, "/");
+    let dirs = filter(\d. d != "" && d != ".", take(listLength(parts) - 1, parts));
+    if any(\d. d == "..", dirs) then "" else join("/", dirs)
+  }
+
+pure func mainOutDirFor(outDir: string, filepath: string, inputRoot: string) -> string {
+  let sub = mainOutputSubdir(filepath, inputRoot);
+  if length(outDir) == 0 || length(sub) == 0 then outDir else "${outDir}/${sub}"
 }
 
 -- Extract basename from a filepath: "/path/to/sample.docx" -> "sample.docx"

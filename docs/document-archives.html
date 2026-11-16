@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parse a Document Archive at Scale — AILANG Parse</title>
+<link rel="icon" type="image/svg+xml" href="img/docparse-logo.svg">
+<meta name="description" content="Turn years of Word, PowerPoint and Excel files into structured JSON and Markdown for search and RAG, on your own machines. About 4.6 million files a day on one workstation, with no AI calls and no GPU.">
+<meta property="og:title" content="Parse a Document Archive at Scale — AILANG Parse">
+<meta property="og:description" content="Turn years of Word, PowerPoint and Excel files into structured JSON and Markdown for search and RAG, on your own machines. About 4.6 million files a day on one workstation, with no AI calls and no GPU.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.sunholo.com/ailang-parse/document-archives.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/docparse.css">
+<link rel="stylesheet" href="css/prism.css">
+<link rel="stylesheet" href="css/docs-layout.css">
+<link rel="stylesheet" href="css/components.css">
+<style>
+.dp-arch-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin: 8px 0 32px;
+}
+@media (max-width: 900px) {
+  .dp-arch-stats { grid-template-columns: repeat(2, 1fr); }
+}
+.dp-arch-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 16px;
+  text-align: center;
+}
+.dp-arch-stat-val {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--dp-blue);
+  line-height: 1.2;
+}
+.dp-arch-stat-lbl {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+.dp-arch-note {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.dp-config-table td.num, .dp-config-table th.num { text-align: right; white-space: nowrap; }
+.dp-arch-table-wrap { overflow-x: auto; }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Do our documents leave our network?", "acceptedAnswer": {"@type": "Answer", "text": "No. The command-line tool reads files from your disks and writes JSON and Markdown next to them. Word, PowerPoint and Excel files are parsed without any AI model or network call, so nothing is sent anywhere."}},
+    {"@type": "Question", "name": "Does parsing an archive need a GPU or an AI model?", "acceptedAnswer": {"@type": "Answer", "text": "Not for Office files. DOCX, PPTX, XLSX and the OpenDocument formats are read directly from the file's XML, on ordinary CPUs. AI is only used if you ask for image descriptions or send scanned pages to the AI PDF backend."}},
+    {"@type": "Question", "name": "Why does the size in terabytes say little about how long it takes?", "acceptedAnswer": {"@type": "Answer", "text": "Most of the bytes in an office archive are pictures inside documents. They are not decoded unless you ask for descriptions, so a slide deck full of photos parses about as quickly as a short memo. Time follows the number of documents and the amount of text and table data in them."}},
+    {"@type": "Question", "name": "How do I find the original file for a parsed output?", "acceptedAnswer": {"@type": "Answer", "text": "With -r, or with DOCPARSE_INPUT_ROOT set, the output folder mirrors the archive: Clients/Acme/2019/Proposal.docx becomes Clients/Acme/2019/Proposal.docx.json and .md under the output folder. Two files with the same name in different folders never overwrite each other."}},
+    {"@type": "Question", "name": "Can we use the hosted API for a backfill?", "acceptedAnswer": {"@type": "Answer", "text": "The hosted API is built for a steady stream of documents, and every plan has a daily request limit. For an archive of millions of files, run the command-line tool or the container on your own machines, or contact Sunholo about a managed run."}}
+  ]
+}
+</script>
+<!-- nav:ld -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "AILANG Parse", "item": "https://www.sunholo.com/ailang-parse/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://www.sunholo.com/ailang-parse/docs.html"}, {"@type": "ListItem", "position": 3, "name": "Try, run and buy", "item": "https://www.sunholo.com/ailang-parse/docs.html#run"}, {"@type": "ListItem", "position": 4, "name": "Document archives", "item": "https://www.sunholo.com/ailang-parse/document-archives.html"}]}</script>
+<!-- /nav:ld -->
+
+</head>
+<body>
+
+<div id="header-mount"></div>
+
+<div class="page">
+
+<!-- nav:crumbs -->
+  <nav class="dp-crumbs" aria-label="Breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">&rsaquo;</span><a href="docs.html#run">Try, run and buy</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Document archives</span></nav>
+<!-- /nav:crumbs -->
+
+  <section class="hero" style="margin-bottom:32px">
+    <h1 class="reveal">Parse a <span class="dp-accent">document archive</span> at scale</h1>
+    <p class="subtitle reveal reveal-delay-1">Years of Word, PowerPoint and Excel files turned into structured JSON and Markdown your search or RAG system can use. It runs on your own machines, with no AI calls and no GPU, and nothing leaves your network.</p>
+  </section>
+
+  <div class="dp-docs-layout">
+
+    <aside class="dp-docs-sidebar reveal">
+      <nav>
+        <a href="#speed" class="active">How fast</a>
+        <a href="#estimate">How long for yours</a>
+        <a href="#run">Run it</a>
+        <a href="#slow">What takes longer</a>
+        <a href="#where">Where to run it</a>
+        <a href="#measure">Measure it yourself</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </aside>
+
+    <main class="dp-docs-content">
+
+      <h2 id="speed">How fast</h2>
+      <div class="dp-arch-stats">
+        <div class="dp-arch-stat"><div class="dp-arch-stat-val">53</div><div class="dp-arch-stat-lbl">files a second on one workstation</div></div>
+        <div class="dp-arch-stat"><div class="dp-arch-stat-val">4.6M</div><div class="dp-arch-stat-lbl">files a day on that machine</div></div>
+        <div class="dp-arch-stat"><div class="dp-arch-stat-val">0</div><div class="dp-arch-stat-lbl">AI calls for Office files</div></div>
+        <div class="dp-arch-stat"><div class="dp-arch-stat-val">670</div><div class="dp-arch-stat-lbl">MB of memory per process</div></div>
+      </div>
+      <p>Measured on 16 November 2026 with AILANG Parse 0.57.1 on one Apple M4 Max (16 cores) running 12 processes at once, over a mix shaped like an office archive: memos, reports, long documents with tables and pictures, slide decks and spreadsheets, 695&nbsp;KB on average. Every file produced a JSON and a Markdown output.</p>
+      <p>Each output keeps what makes old documents worth searching: headings and section structure, tables with merged cells, lists, comments and tracked changes, speaker notes and sheet names. That structure is what lets a RAG system cite the right section instead of a page of flattened text; the <a href="benchmarks.html">benchmarks</a> score it file by file against other parsers.</p>
+
+      <h2 id="estimate">How long for yours</h2>
+      <p>Time follows the number of documents, not the terabytes. Most of an office archive's bytes are pictures inside documents, and those are not decoded unless you ask for descriptions: a 2&nbsp;MB slide deck full of photos parses about as fast as a short memo. So the first number to find is how many files you have, and how big they are on average.</p>
+      <p>At the measured rate, an archive that is 8&nbsp;TB of Office files:</p>
+      <div class="dp-arch-table-wrap">
+      <table class="dp-config-table">
+        <thead><tr><th>Average file size</th><th class="num">Files in 8&nbsp;TB</th><th class="num">One workstation</th><th class="num">Ten machines</th></tr></thead>
+        <tbody>
+          <tr><td>250 KB</td><td class="num">32 million</td><td class="num">7.0 days</td><td class="num">17 hours</td></tr>
+          <tr><td>695 KB (the measured mix)</td><td class="num">11 million</td><td class="num">2.5 days</td><td class="num">6 hours</td></tr>
+          <tr><td>2 MB</td><td class="num">4 million</td><td class="num">21 hours</td><td class="num">2 hours</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="dp-arch-note">Estimates from the measured rate, before deduplication. Ten machines means ten of the same workstation, each with its own slice of the file list; cloud vCPUs are usually slower per core, so allow for more of them. Reading 8&nbsp;TB off a network share also takes time: about a day over a 1&nbsp;Gbit link.</p>
+      <p>A real archive is rarely all Office files. Video, photos, design files and backups often take most of the space and have no text to extract, and old archives hold many copies of the same file. Counting by type first, and skipping exact copies, usually shrinks the job a lot.</p>
+
+      <h2 id="run">Run it</h2>
+      <p><strong>1. See what is in there.</strong> Count files by type before parsing anything:</p>
+      <pre><code class="language-bash">find /archive -type f | sed -E 's/.*\.([^./]+)$/\1/' | tr 'A-Z' 'a-z' \
+  | sort | uniq -c | sort -rn | head -20</code></pre>
+
+      <p><strong>2. One machine, one command.</strong> <code>-r</code> takes in every subfolder, and the output folder mirrors the archive, so <code>Clients/Acme/2019/Proposal.docx</code> becomes <code>parsed/Clients/Acme/2019/Proposal.docx.json</code> and <code>.md</code>. Files with the same name in different folders never overwrite each other.</p>
+      <pre><code class="language-bash">docparse -r /archive --output-dir /parsed</code></pre>
+
+      <p><strong>3. Every core.</strong> One <code>docparse</code> process uses about one core. Split the file list across processes; <code>DOCPARSE_INPUT_ROOT</code> keeps every slice in the same mirrored layout. Outputs are written as each file finishes, so an interrupted run loses nothing already done.</p>
+      <pre><code class="language-bash">export DOCPARSE_INPUT_ROOT=/archive
+find /archive -type f \( -iname '*.docx' -o -iname '*.pptx' -o -iname '*.xlsx' \
+     -o -iname '*.odt' -o -iname '*.odp' -o -iname '*.ods' -o -iname '*.eml' \) -print0 \
+  | xargs -0 -n 1000 -P 12 docparse --output-dir /parsed</code></pre>
+      <p class="dp-arch-note">Set <code>-P</code> to the number of performance cores. Each process needs about 670&nbsp;MB.</p>
+
+      <p><strong>4. Skip exact copies (optional).</strong> Hash every file and keep the first path for each hash, then feed that list to step 3 instead of <code>find</code>:</p>
+      <pre><code class="language-bash">find /archive -type f \( -iname '*.docx' -o -iname '*.pptx' -o -iname '*.xlsx' \) -print0 \
+  | xargs -0 shasum -a 256 | sort -k1,1 -s | awk '!seen[$1]++' \
+  | cut -c67- > unique.txt          # sha256sum on Linux
+
+tr '\n' '\0' &lt; unique.txt | xargs -0 -n 1000 -P 12 docparse --output-dir /parsed</code></pre>
+
+      <p><strong>5. Load it.</strong> The Markdown is ready for embedding as it is. The JSON gives typed blocks (headings, tables, lists, notes) for <a href="chunking.html">chunking that never cuts a table off its heading</a>.</p>
+
+      <h2 id="slow">What takes longer</h2>
+      <ul>
+        <li><strong>Big spreadsheets.</strong> Time grows with the number of cells: a workbook of three 1,500-row sheets took about 1.5&nbsp;s on one core, and in the measured mix the spreadsheets took more time than all the Word and PowerPoint files together. Workbooks over 250,000 cells are refused with <code>WORKBOOK_TOO_COMPLEX</code>; split them by sheet.</li>
+        <li><strong>PDFs</strong> with a text layer are read with <code>pdftotext</code>, which is quick but was not part of this measurement. <strong>Scanned PDFs</strong> need OCR, which is where large archives get slow and expensive; see <a href="pdf-parsing.html">PDF parsing</a> for the local and AI backends.</li>
+        <li><strong>Images</strong> and <code>--describe</code> (descriptions of pictures inside documents) call an AI model, a few seconds and a fee per image. Leave them off for the first pass.</li>
+        <li><strong>Email</strong> (<a href="email-parsing.html">EML and MBOX</a>) is supported; it was not part of this measurement.</li>
+      </ul>
+
+      <h2 id="where">Where to run it</h2>
+      <div class="dp-arch-table-wrap">
+      <table class="dp-config-table">
+        <thead><tr><th>Where</th><th>Good for</th></tr></thead>
+        <tbody>
+          <tr><td>A workstation or server</td><td>Archives up to a few million files. Install with the <a href="selfhost.html">command-line tool</a>; no account, no key.</td></tr>
+          <tr><td>Containers on many machines</td><td>Bigger archives, or a deadline. The <a href="selfhost.html#docker">Docker image</a> runs the same CLI; give each container a slice of the file list.</td></tr>
+          <tr><td><a href="api.html">Hosted API</a></td><td>A steady stream of new documents after the backfill. Every plan has a daily request limit, so it is not the route for millions of old files.</td></tr>
+          <tr><td>A managed run</td><td>When you would rather not run it yourselves. <a href="https://www.sunholo.com/contact">Contact Sunholo</a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h2 id="measure">Measure it yourself</h2>
+      <p>The corpus generator and the runner are in the repository. The corpus uses invented text and random images, so it can be shared and rebuilt exactly; run it on your own hardware, or point the commands above at a sample of your archive.</p>
+      <pre><code class="language-bash">git clone https://github.com/sunholo-data/ailang-parse && cd ailang-parse
+pip install python-docx python-pptx openpyxl Pillow
+bash benchmarks/throughput/run.sh 1 8 12 16     # process counts to try</code></pre>
+      <p class="dp-arch-note">Results are written to <a href="https://github.com/sunholo-data/ailang-parse/blob/main/benchmarks/throughput/results/latest.json"><code>benchmarks/throughput/results/latest.json</code></a>; the numbers on this page come from that file.</p>
+
+      <div class="dp-faq" id="faq">
+        <h2>Frequently Asked Questions</h2>
+        <details>
+          <summary>Do our documents leave our network?</summary>
+          <div class="dp-faq-answer"><p>No. The command-line tool reads files from your disks and writes JSON and Markdown next to them. Word, PowerPoint and Excel files are parsed without any AI model or network call, so nothing is sent anywhere.</p></div>
+        </details>
+        <details>
+          <summary>Does parsing an archive need a GPU or an AI model?</summary>
+          <div class="dp-faq-answer"><p>Not for Office files. DOCX, PPTX, XLSX and the OpenDocument formats are read directly from the file's XML, on ordinary CPUs. AI is only used if you ask for image descriptions or send scanned pages to the AI PDF backend.</p></div>
+        </details>
+        <details>
+          <summary>Why does the size in terabytes say little about how long it takes?</summary>
+          <div class="dp-faq-answer"><p>Most of the bytes in an office archive are pictures inside documents. They are not decoded unless you ask for descriptions, so a slide deck full of photos parses about as quickly as a short memo. Time follows the number of documents and the amount of text and table data in them.</p></div>
+        </details>
+        <details>
+          <summary>How do I find the original file for a parsed output?</summary>
+          <div class="dp-faq-answer"><p>With <code>-r</code>, or with <code>DOCPARSE_INPUT_ROOT</code> set, the output folder mirrors the archive: <code>Clients/Acme/2019/Proposal.docx</code> becomes <code>Clients/Acme/2019/Proposal.docx.json</code> and <code>.md</code> under the output folder. Two files with the same name in different folders never overwrite each other.</p></div>
+        </details>
+        <details>
+          <summary>Can we use the hosted API for a backfill?</summary>
+          <div class="dp-faq-answer"><p>The hosted API is built for a steady stream of documents, and every plan has a daily request limit. For an archive of millions of files, run the command-line tool or the container on your own machines, or contact Sunholo about a managed run.</p></div>
+        </details>
+      </div>
+
+<!-- nav:related -->
+      <aside class="dp-related" aria-label="Related pages">
+        <h2 id="related">Related pages</h2>
+        <div class="dp-related-grid">
+      <a href="performance.html" class="dp-doc-card" data-find="performance guide parse whole folders quickly. speed batch performance folder">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Performance guide</div>
+          <div class="dp-doc-card-desc">Parse whole folders quickly.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="chunking.html" class="dp-doc-card" data-find="chunking for rag split documents into embedding-sized pieces without cutting a table or losing its heading. chunk rag embeddings split">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Chunking for RAG</div>
+          <div class="dp-doc-card-desc">Split documents into embedding-sized pieces without cutting a table or losing its heading.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+      <a href="selfhost.html" class="dp-doc-card" data-find="run locally install the command-line tool and parse on your own machine. install cli local self-host offline">
+        <div class="dp-doc-card-body">
+          <div class="dp-doc-card-title">Run locally</div>
+          <div class="dp-doc-card-desc">Install the command-line tool and parse on your own machine.</div>
+        </div>
+        <span class="dp-doc-card-arrow">&rarr;</span>
+      </a>
+        </div>
+        <p class="dp-related-all"><a href="docs.html">All documentation &rarr;</a></p>
+      </aside>
+<!-- /nav:related -->
+
+    </main>
+  </div>
+
+  <div id="footer-mount"></div>
+
+</div>
+
+<script src="js/site-data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/bench-data.js"></script>
+<script src="js/prism.min.js"></script>
+<script src="js/prism-ailang.js"></script>
+<script>
+(function() {
+  var links = document.querySelectorAll('.dp-docs-sidebar a');
+  var sections = [];
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').replace('#', '');
+    var sec = document.getElementById(id);
+    if (sec) sections.push({ el: sec, link: link });
+  });
+  function update() {
+    var y = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(s) { if (s.el.offsetTop <= y) current = s; });
+    links.forEach(function(l) { l.classList.remove('active'); });
+    if (current) current.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+</body>
+</html>

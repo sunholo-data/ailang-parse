@@ -168,6 +168,9 @@ Examples:
   docparse report.docx                  Parse Office document
   docparse *.eml                        Batch parse (compile once)
   docparse ~/inbox/                     Parse all files in folder
+  docparse -r ~/Archive/ --output-dir parsed/
+                                        Folder and every subfolder; outputs
+                                        keep the folder structure
   docparse slides.pptx --describe       With AI image descriptions
   docparse report.docx --summarize      With AI summary
   docparse contract.pdf                 PDF (deterministic pdftotext, no AI)
@@ -237,6 +240,7 @@ Options:
   --verify          Enable runtime contract verification
   --budget-report   Show capability budget usage after run
   --output-dir DIR  Copy output files to DIR after parsing
+  -r, --recursive   Folder inputs include their subfolders
   --no-attachment-data  EML/MBOX: omit attachment-data/attachment-ext base64
                     blocks from output (attachment-meta is kept)
   --install-backends
@@ -264,6 +268,9 @@ Output:
   Default <out> is the directory you ran from; --output-dir DIR overrides it. In batch
   mode each file's outputs are written as soon as that file finishes — you
   can inspect completed files mid-batch and nothing is lost on Ctrl+C.
+  When the inputs come from more than one folder (-r, or several paths), each
+  file's outputs go under <out> in its folder relative to the inputs' common
+  folder, so two files with the same name never overwrite each other.
 EOF
 }
 
@@ -464,6 +471,7 @@ AI_MODEL="$DEFAULT_AI_MODEL"
 VERIFY=false
 BUDGET=false
 OUTPUT_DIR=""
+RECURSIVE=false
 # Empty means "the default PDF ladder" (see orchestrator.orchPdf): pdftotext,
 # escalating automatically to docling when the PDF has no text layer, never AI.
 # Only an explicit --pdf-backend flag (or a DOCPARSE_PDF_BACKEND already in the
@@ -572,6 +580,10 @@ while [ $# -gt 0 ]; do
       ;;
     --budget-report)
       BUDGET=true
+      shift
+      ;;
+    -r|--recursive)
+      RECURSIVE=true
       shift
       ;;
     --output-dir)
@@ -750,13 +762,29 @@ SUPPORTED_EXTS_PATTERN='.*\.\(docx\|pptx\|xlsx\|odt\|odp\|ods\|html\|htm\|md\|cs
 
 expand_folder() {
   local dir="$1"
-  find "$dir" -maxdepth 1 -type f | grep -i "${SUPPORTED_EXTS_PATTERN}" | sort
+  if $RECURSIVE; then
+    find "$dir" -type f | grep -i "${SUPPORTED_EXTS_PATTERN}" | sort
+  else
+    find "$dir" -maxdepth 1 -type f | grep -i "${SUPPORTED_EXTS_PATTERN}" | sort
+  fi
+}
+
+# Without -r, say so when a folder's subfolders hold documents: an archive
+# passed as one folder used to parse only its top level, with no sign that
+# anything had been skipped.
+hint_subfolders() {
+  local dir="$1"
+  $RECURSIVE && return 0
+  if find "$dir" -mindepth 2 -type f 2>/dev/null | grep -qi "${SUPPORTED_EXTS_PATTERN}"; then
+    echo "Note: $dir has documents in subfolders; they are skipped. Add -r to include them." >&2
+  fi
 }
 
 # Expand any directories in RESOLVED_FILES
 EXPANDED_FILES=()
 for f in "${RESOLVED_FILES[@]}"; do
   if [ -d "$f" ]; then
+    hint_subfolders "$f"
     while IFS= read -r entry; do
       [ -n "$entry" ] && EXPANDED_FILES+=("$entry")
     done < <(expand_folder "$f")
@@ -771,6 +799,40 @@ if [ ${#EXPANDED_FILES[@]} -eq 0 ]; then
 fi
 
 RESOLVED_FILES=("${EXPANDED_FILES[@]}")
+
+# --- Output layout for inputs from several folders ---
+# Outputs are named after the input file, so a/Proposal.docx and
+# b/Proposal.docx both wrote Proposal.docx.json and the second silently
+# replaced the first. When the inputs span folders, find the deepest folder
+# holding all of them; main.ail writes each file's outputs under
+# <out>/<its folder relative to that root>. Batch runs main once per file, so
+# the root travels as DOCPARSE_INPUT_ROOT. Paths are absolute by now.
+# A DOCPARSE_INPUT_ROOT already in the environment wins: parallel runs over
+# slices of one archive (xargs -P) set it to the archive folder so every slice
+# lays its outputs out the same way.
+INPUT_ROOT="${DOCPARSE_INPUT_ROOT:-}"
+if [ -n "$INPUT_ROOT" ]; then
+  [[ "$INPUT_ROOT" = /* ]] || INPUT_ROOT="$(pwd)/$INPUT_ROOT"
+  INPUT_ROOT="$(cd "$INPUT_ROOT" 2>/dev/null && pwd)" || {
+    echo "Error: DOCPARSE_INPUT_ROOT is not a folder: $DOCPARSE_INPUT_ROOT" >&2
+    exit 1
+  }
+fi
+FIRST_DIR="$(dirname "${RESOLVED_FILES[0]}")"
+for f in "${RESOLVED_FILES[@]}"; do
+  [ -n "${DOCPARSE_INPUT_ROOT:-}" ] && break
+  if [ "$(dirname "$f")" != "$FIRST_DIR" ]; then
+    INPUT_ROOT="$FIRST_DIR"
+    break
+  fi
+done
+if [ -n "$INPUT_ROOT" ] && [ -z "${DOCPARSE_INPUT_ROOT:-}" ]; then
+  for f in "${RESOLVED_FILES[@]}"; do
+    while [[ "$f" != "${INPUT_ROOT%/}/"* ]]; do
+      INPUT_ROOT="$(dirname "$INPUT_ROOT")"
+    done
+  done
+fi
 
 # --- Detect if AI is needed (check all files) ---
 # PDFs default to pdftotext (Process cap, no AI). Only --pdf-backend ai needs AI.
@@ -944,6 +1006,9 @@ fi
 # escalation — see the PDF_BACKEND comment above.
 if [ -n "$PDF_BACKEND" ]; then
   ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
+fi
+if [ -n "$INPUT_ROOT" ]; then
+  ENV_PREFIX+=(DOCPARSE_INPUT_ROOT="$INPUT_ROOT")
 fi
 if [ "$PDF_BACKEND" != "ai" ]; then
   ENV_PREFIX+=(DOCPARSE_PROJECT_ROOT="$PROJECT_DIR")

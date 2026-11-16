@@ -11,6 +11,36 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: same-named files in a batch overwrote each other's output
+
+- Outputs were named after the input file alone, so `docparse a/Proposal.docx b/Proposal.docx`
+  wrote one `Proposal.docx.json` and the second file silently replaced the first. In an archive,
+  where the same name turns up in many folders, most of those documents were lost.
+- When a batch's inputs come from more than one folder, each file's outputs now go under the
+  output folder in its folder relative to the inputs' common folder
+  (`parsed/Clients/Acme/2019/Proposal.docx.json`). A batch from one folder is laid out flat,
+  exactly as before. `DOCPARSE_INPUT_ROOT` sets the root explicitly, so separate runs over slices
+  of one archive (`xargs -P`) share one layout.
+- `bin/docparse.cmd` (Windows) is unchanged: its folder input is one level deep, so its inputs
+  share a folder.
+
+### Added: `-r` / `--recursive` for folder inputs
+
+- A folder input read only its top level, with no sign that subfolders were skipped.
+  `docparse -r /archive --output-dir parsed/` now takes in every subfolder. Without `-r`, a folder
+  whose subfolders hold documents prints a note saying so.
+- Regression: `benchmarks/check_batch_output_tree.py` (CI) runs the CLI on a nested tree with
+  same-named files: `-r`, explicit paths from two folders, one folder, and `DOCPARSE_INPUT_ROOT`
+  across two runs.
+
+### Added: archive throughput benchmark and the document archives page
+
+- `benchmarks/throughput/` builds an archive-shaped mix of Word, PowerPoint and Excel files
+  (invented text, random images, fixed seed) and times `docparse` with 1 to N processes.
+  Results: `benchmarks/throughput/results/latest.json`.
+- `docs/document-archives.html`: how long a large archive takes, how to run it on every core,
+  and what takes longer (big spreadsheets, scanned PDFs, image descriptions).
+
 ## [v0.57.1](https://github.com/sunholo-data/ailang-parse/compare/v0.57.0...v0.57.1) — 2026-11-12
 
 ### Fixed: PDF annotations inside compressed object streams were not found
