@@ -11,6 +11,10 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.58.0](https://github.com/sunholo-data/ailang-parse/compare/v0.57.1...v0.58.0) — 2026-11-17
+
+**Requires AILANG >= 0.58.0** (was >= 0.50.0): the redaction pipeline's guarantee depends on IFC labels crossing module boundaries, which older toolchains do not enforce.
+
 ### Added: redaction pipeline, phase 1 — leaks are compile errors (`docparse/redact/`)
 
 - Four modules, no CLI yet: `source` (the one entry: `parseDocumentPure` with no image
