@@ -176,7 +176,7 @@ export func writeReport(path: string, body: string{not doc_content}) -> unit ! {
 export func logLine(msg: string{not doc_content}) -> unit ! {IO}
 ```
 
-### 6. The lint that closes F
+### 6. The lint that closes F (stop-gap until AILANG asks 1–2 ship)
 
 `benchmarks/check_redact_confinement.py` (CI) fails if, in `docparse/redact/`:
 
@@ -247,16 +247,20 @@ May not:
 - A no-egress check: run `--redact` on the corpus under a fresh `TMPDIR`, assert the only
   files created are the declared outputs.
 
-## AILANG asks (filed upstream, not blockers)
+## AILANG dependencies (decision 2026-11-17: wait for the fixes)
 
-1. **Read-only filesystem effect** (`FS[mode=read]`). `source.ail` needs `FS` to read the
-   document, which also lets it write; today the lint covers that. A read-only scope would
-   make it a compile error.
-2. **Labelled stdlib sinks.** An opt-in way to make stdlib egress (`writeFile`,
-   `httpRequest`, AI calls, `println`) refuse a named label in a module, which would remove
-   the need for half of §6.
-3. **`m-ifc-cross-module-labels`** (case D). Not needed by this design, which labels values,
-   but it would let `RedactedResult` and policy types carry labels across modules.
+Ruling: build on AILANG fixes rather than carry our own workarounds. Filed 2026-11-17 to the
+AILANG core inbox, each with a stand-alone repro on v0.60.4:
+
+| # | Ask | Message | Replaces |
+|---|---|---|---|
+| 1 | **Opt-in egress policy**: make stdlib egress (`writeFile`, `httpRequest` bodies, AI prompts, `println`, logging) refuse named labels in a package, e.g. `[ifc] egress_forbid = ["doc_content"]` in `ailang.toml` | `inbox_1794904480678_78279b88` | the effect-row half of the §6 lint (case F) |
+| 2 | **Read-only filesystem mode** (`FS[mode=read]`) | `inbox_1794904481642_78d008c2` | the §6 rule that `source.ail` writes nothing |
+| 3 | **Labels declared inside an imported type are enforced** (case D) | `inbox_1794904479590_98ebc047` | the "label values, never types" rule; lets `RedactedResult` and the document model carry labels across modules |
+
+Phase 1 can still start before they land (labels on values, one declassifier, the egress
+module and the §7 negative tests need none of them). The §6 lint is then the stop-gap,
+deleted rule by rule as each fix ships; if a fix slips past phase 2, the lint stays.
 
 ## Open questions
 
