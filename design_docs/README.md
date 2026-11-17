@@ -26,6 +26,7 @@ design_docs/
 │   ├── v0_12_0/             # AILANG package registry
 │   ├── v0_13_0/             # RAG pipeline (chunking, hierarchy, embeddings)
 │   ├── v0_53_0/             # Slide pagination for PPTX/ODP, SVG images in ODF
+│   ├── v0_58_0/             # Redaction with information-flow control (PRIORITY)
 │   └── v0_4_0_go_binary.md  # Go binary — blocked on AILANG compiler bugs
 ├── archive/                  # Superseded or abandoned designs
 │   ├── authalla_evaluation.md     # Superseded by Firebase Auth
@@ -136,6 +137,12 @@ Designs that were superseded or abandoned (never delete — move here).
 ---
 
 ## Roadmap (Planned)
+
+### v0.58.0 — Redaction with information-flow control `PRIORITY`
+- `docparse --redact`: outputs hold only redacted text; comment, tracked-change and document authors always pseudonymised; a per-file redaction report (counts, never values)
+- AILANG IFC labels make "every output went through the redactor" a compile error: one labelled entry point (`parseDocumentPure`, `! {FS}`), one scoped declassifier, one egress module, a confinement lint and negative tests in CI
+- Deterministic pattern detectors and known-name search first; local-model name detection later; recall/precision measured on a synthetic corpus before any site claim
+- [Design Doc](planned/v0_58_0/v0_58_0_ifc_redaction.md)
 
 ### v0.10.0 — Quarto, Trust & Deferred v0.9.0 Items
 - Quarto Markdown generation with two rendering engines (Phase 1 only — see v0.21.0 for the re-scoped render layer)
