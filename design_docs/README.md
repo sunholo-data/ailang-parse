@@ -138,7 +138,7 @@ Designs that were superseded or abandoned (never delete — move here).
 
 ## Roadmap (Planned)
 
-### v0.58.0 — Redaction with information-flow control `PRIORITY`
+### v0.58.0 — Redaction with information-flow control `PRIORITY` (phase 1 implemented, unreleased)
 - `docparse --redact`: outputs hold only redacted text; comment, tracked-change and document authors always pseudonymised; a per-file redaction report (counts, never values)
 - AILANG IFC labels make "every output went through the redactor" a compile error: one labelled entry point (`parseDocumentPure`, `! {FS}`), one scoped declassifier, one egress module, a confinement lint and negative tests in CI
 - Deterministic pattern detectors and known-name search first; local-model name detection later; recall/precision measured on a synthetic corpus before any site claim

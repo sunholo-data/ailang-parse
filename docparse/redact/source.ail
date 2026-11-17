@@ -1,0 +1,28 @@
+module docparse/redact/source
+
+-- The one way document content enters the redaction pipeline.
+--
+-- Everything this returns is labelled <doc_content>: text that came from a
+-- parsed document and has not been through the redactor. The label is on the
+-- VALUE (the function's return type), never only inside a type declaration:
+-- AILANG enforces labels on imported values (>= v0.58.0) but not labels written
+-- inside imported types (design v0_58_0_ifc_redaction.md, case D).
+--
+-- parseDocumentPure is ! {FS}: no AI, no network, no subprocess, proved by its
+-- effect row. extractImages = false and useAI = false stop DOCX and PPTX image
+-- extraction, the only place parsing writes files (image temp files).
+--
+-- Stop-gap until AILANG ships FS[mode=read]: FS also permits writes, so
+-- benchmarks/check_redact_confinement.py checks this module calls nothing but
+-- parseDocumentPure.
+
+import std/result (Ok, Err)
+import docparse/services/orchestrator (parseDocumentPure, defaultParseOptions, ParseOutcome)
+
+export func redactSource(path: string) -> Result[ParseOutcome<doc_content>, string] ! {FS} {
+  let base = defaultParseOptions();
+  match parseDocumentPure(path, {base | extractImages: false, useAI: false}) {
+    Ok(o) => Ok(o),
+    Err(e) => Err("not supported in redaction mode: ${e}")
+  }
+}

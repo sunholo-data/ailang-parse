@@ -1,0 +1,184 @@
+module scripts/verify_redaction
+
+-- Behaviour of the phase-1 redactor (docparse/redact/core), on hand-built
+-- documents (exact cases) and on public fixtures through the labelled entry
+-- point (docparse/redact/source). The IFC guarantee itself is proved by
+-- benchmarks/check_redact_ifc.sh; this checks the redactor does what it says.
+--
+--   ailang run --quiet --entry main --caps IO,FS scripts/verify_redaction.ail
+--
+-- Exit status: prints "FAIL" lines and a non-zero count on failure.
+
+import std/io (println)
+import std/result (Ok, Err)
+import std/string (length, contains, intToStr, trim)
+import std/list (map, filter, foldl, length as listLength, any, concat)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock,
+  AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, InlineRun, TableCell, plainRun,
+  ParsedDocument, DocMetadata, ExtractionResult)
+import docparse/services/orchestrator (ParseOutcome, parseDocumentPure, defaultParseOptions)
+import docparse/services/output_formatter (formatResult)
+import docparse/services/markdown_writer (renderMarkdown)
+import docparse/redact/policy (RedactPolicy, RedactedResult, defaultRedactPolicy)
+import docparse/redact/source (redactSource)
+import docparse/redact/core (redactOutcome)
+
+-- ── helpers ──────────────────────────────────────────────────────────────────
+
+func vrCheck(ok: bool, msg: string) -> int ! {IO} {
+  println(if ok then "  ok   ${msg}" else "  FAIL ${msg}");
+  if ok then 0 else 1
+}
+
+pure func vrRun(text: string, href: string) -> InlineRun = {plainRun(text) | href: href}
+
+pure func vrFlatten(bs: [Block]) -> [Block] =
+  foldl(\acc b. match b {
+    SectionBlock(s) => acc ++ [b] ++ vrFlatten(s.blocks),
+    _ => acc ++ [b]
+  }, [], bs)
+
+pure func vrAuthors(bs: [Block]) -> [string] =
+  foldl(\acc b. match b {
+    CommentBlock(c) => if length(trim(c.author)) > 0 then acc ++ [c.author] else acc,
+    ChangeBlock(c) => if length(trim(c.author)) > 0 then acc ++ [c.author] else acc,
+    _ => acc
+  }, [], vrFlatten(bs))
+
+pure func vrCount(p: Block -> bool, bs: [Block]) -> int = listLength(filter(p, vrFlatten(bs)))
+
+pure func vrIsDelete(b: Block) -> bool = match b { ChangeBlock(c) => c.changeType == "delete", _ => false }
+pure func vrIsNotes(b: Block) -> bool = match b { SectionBlock(s) => s.kind == "notes", _ => false }
+pure func vrIsComment(b: Block) -> bool = match b { CommentBlock(_) => true, _ => false }
+pure func vrHasData(b: Block) -> bool = match b {
+  ImageBlock(i) => length(i.data) > 0 || length(i.srcset) > 0,
+  AudioBlock(a) => length(a.data) > 0,
+  VideoBlock(v) => length(v.data) > 0,
+  _ => false
+}
+pure func vrCommentHasText(b: Block) -> bool =
+  match b { CommentBlock(c) => length(c.text) > 0 || length(c.anchorText) > 0, _ => false }
+
+pure func vrRender(r: RedactedResult) -> string =
+  "${formatResult({document: r.document, warnings: r.warnings, aiCallsUsed: 0})}${renderMarkdown(r.document)}"
+
+pure func vrPolicy(comments: bool, deletions: bool, notes: bool) -> RedactPolicy =
+  {keepCommentText: comments, keepDeletions: deletions, keepSpeakerNotes: notes}
+
+-- ── a hand-built document with every case ───────────────────────────────────
+
+pure func vrComment(author: string, text: string) -> Block =
+  CommentBlock({id: "1", author: author, date: "2020-01-01", text: text, anchorText: "the clause",
+                anchorKind: "range", anchored: true, anchorBlockIndex: 0, parentId: "", resolved: false})
+
+pure func vrSynthetic() -> ParseOutcome = {
+  document: {
+    format: "docx", filename: "synthetic.docx",
+    metadata: {title: "Plan", author: "Ada Example", created: "", modified: "", pageCount: 1},
+    blocks: [
+      TextBlock({text: "Write to us", style: "", level: 0,
+                 runs: [vrRun("Write to us", "mailto:ada@example.invalid"), vrRun(" or call", "tel:+4500000000")]}),
+      LinkBlock({text: "portal", href: "https://example.invalid/a/b?session=XYZ&user=ada", title: ""}),
+      LinkBlock({text: "docs", href: "https://example.invalid/docs", title: ""}),
+      vrComment("Ben Sample", "Ben's private remark"),
+      ChangeBlock({changeType: "delete", author: "Cleo Test", date: "", text: "old price 100"}),
+      ChangeBlock({changeType: "insert", author: "Ada Example", date: "", text: "new price 90"}),
+      ImageBlock({data: "iVBORw0KGgo=", description: "", mime: "image/png", width: 10, height: 20,
+                  srcset: "", title: "", loading: ""}),
+      SectionBlock({kind: "slide", name: "Slide 1", blocks: [
+        vrComment("Cleo Test", "nested remark"),
+        SectionBlock({kind: "notes", name: "Slide 1", blocks: [
+          TextBlock({text: "speaker says hi", style: "", level: 0, runs: []})]})
+      ]})
+    ]
+  },
+  warnings: [], notes: [], aiCallsUsed: 0
+}
+
+func vrSyntheticChecks() -> int ! {IO, Declassify[label=doc_content]} {
+  println("Hand-built document");
+  let raw = vrSynthetic();
+  let rawBlocks = raw.document.blocks;
+  let d = redactOutcome(defaultRedactPolicy(), raw);
+  let out = vrRender(d);
+  let bs = d.document.blocks;
+  let names = ["Ada Example", "Ben Sample", "Cleo Test"];
+  let f1 = vrCheck(listLength(filter(\a. any(\n. a == n, names), vrAuthors(bs))) == 0,
+                   "no comment or change author survives as written");
+  let f2 = vrCheck(d.document.metadata.author == "Reviewer 1", "document author is Reviewer 1 (first to appear)");
+  let f3 = vrCheck(contains(out, "Reviewer 2") && contains(out, "Reviewer 3"), "comment and change authors numbered by first appearance");
+  let f4 = vrCheck(d.report.authorsPseudonymised == 3, "report: 3 people pseudonymised (got ${intToStr(d.report.authorsPseudonymised)})");
+  let f5 = vrCheck(vrCount(vrIsDelete, bs) == 0 && d.report.deletionsDropped == 1, "tracked deletion dropped by default, counted");
+  let f6 = vrCheck(contains(out, "new price 90"), "insertions kept");
+  let f7 = vrCheck(vrCount(vrHasData, bs) == 0 && d.report.mediaDropped == 1, "image data dropped, counted");
+  let f8 = vrCheck(contains(out, "10") && contains(out, "image/png"), "image mime and size kept");
+  let f9 = vrCheck(contains(out, "ada@example.invalid") == false && contains(out, "+4500000000") == false,
+                   "mailto: and tel: targets gone");
+  let f10 = vrCheck(contains(out, "session=XYZ") == false && contains(out, "https://example.invalid/a/b"),
+                    "query string dropped, scheme/host/path kept");
+  let f11 = vrCheck(d.report.linksRewritten == 3, "report: 3 links rewritten (got ${intToStr(d.report.linksRewritten)})");
+  let f12 = vrCheck(contains(out, "Ben's private remark") && vrCount(vrIsNotes, bs) == 1,
+                    "default policy keeps comment text and speaker notes");
+  let f13 = vrCheck(d.report.touchedBlocks == [0, 1, 3, 4, 5, 6, 7],
+                    "touchedBlocks lists exactly the changed top-level blocks (got ${show(d.report.touchedBlocks)})");
+  let strict = redactOutcome(vrPolicy(false, false, false), raw);
+  let so = vrRender(strict);
+  let f14 = vrCheck(contains(so, "private remark") == false && contains(so, "nested remark") == false
+                    && strict.report.commentsDropped == 2, "keepCommentText=false empties both comments, counted");
+  let f15 = vrCheck(vrCount(vrIsNotes, strict.document.blocks) == 0 && contains(so, "speaker says hi") == false
+                    && strict.report.notesDropped == 1, "keepSpeakerNotes=false drops nested notes, counted");
+  let keepDel = redactOutcome(vrPolicy(true, true, true), raw);
+  let f16 = vrCheck(vrCount(vrIsDelete, keepDel.document.blocks) == 1 && keepDel.report.deletionsDropped == 0,
+                    "keepDeletions=true keeps the deletion (author still pseudonymised)");
+  let f17 = vrCheck(vrRender(redactOutcome(defaultRedactPolicy(), raw)) == out, "deterministic: same input, same output");
+  f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9 + f10 + f11 + f12 + f13 + f14 + f15 + f16 + f17
+}
+
+-- ── public fixtures through the labelled entry point ────────────────────────
+
+func vrFixture(path: string, policy: RedactPolicy) -> int ! {IO, FS, Declassify[label=doc_content]} {
+  println(path);
+  let base = defaultParseOptions();
+  match parseDocumentPure(path, {base | extractImages: false, useAI: false}) {
+    Err(e) => vrCheck(false, "fixture parses: ${e}"),
+    Ok(raw) => match redactSource(path) {
+      Err(e) => vrCheck(false, "redactSource: ${e}"),
+      Ok(o) => {
+        let d = redactOutcome(policy, o);
+        let rawNames = concat(vrAuthors(raw.document.blocks),
+                              if length(trim(raw.document.metadata.author)) > 0 then [raw.document.metadata.author] else []);
+        let left = filter(\a. any(\n. a == n, rawNames),
+                          concat(vrAuthors(d.document.blocks), [d.document.metadata.author]));
+        let f1 = vrCheck(listLength(left) == 0, "no author field keeps a real name (${intToStr(listLength(rawNames))} author fields in source)");
+        let f2 = vrCheck(d.report.deletionsDropped == (if policy.keepDeletions then 0 else vrCount(vrIsDelete, raw.document.blocks)),
+                         "deletions dropped = deletions in source (${intToStr(d.report.deletionsDropped)})");
+        let f3 = vrCheck(d.report.notesDropped == (if policy.keepSpeakerNotes then 0 else vrCount(vrIsNotes, raw.document.blocks)),
+                         "notes dropped = notes in source (${intToStr(d.report.notesDropped)})");
+        let f4 = vrCheck(vrCount(vrHasData, d.document.blocks) == 0, "no media data in output");
+        let f5 = vrCheck(vrRender(redactOutcome(policy, o)) == vrRender(d), "deterministic");
+        f1 + f2 + f3 + f4 + f5
+      }
+    }
+  }
+}
+
+func vrRefusal() -> int ! {IO, FS} {
+  println("Formats outside parseDocumentPure");
+  match redactSource("data/test_files/simple_text.pdf") {
+    Ok(_) => vrCheck(false, "a PDF is refused in redaction mode"),
+    Err(e) => vrCheck(contains(e, "not supported in redaction mode"), "a PDF is refused in redaction mode")
+  }
+}
+
+export func main() -> unit ! {IO, FS, Declassify[label=doc_content]} {
+  let a = vrSyntheticChecks();
+  let b = vrFixture("data/test_files/comments.docx", vrPolicy(false, false, true));
+  let c = vrFixture("data/test_files/track_changes_move.docx", defaultRedactPolicy());
+  let e = vrFixture("data/test_files/pptx_slide_order_notes.pptx", vrPolicy(true, false, false));
+  let g = vrFixture("data/test_files/poi_comment.pptx", defaultRedactPolicy());
+  let k = vrFixture("data/test_files/pandoc_tc_deletion.docx", defaultRedactPolicy());
+  let h = vrRefusal();
+  let failed = a + b + c + e + g + h + k;
+  println("");
+  println(if failed == 0 then "redaction: all checks passed" else "redaction: ${intToStr(failed)} check(s) FAILED")
+}

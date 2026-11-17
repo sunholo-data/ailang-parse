@@ -1,0 +1,193 @@
+module docparse/redact/core
+
+-- The redactor: the ONE place in docparse/redact/ that removes <doc_content>.
+--
+-- redactOutcome takes what docparse/redact/source returns (labelled) and gives
+-- back an unlabelled RedactedResult. Changing a label needs ! {Declassify}; the
+-- scope [label=doc_content] means it can drop only that label, so any other
+-- label on its input survives. Every other function here is pure (! {}), so this
+-- module can neither write, print nor send: the compiler rejects a writeFile here
+-- for want of FS. benchmarks/check_redact_ifc.sh proves both, and
+-- benchmarks/check_redact_confinement.py checks this stays the only Declassify.
+--
+-- Phase 1 (design v0_58_0_ifc_redaction.md): keep/drop policy and author
+-- pseudonyms. Detection of personal data in body text is phase 2.
+
+import std/string (length, toLower, startsWith, substring, find, trim, intToStr)
+import std/list (map, foldl, reverse, length as listLength)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock,
+  AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock,
+  TableCell, InlineRun, ParsedDocument, DocMetadata)
+import docparse/services/orchestrator (ParseOutcome)
+import docparse/redact/policy (RedactPolicy, RedactionReport, RedactedResult)
+
+-- Per-block tallies while walking the tree. `changed` marks a top-level block
+-- for the report's touchedBlocks.
+type RcCounts = {comments: int, deletions: int, notes: int, media: int, links: int, changed: bool}
+
+type RcStep = {blocks: [Block], counts: RcCounts}
+
+pure func redactCoreZero() -> RcCounts =
+  {comments: 0, deletions: 0, notes: 0, media: 0, links: 0, changed: false}
+
+pure func redactCoreAdd(a: RcCounts, b: RcCounts) -> RcCounts = {
+  comments: a.comments + b.comments, deletions: a.deletions + b.deletions,
+  notes: a.notes + b.notes, media: a.media + b.media, links: a.links + b.links,
+  changed: a.changed || b.changed
+}
+
+-- ── Authors ──────────────────────────────────────────────────────────────────
+-- Every person named as an author: the document's own author, then comment and
+-- tracked-change authors in reading order. Distinct, trimmed, empty skipped.
+
+pure func redactCoreAddName(names: [string], raw: string) -> [string] {
+  let n = trim(raw);
+  if length(n) == 0 || redactCoreIndexOf(names, n, 0) >= 0 then names else names ++ [n]
+}
+
+pure func redactCoreIndexOf(names: [string], n: string, i: int) -> int =
+  match names {
+    [] => -1,
+    x :: rest => if x == n then i else redactCoreIndexOf(rest, n, i + 1)
+  }
+
+pure func redactCoreBlockAuthors(names: [string], b: Block) -> [string] =
+  match b {
+    CommentBlock(c) => redactCoreAddName(names, c.author),
+    ChangeBlock(c) => redactCoreAddName(names, c.author),
+    SectionBlock(s) => foldl(\acc x. redactCoreBlockAuthors(acc, x), names, s.blocks),
+    _ => names
+  }
+
+export pure func redactCoreAuthors(doc: ParsedDocument) -> [string] =
+  foldl(\acc b. redactCoreBlockAuthors(acc, b), redactCoreAddName([], doc.metadata.author), doc.blocks)
+
+-- "Reviewer N" for a known author, numbered by first appearance; "" stays "".
+export pure func redactCorePseudonym(names: [string], raw: string) -> string {
+  let i = redactCoreIndexOf(names, trim(raw), 0);
+  if i < 0 then "" else "Reviewer ${intToStr(i + 1)}"
+}
+
+-- ── Links ────────────────────────────────────────────────────────────────────
+-- mailto: and tel: name a person; other URLs keep scheme, host and path, and
+-- lose the query string (session tokens, e-mail addresses in parameters).
+
+export pure func redactCoreHref(href: string) -> string {
+  let low = toLower(trim(href));
+  if startsWith(low, "mailto:") then "[EMAIL]"
+  else if startsWith(low, "tel:") then "[PHONE]"
+  else {
+    let q = find(href, "?");
+    if q >= 0 then substring(href, 0, q) else href
+  }
+}
+
+pure func redactCoreRun(r: InlineRun) -> InlineRun = {r | href: redactCoreHref(r.href)}
+
+pure func redactCoreRunsChanged(runs: [InlineRun]) -> int =
+  foldl(\acc r. acc + (if redactCoreHref(r.href) == r.href then 0 else 1), 0, runs)
+
+pure func redactCoreCell(c: TableCell) -> TableCell = {c | runs: map(redactCoreRun, c.runs)}
+
+pure func redactCoreCellsChanged(cells: [TableCell]) -> int =
+  foldl(\acc c. acc + redactCoreRunsChanged(c.runs), 0, cells)
+
+pure func redactCoreLinks(n: int) -> RcCounts = {redactCoreZero() | links: n, changed: n > 0}
+
+-- ── Blocks ───────────────────────────────────────────────────────────────────
+
+pure func redactCoreKeep(b: Block, c: RcCounts) -> RcStep = {blocks: [b], counts: c}
+
+pure func redactCoreDrop(c: RcCounts) -> RcStep = {blocks: [], counts: {c | changed: true}}
+
+pure func redactCoreMedia(hasData: bool) -> RcCounts =
+  if hasData then {redactCoreZero() | media: 1, changed: true} else redactCoreZero()
+
+pure func redactCoreBlock(p: RedactPolicy, names: [string], b: Block) -> RcStep =
+  match b {
+    TextBlock(t) => redactCoreKeep(TextBlock({t | runs: map(redactCoreRun, t.runs)}),
+                                   redactCoreLinks(redactCoreRunsChanged(t.runs))),
+    HeadingBlock(h) => redactCoreKeep(HeadingBlock({h | runs: map(redactCoreRun, h.runs)}),
+                                      redactCoreLinks(redactCoreRunsChanged(h.runs))),
+    ListBlock(l) => redactCoreKeep(
+      ListBlock({l | itemRuns: map(\rs. map(redactCoreRun, rs), l.itemRuns)}),
+      redactCoreLinks(foldl(\acc rs. acc + redactCoreRunsChanged(rs), 0, l.itemRuns))),
+    TableBlock(t) => redactCoreKeep(
+      TableBlock({t | rows: map(\row. map(redactCoreCell, row), t.rows),
+                      headers: map(redactCoreCell, t.headers)}),
+      redactCoreLinks(foldl(\acc row. acc + redactCoreCellsChanged(row), redactCoreCellsChanged(t.headers), t.rows))),
+    ImageBlock(i) => redactCoreKeep(ImageBlock({i | data: "", srcset: ""}),
+                                    redactCoreMedia(length(i.data) > 0 || length(i.srcset) > 0)),
+    AudioBlock(a) => redactCoreKeep(AudioBlock({a | data: ""}), redactCoreMedia(length(a.data) > 0)),
+    VideoBlock(v) => redactCoreKeep(VideoBlock({v | data: ""}), redactCoreMedia(length(v.data) > 0)),
+    LinkBlock(l) => {
+      let h = redactCoreHref(l.href);
+      redactCoreKeep(LinkBlock({l | href: h}), redactCoreLinks(if h == l.href then 0 else 1))
+    },
+    ChangeBlock(c) =>
+      if c.changeType == "delete" && p.keepDeletions == false
+      then redactCoreDrop({redactCoreZero() | deletions: 1})
+      else redactCoreKeep(ChangeBlock({c | author: redactCorePseudonym(names, c.author)}),
+                          {redactCoreZero() | changed: length(trim(c.author)) > 0}),
+    CommentBlock(c) => {
+      let dropText = p.keepCommentText == false;
+      let hadText = length(c.text) > 0 || length(c.anchorText) > 0;
+      redactCoreKeep(
+        CommentBlock({c | author: redactCorePseudonym(names, c.author),
+                          text: if dropText then "" else c.text,
+                          anchorText: if dropText then "" else c.anchorText}),
+        {redactCoreZero() | comments: if dropText && hadText then 1 else 0,
+                            changed: length(trim(c.author)) > 0 || (dropText && hadText)})
+    },
+    SectionBlock(s) =>
+      if s.kind == "notes" && p.keepSpeakerNotes == false
+      then redactCoreDrop({redactCoreZero() | notes: 1})
+      else {
+        let inner = redactCoreBlocks(p, names, s.blocks);
+        redactCoreKeep(SectionBlock({s | blocks: inner.blocks}), inner.counts)
+      }
+  }
+
+pure func redactCoreBlocks(p: RedactPolicy, names: [string], bs: [Block]) -> RcStep {
+  let acc = foldl(\a b. {
+      let st = redactCoreBlock(p, names, b);
+      {blocks: reverse(st.blocks) ++ a.blocks, counts: redactCoreAdd(a.counts, st.counts)}
+    }, {blocks: [], counts: redactCoreZero()}, bs);
+  {blocks: reverse(acc.blocks), counts: acc.counts}
+}
+
+-- Top level: as redactCoreBlocks, plus the indices of blocks that changed.
+type RcTop = {blocks: [Block], counts: RcCounts, touched: [int], index: int}
+
+pure func redactCoreTop(p: RedactPolicy, names: [string], bs: [Block]) -> RcTop {
+  let acc = foldl(\a b. {
+      let st = redactCoreBlock(p, names, b);
+      {blocks: reverse(st.blocks) ++ a.blocks,
+       counts: redactCoreAdd(a.counts, {st.counts | changed: false}),
+       touched: if st.counts.changed then a.index :: a.touched else a.touched,
+       index: a.index + 1}
+    }, {blocks: [], counts: redactCoreZero(), touched: [], index: 0}, bs);
+  {acc | blocks: reverse(acc.blocks), touched: reverse(acc.touched)}
+}
+
+-- ── The declassifier ─────────────────────────────────────────────────────────
+
+export func redactOutcome(p: RedactPolicy, o: ParseOutcome<doc_content>)
+  -> RedactedResult ! {Declassify[label=doc_content]} {
+  let doc = o.document;
+  let names = redactCoreAuthors(doc);
+  let top = redactCoreTop(p, names, doc.blocks);
+  let meta = doc.metadata;
+  let report: RedactionReport = {
+    authorsPseudonymised: listLength(names),
+    commentsDropped: top.counts.comments,
+    deletionsDropped: top.counts.deletions,
+    notesDropped: top.counts.notes,
+    mediaDropped: top.counts.media,
+    linksRewritten: top.counts.links,
+    touchedBlocks: top.touched
+  };
+  {document: {doc | blocks: top.blocks, metadata: {meta | author: redactCorePseudonym(names, meta.author)}},
+   warnings: o.warnings,
+   report: report}
+}

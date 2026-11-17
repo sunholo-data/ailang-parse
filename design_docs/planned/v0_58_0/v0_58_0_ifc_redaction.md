@@ -1,6 +1,6 @@
 # Design Doc: Redaction with information-flow control (v0.58.0)
 
-**Status**: Planned — **priority** (moved ahead of the older roadmap items, 2026-11-17)
+**Status**: Phase 1 implemented (unreleased, 2026-11-17; [sprint plan](sprint-plan-ifc-redaction-phase1.md)). Phases 2–3 planned — **priority**
 **Date**: 2026-11-17
 **Author**: Mark + Claude
 **Builds on**: AILANG IFC labels (`! {Declassify}`, `{not ℓ}` sinks, cross-module labels since

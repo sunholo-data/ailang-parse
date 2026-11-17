@@ -1,0 +1,27 @@
+module docparse/redact/egress
+
+-- The only module in docparse/redact/ allowed to write, print or send.
+--
+-- Every string parameter is {not doc_content}: a value still carrying the label
+-- (anything from docparse/redact/source that has not been through
+-- docparse/redact/core.redactOutcome) is a compile error here, in this module or
+-- any module that imports it.
+--
+-- Stop-gap until AILANG can make stdlib egress refuse a label (design, AILANG
+-- dependency 1): std/fs.writeFile itself accepts labelled values, so
+-- benchmarks/check_redact_confinement.py checks no other redact module reaches it.
+
+import std/fs (writeFile)
+import std/io (println)
+
+export func writeRedactedJson(path: string{not doc_content}, body: string{not doc_content}) -> unit ! {FS} =
+  writeFile(path, body)
+
+export func writeRedactedMarkdown(path: string{not doc_content}, body: string{not doc_content}) -> unit ! {FS} =
+  writeFile(path, body)
+
+export func writeRedactionReport(path: string{not doc_content}, body: string{not doc_content}) -> unit ! {FS} =
+  writeFile(path, body)
+
+export func logRedacted(msg: string{not doc_content}) -> unit ! {IO} =
+  println(msg)
