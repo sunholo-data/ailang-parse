@@ -11,6 +11,28 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Added: redaction pipeline, phase 1 — leaks are compile errors (`docparse/redact/`)
+
+- Four modules, no CLI yet: `source` (the one entry: `parseDocumentPure` with no image
+  extraction, result labelled `<doc_content>`), `core` (`redactOutcome`, the one declassifier,
+  `! {Declassify[label=doc_content]}`), `egress` (the only module that writes or prints; every
+  parameter `{not doc_content}`), `policy` (types).
+- What phase 1 redacts: comment, tracked-change and document authors become `Reviewer N`
+  (numbered by first appearance); tracked deletions dropped by default; comment text and
+  speaker notes optional; image/audio/video data always dropped; `mailto:`/`tel:` links replaced,
+  query strings removed. A report gives counts and block positions, never values. Detection of
+  personal data in body text is phase 2; nothing here claims to find it.
+- What is proved: `benchmarks/check_redact_ifc.sh` (CI) writes each way of leaking unredacted
+  content into a scratch copy and asserts `ailang check` rejects it — straight to egress, logged,
+  laundered under a cleaner label, through a helper, through a declassifier scoped to another
+  label — and that the clean pipeline compiles. `benchmarks/check_redact_confinement.py` is the
+  stop-gap for what AILANG cannot check yet (stdlib egress accepts labelled values; `FS` also
+  permits writes); it goes when AILANG ships the egress policy and `FS[mode=read]`.
+- `scripts/verify_redaction.ail`: 45 behaviour checks on hand-built documents and public fixtures.
+- **AILANG floor raised to `>=0.58.0`** (was `>=0.50.0`). On v0.57.4 labels stop at module
+  boundaries: three of the leaks above compile clean (measured). `Declassify` added to
+  `[effects].max` (compile-time only, never a runtime capability).
+
 ### Fixed: Markdown to PowerPoint put every heading on one slide (#160)
 
 - A source with no slides of its own (Markdown, DOCX, HTML) went onto a single slide, however it

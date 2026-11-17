@@ -1,0 +1,44 @@
+module docparse/redact/policy
+
+-- Types for the redaction pipeline. Pure: no effects, no labels.
+--
+-- No label is written inside these types on purpose: AILANG does not yet
+-- enforce labels declared inside a type when another module imports it
+-- (design v0_58_0_ifc_redaction.md, case D). Labels go on values instead.
+
+import docparse/types/document (ParsedDocument)
+
+-- Phase 1 choices: keep or drop. Detection (patterns, known names) is phase 2.
+export type RedactPolicy = {
+  keepCommentText: bool,    -- CommentBlock text and the text it is anchored to
+  keepDeletions: bool,      -- ChangeBlock deletions: text the author removed
+  keepSpeakerNotes: bool    -- SectionBlock(kind="notes")
+}
+
+-- Counts and positions only. Never a value from the document.
+export type RedactionReport = {
+  authorsPseudonymised: int,   -- distinct people replaced by "Reviewer N"
+  commentsDropped: int,        -- comment texts removed (author kept as pseudonym)
+  deletionsDropped: int,
+  notesDropped: int,
+  mediaDropped: int,           -- image/audio/video payloads removed
+  linksRewritten: int,         -- mailto:/tel: replaced, query strings dropped
+  touchedBlocks: [int]         -- indices of top-level blocks that changed
+}
+
+export type RedactedResult = {
+  document: ParsedDocument,
+  warnings: [string],
+  report: RedactionReport
+}
+
+export pure func defaultRedactPolicy() -> RedactPolicy = {
+  keepCommentText: true,
+  keepDeletions: false,
+  keepSpeakerNotes: true
+}
+
+export pure func emptyRedactionReport() -> RedactionReport = {
+  authorsPseudonymised: 0, commentsDropped: 0, deletionsDropped: 0, notesDropped: 0,
+  mediaDropped: 0, linksRewritten: 0, touchedBlocks: []
+}
