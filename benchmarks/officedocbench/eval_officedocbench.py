@@ -68,6 +68,7 @@ ADAPTER_NAMES = [
     "docling",
     "llamaparse",
     "extend",
+    "reducto",
     "markitdown",
     "kreuzberg",
     "pandoc",
@@ -122,6 +123,13 @@ def load_adapter(name: str):
             from adapters.extend_adapter import ExtendAdapter
 
             return ExtendAdapter()
+        except Exception:
+            return None
+    elif name == "reducto":
+        try:
+            from adapters.reducto_adapter import ReductoAdapter
+
+            return ReductoAdapter()
         except Exception:
             return None
     elif name == "markitdown":
