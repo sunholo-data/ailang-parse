@@ -18,6 +18,7 @@ from scoring import (
 from adapters.docparse_adapter import DocParseAdapter
 from adapters.llamaparse_adapter import LlamaParseAdapter
 from adapters.extend_adapter import ExtendAdapter
+from adapters.reducto_adapter import ReductoAdapter
 from adapters.liteparse_adapter import LiteParseAdapter
 from types import SimpleNamespace
 from adapters.structure import (
@@ -651,6 +652,126 @@ class StructuralTests(unittest.TestCase):
                 {"status": "FAILED", "failureReason": "FILE_TYPE_NOT_SUPPORTED"},
                 Path("input.odt"),
             )
+
+    @staticmethod
+    def _reducto_run(blocks, props=None):
+        return {
+            "result": {"type": "full", "chunks": [{"content": "", "blocks": blocks}]},
+            "document_properties": props,
+        }
+
+    @staticmethod
+    def _rb(btype, content, page=1, extra=None):
+        return {"type": btype, "content": content, "bbox": {"page": page}, "extra": extra}
+
+    def test_reducto_comments_keep_author_anchor_and_reply(self):
+        run = self._reducto_run(
+            [
+                self._rb("Text", "Some text to review."),
+                self._rb(
+                    "Comment",
+                    "Check this.",
+                    extra={"author": "Ann", "anchored_text": "text to review",
+                           "resolved": False, "reply_to_comment_id": None},
+                ),
+                self._rb(
+                    "Comment",
+                    "Agreed.",
+                    extra={"author": "Bo", "anchored_text": "text to review",
+                           "resolved": True, "reply_to_comment_id": "0"},
+                ),
+            ],
+            {"author": "Ann", "created_at": "2016-05-09T20:15:00+00:00"},
+        )
+        output = ReductoAdapter().convert_json(run, Path("input.docx"))
+        self.assertEqual([c["author"] for c in output["comments"]], ["Ann", "Bo"])
+        self.assertEqual(
+            output["structure"]["comment_anchors"][1],
+            {"text": "Agreed.", "author": "Bo", "annotated_text": "text to review",
+             "anchored": True, "parent_id": "0", "resolved": True, "scope": ""},
+        )
+        self.assertEqual([t["text"] for t in output["text_elements"]], ["Some text to review."])
+        self.assertEqual(output["metadata"]["created"], "2016-05-09T20:15:00Z")
+
+    def test_reducto_change_markup_and_inline_formatting(self):
+        run = self._reducto_run(
+            [
+                self._rb("Text", "a <b>bold</b> and <u>under</u> E=mc<sup>2</sup> "
+                         "<change><s>gone</s> <u>new</u></change>"),
+                self._rb("Footer", "Page footer"),
+                self._rb("Page Number", "3"),
+            ]
+        )
+        output = ReductoAdapter().convert_json(run, Path("input.docx"))
+        self.assertEqual(
+            [(c["type"], c["text"]) for c in output["track_changes"]],
+            [("delete", "gone"), ("insert", "new")],
+        )
+        runs = {r["text"]: r for r in output["structure"]["runs"]}
+        self.assertTrue(runs["bold"]["bold"])
+        self.assertTrue(runs["under"]["underline"])
+        self.assertEqual(runs["2"]["vertAlign"], "superscript")
+        self.assertNotIn("gone", runs)  # a tracked change, not strike formatting
+        self.assertEqual(output["headers_footers"], [{"type": "footer", "text": "Page footer"}])
+
+    def test_reducto_bare_underline_is_not_an_insertion(self):
+        run = self._reducto_run([self._rb("Text", "a <u>two</u> b")])
+        output = ReductoAdapter().convert_json(run, Path("input.docx"))
+        self.assertEqual(output["track_changes"], [])
+
+    def test_reducto_tab_nested_list_items(self):
+        run = self._reducto_run(
+            [
+                self._rb("List Item", "1. Intro"),
+                self._rb("List Item", "\t1. Background"),
+                self._rb("List Item", "\t\t• Detail"),
+                self._rb("List Item", "2. Method"),
+            ]
+        )
+        output = ReductoAdapter().convert_json(run, Path("input.docx"))
+        self.assertEqual(
+            [(i["text"], i["ordered"], i["level"]) for i in output["structure"]["list_items"]],
+            [("Intro", True, 0), ("Background", True, 1), ("Detail", False, 2), ("Method", True, 0)],
+        )
+
+    def test_reducto_slides_and_sheets(self):
+        slides = self._reducto_run(
+            [self._rb("Title", "Agenda", 1), self._rb("List Item", "• One", 1),
+             self._rb("Title", "Wrap up", 2)]
+        )
+        output = ReductoAdapter().convert_json(slides, Path("input.pptx"))
+        self.assertEqual(
+            output["structure"]["containers"],
+            [{"kind": "slide", "name": "Agenda"}, {"kind": "slide", "name": "Wrap up"}],
+        )
+        self.assertEqual(output["speaker_notes"], [])
+        sheets = self._reducto_run(
+            [
+                self._rb("Title", "Revenue", 1),
+                self._rb("Table", '<table><tr><th>Q</th><th>P</th></tr><tr><td>Q1</td>'
+                         '<td data-formula="=B2-C2" style="background-color: yellow">5</td>'
+                         '</tr><tr><td colspan="2">[Site](https://example.com)</td></tr></table>', 1),
+                self._rb("Title", "Staff", 2),
+                self._rb("Table", "<table><tr><td>a</td></tr></table>", 2),
+            ]
+        )
+        output = ReductoAdapter().convert_json(sheets, Path("input.xlsx"))
+        self.assertEqual(output["metadata"]["sheet_names"], ["Revenue", "Staff"])
+        cells = output["structure"]["table_cells"]
+        five = next(c for c in cells if c["text"] == "5")
+        self.assertEqual((five["scope"], five.get("formula")), ("Revenue", "=B2-C2"))
+        self.assertNotIn("fill", five)  # colour names are not invented into hex
+        self.assertIn({"text": "Site", "url": "https://example.com"}, output["hyperlinks"])
+        self.assertTrue(output["tables"][0]["has_merged_cells"])
+
+    def test_reducto_refusal_is_visible(self):
+        with self.assertRaisesRegex(RuntimeError, "415"):
+            ReductoAdapter().convert_json(
+                {"failed": True, "failureReason": "parse HTTP 415", "failureMessage": "DOCUMENT_CORRUPT"},
+                Path("input.odt"),
+            )
+        with self.assertRaisesRegex(RuntimeError, "no blocks"):
+            ReductoAdapter().convert_json(self._reducto_run([]), Path("input.docx"))
 
     def test_liteparse_native_layout_keeps_table_cells(self):
         c = lambda value: SimpleNamespace(text=value)
