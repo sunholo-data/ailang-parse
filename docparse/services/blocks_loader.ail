@@ -1,0 +1,238 @@
+module docparse/services/blocks_loader
+
+import std/fs (readFile)
+import std/json (Json, decode, getString, getInt, getBool, getArray, getObject, asString, asArray, asBool, asNumber)
+import std/math (floatToInt)
+import std/option (Option, Some, None, getOrElse)
+import std/result (Result, Ok, Err)
+import std/list (map, flatMap, filter, length as listLength, concat)
+import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock,
+  AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock,
+  InlineRun, TableCell, ParsedDocument, DocMetadata, simpleCell, spanCell, mergedCell,
+  plainRun, coalesceRuns, mkTableFull)
+
+-- Blocks Loader — decodes a parse-output JSON file back into a ParsedDocument.
+--
+-- The parse side already writes this shape (services/output_formatter writes
+-- exactly these objects), so the same file that documents what a document
+-- CONTAINS can also be the input that authors one:
+--
+--   docparse contract.json --convert contract.docx
+--
+-- Change and Comment blocks have always been part of the schema (that is how
+-- track changes and comments are PARSED out of Office files); this loader is
+-- what makes them authorable — the CLI could not previously turn a block list
+-- into a .docx/.pptx/.xlsx at all.
+--
+-- Three accepted shapes, most specific first:
+--   {"document": {"format", "filename", "metadata", "blocks": [...]}, ...}   (formatResult output)
+--   {"format", "filename", "metadata", "blocks": [...]}                      (documentToJson output)
+--   {"blocks": [...]}  or a bare JSON array of blocks                        (hand-written)
+--
+-- Every field except the type tag and its primary text is optional; the
+-- defaults are the same "not specified" values the parse side uses (empty
+-- string, level 0, plain run). Unknown block types are skipped rather than
+-- failing the whole file — a loader that rejects one exotic block would refuse
+-- to author the other fifty.
+
+export func loadBlocksDocument(path: string) -> Result[ParsedDocument, string] ! {FS} =
+  match decode(readFile(path)) {
+    Err(e) => Err("invalid JSON in ${path}: ${e}"),
+    Ok(json) => documentFromJson(json, path)
+  }
+
+pure func documentFromJson(json: Json, path: string) -> Result[ParsedDocument, string] =
+  -- {"document": {...}} wraps the rest; look inside it first.
+  match getObject(json, "document") {
+    Some(doc) => flatDocument(doc, path),
+    None => flatDocument(json, path)
+  }
+
+pure func flatDocument(doc: Json, path: string) -> Result[ParsedDocument, string] =
+  match blocksFrom(doc) {
+    Err(e) => Err(e),
+    Ok(blocks) => Ok({
+      format: getOrElse(getString(doc, "format"), "blocks"),
+      filename: getOrElse(getString(doc, "filename"), path),
+      metadata: metadataFrom(doc, path),
+      blocks: blocks
+    })
+  }
+
+pure func blocksFrom(doc: Json) -> Result[[Block], string] =
+  match getArray(doc, "blocks") {
+    Some(arr) => Ok(blockList(arr)),
+    None =>
+      -- A bare JSON array of blocks is a valid minimal input too.
+      match asArray(doc) {
+        Some(arr) => Ok(blockList(arr)),
+        None => Err("no \"blocks\" array found — this JSON is not a parse-output document")
+      }
+  }
+
+pure func metadataFrom(doc: Json, path: string) -> DocMetadata = {
+  let meta = match getObject(doc, "metadata") { Some(m) => m, None => doc };
+  {
+    title: getOrElse(getString(meta, "title"), ""),
+    author: getOrElse(getString(meta, "author"), ""),
+    created: getOrElse(getString(meta, "created"), ""),
+    modified: getOrElse(getString(meta, "modified"), ""),
+    pageCount: getOrElse(getInt(meta, "pageCount"), 0)
+  }
+}
+
+pure func blockList(js: [Json]) -> [Block] =
+  flatMap(blockFrom, js)
+
+pure func blockFrom(j: Json) -> [Block] =
+  match getString(j, "type") {
+    Some("text") => [TextBlock({text: getOrElse(getString(j, "text"), ""),
+                                style: getOrElse(getString(j, "style"), "normal"),
+                                level: getOrElse(getInt(j, "level"), 0),
+                                runs: runsFrom(j)})],
+    Some("heading") => [HeadingBlock({text: getOrElse(getString(j, "text"), ""),
+                                      level: getOrElse(getInt(j, "level"), 1),
+                                      runs: runsFrom(j)})],
+    Some("table") => tableFrom(j),
+    Some("list") => [ListBlock({items: stringList(j, "items"),
+                                ordered: getOrElse(getBool(j, "ordered"), false),
+                                itemRuns: itemRunsFrom(j),
+                                itemLevels: intList(j, "itemLevels")})],
+    Some("section") => sectionFrom(j),
+    Some("change") => [ChangeBlock({changeType: getOrElse(getString(j, "changeType"), "insert"),
+                                    author: getOrElse(getString(j, "author"), ""),
+                                    date: getOrElse(getString(j, "date"), ""),
+                                    text: getOrElse(getString(j, "text"), "")})],
+    Some("link") => [LinkBlock({text: getOrElse(getString(j, "text"), ""),
+                                href: getOrElse(getString(j, "href"), ""),
+                                title: getOrElse(getString(j, "title"), "")})],
+    Some("comment") => [CommentBlock({
+      id: getOrElse(getString(j, "id"), ""),
+      author: getOrElse(getString(j, "author"), ""),
+      date: getOrElse(getString(j, "date"), ""),
+      text: getOrElse(getString(j, "text"), ""),
+      anchorText: getOrElse(getString(j, "anchorText"), ""),
+      anchorKind: getOrElse(getString(j, "anchorKind"), "none"),
+      anchored: getOrElse(getBool(j, "anchored"), false),
+      anchorBlockIndex: getOrElse(getInt(j, "anchorBlockIndex"), 0 - 1),
+      parentId: getOrElse(getString(j, "parentId"), ""),
+      resolved: getOrElse(getBool(j, "resolved"), false)})],
+    Some("image") => [ImageBlock({data: getOrElse(getString(j, "data"), getOrElse(getString(j, "src"), "")),
+                                  description: getOrElse(getString(j, "description"), ""),
+                                  mime: getOrElse(getString(j, "mime"), ""),
+                                  width: getOrElse(getInt(j, "width"), 0),
+                                  height: getOrElse(getInt(j, "height"), 0),
+                                  srcset: getOrElse(getString(j, "srcset"), ""),
+                                  title: getOrElse(getString(j, "title"), ""),
+                                  loading: getOrElse(getString(j, "loading"), "")})],
+    Some("audio") => [AudioBlock({data: getOrElse(getString(j, "data"), getOrElse(getString(j, "src"), "")),
+                                  transcription: getOrElse(getString(j, "transcription"), ""),
+                                  mime: getOrElse(getString(j, "mime"), "")})],
+    Some("video") => [VideoBlock({data: getOrElse(getString(j, "data"), getOrElse(getString(j, "src"), "")),
+                                  description: getOrElse(getString(j, "description"), ""),
+                                  mime: getOrElse(getString(j, "mime"), "")})],
+    -- Unknown or untagged: skipped, not fatal.
+    _ => []
+  }
+
+pure func sectionFrom(j: Json) -> [Block] =
+  match getArray(j, "blocks") {
+    Some(children) => [SectionBlock({kind: getOrElse(getString(j, "kind"), "section"),
+                                     name: getOrElse(getString(j, "name"), ""),
+                                     blocks: blockList(children)})],
+    None => []
+  }
+
+pure func tableFrom(j: Json) -> [Block] =
+  match getArray(j, "rows") {
+    Some(rows) => [TableBlock({rows: map(rowFrom, rows),
+                               headers: match getArray(j, "headers") {
+                                 Some(hs) => cellList(hs),
+                                 None => []
+                               },
+                               caption: getOrElse(getString(j, "caption"), "")})],
+    None => []
+  }
+
+pure func rowFrom(row: Json) -> [TableCell] =
+  match asArray(row) {
+    Some(cells) => cellList(cells),
+    None => []
+  }
+
+pure func cellList(cells: [Json]) -> [TableCell] =
+  map(cellFrom, cells)
+
+-- A cell is either a plain JSON string (the compact form output_formatter
+-- writes for simple cells) or an object with span/colour/formula fields.
+pure func cellFrom(cell: Json) -> TableCell =
+  match asString(cell) {
+    Some(text) => simpleCell(text),
+    None => cellObject(cell)
+  }
+
+pure func cellObject(cell: Json) -> TableCell = {
+  let colSpan = getOrElse(getInt(cell, "colSpan"), 1);
+  let base = if colSpan > 1 then spanCell(getOrElse(getString(cell, "text"), ""), colSpan)
+    else if getOrElse(getBool(cell, "merged"), false) then mergedCell()
+    else simpleCell(getOrElse(getString(cell, "text"), ""));
+  let withAlign = {base | align: getOrElse(getString(cell, "align"), ""),
+                       fill: getOrElse(getString(cell, "fill"), ""),
+                       color: getOrElse(getString(cell, "color"), ""),
+                       formula: getOrElse(getString(cell, "formula"), "")};
+  match getArray(cell, "runs") {
+    Some(rs) => {withAlign | runs: runList(rs)},
+    None => withAlign
+  }
+}
+
+-- Runs mirror the parse side's omit-when-false JSON: a run is {text} plus
+-- only the flags that are set.
+pure func runsFrom(j: Json) -> [InlineRun] =
+  match getArray(j, "runs") {
+    Some(rs) => runList(rs),
+    None => []
+  }
+
+pure func runList(rs: [Json]) -> [InlineRun] =
+  coalesceRuns(map(runFrom, rs))
+
+pure func runFrom(r: Json) -> InlineRun =
+  {text: getOrElse(getString(r, "text"), ""),
+   bold: getOrElse(getBool(r, "bold"), false),
+   italic: getOrElse(getBool(r, "italic"), false),
+   underline: getOrElse(getBool(r, "underline"), false),
+   strike: getOrElse(getBool(r, "strike"), false),
+   code: getOrElse(getBool(r, "code"), false),
+   href: getOrElse(getString(r, "href"), ""),
+   vertAlign: getOrElse(getString(r, "vertAlign"), ""),
+   color: getOrElse(getString(r, "color"), "")}
+
+pure func itemRunsFrom(j: Json) -> [[InlineRun]] =
+  match getArray(j, "itemRuns") {
+    Some(rs) => map(\r. match asArray(r) {
+      Some(runObjs) => runList(runObjs),
+      None => []
+    }, rs),
+    None => []
+  }
+
+pure func stringList(j: Json, key: string) -> [string] =
+  match getArray(j, key) {
+    Some(xs) => map(\x. getOrElse(asString(x), ""), xs),
+    None => []
+  }
+
+pure func intList(j: Json, key: string) -> [int] =
+  match getArray(j, key) {
+    Some(xs) => map(intFrom, xs),
+    None => []
+  }
+
+-- itemLevels serialise as bare JSON numbers (jnum), not objects, so the
+-- object-field readers cannot see them; read the bare form here.
+pure func intFrom(x: Json) -> int =
+  match asNumber(x) {
+    Some(f) => floatToInt(f),
+    None => 0
+  }
