@@ -11,6 +11,18 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed: PPTX comment anchors picked the first text shape, not the slide's title
+
+- On decks with no title placeholder (python-pptx blank layout, HTML-to-PPTX exports, Google
+  Slides) the comment anchor was the first `a:t` in document order — usually a footer drawn
+  first — so every comment in the deck was labelled with the footer: a slide whose visible
+  title is `Recommendation` reported
+  `Slide 3: Nordvik Freight · board pack, November 2026 · fictional example`.
+- The anchor label now falls back in order: title/ctrTitle placeholder text, then the text
+  shape with the largest explicit run font size (ties and size-less shapes keep the topmost
+  text shape), then plain `Slide N`. Decks with a real title placeholder are unchanged
+  (`challenge_pptx_modern_comments.pptx` still reports `Slide 1: Q3 Revenue Forecast`).
+
 ## [v0.58.0](https://github.com/sunholo-data/ailang-parse/compare/v0.57.1...v0.58.0) — 2026-11-17
 
 **Requires AILANG >= 0.58.0** (was >= 0.50.0): the redaction pipeline's guarantee depends on IFC labels crossing module boundaries, which older toolchains do not enforce.
