@@ -1,12 +1,12 @@
 module docparse/services/xlsx_generator
 
-import std/string (length, intToStr, contains)
-import std/list (foldl, length as listLength)
+import std/string (length, intToStr, contains, substring, find, startsWith, stringToInt, charCode)
+import std/list (foldl, length as listLength, concat, any, map, filter, flatMap)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
-import std/option (getOrElse)
+import std/option (Some, None, getOrElse)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/image_embed (embedIsBinaryPayload, embedExt)
@@ -56,8 +56,8 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
   let stringIndex = xlsxBuildStringIndex(allStrings, 0);
 
   let contentTypes = xlsxContentTypes(sheetCount,
-    xlsxPicDefaults(sheets, ["png", "jpeg", "gif", "bmp", "tiff"]),
-    xlsxDrawingOverrides(sheets, 1));
+    "${xlsxPicDefaults(sheets, ["png", "jpeg", "gif", "bmp", "tiff"])}${xlsxVmlDefault(sheets)}",
+    "${xlsxDrawingOverrides(sheets, 1)}${xlsxCommentOverrides(sheets, 1)}");
   let rootRels = xlsxRootRels();
   let workbook = xlsxWorkbook(sheets);
   let workbookRels = xlsxWorkbookRels(sheetCount);
@@ -73,7 +73,9 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
     {name: "xl/sharedStrings.xml", content: sharedStringsXml}
   ];
 
-  let allEntries = xlsxAppendList(xlsxAppendList(baseEntries, sheetEntries), xlsxPicEntries(sheets, 1));
+  let allEntries = xlsxAppendList(
+    xlsxAppendList(xlsxAppendList(baseEntries, sheetEntries), xlsxPicEntries(sheets, 1)),
+    xlsxCommentEntries(sheets, 1));
   -- Without pictures the archive is text only, exactly as before.
   let mediaEntries = xlsxMediaEntries(sheets, 1);
 
@@ -89,8 +91,91 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
 -- A picture to anchor in a sheet. data is base64, cx/cy its size in EMU.
 type XlsxPic = { data: string, mime: string, ext: string, descr: string, cx: int, cy: int }
 
--- A sheet with a name, rows of cells and the pictures anchored below them
-type XlsxSheet = { name: string, rows: [[string]], pics: [XlsxPic] }
+-- A cell comment (legacy note, ECMA-376 §18.7) to anchor on a sheet.
+-- ref is the cell reference ("B5"), parsed out of the CommentBlock's anchor.
+type XlsxCellComment = { ref: string, author: string, text: string }
+
+-- A sheet with a name, rows of cells, the pictures anchored below them and
+-- the cell comments pinned to its cells
+type XlsxSheet = { name: string, rows: [[string]], pics: [XlsxPic], comments: [XlsxCellComment] }
+
+-- Authoring cell comments: a CommentBlock becomes a real comment part when it
+-- carries a cell anchor. The parse side writes anchorText as "B5" (bare ref,
+-- empty cell) or "B5: cell value"; both parse to ref B5. Everything else
+-- (unanchored comments, comments inside a plain Content sheet) renders as
+-- text exactly as before.
+pure func xlsxIsCellComment(block: Block) -> bool =
+  match block {
+    CommentBlock(c) => length(xlsxCommentRef(c.anchorText)) > 0,
+    _ => false
+  }
+
+-- "B5: cell value" -> "B5"; "B5" -> "B5"; anything that does not start with a
+-- cell reference-shaped token returns "" (not a cell anchor).
+pure func xlsxCommentRef(anchorText: string) -> string {
+  let at = find(anchorText, ":");
+  let head = if at < 0 then anchorText else substring(anchorText, 0, at);
+  if xlsxIsCellRef(head) then head else ""
+}
+
+-- A cell reference: letters then digits, at least one of each, nothing else.
+pure func xlsxIsCellRef(s: string) -> bool {
+  let n = length(s);
+  if n < 2 then false
+  else {
+    let letterPart = xlsxRefLetters(s, 0, 0);
+    let digitStart = letterPart;
+    xlsxRefDigits(s, letterPart, 0) && digitStart > 0 && digitStart < n
+  }
+}
+
+-- Length of the leading A-Z run; also validates every leading char is a letter.
+pure func xlsxRefLetters(s: string, idx: int, run: int) -> int =
+  if idx >= length(s) then run
+  else {
+    let c = substring(s, idx, idx + 1);
+    if c >= "A" && c <= "Z" then xlsxRefLetters(s, idx + 1, run + 1)
+    else if c >= "a" && c <= "z" then xlsxRefLetters(s, idx + 1, run + 1)
+    else run
+  }
+
+pure func xlsxRefDigits(s: string, idx: int, run: int) -> bool =
+  if idx >= length(s) then run > 0
+  else {
+    let c = substring(s, idx, idx + 1);
+    if c >= "0" && c <= "9" then xlsxRefDigits(s, idx + 1, run + 1)
+    else false
+  }
+
+-- The cell comments of a block list, in order (blocks inside a sheet section).
+pure func xlsxCellComments(blocks: [Block]) -> [XlsxCellComment] =
+  flatMap(\b. match b {
+    CommentBlock(c) =>
+      if length(xlsxCommentRef(c.anchorText)) > 0
+      then [{ref: xlsxCommentRef(c.anchorText), author: c.author, text: c.text}]
+      else [],
+    _ => []
+  }, blocks)
+
+-- Leading run of cell-comment blocks, and what comes after them. Used to pin
+-- comments that follow a bare TableBlock (the shape one sheet per table
+-- produces) onto that sheet rather than into a Content text row.
+pure func xlsxTakeCellComments(blocks: [Block]) -> ([XlsxCellComment], [Block]) =
+  xlsxTakeCellCommentsAcc(blocks, [])
+
+pure func xlsxTakeCellCommentsAcc(blocks: [Block], acc: [XlsxCellComment]) -> ([XlsxCellComment], [Block]) =
+  match blocks {
+    c :: rest =>
+      if xlsxIsCellComment(c)
+      then match c {
+        CommentBlock(cm) => xlsxTakeCellCommentsAcc(rest,
+          concat(acc, [{ref: xlsxCommentRef(cm.anchorText), author: cm.author, text: cm.text}])),
+        -- xlsxIsCellComment is true only for CommentBlock
+        _ => (acc, blocks)
+      }
+      else (acc, blocks),
+    [] => (acc, blocks)
+  }
 
 -- Pictures are at most a 6.5 inch column wide (text width of a Letter page)
 pure func xlsxMaxCx() -> int = 5943600
@@ -124,17 +209,24 @@ pure func xlsxCollectSheets(blocks: [Block]) -> [XlsxSheet] {
 
 pure func xlsxCollectSheetsAcc(blocks: [Block], acc: [XlsxSheet], sheetIdx: int) -> [XlsxSheet] =
   match blocks {
-    [] => if listLength(acc) == 0 then [{name: "Sheet1", rows: [], pics: []}] else acc,
+    [] => if listLength(acc) == 0 then [{name: "Sheet1", rows: [], pics: [], comments: []}] else acc,
     SectionBlock(s) :: rest =>
       if s.kind == "sheet"
       then xlsxCollectSheetsAcc(rest,
-        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxBlocksToRows(s.blocks), pics: xlsxBlocksToPics(s.blocks)}),
+        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxBlocksToRows(s.blocks),
+                              pics: xlsxBlocksToPics(s.blocks), comments: xlsxCellComments(s.blocks)}),
         sheetIdx + 1)
       else xlsxCollectSheetsAcc(rest, acc, sheetIdx),
     TableBlock(t) :: rest =>
-      xlsxCollectSheetsAcc(rest,
-        xlsxAppendSheet(acc, {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxTableToRows(t.headers, t.rows), pics: []}),
-        sheetIdx + 1),
+      -- Cell comments that immediately follow a bare table belong to the
+      -- sheet that table becomes, not to a Content text row.
+      match xlsxTakeCellComments(rest) {
+        (taken, after) => {
+          let sheet = {name: "Sheet${intToStr(sheetIdx)}", rows: xlsxTableToRows(t.headers, t.rows),
+                       pics: [], comments: taken};
+          xlsxCollectSheetsAcc(after, xlsxAppendSheet(acc, sheet), sheetIdx + 1)
+        }
+      },
     b :: rest =>
       -- Embeddable pictures are anchored below the data; the rest is text
       if xlsxIsPicture(b)
@@ -168,10 +260,14 @@ pure func xlsxBlocksToRows(blocks: [Block]) -> [[string]] =
     [] => [],
     TableBlock(t) :: rest => xlsxTableToRowsConcat(t.headers, t.rows, xlsxBlocksToRows(rest)),
     b :: rest =>
-      let text = xlsxBlockToText(b) in
-      if length(text) > 0 && xlsxIsPicture(b) == false
-      then [text] :: xlsxBlocksToRows(rest)
-      else xlsxBlocksToRows(rest)
+      -- A cell-anchored comment becomes a real comment part, not a text row.
+      if xlsxIsCellComment(b) then xlsxBlocksToRows(rest)
+      else {
+        let text = xlsxBlockToText(b);
+        if length(text) > 0 && xlsxIsPicture(b) == false
+        then [text] :: xlsxBlocksToRows(rest)
+        else xlsxBlocksToRows(rest)
+      }
   }
 
 -- Pictures of a sheet section, in order (top-level blocks, as xlsxBlocksToRows)
@@ -217,19 +313,19 @@ pure func xlsxAppendSheet(sheets: [XlsxSheet], sheet: XlsxSheet) -> [XlsxSheet] 
 pure func xlsxAppendToContentSheet(sheets: [XlsxSheet], row: [string], sheetIdx: int) -> [XlsxSheet] =
   -- If there's already a content sheet, append to it; otherwise create one
   match sheets {
-    [] => [{name: "Content", rows: [row], pics: []}],
+    [] => [{name: "Content", rows: [row], pics: [], comments: []}],
     s :: rest =>
       if s.name == "Content"
-      then {name: "Content", rows: xlsxAppendRows(s.rows, [row]), pics: s.pics} :: rest
+      then {name: "Content", rows: xlsxAppendRows(s.rows, [row]), pics: s.pics, comments: s.comments} :: rest
       else s :: xlsxAppendToContentSheet(rest, row, sheetIdx)
   }
 
 pure func xlsxAppendPicToContent(sheets: [XlsxSheet], pic: XlsxPic) -> [XlsxSheet] =
   match sheets {
-    [] => [{name: "Content", rows: [], pics: [pic]}],
+    [] => [{name: "Content", rows: [], pics: [pic], comments: []}],
     s :: rest =>
       if s.name == "Content"
-      then {name: "Content", rows: s.rows, pics: xlsxAppendPicList(s.pics, [pic])} :: rest
+      then {name: "Content", rows: s.rows, pics: xlsxAppendPicList(s.pics, [pic]), comments: s.comments} :: rest
       else s :: xlsxAppendPicToContent(rest, pic)
   }
 
@@ -282,16 +378,22 @@ pure func xlsxBuildSheetEntries(sheets: [XlsxSheet], stringIndex: Map[string, in
   match sheets {
     [] => [],
     s :: rest =>
-      let entry = {name: "xl/worksheets/sheet${intToStr(idx)}.xml", content: xlsxSheetXml(s.rows, stringIndex, listLength(s.pics) > 0)} in
+      let entry = {name: "xl/worksheets/sheet${intToStr(idx)}.xml",
+                   content: xlsxSheetXml(s.rows, stringIndex, listLength(s.pics) > 0, listLength(s.comments) > 0)} in
       entry :: xlsxBuildSheetEntries(rest, stringIndex, idx + 1)
   }
 
 -- Build a single worksheet XML. A sheet with pictures declares the relationship
--- namespace and points at its drawing; a sheet without them is unchanged.
-pure func xlsxSheetXml(rows: [[string]], stringIndex: Map[string, int], hasPics: bool) -> string =
-  if hasPics
-  then "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetFormatPr defaultRowHeight=\"15\"/><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData><drawing r:id=\"rId1\"/></worksheet>"
+-- namespace and points at its drawing; a sheet with cell comments ALSO points
+-- at its legacy VML drawing, which is what makes Excel render the note. A sheet
+-- with neither is unchanged.
+pure func xlsxSheetXml(rows: [[string]], stringIndex: Map[string, int], hasPics: bool, hasComments: bool) -> string = {
+  let drawing = if hasPics then "<drawing r:id=\"rId1\"/>" else "";
+  let legacy = if hasComments then "<legacyDrawing r:id=\"rIdCommentsVml\"/>" else "";
+  if hasPics || hasComments
+  then "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetFormatPr defaultRowHeight=\"15\"/><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData>${drawing}${legacy}</worksheet>"
   else "${xmlDecl()}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>${xlsxRowsToXml(rows, stringIndex, 1)}</sheetData></worksheet>"
+}
 
 pure func xlsxRowsToXml(rows: [[string]], stringIndex: Map[string, int], rowIdx: int) -> string =
   match rows {
@@ -390,6 +492,130 @@ pure func xlsxDrawingOverrides(sheets: [XlsxSheet], k: int) -> string =
       else "<Override PartName=\"/xl/drawings/drawing${intToStr(k)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>${xlsxDrawingOverrides(rest, k + 1)}"
   }
 
+-- === Cell comments (ECMA-376 §18.7) =======================================
+--
+-- A sheet with comments gets three things: xl/commentsK.xml (the notes
+-- themselves), xl/drawings/commentsDrawingK.vml (the note shapes Excel
+-- positions the popups from), and a worksheet <legacyDrawing> reference tying
+-- the shapes to the sheet. Structure mirrors what Excel itself writes
+-- (challenge_comments.xlsx) so the generated workbook round-trips through the
+-- parser: authors list, then <comment ref authorId><text><t>.
+
+-- The <Default> for the VML extension, present only when some sheet has comments
+pure func xlsxVmlDefault(sheets: [XlsxSheet]) -> string =
+  if any(\s. listLength(s.comments) > 0, sheets)
+  then "<Default Extension=\"vml\" ContentType=\"application/vnd.openxmlformats-officedocument.vmlDrawing\"/>"
+  else ""
+
+pure func xlsxCommentOverrides(sheets: [XlsxSheet], k: int) -> string =
+  match sheets {
+    [] => "",
+    s :: rest =>
+      if listLength(s.comments) == 0
+      then xlsxCommentOverrides(rest, k + 1)
+      else "<Override PartName=\"/xl/comments${intToStr(k)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml\"/>${xlsxCommentOverrides(rest, k + 1)}"
+  }
+
+-- One comment part per sheet that has comments, numbered by the sheet, plus
+-- its VML drawing and the sheet's rels.
+pure func xlsxCommentEntries(sheets: [XlsxSheet], idx: int) -> [{name: string, content: string}] =
+  match sheets {
+    [] => [],
+    s :: rest =>
+      if listLength(s.comments) == 0
+      then xlsxCommentEntries(rest, idx + 1)
+      else xlsxAppendList(
+        [{name: "xl/comments${intToStr(idx)}.xml", content: xlsxCommentsXml(s.comments)},
+         {name: "xl/drawings/commentsDrawing${intToStr(idx)}.vml", content: xlsxCommentsVml(s.comments)},
+         {name: "xl/worksheets/_rels/sheet${intToStr(idx)}.xml.rels", content: xlsxSheetCommentRels(s, idx)}],
+        xlsxCommentEntries(rest, idx + 1))
+  }
+
+-- A sheet that carries both pictures and comments needs the drawing
+-- relationship too — the worksheet points at the drawing by r:id="rId1".
+pure func xlsxSheetCommentRels(s: XlsxSheet, k: int) -> string =
+  "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${if listLength(s.pics) > 0 then "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing\" Target=\"../drawings/drawing${intToStr(k)}.xml\"/>" else ""}<Relationship Id=\"rIdComments\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments\" Target=\"../comments${intToStr(k)}.xml\"/><Relationship Id=\"rIdCommentsVml\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing\" Target=\"../drawings/commentsDrawing${intToStr(k)}.vml\"/></Relationships>"
+
+-- The comment part: authors in document order (duplicates share one entry),
+-- then every comment with its author's index.
+pure func xlsxCommentsXml(comments: [XlsxCellComment]) -> string =
+  "${xmlDecl()}<comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><authors>${xlsxAuthorTags(xlsxAuthors(comments, []))}</authors><commentList>${xlsxCommentTags(comments, xlsxAuthors(comments, []), 1)}</commentList></comments>"
+
+-- Distinct non-empty authors, first occurrence order.
+pure func xlsxAuthors(comments: [XlsxCellComment], acc: [string]) -> [string] =
+  match comments {
+    [] => acc,
+    c :: rest =>
+      if length(c.author) == 0 || any(\a. a == c.author, acc)
+      then xlsxAuthors(rest, acc)
+      else xlsxAuthors(rest, concat(acc, [c.author]))
+  }
+
+pure func xlsxAuthorTags(authors: [string]) -> string =
+  foldl(\acc a. "${acc}<author>${xmlEscape(a)}</author>", "", authors)
+
+pure func xlsxCommentTags(comments: [XlsxCellComment], authors: [string], shapeId: int) -> string =
+  match comments {
+    [] => "",
+    c :: rest =>
+      "<comment ref=\"${xmlEscape(c.ref)}\" authorId=\"${intToStr(xlsxAuthorIndex(authors, c.author, 0))}\" shapeId=\"${intToStr(shapeId)}\"><text><t>${xmlEscape(c.text)}</t></text></comment>${xlsxCommentTags(rest, authors, shapeId + 1)}"
+  }
+
+pure func xlsxAuthorIndex(authors: [string], author: string, idx: int) -> int =
+  match authors {
+    [] => 0,
+    a :: rest => if a == author then idx else xlsxAuthorIndex(rest, author, idx + 1)
+  }
+
+-- Legacy note shapes: one <v:shape> per comment, positioned at its cell via
+-- <x:Row>/<x:Column> (0-based). The geometry (144x79 px at the cell's top-left,
+-- hidden until clicked) is Excel's own default.
+pure func xlsxCommentsVml(comments: [XlsxCellComment]) -> string =
+  "<xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"><o:shapelayout v:ext=\"edit\"><o:idmap v:ext=\"edit\" data=\"1\"/></o:shapelayout><v:shapetype id=\"_x0000_t202\" coordsize=\"21600,21600\" o:spt=\"202\" path=\"m,l,21600r21600,l21600,xe\"><v:stroke joinstyle=\"miter\"/><v:path gradientshapeok=\"t\" o:connecttype=\"rect\"/></v:shapetype>${xlsxVmlShapes(comments, 1025)}</xml>"
+
+pure func xlsxVmlShapes(comments: [XlsxCellComment], shapeId: int) -> string =
+  match comments {
+    [] => "",
+    c :: rest =>
+      "<v:shape id=\"_x0000_s${intToStr(shapeId)}\" type=\"#_x0000_t202\" style=\"position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:144px;height:79px;z-index:1;visibility:hidden\" fillcolor=\"#ffffe1\" o:insetmode=\"auto\"><v:fill color2=\"#ffffe1\"/><v:shadow color=\"black\" obscured=\"t\"/><v:path o:connecttype=\"none\"/><v:textbox style=\"mso-direction-alt:auto\"><div style=\"text-align:left\"></div></v:textbox><x:ClientData ObjectType=\"Note\"><x:MoveWithCells/><x:SizeWithCells/><x:AutoFill>False</x:AutoFill><x:Row>${intToStr(xlsxRefRow(c.ref) - 1)}</x:Row><x:Column>${intToStr(xlsxRefCol(c.ref) - 1)}</x:Column></x:ClientData></v:shape>${xlsxVmlShapes(rest, shapeId + 1)}"
+  }
+
+-- "B5" -> 5 (the row number); unparseable falls back to row 1.
+pure func xlsxRefRow(ref: string) -> int = {
+  let digits = substring(ref, xlsxRefLetters(ref, 0, 0), length(ref));
+  match stringToInt(digits) {
+    Some(n) => if n >= 1 then n else 1,
+    None => 1
+  }
+}
+
+-- "B5" -> 2 (B is the second column); unparseable falls back to column 1.
+pure func xlsxRefCol(ref: string) -> int =
+  xlsxRefColWalk(ref, 0, 0)
+
+pure func xlsxRefView(anchor: string) -> string
+  tests [
+    ("B5", "B5:5:2"),
+    ("B2: 184000", "B2:2:2"),
+    ("AA12", "AA12:12:27"),
+    ("", ":1:1"),
+    ("not a ref", ":1:1"),
+    ("5B", ":1:1")
+  ]
+{
+  let ref = xlsxCommentRef(anchor);
+  "${ref}:${intToStr(xlsxRefRow(ref))}:${intToStr(xlsxRefCol(ref))}"
+}
+
+pure func xlsxRefColWalk(ref: string, idx: int, acc: int) -> int =
+  if idx >= length(ref) then (if acc < 1 then 1 else acc)
+  else {
+    let code = charCode(substring(ref, idx, idx + 1));
+    if code >= 97 && code <= 122 then xlsxRefColWalk(ref, idx + 1, acc * 26 + (code - 96))
+    else if code >= 65 && code <= 90 then xlsxRefColWalk(ref, idx + 1, acc * 26 + (code - 64))
+    else (if acc < 1 then 1 else acc)
+  }
+
 -- Root rels
 pure func xlsxRootRels() -> string =
   "${xmlDecl()}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"
@@ -477,7 +703,7 @@ pure func xlsxMinimalStyles() -> string =
 export pure func testXlsxSheetXmlNoPics() -> bool
   tests [((), true)]
 {
-  let xml = xlsxSheetXml([["a"]], emptyMap(), false);
+  let xml = xlsxSheetXml([["a"]], emptyMap(), false, false);
   contains(xml, "drawing") == false && contains(xml, "xmlns:r") == false
 }
 
@@ -498,7 +724,7 @@ export pure func testXlsxPicDefaults() -> bool
   tests [((), true)]
 {
   let pics = [{data: "", mime: "image/jpeg", ext: "jpeg", descr: "", cx: 1, cy: 1}];
-  let sheets = [{name: "Content", rows: [], pics: pics}];
+  let sheets = [{name: "Content", rows: [], pics: pics, comments: []}];
   let defaults = xlsxPicDefaults(sheets, ["png", "jpeg"]);
   contains(defaults, "Extension=\"jpeg\" ContentType=\"image/jpeg\"") && contains(defaults, "png") == false
 }

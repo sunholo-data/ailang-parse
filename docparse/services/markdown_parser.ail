@@ -3,7 +3,7 @@ module docparse/services/markdown_parser
 import std/string (split, trim, length, startsWith, endsWith, substring, find, charAt, join)
 import std/list (map, foldl, reverse, length as listLength)
 import std/option (Some, None)
-import docparse/types/document (DocMetadata, emptyMetadata, mkText, Block)
+import docparse/types/document (DocMetadata, emptyMetadata, mkText, Block, TextBlock, ChangeBlock, CommentBlock)
 import docparse/services/markdown_inline (mdTextBlock, mdHeadingBlock, mdListBlock, mdIsImageOnly, mdImageBlock)
 import docparse/services/markdown_quote (mdQuoteBlocks)
 import docparse/services/markdown_table (mdTableBlock, mdIsTableSeparator, mdCellAlign, mdSplitCells, mdParseTableRow)
@@ -422,10 +422,122 @@ pure func flushText(state: MdParseState) -> MdParseState
   if mdIsEmptyList(state.textLines) then state
   else {
     let text = mdJoinLines(reverse(state.textLines));
-    let block = if mdIsImageOnly(text) then mdImageBlock(text) else mdTextBlock(text, "normal", 0);
-    { state | blocks: block :: state.blocks, textLines: [] }
+    let blocks = if mdIsImageOnly(text) then [mdImageBlock(text)] else mdCriticBlocks(text);
+    { state | blocks: mdPrependBlocks(blocks, state.blocks), textLines: [] }
   }
 }
+
+-- === CriticMarkup (authoring track changes and comments in plain Markdown) ===
+--
+-- {++inserted++}, {--deleted--} and {>>comment<<} — the CriticMarkup
+-- convention (https://criticmarkup.com), the one existing Markdown extension
+-- for revisions. There is no docparse-specific syntax to learn, and any
+-- CriticMarkup-aware editor round-trips it.
+--
+-- Reading: an insertion's text STAYS in the paragraph (it is the accepted
+-- text) and a ChangeBlock(changeType "insert") records it; a deletion's text
+-- LEAVES the paragraph and a ChangeBlock("delete") records what was removed; a
+-- comment leaves the paragraph and a CommentBlock anchored to the cleaned
+-- paragraph text follows it. Convert the result with --convert out.docx and
+-- the generator writes real <w:ins>/<w:del> and a comment range.
+--
+-- A paragraph without any marker parses exactly as before. Nested or
+-- overlapping markers are not supported: the first closer wins, and a marker
+-- with no closer stays literal text rather than eating the paragraph.
+
+pure func mdCriticBlocks(text: string) -> [Block] =
+  if not mdCriticHasMarker(text) then [mdTextBlock(text, "normal", 0)]
+  else match mdCriticScan(text, "", []) {
+    (clean, marks) =>
+      if length(clean) > 0
+      then mdTextBlock(clean, "normal", 0) :: reverse(marks)
+      else reverse(marks)
+  }
+
+pure func mdCriticHasMarker(text: string) -> bool =
+  find(text, "{++") >= 0 || find(text, "{--") >= 0 || find(text, "{>>") >= 0
+
+-- One scan step: everything before the earliest marker is literal, the marker
+-- body is handled per kind, the scan resumes after the closer. acc accumulates
+-- the change/comment blocks in reverse.
+pure func mdCriticScan(s: string, clean: string, acc: [Block]) -> (string, [Block]) =
+  if length(s) == 0 then (clean, acc)
+  else match mdCriticEarliest(s) {
+    Some((kind, at)) => {
+      let pre = substring(s, 0, at);
+      let after = substring(s, at, length(s));
+      match mdCriticCloser(kind, after) {
+        Some(end) => {
+          let inner = substring(after, 3, end);
+          let rest = substring(after, end + 3, length(after));
+          let block = mdCriticBlock(kind, inner, clean, pre);
+          mdCriticScan(rest, "${clean}${pre}${mdCriticKeep(kind, inner)}", block :: acc)
+        },
+        -- No closer: the marker is literal text; resume one char past "{" so
+        -- the same marker cannot be found again.
+        None => mdCriticScan(substring(after, 1, length(after)), "${clean}${pre}{", acc)
+      }
+    },
+    None => ("${clean}${s}", acc)
+  }
+
+-- kind 0 = insertion ("{++" / "++}"), 1 = deletion ("{--" / "--}"),
+-- 2 = comment ("{>>" / "<<}"). Returns the earliest present marker.
+pure func mdCriticEarliest(s: string) -> Option[(int, int)] {
+  let i = find(s, "{++");
+  let d = find(s, "{--");
+  let c = find(s, "{>>");
+  let best = mdCriticMin3(i, d, c);
+  if best < 0 then None
+  else if best == i then Some((0, i))
+  else if best == d then Some((1, d))
+  else Some((2, c))
+}
+
+pure func mdCriticMin3(a: int, b: int, c: int) -> int =
+  if a < 0 then mdCriticMin2(b, c)
+  else if b < 0 then mdCriticMin2(a, c)
+  else if c < 0 then mdCriticMin2(a, b)
+  else mdCriticMin2(mdCriticMin2(a, b), c)
+
+pure func mdCriticMin2(a: int, b: int) -> int =
+  if a < 0 then b
+  else if b < 0 then a
+  else if a <= b then a
+  else b
+
+-- Index of the closer inside `after` (which starts with the marker), or None.
+pure func mdCriticCloser(kind: int, after: string) -> Option[int] =
+  if kind == 0 then mdCriticCloserAt(find(after, "++}"))
+  else if kind == 1 then mdCriticCloserAt(find(after, "--}"))
+  else mdCriticCloserAt(find(after, "<<}"))
+
+pure func mdCriticCloserAt(idx: int) -> Option[int] =
+  if idx < 3 then None else Some(idx)
+
+-- An insertion stays in the paragraph; a deletion and a comment do not.
+pure func mdCriticKeep(kind: int, inner: string) -> string =
+  if kind == 0 then inner else ""
+
+-- The recorded block. changeType "replace" is not produced: CriticMarkup
+-- expresses a replacement as {--old--}{++new++}, which yields two changes.
+pure func mdCriticBlock(kind: int, inner: string, clean: string, pre: string) -> Block =
+  if kind == 0
+  then ChangeBlock({changeType: "insert", author: "unknown", date: "", text: inner})
+  else if kind == 1
+  then ChangeBlock({changeType: "delete", author: "unknown", date: "", text: inner})
+  else {
+    -- The anchor is the text around the marker: what precedes it in the
+    -- paragraph so far, which is what a reader needs to locate the comment.
+    -- Whitespace does not anchor: a comment pinned to a space is anchored to
+    -- nothing, and the block says so rather than inventing a target.
+    let raw = if length(trim(pre)) > 0 then trim(pre)
+      else trim(clean);
+    CommentBlock({id: "", author: "unknown", date: "", text: inner,
+                  anchorText: raw, anchorKind: "range",
+                  anchored: length(raw) > 0, anchorBlockIndex: 0 - 1,
+                  parentId: "", resolved: false})
+  }
 
 -- Flush accumulated list items into a ListBlock
 -- Contract: list items are always cleared after flush
@@ -614,3 +726,26 @@ pure func mdExtractOrderedItem(line: string) -> string
   if dotPos >= 0 then trim(substring(line, dotPos + 2, length(line)))
   else line
 }
+
+-- CriticMarkup scan, as one label per produced block: the paragraph keeps its
+-- accepted text, deletions and comments leave it, and every marker yields its
+-- block in document order.
+pure func mdCriticView(text: string) -> string
+  tests [
+    ("plain paragraph", "plain paragraph"),
+    ("The fee is {--10--}{++12++} {>>check<<}.",
+     "The fee is 12 .|CHANGE delete 10|CHANGE insert 12|COMMENT check"),
+    ("{>>note only<<}", "COMMENT note only"),
+    ("a {++b c++} d", "a b c d|CHANGE insert b c")
+  ]
+{
+  join("|", map(mdCriticLabel, mdCriticBlocks(text)))
+}
+
+pure func mdCriticLabel(b: Block) -> string =
+  match b {
+    TextBlock(t) => t.text,
+    ChangeBlock(c) => "CHANGE ${c.changeType} ${c.text}",
+    CommentBlock(c) => "COMMENT ${c.text}",
+    _ => "?"
+  }

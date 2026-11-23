@@ -9,6 +9,7 @@ import std/bytes (fromBase64)
 import std/result (Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, cellText, countBlocks, filterHeadings, filterTables, filterImages, filterSections)
 import docparse/services/orchestrator (parseDocument, ParseOptions)
+import docparse/services/blocks_loader (loadBlocksDocument)
 import docparse/services/format_router (detectFormat, getExtension, officeType, strategyDescription, needsAI)
 import docparse/services/docx_parser (parseDocx, parseDocxMetadata, parseDocxImages, parseDocxHeaders, parseDocxFooters, parseDocxFootnotes, parseDocxEndnotes, parseDocxComments, parseDocxWithComments)
 import docparse/services/pptx_parser (parsePptx, parsePptxMetadata, parsePptxImages)
@@ -241,6 +242,15 @@ func parseOne(filepath: string, opts: ParseOptions, outDir: string, doSummarize:
     println("Error: File not found: ${filepath}");
     false
   }
+  -- A .json input is a BLOCK LIST, not a document to parse: the parse side
+  -- writes exactly this shape (output_formatter.formatResult), so the same
+  -- file that records what a document contains can author one. Change and
+  -- Comment blocks ride in the schema like any other block, which is what
+  -- makes track changes and comments authorable from the CLI:
+  --   docparse contract.json --convert contract.docx
+  else if getExtension(filepath) == "json" then
+    runBlocksInput(filepath, outDir, doSummarize, convertTarget, referenceDoc,
+                   referenceSection, tableStyle, slideSize)
   else {
     let rawExt = getExtension(filepath);
     let ext = if isTarGz(filepath) then "tar.gz" else rawExt;
@@ -347,6 +357,37 @@ func runParse(filepath: string, opts: ParseOptions, outDir: string, doSummarize:
         then println("⚠ Warning: extraction produced no content blocks.")
         else ();
       writeOutputs(doc, result, outDir, doSummarize, filepath, convertTarget, referenceDoc, referenceSection, tableStyle, slideSize);
+      true
+    }
+  }
+}
+
+-- Blocks mode: a JSON block list (parse-output schema) in, generated document
+-- out. The same writeOutputs path --convert uses for parsed documents, so
+-- every output format and every --reference-doc option behaves identically.
+-- Returns false on a malformed input so batch mode continues with the rest.
+func runBlocksInput(filepath: string, outDir: string, doSummarize: bool, convertTarget: string,
+                    referenceDoc: string, referenceSection: int, tableStyle: string, slideSize: string)
+  -> bool ! {IO, FS, AI, Env, Net, Process, Clock} {
+  match loadBlocksDocument(filepath) {
+    Err(e) => {
+      println("");
+      println("Error [BLOCKS]: ${e}");
+      println("Expected a parse-output document: {\"document\": {\"blocks\": [...]}} (or {\"blocks\": [...]}, or a bare block array).");
+      false
+    },
+    Ok(doc) => {
+      println("File:     ${filepath}");
+      println("Format:   blocks (JSON block list)");
+      println("");
+      let result = { document: doc, warnings: [], aiCallsUsed: 0 };
+      printSummary(doc);
+      println("");
+      println("--- Content Blocks ---");
+      printBlocks(doc.blocks);
+      println("");
+      writeOutputs(doc, result, outDir, doSummarize, filepath, convertTarget,
+                   referenceDoc, referenceSection, tableStyle, slideSize);
       true
     }
   }

@@ -114,6 +114,48 @@ All formats return the same block structure:
 | `Link` | Hyperlink with text, href and title |
 | `Comment` | Review comment with author, date, anchor and thread parent |
 
+## Authoring comments and track changes from the CLI
+
+`Change` and `Comment` blocks have always been part of the parse schema; two
+paths now author them into real Office markup — no second toolchain needed.
+
+**Blocks JSON input.** A parse-output JSON file (`{"document": {"blocks":
+[...]}}`, `{"blocks": [...]}`, or a bare block array) passed as the input is
+loaded instead of parsed, so the same file that records what a document
+contains can produce one:
+
+```bash
+# contract.json carries Change and Comment blocks in the parse schema
+docparse contract.json --convert contract.docx
+docparse budget.json   --convert budget.xlsx    # comments anchored to cells
+docparse deck.json     --convert deck.pptx      # comments pinned to slides
+```
+
+A `change` block becomes real `<w:ins>`/`<w:del>` revision markup in DOCX
+(`changeType` `"insert"`/`"delete"`, with `author` and W3CDTF `date`). A
+`comment` block becomes a real comment — a DOCX comment range plus
+`word/comments.xml`, an XLSX cell note (`xl/commentsN.xml` + legacy VML shape,
+anchored by `anchorText` starting with a cell reference like `"B5"` or
+`"B5: cell value"`), or a PowerPoint slide comment (`ppt/comments/commentN.xml`
++ `ppt/commentAuthors.xml`, anchored by `anchorText` starting `"Slide N"` or
+`anchorBlockIndex`). Every other block type and field is optional and defaults
+the way the parse side writes them; unknown block types are skipped, not fatal.
+
+**CriticMarkup in Markdown.** The parser reads the CriticMarkup convention
+(<https://criticmarkup.com>) inside paragraphs, so plain Markdown can carry
+revisions with no docparse-specific syntax:
+
+```markdown
+The fee is {--10000--}{++12000++} {>>confirm with client<<} net.
+```
+
+`{++inserted++}` stays in the paragraph and yields a `Change(insert)`;
+`{--deleted--}` leaves the paragraph and yields a `Change(delete)`; `{>>comment<<}`
+leaves the paragraph and yields a `Comment` anchored to the surrounding text.
+Convert as usual: `docparse review.md --convert review.docx`. The existing
+blockquote comment/track-change readback is unchanged and still wins when both
+are present.
+
 ## AI Configuration
 
 AILANG Parse uses AILANG's AI effect — any model AILANG supports works:

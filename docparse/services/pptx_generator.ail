@@ -1,7 +1,7 @@
 module docparse/services/pptx_generator
 
 import std/string (length, intToStr, find, substring, split, contains)
-import std/list (foldl, length as listLength, reverse, concat, any, map, flatMap)
+import std/list (foldl, length as listLength, reverse, concat, any, map, flatMap, filter)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
@@ -76,19 +76,26 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
 
   -- Build all ZIP entries. With no speaker notes and no pictures every part
   -- below is exactly what it was before either was written, byte for byte.
-  let contentTypes = if hasNotes
+  let hasComments = pptxAnyComments(slideContents);
+  let baseCt = if hasNotes
     then pptxTplInsertBeforeLast(pptxContentTypes(slideCount, pptxMediaDefaults(pics, "", "")), "</Types>",
       "${pptxNotesMasterContentTypes("/ppt/notesMasters/notesMaster1.xml", "/ppt/theme/theme2.xml")}${pptxNotesContentTypes(slideContents, 1)}")
     else pptxContentTypes(slideCount, pptxMediaDefaults(pics, "", ""));
+  let contentTypes = if hasComments
+    then pptxTplInsertBeforeLast(baseCt, "</Types>", pptxCommentsCt(slideContents))
+    else baseCt;
   let rootRels = pptxRootRels();
   let presentation = if hasNotes
     then pptxTplInsertBeforeFirst(pptxPresentation(slideCount, pptxSldSzFor(slideSize)),
       "<p:sldIdLst>", pptxNotesMasterIdLst("rId${intToStr(slideCount + 6)}"))
     else pptxPresentation(slideCount, pptxSldSzFor(slideSize));
-  let presRels = if hasNotes
+  let basePresRels = if hasNotes
     then pptxTplInsertBeforeLast(pptxPresentationRels(slideCount), "</Relationships>",
       pptxNotesMasterRel("rId${intToStr(slideCount + 6)}", "notesMasters/notesMaster1.xml"))
     else pptxPresentationRels(slideCount);
+  let presRels = if hasComments
+    then pptxTplInsertBeforeLast(basePresRels, "</Relationships>", pptxCommentAuthorsRel())
+    else basePresRels;
   let slideEntries = pptxBuildSlideEntries(slideContents, 1, 1);
   let slideRelEntries = pptxBuildSlideRelEntries(slideContents, 1, "slideLayout1.xml", 1);
   let notesEntries = if hasNotes
@@ -127,13 +134,14 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
     -- table styles and media all arrive without being re-derived.
     let ourParts = concat(pptxAppendEntries(
       [
-        {name: "[Content_Types].xml", content: pptxRefNotesContentTypes(ref, slideContents, pptxTplInsertBeforeLast(pptxRefContentTypes(ref, slideCount), "</Types>", pptxMediaDefaults(pics, ref.contentTypesXml, "")))},
+        {name: "[Content_Types].xml", content: pptxRefCommentsCt(slideContents, pptxRefNotesContentTypes(ref, slideContents, pptxTplInsertBeforeLast(pptxRefContentTypes(ref, slideCount), "</Types>", pptxMediaDefaults(pics, ref.contentTypesXml, ""))))},
         {name: "ppt/presentation.xml", content: pptxRefNotesPresentation(ref, hasNotes, pptxRefPresentation(ref, slideCount, slideSize))},
-        {name: "ppt/_rels/presentation.xml.rels", content: pptxRefNotesPresRels(ref, hasNotes, pptxRefPresRels(ref, slideCount))}
+        {name: "ppt/_rels/presentation.xml.rels", content: pptxRefCommentsPresRels(slideContents, pptxRefNotesPresRels(ref, hasNotes, pptxRefPresRels(ref, slideCount)))}
       ],
       pptxRefSlideEntries(slideContents, 1, 1),
       pptxBuildSlideRelEntries(slideContents, 1, ref.layoutTarget, 1)),
-      if hasNotes then pptxRefNotesEntries(ref, slideContents) else []);
+      concat(if hasNotes then pptxRefNotesEntries(ref, slideContents) else [],
+        pptxCommentArchiveEntries(slideContents, 1)));
     -- Carried parts are already base64, so the whole archive goes through
     -- createArchiveWithBytes whether or not the content has images.
     let allBytes = pptxAppendByteEntries(pptxAppendByteEntries(pptxPartsToByteEntries(ourParts), ref.entries), pptxPicEntries(pics));
@@ -142,7 +150,8 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
       Err(e) => "Error generating PPTX: ${e}"
     }
   } else {
-  let allEntries = concat(pptxAppendEntries(baseEntries, slideEntries, slideRelEntries), notesEntries);
+  let allEntries = concat(pptxAppendEntries(baseEntries, slideEntries, slideRelEntries),
+    concat(notesEntries, pptxCommentArchiveEntries(slideContents, 1)));
 
   -- Pictures are binary, so a deck with any goes through createArchiveWithBytes
   -- with its text parts base64-encoded; a deck without keeps the text path.
@@ -170,13 +179,13 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
 -- parsers emit it directly AFTER its slide section, so it attaches to the
 -- slide group immediately before it. Its name ("Slide N") is not used to find
 -- the slide — position is the contract, and a name can be stale after an edit.
-type PptxSlide = { blocks: [Block], notes: [Block], flow: bool }
+type PptxSlide = { blocks: [Block], notes: [Block], comments: [Block], flow: bool }
 
 pure func pptxCollectSlides(blocks: [Block]) -> [PptxSlide] {
   let hasSlides = pptxHasSlideBlocks(blocks);
   if hasSlides
   then reverse(pptxSplitBySlides(blocks, []))
-  else map(\bs. {blocks: bs, notes: [], flow: false}, pptxSlideBreaks(blocks))
+  else map(\bs. {blocks: bs, notes: [], comments: [], flow: false}, pptxSlideBreaks(blocks))
 }
 
 pure func pptxHasSlideBlocks(blocks: [Block]) -> bool =
@@ -198,12 +207,34 @@ pure func pptxSplitBySlides(blocks: [Block], acc: [PptxSlide]) -> [PptxSlide] =
     [] => acc,
     SectionBlock(s) :: rest =>
       if s.kind == "slide"
-      then pptxSplitBySlides(rest, {blocks: s.blocks, notes: [], flow: false} :: acc)
+      then pptxSplitBySlides(rest, pptxNewSlide(s.blocks) :: acc)
       else if s.kind == "notes"
       then pptxSplitBySlides(rest, pptxAttachNotes(acc, s.blocks))
       else pptxSplitBySlides(rest, acc),
-    _ :: rest => pptxSplitBySlides(rest, acc)
+    c :: rest =>
+      match c {
+        -- A comment outside any slide section follows the slide it annotates
+        -- (the parser emits it right after the slide section), so it pins to
+        -- the most recent slide exactly the way notes do.
+        CommentBlock(_) => pptxSplitBySlides(rest, pptxAttachComments(acc, [c])),
+        _ => pptxSplitBySlides(rest, acc)
+      }
   }
+
+pure func pptxNewSlide(blocks: [Block]) -> PptxSlide =
+  {blocks: pptxNonComments(blocks), notes: [], comments: pptxCommentsOnly(blocks), flow: false}
+
+pure func pptxIsCommentBlock(b: Block) -> bool =
+  match b {
+    CommentBlock(_) => true,
+    _ => false
+  }
+
+pure func pptxCommentsOnly(blocks: [Block]) -> [Block] =
+  filter(pptxIsCommentBlock, blocks)
+
+pure func pptxNonComments(blocks: [Block]) -> [Block] =
+  filter(\b. not pptxIsCommentBlock(b), blocks)
 
 -- A notes section before any slide has nowhere to go and is dropped; the
 -- generator's result line reports it (pptxOrphanNotes). No parser emits that
@@ -214,8 +245,19 @@ pure func pptxAttachNotes(acc: [PptxSlide], notes: [Block]) -> [PptxSlide] =
     -- Bound first: the v0.35 parser (our declared floor) reads a record
     -- literal followed by :: in an arm body as a pattern.
     s :: rest => {
-      let withNotes = {blocks: s.blocks, notes: concat(s.notes, notes), flow: s.flow};
+      let withNotes = {blocks: s.blocks, notes: concat(s.notes, notes), comments: s.comments, flow: s.flow};
       withNotes :: rest
+    }
+  }
+
+-- Comments onto the most recent slide, in order. A comment with no slide
+-- behind it has nowhere to go and is dropped — the same shape as orphan notes.
+pure func pptxAttachComments(acc: [PptxSlide], comments: [Block]) -> [PptxSlide] =
+  match acc {
+    [] => [],
+    s :: rest => {
+      let withComments = {blocks: s.blocks, notes: s.notes, comments: concat(s.comments, comments), flow: s.flow};
+      withComments :: rest
     }
   }
 
@@ -239,13 +281,13 @@ pure func pptxCountSlides(slides: [PptxSlide]) -> int = listLength(slides)
 pure func pptxLayoutSlides(slides: [PptxSlide]) -> [PptxSlide] =
   flatMap(\s.
     if pptxFitsSlots(s.blocks) then [s]
-    else pptxNotesOnFirst(map(\chunk. {blocks: chunk, notes: [], flow: true}, pptxPaginate(s.blocks)), s.notes),
+    else pptxNotesOnFirst(map(\chunk. {blocks: chunk, notes: [], comments: [], flow: true}, pptxPaginate(s.blocks)), s.notes, s.comments),
     slides)
 
-pure func pptxNotesOnFirst(slides: [PptxSlide], notes: [Block]) -> [PptxSlide] =
+pure func pptxNotesOnFirst(slides: [PptxSlide], notes: [Block], comments: [Block]) -> [PptxSlide] =
   match slides {
     [] => [],
-    first :: rest => {blocks: first.blocks, notes: notes, flow: first.flow} :: rest
+    first :: rest => {blocks: first.blocks, notes: notes, comments: comments, flow: first.flow} :: rest
   }
 
 pure func pptxHasNotes(s: PptxSlide) -> bool = listLength(s.notes) > 0
@@ -271,14 +313,131 @@ pure func pptxBuildSlideRelEntries(slides: [PptxSlide], idx: int, layoutTarget: 
     [] => [],
     slide :: rest =>
       let notesRel = if pptxHasNotes(slide) then pptxSlideNotesRel(idx) else "" in
+      let commentsRel = if pptxHasComments(slide) then pptxSlideCommentsRel(idx) else "" in
       let slidePics = pptxPicsOf(slide.blocks, pic) in
       let entry = {name: "ppt/slides/_rels/slide${intToStr(idx)}.xml.rels",
-                   content: pptxTplInsertBeforeLast(pptxRefSlideRels(layoutTarget), "</Relationships>", "${notesRel}${pptxPicRels(slidePics)}")} in
+                   content: pptxTplInsertBeforeLast(pptxRefSlideRels(layoutTarget), "</Relationships>", "${notesRel}${commentsRel}${pptxPicRels(slidePics)}")} in
       entry :: pptxBuildSlideRelEntries(rest, idx + 1, layoutTarget, pic + listLength(slidePics))
   }
 
 pure func pptxSlideNotesRel(idx: int) -> string =
   "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide\" Target=\"../notesSlides/notesSlide${intToStr(idx)}.xml\"/>"
+
+pure func pptxSlideCommentsRel(idx: int) -> string =
+  "<Relationship Id=\"rIdCMT${intToStr(idx)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments\" Target=\"../comments/comment${intToStr(idx)}.xml\"/>"
+
+-- === Slide comments (ECMA-376 §19.3, legacy p:cm shape) ====================
+--
+-- A slide with comments gets ppt/comments/commentN.xml (one part per slide,
+-- every <p:cm> in it), ppt/commentAuthors.xml (the author table the authorId
+-- indexes), a comments relationship from the slide, a commentAuthors
+-- relationship from the presentation, and the two content-type overrides.
+-- Shapes mirror poi_comment.pptx, so a generated deck round-trips through the
+-- parser: <p:cm authorId dt idx><p:pos/><p:text>.
+
+pure func pptxHasComments(s: PptxSlide) -> bool = listLength(s.comments) > 0
+
+pure func pptxAnyComments(slides: [PptxSlide]) -> bool = any(pptxHasComments, slides)
+
+-- Comment parts (one per slide with comments) plus the author part, which is
+-- written once whenever any slide has comments.
+pure func pptxCommentArchiveEntries(slides: [PptxSlide], idx: int) -> [{name: string, content: string}] =
+  if not pptxAnyComments(slides) then []
+  else concat([{name: "ppt/commentAuthors.xml", content: pptxAuthorsXml(slides)}],
+    pptxCommentEntries(slides, idx))
+
+pure func pptxCommentEntries(slides: [PptxSlide], idx: int) -> [{name: string, content: string}] =
+  match slides {
+    [] => [],
+    slide :: rest =>
+      if pptxHasComments(slide)
+      then {name: "ppt/comments/comment${intToStr(idx)}.xml", content: pptxCommentPartXml(slide.comments, pptxDistinctAuthors(pptxAllComments(slides), []))}
+        :: pptxCommentEntries(rest, idx + 1)
+      else pptxCommentEntries(rest, idx + 1)
+  }
+
+-- authors is the DECK-wide distinct author list: authorId indexes the shared
+-- ppt/commentAuthors.xml, so a per-slide list would renumber the same name.
+pure func pptxCommentPartXml(comments: [Block], authors: [string]) -> string =
+  "${xmlDecl()}<p:cmLst xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">${pptxCommentTags(comments, authors, 1)}</p:cmLst>"
+
+pure func pptxCommentTags(comments: [Block], authors: [string], idx: int) -> string =
+  match comments {
+    [] => "",
+    c :: rest =>
+      match c {
+        CommentBlock(cm) =>
+          "<p:cm authorId=\"${intToStr(pptxAuthorPos(authors, cm.author, 0))}\" dt=\"${pptxCommentDt(cm.date)}\" idx=\"${intToStr(idx)}\"><p:pos x=\"3472\" y=\"1558\"/><p:text>${xmlEscape(cm.text)}</p:text></p:cm>${pptxCommentTags(rest, authors, idx + 1)}",
+        _ => pptxCommentTags(rest, authors, idx)
+      }
+  }
+
+pure func pptxAuthorPos(authors: [string], author: string, idx: int) -> int =
+  match authors {
+    [] => 0,
+    a :: rest => if a == author then idx else pptxAuthorPos(rest, author, idx + 1)
+  }
+
+pure func pptxDistinctAuthors(comments: [Block], acc: [string]) -> [string] =
+  match comments {
+    [] => acc,
+    c :: rest =>
+      match c {
+        CommentBlock(cm) =>
+          if length(cm.author) == 0 || any(\a. a == cm.author, acc)
+          then pptxDistinctAuthors(rest, acc)
+          else pptxDistinctAuthors(rest, concat(acc, [cm.author])),
+        _ => pptxDistinctAuthors(rest, acc)
+      }
+  }
+
+pure func pptxAuthorsXml(slides: [PptxSlide]) -> string =
+  "${xmlDecl()}<p:cmAuthorLst xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">${pptxAuthorTags(pptxDistinctAuthors(pptxAllComments(slides), []), 0)}</p:cmAuthorLst>"
+
+pure func pptxAllComments(slides: [PptxSlide]) -> [Block] =
+  match slides {
+    [] => [],
+    s :: rest => concat(s.comments, pptxAllComments(rest))
+  }
+
+pure func pptxAuthorTags(authors: [string], idx: int) -> string =
+  match authors {
+    [] => "",
+    a :: rest =>
+      "<p:cmAuthor id=\"${intToStr(idx)}\" name=\"${xmlAttrEscape(a)}\" initials=\"${xmlAttrEscape(pptxInitials(a))}\" lastIdx=\"0\" clrIdx=\"${intToStr(idx % 8)}\"/>${pptxAuthorTags(rest, idx + 1)}"
+  }
+
+pure func pptxInitials(name: string) -> string =
+  if length(name) == 0 then "?" else substring(name, 0, 1)
+
+-- An absent date is not skippable: dt is part of the legacy shape POI and
+-- PowerPoint both write, so an empty one becomes a fixed epoch-ish stamp.
+pure func pptxCommentDt(date: string) -> string =
+  if length(date) == 0 then "2000-01-01T00:00:00.000" else date
+
+-- Content-type overrides for the comment parts of one deck.
+pure func pptxCommentsCt(slides: [PptxSlide]) -> string =
+  "${pptxCommentPartCt(slides, 1)}${if pptxAnyComments(slides) then "<Override PartName=\"/ppt/commentAuthors.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml\"/>" else ""}"
+
+pure func pptxCommentPartCt(slides: [PptxSlide], idx: int) -> string =
+  match slides {
+    [] => "",
+    slide :: rest =>
+      if pptxHasComments(slide)
+      then "<Override PartName=\"/ppt/comments/comment${intToStr(idx)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.comments+xml\"/>${pptxCommentPartCt(rest, idx + 1)}"
+      else pptxCommentPartCt(rest, idx + 1)
+  }
+
+pure func pptxRefCommentsCt(slides: [PptxSlide], ct: string) -> string =
+  if not pptxAnyComments(slides) then ct
+  else pptxTplInsertBeforeLast(ct, "</Types>", pptxCommentsCt(slides))
+
+pure func pptxRefCommentsPresRels(slides: [PptxSlide], rels: string) -> string =
+  if not pptxAnyComments(slides) then rels
+  else pptxTplInsertBeforeLast(rels, "</Relationships>", pptxCommentAuthorsRel())
+
+pure func pptxCommentAuthorsRel() -> string =
+  "<Relationship Id=\"rIdCMA1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/commentAuthors\" Target=\"commentAuthors.xml\"/>"
 
 -- ============================================================
 -- Speaker notes (ECMA-376 §13.3.5 notesSlide, §13.3.4 notesMaster)
