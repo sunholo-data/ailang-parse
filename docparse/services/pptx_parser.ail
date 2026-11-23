@@ -1,7 +1,7 @@
 module docparse/services/pptx_parser
 
 import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren, getTag)
-import std/option (Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
+import std/option (Option, Some, None, flatMap as optFlatMap, map as optMap, getOrElse)
 import std/result (Result, Ok, Err)
 import std/string (contains, length, trim, stringToInt, join, intToStr, endsWith)
 import std/list (map, flatMap, any, filter, concat, length as listLength, take)
@@ -147,20 +147,111 @@ pure func pptxIsCommentRel(r: XmlNode) -> bool {
   contains(relType, "/comments") || contains(relType, "modernComment")
 }
 
--- "Slide 3: Q3 Revenue Forecast" — the slide number plus its opening line
-pure func pptxSlideAnchor(slideXml: string, slideNo: int) -> string {
-  let first = pptxFirstSlideText(slideXml);
+-- "Slide 3: Q3 Revenue Forecast" — the slide number plus its opening line.
+--
+-- Decks with no title placeholder (python-pptx blank layout, HTML-to-PPTX
+-- exports, Google Slides) keep their visible title in a plain text box, often
+-- drawn AFTER a repeated footer. Reading the first a:t in document order (the
+-- pre-v0.59 behaviour) labelled every comment in such a deck with the footer.
+-- The fallback order instead:
+--   1. the title/ctrTitle placeholder's text, when the slide has one;
+--   2. otherwise the text shape carrying the largest explicit run font size
+--      (size-less shapes rank 0, so a deck with no explicit sizes degrades to
+--      the topmost text shape; equal sizes keep the earlier, topmost shape);
+--   3. otherwise just "Slide N".
+pure func pptxSlideAnchor(slideXml: string, slideNo: int) -> string
+  tests [
+    -- title placeholder wins even when drawn after other text
+    (("<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>Nordvik Freight · board pack</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Q3 Revenue Forecast</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>", 1), "Slide 1: Q3 Revenue Forecast"),
+    -- the reported case: no title placeholder, footer drawn first, 40pt title after
+    (("<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr></p:sp><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>Nordvik Freight · board pack, November 2026 · fictional example</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:rPr sz=\"4000\" b=\"1\"/><a:t>Recommendation</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>", 3), "Slide 3: Recommendation"),
+    -- no explicit sizes anywhere: topmost text shape (old behaviour preserved)
+    (("<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>Footer line</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>Body text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>", 2), "Slide 2: Footer line"),
+    -- empty title placeholder falls through to the largest-font text shape
+    (("<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>  </a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:rPr sz=\"3200\"/><a:t>Choose a plan</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>", 4), "Slide 4: Choose a plan"),
+    -- no text at all: plain slide number
+    (("<p:sld xmlns:p=\"p\" xmlns:a=\"a\"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr></p:sp></p:spTree></p:cSld></p:sld>", 3), "Slide 3")
+  ]
+{
+  let first = pptxSlideLabelText(slideXml);
   if length(first) > 0 then "Slide ${intToStr(slideNo)}: ${first}"
   else "Slide ${intToStr(slideNo)}"
 }
 
-pure func pptxFirstSlideText(slideXml: string) -> string =
+pure func pptxSlideLabelText(slideXml: string) -> string =
   match parsePptxContentXml(slideXml) {
-    Ok(root) => match findAll(root, "a:t") {
-      [] => "",
-      t :: _ => trim(getText(t))
+    Ok(root) => {
+      let shapes = findAll(root, "p:sp");
+      match pptxTitleShapeText(shapes) {
+        Some(title) => title,
+        None => pptxBestTextShape(shapes, "", 0)
+      }
     },
     Err(_) => ""
+  }
+
+-- The first title/ctrTitle placeholder shape that has text.
+pure func pptxTitleShapeText(shapes: [XmlNode]) -> Option[string] =
+  match shapes {
+    [] => None,
+    sp :: rest => {
+      let phType = getPlaceholderType(sp);
+      if phType == "title" || phType == "ctrTitle"
+      then match pptxShapeOpeningText(sp) {
+        Some(text) => Some(text),
+        None => pptxTitleShapeText(rest)
+      }
+      else pptxTitleShapeText(rest)
+    }
+  }
+
+-- The text of the shape with the largest explicit font size. An empty `best`
+-- is always replaced, so a deck with no explicit sizes keeps the topmost text
+-- shape; equal sizes keep the earlier (topmost) shape.
+pure func pptxBestTextShape(shapes: [XmlNode], best: string, bestSz: int) -> string =
+  match shapes {
+    [] => best,
+    sp :: rest =>
+      match pptxShapeOpeningText(sp) {
+        Some(text) => {
+          let sz = pptxShapeMaxFontSize(sp);
+          if length(best) == 0 || sz > bestSz
+          then pptxBestTextShape(rest, text, sz)
+          else pptxBestTextShape(rest, best, bestSz)
+        },
+        None => pptxBestTextShape(rest, best, bestSz)
+      }
+  }
+
+-- The shape's opening line: the first non-empty paragraph's text.
+pure func pptxShapeOpeningText(sp: XmlNode) -> Option[string] =
+  pptxFirstParaText(findAll(sp, "a:p"))
+
+pure func pptxFirstParaText(paras: [XmlNode]) -> Option[string] =
+  match paras {
+    [] => None,
+    p :: rest => {
+      let text = trim(extractDrawingMLText(p));
+      if length(text) > 0 then Some(text) else pptxFirstParaText(rest)
+    }
+  }
+
+-- Largest sz (hundredths of a point) on the shape's run/paragraph properties;
+-- 0 when the shape carries no explicit size (size lives in the layout then).
+pure func pptxShapeMaxFontSize(sp: XmlNode) -> int =
+  pptxMaxSz(
+    findAll(sp, "a:rPr") ++ findAll(sp, "a:endParaRPr") ++ findAll(sp, "a:defRPr"),
+    0
+  )
+
+pure func pptxMaxSz(nodes: [XmlNode], acc: int) -> int =
+  match nodes {
+    [] => acc,
+    n :: rest =>
+      match stringToInt(getOrElse(getAttr(n, "sz"), "")) {
+        Some(sz) => pptxMaxSz(rest, if sz > acc then sz else acc),
+        None => pptxMaxSz(rest, acc)
+      }
   }
 
 func pptxReadCommentParts(filepath: string, targets: [string], anchor: string) -> [Block] ! {FS} =
