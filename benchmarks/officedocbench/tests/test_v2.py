@@ -1017,6 +1017,45 @@ class AdapterMappingTests(unittest.TestCase):
         # Without the provider flag an empty header row is a real row.
         self.assertEqual(markdown_output(md)["structure"]["table_cells"][0]["text"], "")
 
+    def test_unstructured_lists_heading_levels_slides_and_notes(self):
+        from adapters.unstructured_adapter import UnstructuredAdapter
+
+        class Meta(SimpleNamespace):
+            def to_dict(self):
+                return {k: v for k, v in vars(self).items() if v is not None}
+
+        def el(kind, text, page=None, depth=None):
+            cls = type(kind, (), {"__str__": lambda self: text})
+            obj = cls()
+            obj.metadata = Meta(page_number=page, category_depth=depth)
+            return obj
+
+        out = UnstructuredAdapter().convert_elements([
+            el("Title", "Plan", depth=0), el("ListItem", "Frontend", depth=0),
+            el("ListItem", "React", depth=1), el("Title", "Timeline", depth=1),
+            el("ListItem", "Later", depth=0),
+        ], Path("x.docx"))
+        self.assertEqual(out["headings"], [{"text": "Plan", "level": 1}, {"text": "Timeline", "level": 2}])
+        self.assertEqual(out["structure"]["list_items"], [
+            {"text": "Frontend", "level": 0}, {"text": "React", "level": 1}, {"text": "Later", "level": 0}])
+        self.assertEqual([(x["items"], x["depth"]) for x in out["lists"]],
+                         [(["Frontend", "React"], 2), (["Later"], 1)])
+        self.assertEqual([e["type"] for e in out["structure"]["element_order"]],
+                         ["heading", "list", "heading", "list"])
+
+        plain = [el("Title", "Intro", 1, 0), el("Title", "Point", 1, 1), el("PageBreak", "", 1),
+                 el("NarrativeText", "Body", 2, 0), el("PageBreak", "", 2)]
+        noted = [el("NarrativeText", "Say hi", 1, 0)] + plain
+        notes = UnstructuredAdapter._slide_notes(plain, noted)
+        self.assertEqual(notes, {1: "Say hi"})
+        out = UnstructuredAdapter().convert_elements(plain, Path("x.pptx"), notes)
+        self.assertEqual(out["structure"]["containers"], [
+            {"kind": "slide", "name": "Intro"}, {"kind": "slide", "name": ""},
+            {"kind": "slide", "name": ""}])
+        self.assertEqual(out["structure"]["notes"], [{"scope": "Intro", "text": "Say hi"}])
+        self.assertEqual(out["speaker_notes"], [{"text": "Say hi"}])
+        self.assertNotIn("", [t["text"] for t in out["text_elements"]])
+
 
 if __name__ == "__main__":
     unittest.main()
