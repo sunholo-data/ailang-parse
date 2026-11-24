@@ -78,6 +78,19 @@ ADAPTER_NAMES = [
 ]
 
 
+def _error_text(exc: Exception, limit: int = 500) -> str:
+    """An error message cut to `limit`, keeping its start and its end.
+
+    Tools often print warnings first and the real error last (LiteParse's
+    LibreOffice step: Fontconfig warnings, then "source file could not be
+    loaded"), so a head-only cut hid the cause.
+    """
+    text = str(exc)
+    if len(text) <= limit:
+        return text
+    return text[:80] + " ... " + text[-(limit - 85):]
+
+
 def _find_test_file(source_file: str) -> Path | None:
     """Find a test file in TEST_DIR or its subdirectories (e.g., challenge/)."""
     direct = TEST_DIR / source_file
@@ -336,12 +349,12 @@ def evaluate_adapter(
                     "file": source_file,
                     "format": fmt,
                     "status": "ERROR",
-                    "error": str(exc)[:500],
+                    "error": _error_text(exc),
                     **profile,
                 }
             )
             print(
-                f"    {source_file}: ERROR {str(exc)[:120]}",
+                f"    {source_file}: ERROR {_error_text(exc, 200)}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -485,7 +498,7 @@ def main():
                         "file": json.loads(p.read_text())["file"],
                         "format": json.loads(p.read_text())["format"],
                         "status": "ERROR",
-                        "error": str(exc)[:500],
+                        "error": _error_text(exc),
                     }
                     for p in gt_files
                 ],
