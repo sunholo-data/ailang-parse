@@ -1056,6 +1056,67 @@ class AdapterMappingTests(unittest.TestCase):
         self.assertEqual(out["speaker_notes"], [{"text": "Say hi"}])
         self.assertNotIn("", [t["text"] for t in out["text_elements"]])
 
+    def test_docling_comments_notes_furniture_lists_and_spans(self):
+        from adapters.docling_adapter import DoclingAdapter
+
+        ref = lambda kind, i: {"$ref": f"#/{kind}/{i}"}
+        text = lambda i, value, parent, label="text", layer="body", **kw: {
+            "self_ref": f"#/texts/{i}", "parent": parent, "children": kw.pop("children", []),
+            "content_layer": layer, "label": label, "text": value, "orig": value, **kw}
+        group = lambda i, label, name, parent, children, layer="body": {
+            "self_ref": f"#/groups/{i}", "parent": parent, "children": children,
+            "content_layer": layer, "label": label, "name": name}
+        body = {"self_ref": "#/body", "children": [ref("groups", 0), ref("texts", 0),
+                ref("groups", 1), ref("groups", 3), ref("tables", 0)], "label": "unspecified"}
+        doc = {
+            "body": body,
+            "texts": [
+                text(0, "Keep the date.", ref("body", 0), comments=[ref("groups", 3)]),
+                text(1, "One", ref("groups", 1), "list_item", children=[ref("groups", 2)]),
+                text(2, "Nested", ref("groups", 2), "list_item"),
+                text(3, "Two", ref("groups", 1), "list_item"),
+                text(4, "[author: Ann Lee (AL), time: 2026-01-01T00:00:00.000+00:00]: Check it.",
+                     ref("groups", 3), layer="notes"),
+                text(5, "Header text", ref("groups", 0), layer="furniture"),
+            ],
+            "groups": [
+                group(0, "section", "page header", ref("body", 0), [ref("texts", 5)], "furniture"),
+                group(1, "list", "list", ref("body", 0), [ref("texts", 1), ref("texts", 3)]),
+                group(2, "list", "list", ref("texts", 1), [ref("texts", 2)]),
+                group(3, "comment_section", "comment-0", ref("body", 0), [ref("texts", 4)], "notes"),
+            ],
+            "tables": [{"self_ref": "#/tables/0", "prov": [], "data": {"num_rows": 3, "table_cells": [
+                {"start_row_offset_idx": 0, "start_col_offset_idx": 0, "row_span": 2, "col_span": 1,
+                 "text": "A", "column_header": True},
+                {"start_row_offset_idx": 0, "start_col_offset_idx": 1, "row_span": 1, "col_span": 2,
+                 "text": "E", "column_header": True},
+                {"start_row_offset_idx": 1, "start_col_offset_idx": 1, "row_span": 1, "col_span": 1, "text": "G"},
+                {"start_row_offset_idx": 2, "start_col_offset_idx": 0, "row_span": 1, "col_span": 1, "text": "1"},
+            ]}}],
+            "pictures": [],
+        }
+        document = SimpleNamespace(export_to_dict=lambda: doc, export_to_markdown=lambda: "Keep the date.")
+        out = DoclingAdapter().convert_document(document)
+        self.assertEqual(out["comments"], [{"text": "Check it.", "author": "Ann Lee",
+                                            "annotated_text": "Keep the date.", "anchored": True, "scope": ""}])
+        self.assertEqual(out["headers_footers"], [{"type": "header", "text": "Header text"}])
+        self.assertEqual(out["lists"], [{"items": ["One", "Nested", "Two"], "ordered": False, "depth": 2}])
+        self.assertEqual(out["tables"][0]["row_count"], 2)
+        cells = {(c["row"], c["col"]): c for c in out["structure"]["table_cells"]}
+        self.assertTrue(cells[2, 1]["merged"] and cells[1, 3]["merged"])
+        self.assertEqual(cells[2, 2]["text"], "G")
+
+        slide = {"self_ref": "#/groups/0", "parent": ref("body", 0), "children": [ref("texts", 0), ref("texts", 1)],
+                 "content_layer": "body", "label": "chapter", "name": "slide-0"}
+        doc = {"body": {"self_ref": "#/body", "children": [ref("groups", 0)]}, "groups": [slide],
+               "texts": [text(0, "Intro", ref("groups", 0), "title"),
+                         text(1, "Say hi", ref("groups", 0), layer="notes")],
+               "tables": [], "pictures": []}
+        out = DoclingAdapter().convert_document(SimpleNamespace(export_to_dict=lambda: doc,
+                                                                export_to_markdown=lambda: "# Intro"))
+        self.assertEqual(out["structure"]["notes"], [{"scope": "Intro", "text": "Say hi"}])
+        self.assertEqual(out["speaker_notes"], [{"text": "Say hi"}])
+
 
 if __name__ == "__main__":
     unittest.main()

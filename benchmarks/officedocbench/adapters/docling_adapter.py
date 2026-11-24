@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import docling_structure, markdown_output
+from .structure import (
+    docling_headers_footers,
+    docling_lists,
+    docling_structure,
+    markdown_output,
+)
 
 
 class DoclingAdapter(OfficeDocBenchAdapter):
@@ -35,7 +40,10 @@ class DoclingAdapter(OfficeDocBenchAdapter):
             self._converter = DocumentConverter()
         converter = self._converter
         result = converter.convert(str(filepath))
+        return self.convert_document(result.document)
 
+    def convert_document(self, document) -> dict[str, Any]:
+        """Map a DoclingDocument (export_to_dict / export_to_markdown)."""
         text_elements = []
         headings = []
         tables = []
@@ -46,7 +54,7 @@ class DoclingAdapter(OfficeDocBenchAdapter):
         metadata: dict[str, Any] = {}
 
         try:
-            doc_dict = result.document.export_to_dict()
+            doc_dict = document.export_to_dict()
 
             # Docling v2 uses 'texts' list with 'label' field, 'tables' list,
             # 'pictures' list, and 'body' with $ref children
@@ -94,6 +102,13 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                     cell_text = tbl.get("text", tbl.get("orig", ""))
 
                 num_rows = data.get("num_rows", 0) if isinstance(data, dict) else 0
+                # Rows exclude the header row, as for the other providers,
+                # when Docling marks one (column_header cells in row 0).
+                if isinstance(data, dict) and any(
+                    c.get("column_header") and c.get("start_row_offset_idx", 0) == 0
+                    for c in data.get("table_cells", [])
+                ):
+                    num_rows -= 1
                 tables.append({
                     "rows": data.get("grid", []),
                     "row_count": num_rows,
@@ -136,7 +151,7 @@ class DoclingAdapter(OfficeDocBenchAdapter):
 
         except Exception:
             # Last resort: markdown export
-            md = result.document.export_to_markdown()
+            md = document.export_to_markdown()
             for line in md.strip().split("\n"):
                 line = line.strip()
                 if not line:
@@ -154,7 +169,12 @@ class DoclingAdapter(OfficeDocBenchAdapter):
                     text_elements.append({"text": line, "style": "markdown"})
 
         structure = docling_structure(doc_dict)
-        rich = markdown_output(result.document.export_to_markdown())
+        # Docling's tree groups list items: one list per top-level group.
+        groups = docling_lists(doc_dict)
+        if groups:
+            lists_out = groups
+        headers_footers += docling_headers_footers(doc_dict)
+        rich = markdown_output(document.export_to_markdown())
         # Docling represents formatted paragraphs as inline groups of text
         # fragments. Its own serializer preserves those paragraph boundaries.
         text_elements = rich["text_elements"]
@@ -168,10 +188,10 @@ class DoclingAdapter(OfficeDocBenchAdapter):
             "headings": headings,
             "tables": tables,
             "track_changes": [],
-            "comments": [],
+            "comments": [dict(c) for c in structure["comment_anchors"]],
             "headers_footers": headers_footers,
             "footnotes": footnotes,
-            "speaker_notes": [],
+            "speaker_notes": [{"text": n["text"]} for n in structure["notes"]],
             "text_boxes": [],
             "images": images,
             "lists": lists_out,

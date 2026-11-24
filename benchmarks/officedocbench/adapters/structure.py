@@ -560,10 +560,79 @@ def pandoc_structure(ast, table_parser):
     return out
 
 
+def _docling_item(document, ref):
+    parts = (ref or {}).get("$ref", "").split("/")
+    if len(parts) == 3 and parts[1] in document:
+        return document[parts[1]][int(parts[2])]
+    return None
+
+
+def _docling_texts(document, node):
+    """Texts under a Docling node, in tree order (tables give their cells)."""
+    if node is None:
+        return []
+    if "data" in node:
+        return [c.get("text", "") for c in node["data"].get("table_cells", [])]
+    out = [node["text"]] if node.get("text") else []
+    for ref in node.get("children", []):
+        out += _docling_texts(document, _docling_item(document, ref))
+    return out
+
+
+_DOCLING_COMMENT = re.compile(r"^\[author: (?P<author>.*?)(?: \([^()]*\))?(?:, time: [^\]]*)?\]: ?")
+
+
+def docling_lists(document):
+    """One legacy list per top-level Docling list group, nested items included."""
+    lists = []
+
+    def walk(node, current=None, depth=0):
+        if node is None:
+            return
+        label = node.get("label", "")
+        if label in ("list", "ordered_list"):
+            depth += 1
+            if current is None:
+                current = {"items": [], "ordered": label == "ordered_list", "depth": 1}
+                lists.append(current)
+            current["depth"] = max(current["depth"], depth)
+        elif label == "list_item" and current is not None:
+            if not current["items"] and node.get("enumerated"):
+                current["ordered"] = True
+            current["items"].append(node.get("text", ""))
+        for ref in node.get("children", []):
+            walk(_docling_item(document, ref), current, depth)
+
+    walk(document.get("body", {}))
+    return [x for x in lists if x["items"]]
+
+
+def docling_headers_footers(document):
+    """DOCX page header/footer sections (furniture layer), one per part child."""
+    out = []
+    for group in document.get("groups", []):
+        kind = {"page header": "header", "page footer": "footer"}.get(group.get("name"))
+        if kind is None or group.get("content_layer") != "furniture":
+            continue
+        for ref in group.get("children", []):
+            value = " ".join(t for t in _docling_texts(document, _docling_item(document, ref)) if t)
+            if value.strip():
+                out.append({"type": kind, "text": value})
+    return out
+
+
 def docling_structure(document):
     out = {
         k: []
-        for k in ("element_order", "table_cells", "runs", "list_items", "hyperlinks")
+        for k in (
+            "element_order",
+            "table_cells",
+            "runs",
+            "list_items",
+            "hyperlinks",
+            "comment_anchors",
+            "notes",
+        )
     }
     for item in document.get("texts", []):
         fmt = item.get("formatting") or {}
@@ -592,6 +661,7 @@ def docling_structure(document):
     out["containers"] = [
         {"kind": "sheet", "name": g.get("name", "")} for g in sheet_groups
     ]
+    slide_names = {}
     for group in document.get("groups", []):
         if group.get("label") == "chapter" and group.get("name", "").startswith(
             "slide-"
@@ -605,6 +675,41 @@ def docling_structure(document):
                         title = item.get("text", "")
                         break
             out["containers"].append({"kind": "slide", "name": title})
+            slide_names[group["self_ref"]] = title
+            # Speaker notes: the slide's own text in Docling's notes layer.
+            for ref in group.get("children", []):
+                item = _docling_item(document, ref)
+                if item and item.get("content_layer") == "notes" and "text" in item:
+                    out["notes"].append({"scope": title, "text": item["text"]})
+
+    # Comments: comment_section groups (notes layer) holding
+    # "[author: Name (initials), time: ...]: text"; the text items that
+    # carry them reference the group (optionally with a character range).
+    targets = {}
+    for item in document.get("texts", []):
+        for ref in item.get("comments") or []:
+            target = item.get("text", "")
+            if isinstance(ref.get("range"), (list, tuple)) and len(ref["range"]) == 2:
+                target = target[ref["range"][0] : ref["range"][1]]
+            targets.setdefault(ref.get("$ref") or ref.get("cref"), []).append(target)
+    for group in document.get("groups", []):
+        if group.get("label") != "comment_section":
+            continue
+        for ref in group.get("children", []):
+            item = _docling_item(document, ref)
+            if not item or "text" not in item:
+                continue
+            match = _DOCLING_COMMENT.match(item["text"])
+            anchor = targets.get(group["self_ref"], []) + targets.get(item["self_ref"], [])
+            out["comment_anchors"].append(
+                {
+                    "text": item["text"][match.end() :] if match else item["text"],
+                    "author": match.group("author") if match else "",
+                    "annotated_text": " ".join(anchor),
+                    "anchored": bool(anchor),
+                    "scope": slide_names.get((group.get("parent") or {}).get("$ref"), ""),
+                }
+            )
 
     for ti, tbl in enumerate(document.get("tables", [])):
         sheet_index, scope = table_sheets.get(tbl.get("self_ref"), (ti, ""))
@@ -612,17 +717,35 @@ def docling_structure(document):
         bbox = provenance[0].get("bbox", {}) if provenance and scope else {}
         row_offset, col_offset = int(bbox.get("t", 0)), int(bbox.get("l", 0))
         for c in tbl.get("data", {}).get("table_cells", []):
+            row = c.get("start_row_offset_idx", 0) + 1 + row_offset
+            col = c.get("start_col_offset_idx", 0) + 1 + col_offset
             out["table_cells"].append(
                 {
                     "table": sheet_index,
                     "scope": scope,
-                    "row": c.get("start_row_offset_idx", 0) + 1 + row_offset,
-                    "col": c.get("start_col_offset_idx", 0) + 1 + col_offset,
+                    "row": row,
+                    "col": col,
                     "text": c.get("text", ""),
                     "col_span": c.get("col_span", 1),
                     "merged": False,
                 }
             )
+            # Docling lists a spanning cell once; the positions it covers
+            # are merged cells, as html_rows records them for HTML.
+            for dy in range(c.get("row_span", 1)):
+                for dx in range(c.get("col_span", 1)):
+                    if dx or dy:
+                        out["table_cells"].append(
+                            {
+                                "table": sheet_index,
+                                "scope": scope,
+                                "row": row + dy,
+                                "col": col + dx,
+                                "text": "",
+                                "col_span": 1,
+                                "merged": True,
+                            }
+                        )
 
     def walk(node, level=0):
         label = node.get("label", "")
