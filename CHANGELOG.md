@@ -11,6 +11,16 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Changed: license is now FSL-1.1-ALv2
+
+- AILANG Parse moves from Apache 2.0 to the Functional Source License 1.1 with an Apache 2.0
+  future license (`LICENSE.md`). Any use is permitted except offering it to others as a
+  commercial product or service that competes with AILANG Parse or the DocParse API; each
+  version becomes Apache 2.0 two years after its release. Commercial licenses:
+  docparse@sunholo.com.
+- Unchanged: the client SDKs (`sdks/`) and OfficeDocBench (`benchmarks/officedocbench/`) stay
+  Apache 2.0, and every release up to v0.58.0 stays Apache 2.0.
+
 ## [v0.58.0](https://github.com/sunholo-data/ailang-parse/compare/v0.57.1...v0.58.0) — 2026-11-17
 
 **Requires AILANG >= 0.58.0** (was >= 0.50.0): the redaction pipeline's guarantee depends on IFC labels crossing module boundaries, which older toolchains do not enforce.
