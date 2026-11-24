@@ -34,6 +34,15 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
         except Exception:
             return "unknown"
 
+    # Pinned so the score does not depend on the machine: once
+    # `lit models pull ocria-nano` has run, LiteParse >= 2.21 makes that model
+    # its default backend, and its table/layout model then runs on every page.
+    # The OCRia-nano-1 run is its own adapter (liteparse_ocria_adapter.py).
+    OCR_BACKEND = "tesseract"
+
+    def provider_config(self) -> dict[str, Any]:
+        return {"ocr_backend": self.OCR_BACKEND}
+
     def parse(self, filepath: Path) -> dict[str, Any]:
         try:
             from liteparse import LiteParse
@@ -48,6 +57,7 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
             extract_images=True,
             extract_text_metadata=True,
             output_format="markdown",
+            ocr_backend=self.OCR_BACKEND,
         )
         return self.convert_result(parser.parse(str(filepath)), filepath)
 
@@ -72,7 +82,9 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                     output["structure"]["element_order"].append(
                         {"type": "heading", "text": value}
                     )
-                elif kind == "table":
+                elif kind in ("table", "merged_table"):
+                    # merged_table: LayoutNet's table (ocria-nano backend), whose
+                    # cells carry colspan/rowspan in the HTML rendering.
                     rows = (
                         [[c.text for c in block.header]] if block.header else []
                     ) + [[c.text for c in row] for row in block.rows or []]
@@ -85,7 +97,7 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                             "rows": rows,
                             "row_count": len(block.rows or []),
                             "cell_text": " ".join(x for row in rows for x in row),
-                            "has_merged_cells": False,
+                            "has_merged_cells": kind == "merged_table",
                         }
                     )
                 elif kind == "list_item":
@@ -99,6 +111,14 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                             "level": block.level or 0,
                         }
                     )
+                elif kind in ("page_header", "page_footer"):
+                    # LayoutNet page furniture (ocria-nano backend): score it as
+                    # headers/footers, as the Docling and Reducto adapters do.
+                    if value:
+                        output.setdefault("headers_footers", []).append(
+                            {"type": kind.removeprefix("page_"), "text": value}
+                        )
+                    continue
                 elif value:
                     output["text_elements"].append({"text": value, "style": kind})
                     output["structure"]["element_order"].append(

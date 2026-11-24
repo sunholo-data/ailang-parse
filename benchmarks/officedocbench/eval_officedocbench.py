@@ -74,6 +74,7 @@ ADAPTER_NAMES = [
     "pandoc",
     "ooxml",
     "liteparse",
+    "liteparse_ocria",
 ]
 
 
@@ -158,6 +159,13 @@ def load_adapter(name: str):
             from adapters.liteparse_adapter import LiteParseAdapter
 
             return LiteParseAdapter()
+        except Exception:
+            return None
+    elif name == "liteparse_ocria":
+        try:
+            from adapters.liteparse_ocria_adapter import LiteParseOCRiaAdapter
+
+            return LiteParseOCRiaAdapter()
         except Exception:
             return None
     elif name == "ooxml":
@@ -443,6 +451,12 @@ def main():
         ADAPTER_HASH = hashlib.sha256(
             module.read_bytes()
             + (SCRIPT_DIR / "adapters/structure.py").read_bytes()
+            # The OCRia variant inherits all of its mapping from this module.
+            + (
+                (SCRIPT_DIR / "adapters/liteparse_adapter.py").read_bytes()
+                if name == "liteparse_ocria"
+                else b""
+            )
             + reference
         ).hexdigest()
         print(
@@ -507,6 +521,7 @@ _ADAPTER_ID = {
     "Pandoc": "pandoc",
     "Raw OOXML": "ooxml",
     "LiteParse": "liteparse",
+    "LiteParse + OCRia-nano-1": "liteparse_ocria",
 }
 
 
