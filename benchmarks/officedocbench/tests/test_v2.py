@@ -854,5 +854,130 @@ class StructuralTests(unittest.TestCase):
             runner._write_summary([{"adapter": "old", "results": []}])
 
 
+def _words(text, wrap=None):
+    """Pandoc inlines for a phrase: Str/Space per word, optionally wrapped."""
+    out = []
+    for i, w in enumerate(text.split()):
+        out += ([{"t": "Space"}] if i else []) + [{"t": "Str", "c": w}]
+    return [{"t": wrap, "c": out}] if wrap else out
+
+
+def _pandoc_cell(text, rowspan=1, colspan=1):
+    attr = ["", [], []]
+    return [attr, {"t": "AlignDefault"}, rowspan, colspan,
+            [{"t": "Plain", "c": _words(text)}]]
+
+
+def _pandoc_table(head, body):
+    attr = ["", [], []]
+    rows = lambda rs: [[attr, r] for r in rs]
+    return {"t": "Table", "c": [attr, [None, []], [], [attr, rows(head)],
+                                [[attr, 0, [], rows(body)]], [attr, []]]}
+
+
+class AdapterMappingTests(unittest.TestCase):
+    """Synthetic provider output -> adapter output, one fix per test."""
+
+    def test_pandoc_reads_spreadsheets_slides_and_delimited_text(self):
+        from adapters.pandoc_adapter import PandocAdapter
+
+        self.assertLessEqual({"csv", "tsv", "pptx", "xlsx"}, PandocAdapter().supported_formats())
+
+    def test_pandoc_comments_are_comments_not_paragraph_text(self):
+        from adapters.pandoc_adapter import PandocAdapter
+
+        start = lambda cid, body: {"t": "Span", "c": [
+            ["", ["comment-start"], [["comment-id", cid], ["author", "Ann"], ["date", "2026-01-01T00:00:00Z"]]],
+            _words(body)]}
+        end = lambda cid, inner=(): {"t": "Span", "c": [["", ["comment-end"], [["comment-id", cid]]], list(inner)]}
+        ast = {"blocks": [
+            {"t": "Para", "c": _words("Keep") + [{"t": "Space"}, start("1", "Check date."),
+             start("2", "Nested.")] + _words("the term") + [end("1", [end("2")]), {"t": "Space"}] + _words("ok")},
+            {"t": "Para", "c": [start("3", "Never closed.")] + _words("tail")},
+        ]}
+        out = PandocAdapter().convert_ast(ast)
+        self.assertEqual([t["text"] for t in out["text_elements"]], ["Keep the term ok", "tail"])
+        got = {c["text"]: (c["author"], c["annotated_text"], c["anchored"]) for c in out["comments"]}
+        self.assertEqual(got, {
+            "Check date.": ("Ann", "the term", True),
+            "Nested.": ("Ann", "the term", True),
+            "Never closed.": ("Ann", "", False),
+        })
+        self.assertEqual(out["bookmarks"], [])
+        expected = {"comment_anchors": [{"text": "Check date.", "author": "Ann",
+                                         "annotated_text": "the term", "anchored": True}]}
+        self.assertEqual(score_structure(expected, out)["score"], 1)
+
+    def test_pandoc_comment_range_spans_paragraphs_and_cells(self):
+        from adapters.structure import pandoc_structure
+        from adapters.pandoc_adapter import PandocAdapter
+
+        start = {"t": "Span", "c": [["", ["comment-start"], [["comment-id", "0"], ["author", "A"]]], _words("body")]}
+        table = _pandoc_table([], [[_pandoc_cell("x"), _pandoc_cell("EUR 1")],
+                                   [_pandoc_cell("y"), _pandoc_cell("EUR 2")]])
+        cell = table["c"][4][0][3][0][1][1]
+        cell[4][0]["c"] = [start] + cell[4][0]["c"]
+        last = table["c"][4][0][3][1][1][1]
+        last[4][0]["c"].append({"t": "Span", "c": [["", ["comment-end"], [["comment-id", "0"]]], []]})
+        out = pandoc_structure({"blocks": [table]}, PandocAdapter()._parse_table)
+        self.assertEqual(out["comment_anchors"][0]["annotated_text"], "EUR 1 y EUR 2")
+
+    def test_pandoc_runs_join_words_that_share_formatting(self):
+        from adapters.pandoc_adapter import PandocAdapter
+
+        ast = {"blocks": [{"t": "Para", "c": _words("plain then") + [{"t": "Space"}]
+                           + _words("two words", "Strong") + [{"t": "Space"}]
+                           + _words("E=mc") + [{"t": "Superscript", "c": _words("2")}]}]}
+        out = PandocAdapter().convert_ast(ast)
+        runs = out["structure"]["runs"]
+        self.assertIn({"text": "two words", "bold": True, "italic": False, "underline": False,
+                       "strike": False, "code": False, "vertAlign": ""}, runs)
+        self.assertEqual([r["text"] for r in runs if r["vertAlign"] == "superscript"], ["2"])
+        expected = {"runs": [{"text": "two words", "bold": True}, {"text": "plain then", "bold": False},
+                             {"text": "2", "vertAlign": "superscript"}]}
+        self.assertEqual(score_structure(expected, out)["score"], 1)
+
+    def test_pandoc_rowspan_keeps_later_cells_in_their_columns(self):
+        from adapters.pandoc_adapter import PandocAdapter
+
+        table = _pandoc_table(
+            [[_pandoc_cell("A", rowspan=2), _pandoc_cell("E", colspan=2)],
+             [_pandoc_cell("G"), _pandoc_cell("H")]],
+            [[_pandoc_cell("1"), _pandoc_cell("2"), _pandoc_cell("3")]],
+        )
+        out = PandocAdapter().convert_ast({"blocks": [table]})
+        cells = {(c["row"], c["col"]): c for c in out["structure"]["table_cells"]}
+        self.assertEqual(cells[2, 2]["text"], "G")
+        self.assertEqual(cells[2, 3]["text"], "H")
+        self.assertTrue(cells[2, 1]["merged"])
+        self.assertEqual(cells[1, 2]["col_span"], 2)
+        self.assertEqual(out["tables"][0]["rows"][1][1]["text"], "G")
+
+    def test_pandoc_slides_sheets_and_notes(self):
+        from adapters.pandoc_adapter import PandocAdapter
+
+        header = lambda ident, text: {"t": "Header", "c": [2, [ident, [], []], _words(text)]}
+        notes = {"t": "Div", "c": [["", ["notes"], []], [{"t": "Para", "c": _words("Say hello")}]]}
+        out = PandocAdapter().convert_ast({"blocks": [
+            header("slide-1", "Intro"), {"t": "Para", "c": _words("Body")}, notes,
+            header("slide-2", "End"),
+        ]})
+        s = out["structure"]
+        self.assertEqual(s["containers"], [{"kind": "slide", "name": "Intro"}, {"kind": "slide", "name": "End"}])
+        self.assertEqual(s["notes"], [{"scope": "Intro", "text": "Say hello"}])
+        self.assertEqual(out["speaker_notes"], [{"text": "Say hello"}])
+        self.assertNotIn("Say hello", [t["text"] for t in out["text_elements"]])
+        out = PandocAdapter().convert_ast({"blocks": [
+            header("sheet-1", "Main"), _pandoc_table([], [[_pandoc_cell("x")]]),
+            header("sheet-2", "Other"), _pandoc_table([], [[_pandoc_cell("y")]]),
+        ]})
+        self.assertEqual(out["metadata"]["sheet_names"], ["Main", "Other"])
+        self.assertEqual([(c["table"], c["scope"]) for c in out["structure"]["table_cells"]],
+                         [(0, "Main"), (1, "Other")])
+        # A heading the author wrote is not a container.
+        out = PandocAdapter().convert_ast({"blocks": [header("intro", "Intro")]})
+        self.assertEqual(out["structure"]["containers"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

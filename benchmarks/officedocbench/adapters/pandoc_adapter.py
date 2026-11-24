@@ -7,12 +7,15 @@ Pandoc converts documents to a structured JSON AST via `-t json`. With
 Span elements. This adapter walks the AST to extract headings, tables,
 lists, images, footnotes, track changes, and metadata.
 
+With `--track-changes=all` the DOCX reader also emits comments as
+comment-start/comment-end Spans (author, date, the anchored range between
+them). The PPTX/XLSX readers open each slide/sheet with a level-2 header
+whose id is slide-N/sheet-N, and put speaker notes in a Div of class
+"notes". Table cells carry RowSpan/ColSpan.
+
 Limitations (returns empty):
-  - Comments (w:comment not exposed by pandoc)
   - Headers/footers (pandoc strips these)
   - Text boxes / VML shapes
-  - Speaker notes (PPTX not supported)
-  - Merged cell detection (pandoc flattens table structure)
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import pandoc_structure
+from .structure import pandoc_structure, span_grid
 
 
 class PandocAdapter(OfficeDocBenchAdapter):
@@ -59,8 +62,10 @@ class PandocAdapter(OfficeDocBenchAdapter):
         if result.returncode != 0:
             raise RuntimeError(f"pandoc failed: {result.stderr.strip()}")
 
-        ast = json.loads(result.stdout)
+        return self.convert_ast(json.loads(result.stdout))
 
+    def convert_ast(self, ast: dict[str, Any]) -> dict[str, Any]:
+        """Map a pandoc JSON AST; no pandoc invocation."""
         # Collectors
         text_elements: list[dict[str, Any]] = []
         headings: list[dict[str, Any]] = []
@@ -83,6 +88,9 @@ class PandocAdapter(OfficeDocBenchAdapter):
         metadata_dict = self._extract_metadata(meta)
 
         structure = pandoc_structure(ast, self._parse_table)
+        sheets = [c["name"] for c in structure["containers"] if c["kind"] == "sheet"]
+        if sheets:
+            metadata_dict["sheet_names"] = sheets
         return {
             "structure": structure,
             "hyperlinks": structure["hyperlinks"],
@@ -91,10 +99,10 @@ class PandocAdapter(OfficeDocBenchAdapter):
             "headings": headings,
             "tables": tables,
             "track_changes": track_changes,
-            "comments": [],            # Pandoc does not extract comments
+            "comments": [dict(c) for c in structure["comment_anchors"]],
             "headers_footers": [],     # Pandoc strips headers/footers
             "footnotes": footnotes,
-            "speaker_notes": [],       # Pandoc does not handle PPTX
+            "speaker_notes": [{"text": n["text"]} for n in structure["notes"]],
             "text_boxes": [],          # Pandoc does not extract text boxes
             "images": images,
             "lists": lists_out,
@@ -156,6 +164,9 @@ class PandocAdapter(OfficeDocBenchAdapter):
                 self._walk_blocks(c, text_elements, headings, tables,
                                   track_changes, images, footnotes, lists_out)
 
+            elif t == "Div" and "notes" in c[0][1]:
+                pass  # PPTX speaker notes: mapped by pandoc_structure
+
             elif t == "Div":
                 # c = [attr, [blocks]]
                 self._walk_blocks(c[1], text_elements, headings, tables,
@@ -210,7 +221,9 @@ class PandocAdapter(OfficeDocBenchAdapter):
                 kvs = dict(attr[2]) if len(attr) > 2 else {}
                 span_text = self._inlines_to_text(c[1], track_changes, images, footnotes)
 
-                if "insertion" in classes:
+                if "comment-start" in classes:
+                    pass  # the comment's own text, not document text
+                elif "insertion" in classes:
                     track_changes.append({
                         "type": "insertion",
                         "author": kvs.get("author", ""),
@@ -322,7 +335,7 @@ class PandocAdapter(OfficeDocBenchAdapter):
             pass
 
         return {
-            "rows": grid,
+            "rows": span_grid(grid),
             "row_count": row_count,
             "has_merged_cells": has_merged,
             "cell_text": " ".join(cell_texts),
@@ -364,4 +377,6 @@ class PandocAdapter(OfficeDocBenchAdapter):
         return ""
 
     def supported_formats(self) -> set[str]:
-        return {"docx", "html", "epub", "md", "odt"}
+        # `pandoc --list-input-formats` (3.12+): csv, tsv, pptx and xlsx are
+        # readers too; ods/odp are not.
+        return {"docx", "html", "epub", "md", "odt", "csv", "tsv", "pptx", "xlsx"}

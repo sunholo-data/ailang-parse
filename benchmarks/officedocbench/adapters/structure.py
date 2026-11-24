@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 def cell(value):
     return dict(value) if isinstance(value, dict) else {"text": str(value)}
@@ -189,6 +191,37 @@ def html_rows(markup):
     return rows
 
 
+def span_grid(rows):
+    """Lay out rows that omit span-covered cells on their logical grid.
+
+    For providers (Pandoc) whose rows list only the cells that start at a
+    position, each carrying colSpan/rowSpan: covered positions become
+    {"text": "", "merged": True} placeholders, as html_rows does for HTML,
+    so a cell after a row-spanned column keeps its real column.
+    """
+    out, occupied = [], {}
+    for ri, source in enumerate(rows):
+        row, ci = [], 0
+        for value in source:
+            while (ri, ci) in occupied:
+                row.append(occupied[ri, ci])
+                ci += 1
+            c = cell(value)
+            cs = c.get("colSpan", c.get("col_span", 1))
+            rs = c.get("rowSpan", c.get("row_span", 1))
+            row.append(c)
+            for dy in range(rs):
+                for dx in range(cs):
+                    if dx or dy:
+                        occupied[ri + dy, ci + dx] = {"text": "", "merged": True}
+            ci += 1
+        while (ri, ci) in occupied:
+            row.append(occupied[ri, ci])
+            ci += 1
+        out.append(row)
+    return out
+
+
 def markdown_output(source):
     """Read only features explicitly present in a provider's Markdown/HTML."""
     from markdown_it import MarkdownIt
@@ -317,6 +350,40 @@ def markdown_output(source):
     return out
 
 
+_PANDOC_FLAGS = {
+    "Strong": "bold",
+    "Emph": "italic",
+    "Underline": "underline",
+    "Strikeout": "strike",
+}
+_PANDOC_VERT = {"Superscript": "superscript", "Subscript": "subscript"}
+_PANDOC_QUOTES = {"DoubleQuote": ("\u201c", "\u201d"), "SingleQuote": ("\u2018", "\u2019")}
+_RUN_DEFAULTS = {
+    "bold": False,
+    "italic": False,
+    "underline": False,
+    "strike": False,
+    "code": False,
+    "vertAlign": "",
+}
+
+
+def merge_runs(pieces):
+    """Join adjacent (text, flags) pieces that carry the same formatting.
+
+    A provider that splits a styled phrase into one node per word (Pandoc's
+    Str/Space) still marked the whole phrase; one run per formatting span
+    is what the phrase-level run assertions compare against.
+    """
+    runs = []
+    for value, flags in pieces:
+        if runs and all(runs[-1][k] == flags.get(k, v) for k, v in _RUN_DEFAULTS.items()):
+            runs[-1]["text"] += value
+        else:
+            runs.append({"text": value, **{k: flags.get(k, v) for k, v in _RUN_DEFAULTS.items()}})
+    return [r for r in runs if r["text"].strip()]
+
+
 def pandoc_structure(ast, table_parser):
     out = {
         k: []
@@ -327,50 +394,113 @@ def pandoc_structure(ast, table_parser):
             "list_items",
             "hyperlinks",
             "bookmarks",
+            "comment_anchors",
+            "containers",
+            "notes",
         )
     }
+    comments, open_ids = {}, []
+    scope = [""]
 
-    def inline(nodes, flags=None):
-        flags = flags or {}
+    def classes(c):
+        return c[0][1] if len(c[0]) > 1 else []
+
+    def collect(nodes, flags, acc, effects):
+        """Flatten inlines to (text, flags); effects=False only reads text."""
         for n in nodes:
             t, c = n.get("t"), n.get("c")
-            key = {
-                "Strong": "bold",
-                "Emph": "italic",
-                "Underline": "underline",
-                "Strikeout": "strike",
-            }.get(t)
-            if key:
-                inline(c, {**flags, key: True})
-            elif t in ("Str", "Code"):
-                out["runs"].append({"text": c if t == "Str" else c[1], **flags})
+            if t in _PANDOC_FLAGS:
+                collect(c, {**flags, _PANDOC_FLAGS[t]: True}, acc, effects)
+            elif t in _PANDOC_VERT:
+                collect(c, {**flags, "vertAlign": _PANDOC_VERT[t]}, acc, effects)
+            elif t == "SmallCaps":
+                collect(c, flags, acc, effects)
+            elif t == "Quoted":
+                left, right = _PANDOC_QUOTES.get(c[0].get("t"), ('"', '"'))
+                acc.append((left, flags))
+                collect(c[1], flags, acc, effects)
+                acc.append((right, flags))
+            elif t == "Str":
+                acc.append((c, flags))
+            elif t in ("Code", "Math"):
+                acc.append((c[1], {**flags, "code": t == "Code"}))
+            elif t in ("Space", "SoftBreak", "LineBreak"):
+                acc.append((" ", flags))
             elif t == "Link":
-                out["hyperlinks"].append({"text": plain(c[1]), "url": c[2][0]})
-                inline(c[1], flags)
+                if effects:
+                    out["hyperlinks"].append({"text": plain(c[1]), "url": c[2][0]})
+                collect(c[1], flags, acc, effects)
             elif t == "Span":
-                if c[0][0]:
-                    out["bookmarks"].append({"name": c[0][0]})
-                inline(c[1], flags)
+                kind = classes(c)
+                kv = dict(c[0][2]) if len(c[0]) > 2 else {}
+                if "comment-start" in kind:
+                    # The span body is the comment's text, not document text.
+                    if effects:
+                        cid = kv.get("comment-id", "")
+                        comments[cid] = {
+                            "text": plain(c[1]),
+                            "author": kv.get("author", ""),
+                            "annotated_text": "",
+                            "anchored": False,
+                            "scope": scope[0],
+                        }
+                        out["comment_anchors"].append(comments[cid])
+                        open_ids.append(cid)
+                elif "comment-end" in kind:
+                    cid = kv.get("comment-id", "")
+                    if effects and cid in open_ids:
+                        open_ids.remove(cid)
+                        comments[cid]["anchored"] = True
+                    collect(c[1], flags, acc, effects)  # ends can nest
+                elif "deletion" in kind:
+                    continue  # deleted text is not in the document
+                else:
+                    if effects and c[0][0]:
+                        out["bookmarks"].append({"name": c[0][0]})
+                    collect(c[1], flags, acc, effects)
+            elif t == "Cite":
+                collect(c[1], flags, acc, effects)
+        return acc
 
     def plain(ns):
-        return "".join(
-            n.get("c", "")
-            if n.get("t") == "Str"
-            else " "
-            if n.get("t") in ("Space", "SoftBreak")
-            else plain(n["c"])
-            if n.get("t") in ("Strong", "Emph", "Underline", "Strikeout")
-            else ""
-            for n in ns
-        )
+        return "".join(v for v, _ in collect(ns, {}, [], False)).strip()
 
-    def walk(bs, level=0):
+    def inline(nodes):
+        """Runs and comment ranges of one block's inlines, in document order."""
+        pieces = []
+        for n in nodes:
+            before = len(pieces)
+            collect([n], {}, pieces, True)
+            for cid in open_ids:
+                comments[cid].setdefault("_parts", []).append(
+                    "".join(v for v, _ in pieces[before:])
+                )
+        out["runs"].extend(merge_runs(pieces))
+        for cid in open_ids:
+            comments[cid].setdefault("_parts", []).append(" ")
+
+    def table_blocks(c):
+        """Every cell's blocks of a pandoc Table, head to foot."""
+        rows = list(c[3][1]) if len(c[3]) > 1 else []
+        for body in c[4]:
+            rows += body[2] + body[3]
+        rows += c[5][1] if len(c[5]) > 1 else []
+        return [cell_[4] for row in rows for cell_ in row[1]]
+
+    def walk(bs, level=0, order=True):
         for b in bs:
             t, c = b.get("t"), b.get("c")
             if t in ("Para", "Plain", "Header"):
                 ins = c[2] if t == "Header" else c
+                ident = c[1][0] if t == "Header" else ""
+                kind = ident.split("-")[0]
+                if order and kind in ("slide", "sheet") and ident[len(kind) + 1:].isdigit():
+                    # Pandoc's PPTX/XLSX readers open each slide/sheet with
+                    # a level-2 header whose id is slide-N / sheet-N.
+                    scope[0] = plain(ins)
+                    out["containers"].append({"kind": kind, "name": scope[0]})
                 inline(ins)
-                if not level:
+                if order:
                     out["element_order"].append(
                         {
                             "type": "heading" if t == "Header" else "text",
@@ -386,20 +516,39 @@ def pandoc_structure(ast, table_parser):
                     out["list_items"].append(
                         {"text": value, "ordered": t == "OrderedList", "level": level}
                     )
-                    walk(item, level + 1)
-                if not level:
+                    walk(item, level + 1, False)
+                if order:
                     out["element_order"].append({"type": "list"})
             elif t == "Table":
                 table = table_parser(c)
                 idx = len({x["table"] for x in out["table_cells"]})
-                out["table_cells"] += table_cells(table.get("rows", []), idx)
-                out["element_order"].append({"type": "table"})
+                out["table_cells"] += table_cells(table.get("rows", []), idx, scope[0])
+                for blocks in table_blocks(c):
+                    walk(blocks, level, False)
+                if order:
+                    out["element_order"].append({"type": "table"})
+            elif t == "Div" and "notes" in c[0][1]:
+                # PPTX speaker notes: a Div of class "notes" inside the slide.
+                out["notes"].append(
+                    {
+                        "scope": scope[0],
+                        "text": " ".join(
+                            plain(x["c"] if x.get("t") != "Header" else x["c"][2])
+                            for x in c[1]
+                            if x.get("t") in ("Para", "Plain", "Header")
+                        ),
+                    }
+                )
             elif t == "Div":
-                walk(c[1], level)
+                walk(c[1], level, order)
             elif t == "BlockQuote":
-                walk(c, level)
+                walk(c, level, order)
 
     walk(ast.get("blocks", []))
+    for cid, rec in comments.items():
+        parts = rec.pop("_parts", [])
+        if rec["anchored"]:
+            rec["annotated_text"] = re.sub(r"\s+", " ", "".join(parts)).strip()
     return out
 
 
