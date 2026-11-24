@@ -793,6 +793,49 @@ class StructuralTests(unittest.TestCase):
         self.assertEqual(output["structure"]["table_cells"][-1]["col"], 2)
         self.assertEqual(output["structure"]["table_cells"][-1]["text"], "")
 
+    def test_liteparse_layoutnet_tables_and_page_furniture(self):
+        # OCRia-nano-1's LayoutNet emits merged_table and page_header/footer.
+        c = lambda value: SimpleNamespace(text=value)
+        block = lambda kind, **kw: SimpleNamespace(
+            kind=kind, text=kw.get("text"), header=None, rows=kw.get("rows"),
+            bold=False, italic=False, level=None, ordered=False,
+        )
+        page = SimpleNamespace(
+            markdown="",
+            text="fallback",
+            blocks=[
+                block("page_header", text="Quarterly report"),
+                block("merged_table", rows=[[c("A"), c("B")], [c("1"), c("2")]]),
+                block("page_footer", text="Page 1"),
+            ],
+            annotations=[],
+            text_items=[],
+        )
+        output = LiteParseAdapter().convert_result(
+            SimpleNamespace(pages=[page], images=[]), Path("file.docx")
+        )
+        self.assertEqual(len(output["tables"]), 1)
+        self.assertTrue(output["tables"][0]["has_merged_cells"])
+        self.assertEqual(
+            output["headers_footers"],
+            [
+                {"type": "header", "text": "Quarterly report"},
+                {"type": "footer", "text": "Page 1"},
+            ],
+        )
+        self.assertNotIn(
+            "Page 1", [t["text"] for t in output["text_elements"]]
+        )
+
+    def test_liteparse_backends_are_pinned(self):
+        from adapters.liteparse_ocria_adapter import LiteParseOCRiaAdapter
+
+        self.assertEqual(LiteParseAdapter.OCR_BACKEND, "tesseract")
+        self.assertEqual(LiteParseOCRiaAdapter.OCR_BACKEND, "ocria-nano")
+        self.assertEqual(
+            runner._ADAPTER_ID[LiteParseOCRiaAdapter().name()], "liteparse_ocria"
+        )
+
     def test_summary_rejects_filtered_provider_results(self):
         result = {
             "adapter": "Example",
