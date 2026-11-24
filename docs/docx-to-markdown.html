@@ -182,6 +182,59 @@
 @media (max-width: 480px) {
   .d2m-bar { grid-template-columns: 96px 1fr 48px; font-size: 12px; }
 }
+
+/* ---- Lead answer cards (the hook: two different answers) ---- */
+.d2m-lead { margin: 18px 0 30px; }
+.d2m-lead-q { font-size: 15.5px; font-weight: 600; color: var(--text-primary); }
+.d2m-lead-q .lbl {
+  display: block; font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 7px;
+}
+.d2m-lead-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.d2m-lead-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px 18px 18px; background: var(--bg-card); }
+.d2m-lead-card--win { border-color: var(--dp-blue); box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.14) inset; }
+.d2m-lead-card h4 {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-secondary); margin: 0 0 10px;
+}
+.d2m-lead-card--win h4 { color: var(--dp-blue); }
+.d2m-lead-card p { font-size: 14.5px; line-height: 1.55; margin: 0; color: var(--text-primary); }
+.d2m-lead-card b { color: var(--dp-blue); }
+@media (max-width: 760px) { .d2m-lead-pair { grid-template-columns: 1fr; } }
+
+/* ---- Document viewer mock (the actual file, with its comment in the margin) ---- */
+.d2m-docview { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.d2m-docview-bar {
+  display: flex; align-items: center; gap: 7px; padding: 8px 14px; background: var(--bg-input, rgba(100,116,139,0.06));
+  border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary);
+}
+.d2m-docview-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint, #cbd5e1); display: inline-block; }
+.d2m-docview-body { display: grid; grid-template-columns: 1fr 230px; }
+.d2m-docview-page { padding: 26px 30px; font-family: Georgia, 'Times New Roman', serif; font-size: 14.5px; line-height: 1.7; color: #1f2937; background: #fff; }
+.d2m-docview-page h5 { font-size: 13px; font-weight: 700; margin: 0 0 10px; color: #111827; }
+.d2m-docview-page p { margin: 0 0 14px; }
+.d2m-docview-page del { color: #b91c1c; text-decoration: line-through; background: rgba(185,28,28,.07); }
+.d2m-docview-page ins { color: #15803d; text-decoration: underline; background: rgba(21,128,61,.07); font-style: normal; }
+.d2m-docview-anchor { background: rgba(250, 204, 21, .35); border-radius: 2px; padding: 0 1px; }
+.d2m-docview-margin { background: #fdfdf7; border-left: 1px solid var(--border); padding: 16px 12px; }
+.d2m-docview-comment { border: 1px solid #f3d675; background: #fffbea; border-radius: 6px; padding: 10px 12px; font-size: 12px; line-height: 1.5; color: #44403c; }
+.d2m-docview-comment b { display: block; font-size: 11px; color: #92400e; margin-bottom: 4px; }
+@media (max-width: 760px) {
+  .d2m-docview-body { grid-template-columns: 1fr; }
+  .d2m-docview-margin { border-left: 0; border-top: 1px solid var(--border); }
+}
+
+/* ---- Extraction excerpts: what each parser actually handed the AI ---- */
+.d2m-excerpt-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+.d2m-excerpt { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.d2m-excerpt-label {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-secondary); padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-input, rgba(100,116,139,.05));
+}
+.d2m-excerpt--ours .d2m-excerpt-label { color: #047857; }
+.d2m-excerpt pre { margin: 0; padding: 12px 14px; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-card, #fff); }
+.d2m-excerpt mark { background: rgba(250,204,21,.4); border-radius: 2px; padding: 0 2px; }
+@media (max-width: 760px) { .d2m-excerpt-pair { grid-template-columns: 1fr; } }
 </style>
 <script type="application/ld+json">
 {
@@ -250,6 +303,7 @@
     <aside class="dp-docs-sidebar reveal">
       <nav>
         <a href="#side-by-side" class="active">vs MarkItDown</a>
+        <a href="#qa">Same Question, Two Answers</a>
         <a href="#scores">Word File Scores</a>
         <a href="#what-you-get">What You Get</a>
         <a href="#run">Run It</a>
@@ -383,6 +437,80 @@ Please review the technical specification before the meeting.
         <p class="d2m-pair-note">The outline&rsquo;s three levels stay three levels, so &ldquo;Migrations&rdquo; is still under Database, under Backend. Flattened, a list of requirements becomes a list of unrelated lines.</p>
       </div>
       <p style="font-size:12px;color:var(--text-secondary)">Outputs captured on 10 November 2026 with MarkItDown 0.1.5 (<code>markitdown[docx]</code>) and the AILANG Parse CLI, from the files linked above. The <code>Timeline</code> section after the lists is the same in both and is cut here.</p>
+
+      <h2 id="qa">Same document, same question &mdash; two different answers</h2>
+      <p>Forget the raw Markdown for a moment. Here&rsquo;s what it&rsquo;s actually for: a
+      fictional supplier contract is parsed by MarkItDown, then by AILANG Parse. The same
+      question goes to the same AI against each result &mdash; nothing else changes.</p>
+
+      <div class="d2m-lead">
+        <p class="d2m-lead-q"><span class="lbl">The question</span>&ldquo;Why did the annual price cap change, and what did we get in return?&rdquo;</p>
+        <div class="d2m-lead-pair">
+          <div class="d2m-lead-card">
+            <h4>AI, via MarkItDown</h4>
+            <p>&ldquo;The document doesn&rsquo;t say&hellip; Nothing in it explains that the cap changed, what the earlier figure was, why it moved, or what Nordvik got in return.&rdquo;</p>
+          </div>
+          <div class="d2m-lead-card d2m-lead-card--win">
+            <h4>AI, via AILANG Parse</h4>
+            <p>&ldquo;The 5% cap replaced a 3% cap. Legal (S. Holm) says they accepted 5% only because the supplier <b>dropped the 24-month lock-in</b>&hellip; <b>If the supplier asks for the lock-in back, the cap goes back to 3%.</b>&rdquo;</p>
+          </div>
+        </div>
+      </div>
+
+      <h3>Why: here&rsquo;s the actual document</h3>
+      <p>The answer was never missing from the contract. It&rsquo;s right there on the page
+      &mdash; in a tracked change, with a reviewer&rsquo;s comment explaining it, right next to
+      the clause it changed.</p>
+
+      <div class="d2m-docview">
+        <div class="d2m-docview-bar"><span class="d2m-docview-dot"></span><span class="d2m-docview-dot"></span><span class="d2m-docview-dot"></span><span>supplier-agreement.docx &mdash; &sect;4 Prices, Track Changes shown</span></div>
+        <div class="d2m-docview-body">
+          <div class="d2m-docview-page">
+            <h5>4. Prices</h5>
+            <p>Annual price increases are capped at <span class="d2m-docview-anchor"><del>3%</del>&nbsp;<ins>5%</ins></span> per contract year, applied each 1 January.</p>
+            <h5>7. Term</h5>
+            <p>This Agreement has a term of <del>36 months, with a minimum commitment of 24 months,</del> <ins>12 months, renewing annually, terminable on 90 days&rsquo; written notice.</ins></p>
+          </div>
+          <div class="d2m-docview-margin">
+            <div class="d2m-docview-comment"><b>Legal (S. Holm)</b>We accepted 5% instead of 3% only because they dropped the 24-month lock-in (see &sect;7). CFO agreed 12 Oct.</div>
+          </div>
+        </div>
+      </div>
+
+      <h3>What each parser actually handed the AI</h3>
+      <p>Both extractions start from this exact file. One keeps the comment and the revision
+      next to the clause; one doesn&rsquo;t.</p>
+      <div class="d2m-excerpt-pair">
+        <div class="d2m-excerpt">
+          <div class="d2m-excerpt-label">MarkItDown&rsquo;s output</div>
+          <pre><code>## 4. Prices
+Annual price increases are capped at 5% per
+contract year, applied each 1 January.</code></pre>
+        </div>
+        <div class="d2m-excerpt d2m-excerpt--ours">
+          <div class="d2m-excerpt-label">AILANG Parse&rsquo;s output</div>
+          <pre><code>## 4. Prices
+Annual price increases are capped at 5% per
+contract year, applied each 1 January.
+
+&gt; <mark>[delete by Legal (S. Holm)] ~~3%~~</mark>
+&gt; <mark>[insert by Legal (S. Holm)] 5%</mark>
+&gt;
+&gt; <mark>**Comment (Legal (S. Holm)):** We accepted 5%
+&gt; instead of 3% only because they dropped the
+&gt; 24-month lock-in (see &sect;7).</mark></code></pre>
+        </div>
+      </div>
+      <p class="d2m-pair-note">The 5% is on the page either way. Only AILANG Parse keeps the
+      <b>comment and the revision that explain it</b>, so only its answer can explain it too.</p>
+
+      <p style="font-size:12.5px;color:var(--text-secondary);margin-top:16px">The same trial
+      on an Excel cost breakdown and a PowerPoint board recommendation showed the identical
+      pattern: a cell comment held the one-off-vs-ongoing cost split, a slide&rsquo;s speaker
+      notes held the CFO&rsquo;s sign-off status. MarkItDown&rsquo;s output let the AI restate
+      what was on the page; AILANG Parse&rsquo;s let it answer the question that was actually
+      asked. Fictional documents, built to test this; answers vary run to run &mdash; try it on
+      your own files.</p>
 
       <h2 id="scores">Word file scores on an open benchmark</h2>
       <p>The examples above are three files. <a href="benchmarks.html">OfficeDocBench v2</a> scores every parser on the same <span data-bench="ailang_parse.per_format.docx.files">33</span> Word files. It checks headings, lists, tables, comments, tracked changes, notes, links and text against the source file. Scores on Word files:</p>
