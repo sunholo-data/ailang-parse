@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-BENCHMARK_VERSION = "2.0.0"
+BENCHMARK_VERSION = "2.1.0"
 
 
 def text(value: Any) -> str:

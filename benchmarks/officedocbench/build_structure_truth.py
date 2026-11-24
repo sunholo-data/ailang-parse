@@ -563,7 +563,7 @@ def main():
             "oracle": "build_structure_truth.py v2.1",
             "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         }
-        gt["benchmark_version"] = "2.0.0"
+        gt["benchmark_version"] = "2.1.0"
         rendered = json.dumps(gt, indent=2, ensure_ascii=False) + "\n"
         if check:
             if not dest.exists() or dest.read_text() != rendered:

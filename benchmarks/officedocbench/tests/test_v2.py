@@ -965,7 +965,7 @@ class StructuralTests(unittest.TestCase):
         result = {
             "adapter": "Example",
             "provenance": {
-                "benchmark_version": "2.0.0",
+                "benchmark_version": "2.1.0",
                 "mode": "live",
                 "corpus_sha256": "same",
             },
