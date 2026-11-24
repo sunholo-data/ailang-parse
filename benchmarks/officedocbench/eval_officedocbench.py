@@ -202,12 +202,16 @@ def evaluate_adapter(
         if format_filter and fmt != format_filter:
             continue
 
+        # Minimal/damaged packages are labelled so reports can separate
+        # recovery failures from failures on fully formed documents.
+        profile = {"input_profile": gt["input_profile"]} if gt.get("input_profile") else {}
         if fmt not in supported:
             skip_results.append(
                 {
                     "file": source_file,
                     "format": fmt,
                     "status": "UNSUPPORTED",
+                    **profile,
                 }
             )
             continue
@@ -219,6 +223,7 @@ def evaluate_adapter(
                     "file": source_file,
                     "format": fmt,
                     "status": "MISSING",
+                    **profile,
                 }
             )
             continue
@@ -236,6 +241,7 @@ def evaluate_adapter(
 
     for test_path, gt, gt_path in parse_jobs:
         source_file, fmt = gt["file"], gt["format"]
+        profile = {"input_profile": gt["input_profile"]} if gt.get("input_profile") else {}
         before = time.monotonic()
         try:
             for verification in ("verification", "legacy_verification"):
@@ -309,6 +315,7 @@ def evaluate_adapter(
                     "file": source_file,
                     "format": fmt,
                     "status": "OK",
+                    **profile,
                     **(
                         {"time_ms": round(elapsed_ms, 1)}
                         if cached_at is None and not use_golden
@@ -330,6 +337,7 @@ def evaluate_adapter(
                     "format": fmt,
                     "status": "ERROR",
                     "error": str(exc)[:500],
+                    **profile,
                 }
             )
             print(
@@ -622,6 +630,12 @@ def _write_summary(all_results: list[dict]) -> None:
                 "timing": timing,
                 "structural_fidelity": _rounded(_avg("structural_fidelity"), 4),
                 "errors": sum(r["status"] == "ERROR" for r in ar["results"]),
+                # Errors on deliberately minimal (recovery-profile) inputs.
+                "recovery_errors": sorted(
+                    r["file"]
+                    for r in ar["results"]
+                    if r["status"] == "ERROR" and r.get("input_profile") == "recovery"
+                ),
                 "provenance": ar.get("provenance", {}),
                 "structural_features": {
                     kind: {

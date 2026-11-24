@@ -31,12 +31,15 @@ def rescore(result, cache_root):
     )
     cache_dir = cache_root / result["adapter"].lower().replace(" ", "_")
     for row in result["results"]:
+        gt = json.loads((bench.GT_DIR / (row["file"] + ".json")).read_text())
+        row.pop("input_profile", None)
+        if gt.get("input_profile"):
+            row["input_profile"] = gt["input_profile"]
         if (
             row["status"] != "OK"
             and row.get("error") != "provider returned no extracted content"
         ):
             continue
-        gt = json.loads((bench.GT_DIR / (row["file"] + ".json")).read_text())
         source = bench._find_test_file(row["file"])
         cache = json.loads((cache_dir / (row["file"] + ".json")).read_text())
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
