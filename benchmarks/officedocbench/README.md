@@ -1,6 +1,6 @@
-# OfficeDocBench v2
+# OfficeDocBench v2.1
 
-OfficeDocBench evaluates document parsers on **87 files across 11 formats**. It measures structural fidelity as well as text extraction. The corpus retains the original 69 cases and adds 18 Office regression fixtures. `corpus.json` declares the exact case set; extra files downloaded by CI never silently change the public comparison. Results from v1 use different scoring and must not be compared directly with v2 percentages.
+OfficeDocBench evaluates document parsers on **87 files across 11 formats**. It measures structural fidelity as well as text extraction. The corpus retains the original 69 cases and adds 18 Office regression fixtures. Those 18 fixtures were written by the AILANG Parse team alongside fixes to its parser, so they cover features AILANG Parse was built to handle; about half of all 87 files were authored by the team, and the rest come from the Pandoc, Apache POI, LibreOffice, Unstructured and other public test suites (`benchmarks/SOURCES.md`). `corpus.json` declares the exact case set; extra files downloaded by CI never silently change the public comparison. Results from v1 use different scoring and must not be compared directly with v2 percentages.
 
 ## What changed
 
@@ -121,46 +121,42 @@ Ground truth must be checked against the input source, not regenerated to make t
 
 Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files retain their original licenses; see `benchmarks/SOURCES.md`.
 
-## Recorded comparison (2026-10-23)
+## Results (v2.1, 2026-11-24)
 
-These figures were scored against the ground truth before v2.1, which still held values generated from AILANG Parse output. They have not been rescored against the rebuilt ground truth. The changed `corpus_sha256` stops `--summarize` from combining runs scored against different ground truth. Rescore cached outputs with `rescore.py` before quoting any number.
+Every tool was run on 2026-11-24 against the v2.1 ground truth, with the same scorer. Local tools were run live. Extend, Reducto and LlamaParse were run live through their APIs once, with every raw response kept (`EXTEND_RAW_DIR`, `REDUCTO_RAW_DIR`, `LLAMAPARSE_RAW_DIR`), and the published results map those stored responses with the final adapters (`raw_reuse` in provenance). The exact tool versions are in `results/environment.txt` and each result's provenance.
 
-The reference is the **[XLSX hyperlink candidate (PR #116)](https://github.com/sunholo-data/ailang-parse/pull/116)**,
-labeled `0.52.2+xlsx-hyperlinks`. It includes the PPTX spacing and DOCX cell-formatting
-fixes merged in PR #115 and explicit XLSX hyperlink target extraction.
-`DOCPARSE_BENCHMARK_LABEL=xlsx-hyperlinks` records that label; the exact clean
-source revision and toolchain remain in provenance. Competitor outputs retain
-their original live parse timestamps and are rescored against the same audited
-expectations without new API requests. Do not attribute this candidate's score
-to the unchanged v0.52.2 release.
+| Provider | Version | Parsed | Composite | Coverage-adjusted | Structural fidelity | Text overlap | Errors |
+|---|---|---:|---:|---:|---:|---:|---:|
+| AILANG Parse | 0.58.0 | 87/87 | 95.0% | 95.0% | 99.0% | 97.2% | 0 |
+| Pandoc | 3.14 | 79/87 | 81.0% | 73.5% | 75.9% | 91.9% | 2 |
+| Kreuzberg | 4.10.4 | 83/87 | 74.7% | 71.2% | 56.3% | 92.2% | 4 |
+| Docling | 2.152.0 | 84/87 | 73.4% | 70.9% | 73.0% | 96.4% | 2 |
+| Reducto | r-1@v1.12.24-1094-g7ca71926b723 | 72/87 | 79.8% | 66.1% | 70.7% | 85.5% | 0 |
+| Unstructured | 0.27.37 | 79/87 | 67.6% | 61.4% | 63.5% | 95.1% | 2 |
+| LlamaParse | 0.6.94 | 85/87 | 61.2% | 59.8% | 53.9% | 88.9% | 2 |
+| MarkItDown | 0.1.5 | 73/87 | 68.4% | 57.4% | 64.5% | 86.3% | 2 |
+| Raw OOXML | 2.0.0-stdlib | 60/87 | 81.8% | 56.4% | 61.3% | 96.2% | 1 |
+| Extend | parse_performance@api-2026-02-09 | 77/87 | 61.9% | 54.8% | 53.4% | 88.1% | 4 |
+| LiteParse | 2.21.1 | 74/87 | 38.9% | 33.1% | 23.0% | 85.6% | 2 |
+| LiteParse + OCRia-nano-1 | 2.21.1+ocria-nano@1.0.0 | 74/87 | 36.3% | 30.9% | 22.9% | 85.8% | 2 |
 
-With the same 87 inputs and unchanged assertions, the previous PR #115 parser
-scores **97.70%** and this candidate scores **98.08%**. Only
-`challenge_hyperlinks.xlsx` changes (66.67% to 100%); the other 86 case scores
-are identical. Source-verified hyperlink assertion recall rises from 75% to
-100% across four cases. The earlier published 97.3% used a six-case legacy
-audit and is not the baseline for this comparison. The current legacy audit
-covers eight selected cases; unaudited historical fields remain identified.
+**Structural fidelity** is the share of source-checked structural assertions a tool reproduces (cell positions, comment targets, list depth, explicit formatting, slide and sheet order, notes, hyperlinks, breaks). **Text overlap** is word-level Jaccard against the source text. A file a tool fails on or does not support counts as zero in the coverage-adjusted score.
 
-| Provider | Version | Parsed | Composite | Coverage-adjusted | Errors |
-|---|---|---:|---:|---:|---:|
-| AILANG Parse | 0.52.2+xlsx-hyperlinks | 87/87 | 98.1% | 98.1% | 0 |
-| Kreuzberg | 4.10.4 | 82/87 | 68.5% | 64.6% | 5 |
-| Docling | 2.142.1 | 83/87 | 65.2% | 62.2% | 3 |
-| Reducto (r-1) | r-1@v1.12.24-681-gfa140bec3448 | 72/87 | 72.7% | 60.1% | 0 |
-| LlamaParse (standard) | 0.6.94 | 83/87 | 61.9% | 59.0% | 4 |
-| Extend (Parse 2.0) | parse_performance@api-2026-02-09 | 77/87 | 60.2% | 53.3% | 4 |
-| Unstructured | 0.27.34 | 76/87 | 58.9% | 51.4% | 5 |
-| Raw OOXML | 2.0.0-stdlib | 60/87 | 70.7% | 48.7% | 1 |
-| MarkItDown | 0.1.5 | 69/87 | 58.7% | 46.6% | 2 |
-| Pandoc | 3.12.1 | 49/87 | 63.1% | 35.6% | 1 |
-| LiteParse (Tesseract) | 2.21.1 | 70/87 | 35.9% | 28.9% | 6 |
-| LiteParse + OCRia-nano-1 | 2.21.1+ocria-nano@1.0.0 | 71/87 | 34.6% | 28.2% | 5 |
+LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. Its two errors are the minimal hand-made `test.ods` and `test.odt` recovery fixtures.
 
-LlamaParse uses the legacy `llama-parse` 0.6.94 client in standard non-premium mode. The original provider job responses were retrieved to audit and repair the mappings; no new parsing requests were needed for that remap. Its EPUB and minimal ODS/ODT conversion failures are retained. Other model tiers require separate configured runs.
+Extend ran through its REST API (`parse_performance@api-2026-02-09`) at its strongest documented settings: the `parse_performance` engine (Parse 2.0) with agentic text and table correction, advanced chart extraction, formulas, `formattingDetection: change_tracking`, HTML tables, and `excelParsingMode: advanced` with cell metadata and formatting. The exact request is recorded in `provenance.provider_config`. Extend renders DOCX and PPTX to PDF before parsing. ODP, EPUB and TSV are rejected at upload and count as unsupported. Its four errors are provider failures: two `OCR_ERROR`s (`challenge_footnotes.docx`, `test.ods`), an HTTP 500 (`test.odt`), and no blocks for the recovery fixture `challenge_threaded_comments.xlsx`. An empty answer is scored, not counted as an error, where the file is genuinely empty (`python_pptx_slides.pptx`).
 
-Extend was run on 2026-11-03 through its REST API (version 2026-02-09) at its strongest documented settings: the `parse_performance` engine (Parse 2.0) with agentic text and table correction, advanced chart extraction, formulas, `formattingDetection: change_tracking`, HTML tables, and `excelParsingMode: advanced` with cell metadata and formatting. The exact request is recorded in `provenance.provider_config`. Extend renders DOCX and PPTX to PDF before parsing, so comments, speaker notes, bookmarks and authorship are absent from its response; tracked changes appear only where they are visible on the page, without authors. XLSX and ODS are read natively, and the adapter scores their cells at Extend's own `data-cell` coordinates. HTML and Markdown input is returned as-is. ODP, EPUB and TSV are rejected at upload and count as unsupported. Four provider errors reproduced on a second attempt: an `OCR_ERROR` (`challenge_footnotes.docx`), an HTTP 500 (`test.odt`), an empty three-slide response (`python_pptx_slides.pptx`), and no blocks for the recovery-profile `challenge_threaded_comments.xlsx`. The run used 220 credits; the median latency was 5.6 s per file including upload and polling.
-
-Reducto was run on 2026-11-18 through its REST API (server build v1.12.24-681-gfa140bec3448) at its strongest documented settings: the `r-1` model (the API default is still `legacy` until December 2026), HTML tables, `formatting.include` change tracking, comments and hyperlinks, `spreadsheet.clustering: accurate` with formulas and cell colours, large tables kept whole, document properties, and chunking disabled. The exact request is recorded in `provenance.provider_config`. Reducto reads Word comments with author, date, anchored text and reply threading, and returns inline formatting as HTML and nested lists by tab depth; the adapter maps each of these from the response. Speaker notes, bookmarks, section breaks and tracked-change authors are absent from its response. A tracked change is counted only where Reducto marks it with `<change>`: an insertion that comes back as a bare `<u>` is underline, and plain strikethrough that Reducto wraps in `<change><s>` is counted as the deletion it claims. Spreadsheet cells carry no sheet coordinates, so they are scored at table-local positions; cell colours come back as approximate names (`lightblue`, `lightred`) and are not converted to values. ODT, ODS, ODP and EPUB are refused at parse with HTTP 415 `DOCUMENT_CORRUPT` and count as unsupported; Markdown, HTML and TSV are not in Reducto's documented list but parse. There were no provider errors. The median latency was 1.6 s per file including upload.
+Reducto ran through its REST API (server build `r-1@v1.12.24-1094-g7ca71926b723`) at its strongest documented settings: the `r-1` model, HTML tables, `formatting.include` change tracking, comments and hyperlinks, `spreadsheet.clustering: accurate` with formulas and cell colours, large tables kept whole, document properties, and chunking disabled. ODT, ODS, ODP and EPUB are refused with HTTP 415 and count as unsupported. There were no provider errors.
 
 LiteParse was run twice on 2026-11-24, on CPU, with version 2.21.1 and identical settings apart from the OCR backend. The `liteparse` adapter pins Tesseract. The `liteparse_ocria` adapter uses OCRia-nano-1 (8.1M parameters, model 1.0.0), which needs `lit models pull ocria-nano` once beforehand. With OCRia-nano-1 on, LiteParse's LayoutNet table and layout model also runs on the pages LiteParse renders from Office files. Its tables arrive as `merged_table` blocks with spans, and its running headers and footers as `page_header` / `page_footer`. Both adapters map these. It finds one more table and both header/footer cases, but fewer headings and list items: it returns many list items as `code` blocks. Median time per file was about 1.0 s for both runs, because LiteParse's LibreOffice conversion takes most of the time. The model weights are under the OCRia-nano-1 Model License, which permits benchmarking.
+
+### What changed in v2.1
+
+- The legacy ground truth for 69 cases was rebuilt from the source documents (`source_truth.py`). Before v2.1 most of it had been generated from AILANG Parse's own output. Fields that depend on one parser's conventions (paragraph count, reading order, table row counts, some list counts) are no longer scored. `truth_rebuild_v2_1.json` lists every changed value.
+- A section break is asserted only where the document has one. Every DOCX ends with a body-level `w:sectPr`, which had been asserted as a break that only AILANG Parse emitted.
+- Run assertions cover only formatting the source switches on (no default black, no `bold: false`).
+- The scorer skips a dimension with nothing to check instead of scoring it 1.0, reads heading text from the source-derived headings, treats tracked-change type synonyms as equal, and matches a covered table cell by position rather than span.
+- Adapters were corrected where they dropped output their tool returns, after checking each tool's raw output: Pandoc (xlsx, pptx, csv and tsv are supported; comments, runs, rowspans), MarkItDown (md and tsv; slides and notes; placeholder header rows), Unstructured (list and heading depth, slides, notes), Docling (comments, notes, headers and footers, merged cells), Kreuzberg (hyperlinks), LiteParse (slides), shared Markdown list grouping, and formatting runs for every tool that returns them.
+- `test.odt`, `test.ods` and `test.odp` are labelled recovery fixtures, and three ODT files with no body text accept an empty answer.
+
+Results scored against the v2.0 ground truth are not comparable with these and are not kept in `results/`.

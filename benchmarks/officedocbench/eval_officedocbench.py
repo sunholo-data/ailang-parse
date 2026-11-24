@@ -726,6 +726,16 @@ def _write_summary(all_results: list[dict]) -> None:
         ),
         "adapters": adapters_summary,
     }
+    # The range of competitor scores, so prose like "the other parsers score
+    # from X to Y" never names a tool that has since moved.
+    rivals = [a for a in adapters_summary if a["id"] != "ailang_parse"]
+    if rivals:
+        best = max(rivals, key=lambda a: a["adjusted"])
+        summary.update(
+            competitor_adjusted_min=min(a["adjusted"] for a in rivals),
+            competitor_adjusted_max=best["adjusted"],
+            competitor_best_name=best["name"],
+        )
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     summary_path = RESULTS_DIR / "summary.json"
