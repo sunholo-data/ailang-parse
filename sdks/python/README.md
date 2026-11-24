@@ -432,7 +432,7 @@ client = DocParse(
 
 ## License
 
-Apache 2.0 — see [LICENSE](../../LICENSE) for details.
+Apache 2.0 — see [LICENSE](LICENSE). The client SDKs stay Apache-2.0; the parsers in the rest of the repository are under FSL-1.1-ALv2.
 
 ## Links
 

@@ -307,4 +307,14 @@ See [benchmarks/](benchmarks/) for details.
 
 ## License
 
-Apache 2.0
+AILANG Parse is under the [Functional Source License 1.1, Apache 2.0 Future License](LICENSE.md)
+(FSL-1.1-ALv2). You can use, modify and redistribute it for any purpose except a Competing Use:
+offering it to others as a commercial product or service that substitutes for AILANG Parse or
+the hosted DocParse API. Internal use, self-hosting for your own documents, research,
+education, and professional services for a licensee are all permitted. Two years after each
+version is released, that version also becomes available under Apache 2.0.
+
+- The client SDKs in [`sdks/`](sdks/) and the OfficeDocBench benchmark in
+  [`benchmarks/officedocbench/`](benchmarks/officedocbench/) stay under Apache 2.0.
+- Versions up to and including v0.58.0 were released under Apache 2.0 and stay that way.
+- For a Competing Use, contact docparse@sunholo.com for a commercial license.
