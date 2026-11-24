@@ -11,10 +11,19 @@ Driving LlamaParse the way its own docs recommend for structure-heavy docs:
 - extract_charts, save_images for image scoring
 - hide_headers/hide_footers explicitly false to keep page furniture
 - a parsing_instruction to nudge the model toward structural extraction
+
+Raw responses: set LLAMAPARSE_RAW_DIR to keep every file's raw answer (the
+JSON job results, or the Markdown documents of the fallback, or the
+failure). With LLAMAPARSE_REUSE_RAW=1 as well, a stored answer for the same
+file bytes is remapped instead of re-requested (explicit opt-in, never a
+hidden fallback; recorded as raw_reuse in provenance), so one paid run can
+be remapped after mapping fixes.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import warnings
@@ -42,27 +51,31 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         except Exception:
             return "unknown"
 
-    def parse(self, filepath: Path) -> dict[str, Any]:
-        if not os.environ.get("LLAMA_CLOUD_API_KEY"):
-            raise RuntimeError("LLAMA_CLOUD_API_KEY not set")
-
-        try:
-            from llama_parse import LlamaParse
-        except ImportError:
-            raise RuntimeError("llama-parse not installed: uv pip install llama-parse")
-
+    @staticmethod
+    def _premium() -> bool:
         # Premium mode is 15× the standard credit cost — opt-in only.
         # Set LLAMAPARSE_PREMIUM=1 in the environment for "publication" runs;
         # default-off keeps day-to-day benchmark refreshes affordable.
-        premium = os.environ.get("LLAMAPARSE_PREMIUM", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        return os.environ.get("LLAMAPARSE_PREMIUM", "").lower() in ("1", "true", "yes")
 
-        parser = LlamaParse(
+    @staticmethod
+    def _reuse() -> bool:
+        return os.environ.get("LLAMAPARSE_REUSE_RAW", "").lower() in ("1", "true", "yes")
+
+    def provider_config(self) -> dict[str, Any]:
+        """Recorded in results provenance.
+
+        ``raw_reuse`` marks a remap of stored responses, whose per-file
+        timings are mapping time, not LlamaParse's parse latency.
+        """
+        return {"premium_mode": self._premium(), "raw_reuse": self._reuse()}
+
+    def _parser(self):
+        from llama_parse import LlamaParse
+
+        return LlamaParse(
             result_type="markdown",
-            premium_mode=premium,
+            premium_mode=self._premium(),
             output_tables_as_HTML=True,
             extract_charts=True,
             adaptive_long_table=True,
@@ -76,6 +89,35 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
             ),
         )
 
+    def parse(self, filepath: Path) -> dict[str, Any]:
+        return self.convert_raw(self._run(filepath), filepath)
+
+    def _raw_path(self, filepath: Path) -> Path | None:
+        raw_dir = os.environ.get("LLAMAPARSE_RAW_DIR")
+        if not raw_dir:
+            return None
+        digest = hashlib.sha256(filepath.read_bytes()).hexdigest()[:16]
+        return Path(raw_dir) / f"{filepath.name}.{digest}.json"
+
+    def _run(self, filepath: Path) -> dict[str, Any]:
+        """The provider's raw answer for a file: stored, or requested now.
+
+        LLAMAPARSE_RAW_DIR keeps every answer (failures too), keyed by the
+        file's bytes. With LLAMAPARSE_REUSE_RAW=1 a stored answer is
+        remapped instead of re-requested (explicit opt-in, never a hidden
+        fallback), so mapping fixes do not spend credits.
+        """
+        raw_path = self._raw_path(filepath)
+        if raw_path and self._reuse() and raw_path.exists():
+            return json.loads(raw_path.read_text())
+
+        if not os.environ.get("LLAMA_CLOUD_API_KEY"):
+            raise RuntimeError("LLAMA_CLOUD_API_KEY not set")
+        try:
+            parser = self._parser()
+        except ImportError:
+            raise RuntimeError("llama-parse not installed: uv pip install llama-parse")
+
         # Per-page JSON is richer than the flattened markdown — it carries
         # typed items (heading/text/table/list/image) plus image and chart
         # metadata. Fall back to markdown if the JSON endpoint is unavailable
@@ -86,19 +128,43 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         except Exception:
             json_result = None
 
-        # Empty/missing JSON result is a soft failure (e.g. credit exhaustion
-        # where the SDK swallows the API error and returns []). Treat that as
-        # a hard error so the eval records ERROR rather than silently scoring
-        # the file with empty data — that would publish a fake low score.
+        run: dict[str, Any]
         if not json_result or (isinstance(json_result, list) and not any(json_result)):
-            documents = parser.load_data(str(filepath))
-            if not documents:
-                raise RuntimeError(
-                    "LlamaParse returned no content (likely credit exhaustion or job failure)"
-                )
-            return self._from_markdown(documents)
+            try:
+                documents = parser.load_data(str(filepath))
+            except Exception as exc:
+                run = {"failed": True, "failureMessage": str(exc)[:300]}
+            else:
+                run = {
+                    "json_result": None,
+                    "documents": [
+                        doc.text if hasattr(doc, "text") else str(doc)
+                        for doc in documents or []
+                    ],
+                }
+        else:
+            run = {"json_result": json_result}
 
-        return self.convert_json(json_result, filepath)
+        if raw_path:
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_path.write_text(json.dumps(run, indent=1))
+        return run
+
+    def convert_raw(self, run: dict[str, Any], filepath: Path) -> dict[str, Any]:
+        """Map a stored or fresh raw answer; no parsing request."""
+        if run.get("failed"):
+            raise RuntimeError(f"LlamaParse failed: {run.get('failureMessage')}")
+        if run.get("json_result"):
+            return self.convert_json(run["json_result"], filepath)
+        # Empty/missing JSON and no Markdown documents is a soft failure
+        # (e.g. credit exhaustion where the SDK swallows the API error and
+        # returns []). Treat that as a hard error so the eval records ERROR
+        # rather than silently scoring the file with empty data.
+        if not run.get("documents"):
+            raise RuntimeError(
+                "LlamaParse returned no content (likely credit exhaustion or job failure)"
+            )
+        return markdown_output("\n\n".join(run["documents"]))
 
     def convert_json(self, json_result, filepath):
         """Map an existing provider response; no upload or parsing request."""
@@ -268,15 +334,6 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
             "lists": lists_out,
             "metadata": {},  # no document-properties endpoint
         }
-
-    # -------------------------------------------------------------- Markdown
-
-    def _from_markdown(self, documents: Any) -> dict[str, Any]:
-        return markdown_output(
-            "\n\n".join(
-                doc.text if hasattr(doc, "text") else str(doc) for doc in documents
-            )
-        )
 
     def supported_formats(self) -> set[str]:
         # LlamaParse Cloud accepts a broad set; list the formats present in OfficeDocBench

@@ -1211,6 +1211,71 @@ class AdapterMappingTests(unittest.TestCase):
         out = ReductoAdapter().convert_json(run, Path("x.docx"))
         self.assertEqual([r["text"] for r in out["text_elements"][0]["formatting"]], ["bold"])
 
+    def test_llamaparse_raw_answers_are_kept_and_reused(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        page = {"items": [{"type": "text", "value": "Hello"}], "md": "Hello"}
+        calls = []
+
+        class Fake:
+            def __init__(self, json_result=None, docs=None, error=None):
+                self.json_result, self.docs, self.error = json_result, docs, error
+
+            def get_json_result(self, path):
+                calls.append(("json", path))
+                return self.json_result
+
+            def load_data(self, path):
+                calls.append(("md", path))
+                if self.error:
+                    raise RuntimeError(self.error)
+                return self.docs
+
+        class Adapter(LlamaParseAdapter):
+            fake = None
+
+            def _parser(self):
+                return self.fake
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "doc.docx"
+            src.write_bytes(b"one")
+            raw = Path(tmp) / "raw"
+            env = {"LLAMAPARSE_RAW_DIR": str(raw), "LLAMA_CLOUD_API_KEY": "x",
+                   "LLAMAPARSE_REUSE_RAW": ""}
+            with mock.patch.dict(os.environ, env):
+                adapter = Adapter()
+                adapter.fake = Fake(json_result=[{"pages": [page]}])
+                first = adapter.parse(src)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(len(list(raw.glob("doc.docx.*.json"))), 1)
+                self.assertFalse(adapter.provider_config()["raw_reuse"])
+                # Reuse: no request, same mapping, even without an API key.
+                os.environ.update(LLAMAPARSE_REUSE_RAW="1", LLAMA_CLOUD_API_KEY="")
+                adapter.fake = None
+                self.assertEqual(adapter.parse(src), first)
+                self.assertEqual(len(calls), 1)
+                self.assertTrue(adapter.provider_config()["raw_reuse"])
+                # Different bytes are a different key: a fresh request.
+                os.environ.update(LLAMA_CLOUD_API_KEY="x")
+                src.write_bytes(b"two")
+                adapter.fake = Fake(json_result=[], docs=[SimpleNamespace(text="# Title")])
+                out = adapter.parse(src)
+                self.assertEqual(out["headings"], [{"text": "Title", "level": 1}])
+                self.assertEqual(adapter.parse(src), out)  # reused
+                self.assertEqual(len(calls), 3)  # json then markdown, once
+                # Failures are kept and reproduced by a remap.
+                src.write_bytes(b"three")
+                adapter.fake = Fake(json_result=None, error="credits exhausted")
+                with self.assertRaisesRegex(RuntimeError, "credits exhausted"):
+                    adapter.parse(src)
+                adapter.fake = None
+                with self.assertRaisesRegex(RuntimeError, "credits exhausted"):
+                    adapter.parse(src)
+                self.assertEqual(len(list(raw.glob("doc.docx.*.json"))), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
