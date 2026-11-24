@@ -11,6 +11,10 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Fixed
+
+- `csvParseLine` states the precondition its contract relies on (`requires { length(line) > 0 }`). Its `ensures { listLength(result) >= 1 }` was false for an empty line with an empty delimiter (`split("", "")` is `[]`); `ailang verify` reported it with a runtime-confirmed counterexample. No behavior change: the only caller already drops blank lines.
+
 ## [v0.58.0](https://github.com/sunholo-data/ailang-parse/compare/v0.57.1...v0.58.0) — 2026-11-17
 
 **Requires AILANG >= 0.58.0** (was >= 0.50.0): the redaction pipeline's guarantee depends on IFC labels crossing module boundaries, which older toolchains do not enforce.

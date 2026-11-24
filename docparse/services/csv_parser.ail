@@ -55,8 +55,11 @@ pure func csvParseSimple(content: string, delimiter: string) -> [[string]] {
 
 -- Parse a single CSV line into a list of field strings.
 -- Only used when the content contains no quote characters at all.
--- Contract: always produces at least one field per non-empty line
+-- Contract: always produces at least one field per non-empty line. The
+-- requires is that "non-empty": split("", "") is [], so an empty line with an
+-- empty delimiter has no fields. csvParseSimple drops blank lines first.
 pure func csvParseLine(line: string, delimiter: string) -> [string]
+  requires { length(line) > 0 }
   ensures { listLength(result) >= 1 }
 {
   map(trim, split(line, delimiter))
