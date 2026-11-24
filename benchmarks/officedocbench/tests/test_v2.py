@@ -984,13 +984,13 @@ class AdapterMappingTests(unittest.TestCase):
         )
         self.assertEqual(
             [(x["items"], x["ordered"], x["depth"]) for x in out["lists"]],
-            [(["a", "b"], False, 1), (["one", "two", "three"], True, 1),
-             (["x", "y"], False, 2), (["c"], False, 1)],
+            [(["a", "b"], False, 1), (["one", "two", "x", "y", "three"], True, 2),
+             (["c"], False, 1)],
         )
         self.assertEqual(
-            [(x["text"], x["level"]) for x in out["structure"]["list_items"]],
-            [("a", 0), ("b", 0), ("one", 0), ("two", 0), ("x", 1), ("y", 1),
-             ("three", 0), ("c", 0)],
+            [(x["text"], x["level"], x["ordered"]) for x in out["structure"]["list_items"]],
+            [("a", 0, False), ("b", 0, False), ("one", 0, True), ("two", 0, True),
+             ("x", 1, False), ("y", 1, False), ("three", 0, True), ("c", 0, False)],
         )
 
     def test_markitdown_formats_slides_notes_and_placeholder_header(self):

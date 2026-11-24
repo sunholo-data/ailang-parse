@@ -253,16 +253,14 @@ def markdown_output(source, placeholder_header=False):
         if token.type == "heading_open":
             heading = int(token.tag[1:])
         elif token.type in ("bullet_list_open", "ordered_list_open"):
-            # One legacy list per Markdown list node: its items are the
-            # consecutive entries CommonMark groups; a nested list is its own.
-            list_stack.append(
-                {
-                    "items": [],
-                    "ordered": token.type == "ordered_list_open",
-                    "depth": len(list_stack) + 1,
-                }
-            )
-            out["lists"].append(list_stack[-1])
+            # One legacy list per top-level Markdown list: the consecutive
+            # items CommonMark groups, nested items included (depth = levels),
+            # as the reference adapter counts a list block with item levels.
+            ordered = token.type == "ordered_list_open"
+            if not list_stack:
+                out["lists"].append({"items": [], "ordered": ordered, "depth": 1})
+            list_stack.append(ordered)
+            out["lists"][-1]["depth"] = max(out["lists"][-1]["depth"], len(list_stack))
         elif token.type in ("bullet_list_close", "ordered_list_close"):
             list_stack.pop()
         elif token.type == "table_open":
@@ -342,11 +340,11 @@ def markdown_output(source, placeholder_header=False):
                 structure["element_order"].append({"type": "heading", "text": value})
                 heading = 0
             elif list_stack:
-                list_stack[-1]["items"].append(value)
+                out["lists"][-1]["items"].append(value)
                 structure["list_items"].append(
                     {
                         "text": value,
-                        "ordered": list_stack[-1]["ordered"],
+                        "ordered": list_stack[-1],
                         "level": len(list_stack) - 1,
                     }
                 )
