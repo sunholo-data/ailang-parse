@@ -67,8 +67,10 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
             output_format="markdown",
             images=ImageExtractionConfig(extract_images=True),
         )
-        result = extract_file_sync(str(filepath), config=config)
+        return self.convert_result(extract_file_sync(str(filepath), config=config), filepath)
 
+    def convert_result(self, result, filepath: Path) -> dict[str, Any]:
+        """Map an ExtractionResult; no extraction here."""
         text_elements: list[dict[str, Any]] = []
         headings: list[dict[str, Any]] = []
         tables: list[dict[str, Any]] = []
@@ -177,9 +179,29 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
         if not speaker_notes and str(filepath).endswith(".pptx"):
             self._extract_inline_notes(result.content or "", speaker_notes, text_elements)
 
+        # Kreuzberg's table nodes mark header cells (is_header); exclude a
+        # header row from row_count as the other providers' tables do. Its
+        # grid repeats a spanned cell's text rather than exposing spans.
+        header_rows = [
+            any(
+                cell.get("is_header") and cell.get("row") == 0
+                for cell in node["content"].get("grid", {}).get("cells", [])
+            )
+            for node in ((result.document or {}).get("nodes", []) if isinstance(result.document, dict) else [])
+            if isinstance(node.get("content"), dict) and node["content"].get("node_type") == "table"
+        ]
+        if len(header_rows) == len(tables):
+            for table, header in zip(tables, header_rows):
+                if header and table["row_count"]:
+                    table["row_count"] -= 1
+
         structure = kreuzberg_structure(result)
         markdown = markdown_output(result.content or "")
         structure["runs"] = markdown["structure"]["runs"]
+        # Links as written in Kreuzberg's Markdown. Its node annotations carry
+        # offsets too, but they do not line up with node text once the text
+        # holds multi-byte characters (e.g. gutenberg_moby_dick.epub).
+        structure["hyperlinks"] = markdown["structure"]["hyperlinks"]
         if not structure["list_items"]:
             structure["list_items"] = markdown["structure"]["list_items"]
         return {

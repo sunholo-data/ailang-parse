@@ -1117,6 +1117,28 @@ class AdapterMappingTests(unittest.TestCase):
         self.assertEqual(out["structure"]["notes"], [{"scope": "Intro", "text": "Say hi"}])
         self.assertEqual(out["speaker_notes"], [{"text": "Say hi"}])
 
+    def test_kreuzberg_markdown_links_and_header_row_count(self):
+        from adapters.kreuzberg_adapter import KreuzbergAdapter
+
+        cell = lambda r, c, text, header=False: {"content": text, "row": r, "col": c,
+                                                  "row_span": 1, "col_span": 1, "is_header": header}
+        nodes = [
+            {"content": {"node_type": "paragraph", "text": "See Docs"}},
+            {"content": {"node_type": "table", "grid": {"rows": 3, "cols": 1, "cells": [
+                cell(0, 0, "Name", True), cell(1, 0, "a"), cell(2, 0, "b")]}}},
+        ]
+        result = SimpleNamespace(
+            content="See [Docs](https://example.com/docs)\n\n| Name |\n| --- |\n| a |\n| b |\n",
+            tables=[SimpleNamespace(cells=[["Name"], ["a"], ["b"]], markdown="| Name |\n| --- |\n| a |\n| b |")],
+            images=[], metadata={}, document={"nodes": nodes},
+        )
+        out = KreuzbergAdapter().convert_result(result, Path("x.docx"))
+        self.assertEqual(out["structure"]["hyperlinks"], [{"text": "Docs", "url": "https://example.com/docs"}])
+        self.assertEqual(out["tables"][0]["row_count"], 2)
+        nodes[1]["content"]["grid"]["cells"][0]["is_header"] = False
+        out = KreuzbergAdapter().convert_result(result, Path("x.docx"))
+        self.assertEqual(out["tables"][0]["row_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
