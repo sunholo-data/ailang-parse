@@ -64,17 +64,24 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
     def convert_result(self, result, filepath):
         from .structure import table_cells
 
-        text = "\n\n".join(getattr(p, "markdown", "") or p.text for p in result.pages)
-        output = markdown_output(text)
+        pages = list(result.pages)
+        page_md = [getattr(p, "markdown", "") or p.text for p in pages]
+        output = markdown_output("\n\n".join(page_md))
         blocks = [
-            b for page in result.pages for b in (getattr(page, "blocks", None) or [])
+            (pi, b)
+            for pi, page in enumerate(pages)
+            for b in (getattr(page, "blocks", None) or [])
         ]
+        table_pages = []  # page index of each table, in order
         if blocks:
             output.update(text_elements=[], headings=[], tables=[], lists=[])
             output["structure"].update(element_order=[], table_cells=[], list_items=[])
-            for block in blocks:
+            previous = None
+            for pi, block in blocks:
                 kind = block.kind
                 value = block.text or ""
+                new_list = kind == "list_item" and previous != ("list_item", pi)
+                previous = (kind, pi)
                 if kind == "heading":
                     output["headings"].append(
                         {"text": value, "level": block.level or 1}
@@ -92,6 +99,7 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                         rows, len(output["tables"])
                     )
                     output["structure"]["element_order"].append({"type": "table"})
+                    table_pages.append(pi)
                     output["tables"].append(
                         {
                             "rows": rows,
@@ -101,8 +109,15 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                         }
                     )
                 elif kind == "list_item":
-                    output["lists"].append(
-                        {"items": [value], "ordered": bool(block.ordered)}
+                    # Consecutive list_item blocks on a page are one list.
+                    if new_list:
+                        output["lists"].append(
+                            {"items": [], "ordered": bool(block.ordered), "depth": 1}
+                        )
+                        output["structure"]["element_order"].append({"type": "list"})
+                    output["lists"][-1]["items"].append(value)
+                    output["lists"][-1]["depth"] = max(
+                        output["lists"][-1]["depth"], (block.level or 0) + 1
                     )
                     output["structure"]["list_items"].append(
                         {
@@ -132,6 +147,26 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                             "italic": bool(block.italic),
                         }
                     )
+        else:
+            for pi, md in enumerate(page_md):
+                table_pages += [pi] * len(markdown_output(md)["tables"])
+        if filepath.suffix.lower() in (".pptx", ".odp"):
+            # LiteParse renders a deck to one page per slide; a slide is
+            # named by its first heading, as for the other page-based APIs.
+            names = []
+            for page, md in zip(pages, page_md):
+                heads = [
+                    b.text
+                    for b in (getattr(page, "blocks", None) or [])
+                    if b.kind == "heading" and b.text
+                ] or [h["text"] for h in markdown_output(md)["headings"]]
+                names.append(heads[0] if heads else "")
+            output["structure"]["containers"] = [
+                {"kind": "slide", "name": n} for n in names
+            ]
+            for c in output["structure"]["table_cells"]:
+                if c["table"] < len(table_pages):
+                    c["scope"] = names[table_pages[c["table"]]]
         output["images"] = [
             {"description": str(getattr(image, "id", ""))}
             for image in getattr(result, "images", [])

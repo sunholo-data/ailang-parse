@@ -1139,6 +1139,43 @@ class AdapterMappingTests(unittest.TestCase):
         out = KreuzbergAdapter().convert_result(result, Path("x.docx"))
         self.assertEqual(out["tables"][0]["row_count"], 3)
 
+    def test_liteparse_pages_are_slides_and_list_blocks_group(self):
+        block = lambda kind, text=None, **kw: SimpleNamespace(
+            kind=kind, text=text, header=None, rows=kw.get("rows"), bold=False,
+            italic=False, level=kw.get("level"), ordered=kw.get("ordered", False))
+        page = lambda blocks, md="": SimpleNamespace(
+            markdown=md, text="", blocks=blocks, annotations=[], text_items=[])
+        c = lambda value: SimpleNamespace(text=value)
+        pages = [
+            page([block("heading", "Intro", level=1), block("list_item", "a", level=0),
+                  block("list_item", "b", level=1), block("text", "gap"),
+                  block("list_item", "c", level=0)]),
+            page([block("list_item", "next page", level=0),
+                  block("table", rows=[[c("x"), c("y")]])]),
+            page([], "```text\n\n```"),
+        ]
+        out = LiteParseAdapter().convert_result(SimpleNamespace(pages=pages, images=[]), Path("deck.pptx"))
+        s = out["structure"]
+        self.assertEqual(s["containers"], [{"kind": "slide", "name": n} for n in ("Intro", "", "")])
+        self.assertEqual({c["scope"] for c in s["table_cells"]}, {""})
+        self.assertEqual([(x["items"], x["depth"]) for x in out["lists"]],
+                         [(["a", "b"], 2), (["c"], 1), (["next page"], 1)])
+        self.assertEqual([e["type"] for e in s["element_order"]],
+                         ["heading", "list", "text", "list", "list", "table"])
+        out = LiteParseAdapter().convert_result(SimpleNamespace(pages=pages, images=[]), Path("doc.docx"))
+        self.assertNotIn("containers", out["structure"])
+        blank = LiteParseAdapter().convert_result(
+            SimpleNamespace(pages=[page([], "```text\n\n```")] * 3, images=[]), Path("blank.pptx"))
+        self.assertTrue(has_extracted_content(blank))
+
+    def test_error_text_keeps_the_cause_at_the_end(self):
+        noise = "conversion error: Command failed: " + "Fontconfig warning: x\n" * 40
+        text = runner._error_text(RuntimeError(noise + "Error: source file could not be loaded"))
+        self.assertLessEqual(len(text), 500)
+        self.assertTrue(text.startswith("conversion error"))
+        self.assertTrue(text.endswith("source file could not be loaded"))
+        self.assertEqual(runner._error_text(RuntimeError("short")), "short")
+
 
 if __name__ == "__main__":
     unittest.main()
