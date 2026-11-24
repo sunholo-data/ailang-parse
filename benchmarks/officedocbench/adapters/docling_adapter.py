@@ -11,6 +11,7 @@ from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
 from .structure import (
+    attach_formatting,
     docling_headers_footers,
     docling_lists,
     docling_structure,
@@ -177,7 +178,7 @@ class DoclingAdapter(OfficeDocBenchAdapter):
         rich = markdown_output(document.export_to_markdown())
         # Docling represents formatted paragraphs as inline groups of text
         # fragments. Its own serializer preserves those paragraph boundaries.
-        text_elements = rich["text_elements"]
+        text_elements = attach_formatting(rich["text_elements"], structure["runs"])
         structure["element_order"] = rich["structure"]["element_order"]
         sheet_names = [c["name"] for c in structure["containers"] if c["kind"] == "sheet"]
         if sheet_names: metadata["sheet_names"] = sheet_names

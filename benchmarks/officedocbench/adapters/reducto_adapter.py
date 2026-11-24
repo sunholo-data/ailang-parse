@@ -48,7 +48,13 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import add_sheet_scopes, cell, markdown_output, table_cells
+from .structure import (
+    add_sheet_scopes,
+    attach_formatting,
+    cell,
+    markdown_output,
+    table_cells,
+)
 
 API = os.environ.get("REDUCTO_API_BASE", "https://platform.reducto.ai")
 TIMEOUT_SECONDS = 600
@@ -440,6 +446,7 @@ class ReductoAdapter(OfficeDocBenchAdapter):
         # Reducto writes emphasis as inline HTML, which markdown_output
         # cannot attribute; its runs are replaced by the HTML-derived ones.
         structure["runs"] = runs
+        attach_formatting(output["text_elements"], runs)
         if links:
             structure["hyperlinks"] = structure.get("hyperlinks", []) + links
             output["hyperlinks"] = structure["hyperlinks"]

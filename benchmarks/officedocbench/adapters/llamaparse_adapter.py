@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import markdown_output
+from .structure import attach_formatting, markdown_output
 
 # llama-parse 0.6.x prints a DeprecationWarning on import recommending the
 # new unified SDK; the SDK still works fine and OfficeDocBench is pinned to
@@ -112,6 +112,7 @@ class LlamaParseAdapter(OfficeDocBenchAdapter):
         )
         rich = markdown_output(markdown)
         output["structure"] = rich["structure"]
+        attach_formatting(output["text_elements"], rich["structure"]["runs"])
         output["hyperlinks"] = rich["hyperlinks"]
         if rich["tables"]:
             output["tables"] = rich["tables"]

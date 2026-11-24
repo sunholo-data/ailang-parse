@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import kreuzberg_structure, markdown_output
+from .structure import attach_formatting, kreuzberg_structure, markdown_output
 
 
 class KreuzbergAdapter(OfficeDocBenchAdapter):
@@ -198,6 +198,7 @@ class KreuzbergAdapter(OfficeDocBenchAdapter):
         structure = kreuzberg_structure(result)
         markdown = markdown_output(result.content or "")
         structure["runs"] = markdown["structure"]["runs"]
+        attach_formatting(text_elements, structure["runs"])
         # Links as written in Kreuzberg's Markdown. Its node annotations carry
         # offsets too, but they do not line up with node text once the text
         # holds multi-byte characters (e.g. gutenberg_moby_dick.epub).

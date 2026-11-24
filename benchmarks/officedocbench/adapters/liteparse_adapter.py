@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import markdown_output
+from .structure import attach_formatting, markdown_output
 
 
 class LiteParseAdapter(OfficeDocBenchAdapter):
@@ -183,6 +183,8 @@ class LiteParseAdapter(OfficeDocBenchAdapter):
                     output["structure"]["runs"].append(
                         {"text": item.text, "bold": weight >= 600}
                     )
+        if blocks:
+            attach_formatting(output["text_elements"], output["structure"]["runs"])
         return output
 
     def _flush_table(self, rows: list[str]) -> dict[str, Any]:

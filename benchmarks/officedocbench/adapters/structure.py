@@ -5,6 +5,26 @@ from __future__ import annotations
 import re
 
 
+_FORMAT_FLAGS = ("bold", "italic", "underline", "strike")
+
+
+def attach_formatting(text_elements, runs):
+    """Give each text element the formatted runs it contains.
+
+    The reference adapter does this from AILANG's runs (text_elements[].
+    formatting, which earns 'styles' detection); adapters whose provider
+    returns bold/italic/underline/strike runs get the same field.
+    """
+    styled = [
+        r
+        for r in runs
+        if r.get("text", "").strip() and any(r.get(k) for k in _FORMAT_FLAGS)
+    ]
+    for item in text_elements:
+        item["formatting"] = [r for r in styled if r["text"] in item.get("text", "")]
+    return text_elements
+
+
 def cell(value):
     return dict(value) if isinstance(value, dict) else {"text": str(value)}
 
@@ -302,6 +322,7 @@ def markdown_output(source, placeholder_header=False):
                 }
             )
         elif token.type == "inline":
+            first_run = len(structure["runs"])
             value = "".join(
                 c.content
                 for c in (token.children or [])
@@ -349,7 +370,18 @@ def markdown_output(source, placeholder_header=False):
                     }
                 )
             elif value.strip():
-                out["text_elements"].append({"text": value, "style": "paragraph"})
+                out["text_elements"].append(
+                    {
+                        "text": value,
+                        "style": "paragraph",
+                        # This paragraph's own formatted runs.
+                        "formatting": [
+                            r
+                            for r in structure["runs"][first_run:]
+                            if r["text"].strip() and any(r.get(k) for k in _FORMAT_FLAGS)
+                        ],
+                    }
+                )
                 structure["element_order"].append({"type": "text", "text": value})
     out["lists"] = [x for x in out["lists"] if x["items"]]
     out["hyperlinks"] = structure["hyperlinks"]

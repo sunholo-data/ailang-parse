@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import html_rows, table_cells
+from .structure import attach_formatting, html_rows, table_cells
 
 
 class UnstructuredAdapter(OfficeDocBenchAdapter):
@@ -166,6 +166,7 @@ class UnstructuredAdapter(OfficeDocBenchAdapter):
             else:
                 text_elements.append({"text": text, "style": el_type})
 
+        attach_formatting(text_elements, structure["runs"])
         for slide_page, slide in slides.items():
             if notes.get(slide_page):
                 structure["notes"].append({"scope": slide["name"], "text": notes[slide_page]})

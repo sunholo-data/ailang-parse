@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import pandoc_structure, span_grid
+from .structure import attach_formatting, pandoc_structure, span_grid
 
 
 class PandocAdapter(OfficeDocBenchAdapter):
@@ -88,6 +88,7 @@ class PandocAdapter(OfficeDocBenchAdapter):
         metadata_dict = self._extract_metadata(meta)
 
         structure = pandoc_structure(ast, self._parse_table)
+        attach_formatting(text_elements, structure["runs"])
         sheets = [c["name"] for c in structure["containers"] if c["kind"] == "sheet"]
         if sheets:
             metadata_dict["sheet_names"] = sheets

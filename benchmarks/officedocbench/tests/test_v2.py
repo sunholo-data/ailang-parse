@@ -1191,6 +1191,26 @@ class AdapterMappingTests(unittest.TestCase):
         self.assertTrue(text.endswith("source file could not be loaded"))
         self.assertEqual(runner._error_text(RuntimeError("short")), "short")
 
+    def test_formatted_runs_reach_text_elements_like_the_reference(self):
+        from adapters.structure import attach_formatting
+        from scoring import score_feature_detection
+
+        out = markdown_output("Plain **bold words** and *it*.\n\nNothing here.\n")
+        first, second = out["text_elements"]
+        self.assertEqual([(r["text"], r["bold"], r["italic"]) for r in first["formatting"]],
+                         [("bold words", True, False), ("it", False, True)])
+        self.assertEqual(second["formatting"], [])
+        styles = {"styles": {"present": True}}
+        self.assertTrue(score_feature_detection(styles, out)["checks"]["styles"])
+        self.assertFalse(score_feature_detection(styles, markdown_output("plain"))["checks"]["styles"])
+        elements = attach_formatting([{"text": "a key phrase here"}, {"text": "other"}],
+                                     [{"text": "key phrase", "bold": True}, {"text": "other", "bold": False}])
+        self.assertEqual(elements[0]["formatting"], [{"text": "key phrase", "bold": True}])
+        self.assertEqual(elements[1]["formatting"], [])
+        run = StructuralTests._reducto_run([StructuralTests._rb("Text", "Some <b>bold</b> text.")])
+        out = ReductoAdapter().convert_json(run, Path("x.docx"))
+        self.assertEqual([r["text"] for r in out["text_elements"][0]["formatting"]], ["bold"])
+
 
 if __name__ == "__main__":
     unittest.main()
