@@ -70,6 +70,30 @@ class StructuralTests(unittest.TestCase):
                 self.assertEqual(record["oracle"], "audit_legacy_truth.py v2")
                 self.assertIn("full_text_words", record["fields"])
 
+    def test_heading_texts_match_heading_counts(self):
+        with_texts = 0
+        for name in CASES:
+            truth = json.loads((BENCH / "ground_truth" / (name + ".json")).read_text())
+            headings = truth["features"]["headings"]
+            if headings is None:
+                continue
+            with self.subTest(file=name):
+                texts = headings["texts"]
+                self.assertEqual(len(texts), headings["count"])
+                levels = {}
+                for entry in texts:
+                    self.assertTrue(entry["text"].strip())
+                    levels[str(entry["level"])] = levels.get(str(entry["level"]), 0) + 1
+                self.assertEqual(levels, headings["by_level"])
+                with_texts += bool(texts)
+        self.assertGreater(with_texts, 0)
+        real_world = audited(
+            runner._find_test_file("challenge_real_world.docx"), {"features": {}}
+        )["features"]["headings"]["texts"]
+        # Title/Subtitle carry no outline level and are not headings.
+        self.assertNotIn("Title", [h["text"] for h in real_world])
+        self.assertEqual(real_world[0]["level"], 1)
+
     def test_source_truth_corrections(self):
         def build(name):
             return audited(runner._find_test_file(name), {"features": {}})
