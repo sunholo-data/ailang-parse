@@ -320,9 +320,10 @@ class ReductoAdapter(OfficeDocBenchAdapter):
                 f"Reducto {run.get('failureReason')}: {run.get('failureMessage')}"
             )
         chunks = (run.get("result") or {}).get("chunks") or []
+        # A completed parse with no blocks is an empty answer (a blank deck),
+        # not a failure; the runner still refuses empty output unless the
+        # fixture's truth allows it (allow_empty_output).
         blocks = [b for ch in chunks for b in ch.get("blocks") or []]
-        if not blocks:
-            raise RuntimeError("Reducto returned no blocks")
 
         suffix = filepath.suffix.lower()
         body: list[str] = []

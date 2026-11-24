@@ -770,8 +770,23 @@ class StructuralTests(unittest.TestCase):
                 {"failed": True, "failureReason": "parse HTTP 415", "failureMessage": "DOCUMENT_CORRUPT"},
                 Path("input.odt"),
             )
-        with self.assertRaisesRegex(RuntimeError, "no blocks"):
-            ReductoAdapter().convert_json(self._reducto_run([]), Path("input.docx"))
+
+    def test_empty_provider_answers_are_valid_empty_output(self):
+        import jsonschema
+
+        schema = json.loads((BENCH / "schema/adapter_output.schema.json").read_text())
+        out = ReductoAdapter().convert_json(self._reducto_run([]), Path("blank.pptx"))
+        jsonschema.validate(out, schema)
+        self.assertFalse(has_extracted_content(out))
+        self.assertTrue(has_extracted_content(out, {"allow_empty_output": True}))
+        # Extend returns one chunk per slide; a blank deck's chunks have no blocks.
+        run = {"status": "PROCESSED", "output": {"chunks": [{"blocks": []}] * 3}}
+        out = ExtendAdapter().convert_json(run, Path("blank.pptx"))
+        jsonschema.validate(out, schema)
+        self.assertEqual(out["structure"]["containers"], [{"kind": "slide", "name": ""}] * 3)
+        out = ExtendAdapter().convert_json({"status": "PROCESSED", "output": {"chunks": []}}, Path("x.docx"))
+        self.assertFalse(has_extracted_content(out))
+        self.assertTrue(has_extracted_content(out, {"allow_empty_output": True}))
 
     def test_liteparse_native_layout_keeps_table_cells(self):
         c = lambda value: SimpleNamespace(text=value)
