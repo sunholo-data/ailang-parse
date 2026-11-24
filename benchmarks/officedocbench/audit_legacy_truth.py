@@ -97,6 +97,8 @@ def _heading_feature(headings):
         "present": bool(headings),
         "count": len(headings),
         "by_level": dict(sorted(Counter(str(level) for level, _ in headings).items())),
+        # Same readers and rules as count: one entry per heading, document order.
+        "texts": [{"text": text, "level": level} for level, text in headings],
     }
 
 
