@@ -2,23 +2,17 @@
   "file": "poi_two_sheets.xlsx",
   "format": "xlsx",
   "source": "apache poi",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 0,
-      "total_words": 4,
+      "total_words": 2,
       "key_phrases": [
         "Sheet1",
         "Sheet2"
       ]
     },
     "headings": null,
-    "tables": {
-      "present": true,
-      "count": 2,
-      "total_rows": 0,
-      "has_merged_cells": false
-    },
+    "tables": null,
     "track_changes": null,
     "comments": null,
     "headers_footers": null,
@@ -31,41 +25,21 @@
     },
     "lists": null,
     "metadata": {
-      "title": "",
       "author": "Noel Markham",
       "created": "2007-12-04T17:15:32Z",
       "modified": "2008-10-28T14:51:14Z"
     },
     "sheets": {
-      "present": false,
-      "names": []
+      "present": true,
+      "names": [
+        "Sheet1",
+        "Sheet2"
+      ]
     }
   },
   "full_text_words": [
-    "sheet1",
     "sheet1a1",
-    "sheet2",
     "sheet2a1"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Sheet1",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Sheet2A1"
-    },
-    {
-      "type": "heading",
-      "text": "Sheet2",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Sheet1A1"
-    }
   ],
   "structure": {
     "containers": [
@@ -100,5 +74,24 @@
     "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "62f83686811614842efe4606d07669fd3c70b8ed8c8ff1459c2c329c802a2e59"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.0.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "xlsx: workbook sheet order, sheet cells, comments, docProps/core.xml",
+    "source_sha256": "62f83686811614842efe4606d07669fd3c70b8ed8c8ff1459c2c329c802a2e59",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.images",
+      "features.metadata",
+      "features.sheets"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables:xlsx": "how many tables a worksheet holds is a parser convention (v2 table_cells assertions cover cells)",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

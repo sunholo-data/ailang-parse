@@ -2,12 +2,10 @@
   "file": "python_pptx_table.pptx",
   "format": "pptx",
   "source": "python-pptx (MIT)",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 0,
-      "total_words": 22,
-      "key_phrases": []
+      "total_words": 22
     },
     "headings": {
       "present": false,
@@ -17,7 +15,6 @@
     "tables": {
       "present": true,
       "count": 4,
-      "total_rows": 10,
       "has_merged_cells": true
     },
     "track_changes": null,
@@ -28,18 +25,12 @@
       "present": false,
       "count": 0
     },
-    "text_boxes": {
-      "present": false,
-      "count": 0
-    },
+    "text_boxes": null,
     "images": {
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
       "title": "Presentation",
       "author": "python-pptx",
@@ -72,24 +63,6 @@
     "unladen",
     "vert"
   ],
-  "element_order": [
-    {
-      "type": "table",
-      "text": "a b c"
-    },
-    {
-      "type": "table",
-      "text": "having custom margins vert anchor is inherited vert anchor i"
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'merged cell', 'colSpan': 2, 'merged': False} {'tex"
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'merged cell', 'colSpan': 3, 'merged': False} {'tex"
-    }
-  ],
   "structure": {
     "containers": [
       {
@@ -111,5 +84,27 @@
     "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "02df45aad4927c4c471d76d4f638e82e14c42d4db773103cf8f950f73b0ae976"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.0.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "pptx: slides in presentation order, notes slides, comments, docProps/core.xml",
+    "source_sha256": "02df45aad4927c4c471d76d4f638e82e14c42d4db773103cf8f950f73b0ae976",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.headings",
+      "features.tables",
+      "features.speaker_notes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:pptx": "bullets are inherited from layouts/masters; which paragraphs form a list is a convention",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity",
+      "text_boxes:pptx": "every slide shape is a text frame; which are 'text boxes' is a convention"
+    }
+  }
 }

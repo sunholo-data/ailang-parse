@@ -6,15 +6,51 @@ OfficeDocBench evaluates document parsers on **87 files across 11 formats**. It 
 
 The reference adapter now preserves comment anchors and sheet attribution, logical table cells, formulas, colours on empty cells, list depth, inline formatting, bookmarks, breaks, and slide/notes relationships. Competitor adapters map the same evidence when their output exposes it. They never reopen the input document to fill in features missing from a provider's response. Raw OOXML is explicitly a local reference parser, not an external product.
 
-There are **61 Office cases with source-derived structural assertions**. `build_structure_truth.py` reads the original DOCX/PPTX/XLSX XML, independently of AILANG output, and records the source SHA-256. It checks exact cell coordinates and merge anchors, sheet/slide order, notes attribution, comment targets, list levels, run formatting, formulas, colours, links, bookmarks, and section breaks where the input supplies those features.
+## Where the ground truth comes from
 
-`audit_legacy_truth.py` independently audits selected legacy fields in eight cases against source HTML/XML. This replaces historical HTML parse-error expectations, nonexistent footnote bodies, fragmented list counts, empty SDT text expectations, an extra image count, and two PPTX cases with jammed words, stale reading order and unused media counted as pictures. Each `legacy_verification.fields` array records the precise audit scope and its source hash; the other legacy fields remain unaudited. Both oracles have CI checks.
+Every scored value is computed from the source document by a reader that shares no code or output with AILANG Parse: Python's `zipfile`, `xml.etree` and `csv`, BeautifulSoup (`html.parser`) and markdown-it-py. Nothing is taken from the `.ail` parsers, from `benchmarks/office/golden/`, or from `annotate.py`/`enrich_gt.py`. Those two scripts produced the original 69 annotations from AILANG Parse's own output. They are kept for history and are not part of the maintenance path. A value that depends on one parser's conventions rather than on the document is removed, and the scorer then skips it.
+
+Two oracles write the files in `ground_truth/`, and both run with `--check` in CI:
+
+- `build_structure_truth.py` writes the v2 `structure` assertions for 49 DOCX/PPTX/XLSX cases from the Office XML and records the source SHA-256 under `verification`.
+- `audit_legacy_truth.py`, with its readers in `source_truth.py`, rebuilds the legacy `features`, `full_text_words` and metadata for all 69 original cases. Each case gets a `legacy_verification` record. It names the reader and the source SHA-256, lists the recomputed fields, and lists each field that is no longer scored and why. `verified: true` means every scored value in the case came from these readers.
+
+| Field | Source reader | Formats | Status |
+|---|---|---|---|
+| `full_text_words` | All content text, tokenized with the scorer's own tokenizer: body paragraphs, table cells, slide shapes, sheet cells, headers/footers, footnotes/endnotes, comments, speaker notes, text boxes, and both inserted and deleted tracked text. Each OMML math run counts as its own word source. Excluded: metadata, sheet and slide names, alt text, link targets, field instructions, chart and SmartArt text. Spreadsheet numbers count only in General format, as Excel shows them. | all 11 | recomputed |
+| `text.key_phrases` | Legacy phrases kept only where the phrase occurs verbatim (case and whitespace normalised) in one source paragraph | all | filtered (191 of 209 kept) |
+| `text.paragraph_count` | — | all | removed: it depends on parser segmentation |
+| `element_order` | — | all | removed: a reading order in one parser's block granularity |
+| `headings` | HTML/EPUB `h1`–`h6`; Markdown ATX/setext headings; ODT/ODP `text:h` with `text:outline-level`; DOCX paragraph or style-chain `w:outlineLvl`, a `heading N` style name, or an undefined built-in `HeadingN` id (Title and Subtitle have no outline level and are not headings); PPTX title placeholders and ODP title frames (level 1) | docx, pptx, odt, odp, html, epub, md | recomputed |
+| `tables.count`, `has_merged_cells` | `w:tbl` (`gridSpan`/`vMerge`), `a:tbl` (`gridSpan`/`rowSpan`/`hMerge`/`vMerge`), `table:table` (spanned attributes), HTML `<table>` (`colspan`/`rowspan`), GFM pipe tables and Pandoc grid tables, one table per CSV/TSV file. Nested tables count. | docx, pptx, odt, odp, html, epub, md, csv, tsv | recomputed |
+| `tables` (spreadsheets) | — | xlsx, ods | removed: how many tables a worksheet holds is a parser convention. v2 `table_cells` assertions cover XLSX cells. |
+| `tables.total_rows` | — | all | removed: "rows excluding header" is a convention |
+| `lists` | Top-level `<ol>`/`<ul>`, Markdown lists and `text:list` elements with text. Nested lists add depth (`max_depth`, `has_nested`), not extra lists. Ordered/unordered counts are given only when every list's type is declared. | odt, html, epub, md | recomputed |
+| `lists` | — | docx, pptx, odp | removed: WordprocessingML has no list container, slide bullets come from masters, and ODP wraps each outline paragraph in its own list. v2 `list_items` assertions cover DOCX levels. |
+| `images` | DOCX `a:blip`/`v:imagedata` pointing to an embedded image part (not under `mc:Fallback`); PPTX `p:pic` on slides; XLSX drawing pictures; ODF frames holding an embedded `draw:image` (not an object preview); HTML/EPUB `<img>`; Markdown images | all but csv/tsv | recomputed |
+| `comments` (count, authors, texts, ranges) | `word/comments.xml`; ranges from `commentRangeStart`/`End` | docx | recomputed |
+| `track_changes` | `w:ins`/`w:del`/`w:moveFrom`/`w:moveTo` with text, and ODF `text:changed-region` | docx, odt | recomputed |
+| `headers_footers` | Header/footer parts referenced by a `w:sectPr`, and the master pages an ODT uses, counted when they contain text | docx, odt | recomputed |
+| `footnotes_endnotes` (count, texts) | `w:footnote`/`w:endnote` of type normal (separators excluded); ODF `text:note` | docx, odt | recomputed |
+| `speaker_notes` | Notes slides/`presentation:notes` with text, excluding number, date, header and footer placeholders | pptx, odp | recomputed |
+| `text_boxes` | `w:txbxContent` with text, counted once (not again under `mc:Fallback`); ODF frames holding a `draw:text-box` | docx, odt | recomputed |
+| `text_boxes` | — | pptx, odp | removed: every slide shape is a text frame |
+| `metadata` | OOXML `docProps/core.xml` (`dc:title`, `dc:creator`, `dcterms:created`, `dcterms:modified`); ODF `meta.xml` (`dc:title`; `meta:creation-date` for created, `dc:date` for modified, author only when `meta:initial-creator` exists and agrees with `dc:creator`); HTML `<title>`/`<meta name=author>`; EPUB OPF `dc:title`, a single `dc:creator`, `dcterms:modified`. Fields the source does not set are not asserted. | all with metadata | recomputed |
+| `sheets.names` | `xl/workbook.xml` sheet order; ODS `table:table` order | xlsx, ods | recomputed |
+| `section_breaks` | `w:sectPr` inside a paragraph's `w:pPr`. The body's final `w:sectPr` is not a break. | docx (8 cases) | recomputed |
+| `bookmarks`, `hyperlinks`, `fields` | `w:bookmarkStart` names (hidden `_` names excluded); `w:hyperlink` text plus relationship target or `#anchor`; cached field results with their instruction type | docx (1 case each) | recomputed |
+| `equations` | OMML has no text form. A formula is asserted only when it contains no layout elements (fractions, scripts, radicals, ...), joined from its runs. | docx (1 case, 1 of 4 formulas) | recomputed in part |
+| `styles` | — | docx (1 case) | removed: counts run segmentation. v2 `runs` assertions check explicit formatting instead. |
+
+The v2 `structure` assertions follow the same rule. `breaks` records a `section-break` for a `w:sectPr` in paragraph properties and a `page-break` for an explicit `w:br w:type="page"` (not `w:lastRenderedPageBreak`). Only `challenge_page_breaks.docx` has either. Until v2.1 every DOCX asserted a section break for the closing body `w:sectPr`, which only AILANG Parse emitted. `runs` assert only formatting a run switches on: bold, italic, underline, strike, a colour other than black, and a non-baseline vertical alignment. An explicit "off" or `#000000` is not asserted, because a parser that reports no formatting already implies it. Twelve DOCX cases had no assertion other than the closing section break or default-colour runs. They now carry legacy fields only.
+
+The rebuild corrected values that disagreed with the source. Examples: `challenge_bookmarks.docx` text words copied from another file; comment ranges in `comments.docx` and `challenge_comment_ranges.docx` that extended past `commentRangeEnd`; ODF creation dates taken from `dc:date` (the last-save date) in 8 files; footnotes missing in `pandoc_notes.docx`, `poi_footnotes.docx` and `officeparser.odt`; 8 text boxes counted twice through `mc:Fallback` in `docx-shapes.docx`; empty header/footer parts counted in `docx-hdrftr.docx`; one Pandoc grid table counted as four in `pandoc_planets.md`; and speaker notes or slide titles missed in `officeparser.odp` and `poi_sampleshow.pptx`. `truth_rebuild_v2_1.json` lists every changed value, with the old parser-derived value beside the new source-derived one.
 
 Assertions are selective, not an exhaustive claim about every Office feature. For example, stored numbers are not treated as display-formatted text, theme/tint colours are not yet fully annotated here, and spreadsheet row-coordinate assertions stop at row 100 to avoid conflating original rows with parsers' collapsed large gaps. Image detection remains a count metric; lossless image bytes and document generation are covered by separate regression suites.
 
-One added fixture, `challenge_threaded_comments.xlsx`, is labeled `input_profile: recovery`: it deliberately lacks workbook relationships. Its failures test recovery from a minimal package and should not be described as failures on a fully formed standard workbook. Other known minimal-file failures remain visible by filename in the results.
+Five cases carry `input_profile: recovery`. `challenge_threaded_comments.xlsx` deliberately lacks workbook relationships. `challenge_footnotes.docx` references notes but has no note parts, so the note text cannot be recovered. `test.odt`, `test.ods` and `test.odp` are hand-made minimal ODF packages with only `mimetype`, the manifest, `content.xml` and `meta.xml`, and no `styles.xml`. Failures on these cases test recovery from a minimal package. They should not be described as failures on a fully formed document. Each result row carries the case's `input_profile`, and the summary lists `recovery_errors` per tool.
 
-The legacy `challenge_footnotes.docx` is also labeled as recovery input: it references notes but contains no note-body parts. Parsers cannot recover note text that is absent. AILANG warning blocks remain in adapter diagnostics and do not count as source prose or source reading-order elements. Image blocks do contribute reading-order evidence.
+`allow_empty_output` marks cases whose body has no words, so a tool that correctly returns no text is scored rather than counted as an error: `lo_nested_table.odt` (empty paragraph, empty tables in the footer), `lo_table_styles.odt` (empty table), `lo_image_mimetype.odt` (one image), `python_pptx_slides.pptx` and `poi_table.pptx`. AILANG warning blocks remain in adapter diagnostics and do not count as source prose.
 
 ## Scoring
 
@@ -24,7 +60,7 @@ The eighth dimension, **structural fidelity**, uses the source-derived assertion
 
 Structural assertions compare identity and position, not just word presence. Reading/container order uses a sequence alignment that penalizes missing, additional, or reordered entries. Other assertions require their declared properties to agree; missing evidence scores zero. Styled phrases can match within a coalesced run. Formula comparisons ignore the optional leading `=` used in spreadsheet display notation; missing or changed expressions still lose credit. An actual paragraph containing the target words does not establish a comment-to-target relationship.
 
-The legacy scorer also now checks real reading order, actual comment anchors, and ordered sheet names. It no longer reconstructs document order by concatenating feature buckets. Corrected an inconsistent legacy list count in `challenge_real_world.docx` (six list groups).
+The legacy scorer checks actual comment anchors and ordered sheet names. Legacy reading order and paragraph counts are no longer scored (see above); v2 assertions carry order where the source defines it (sheets, slides). Within a legacy dimension, a check whose ground truth was removed is skipped. A dimension left with no check at all scores 1.0 for every tool, as it did before v2.1 for cases without that feature. This narrows the spread between tools but favours none.
 
 **Composite** is the mean over successfully parsed cases. **Coverage** is successful parses divided by all 87 cases. **Coverage-adjusted score** is composite times coverage; failed and unsupported cases contribute zero. Always publish coverage and error counts alongside scores. Per-feature structural results expose which new capabilities actually survive extraction.
 
@@ -86,6 +122,8 @@ Ground truth must be checked against the input source, not regenerated to make t
 Benchmark annotations: CC-BY-4.0. Evaluation code: Apache-2.0. Source files retain their original licenses; see `benchmarks/SOURCES.md`.
 
 ## Recorded comparison (2026-10-23)
+
+These figures were scored against the ground truth before v2.1, which still held values generated from AILANG Parse output. They have not been rescored against the rebuilt ground truth. The changed `corpus_sha256` stops `--summarize` from combining runs scored against different ground truth. Rescore cached outputs with `rescore.py` before quoting any number.
 
 The reference is the **[XLSX hyperlink candidate (PR #116)](https://github.com/sunholo-data/ailang-parse/pull/116)**,
 labeled `0.52.2+xlsx-hyperlinks`. It includes the PPTX spacing and DOCX cell-formatting

@@ -2,10 +2,9 @@
   "file": "tables-with-incomplete-rows.docx",
   "format": "docx",
   "source": "original",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 2,
       "total_words": 26,
       "key_phrases": [
         "Example of DOCX table where one or more rows is missing cells from the end."
@@ -19,7 +18,6 @@
     "tables": {
       "present": true,
       "count": 6,
-      "total_rows": 14,
       "has_merged_cells": true
     },
     "track_changes": {
@@ -52,12 +50,8 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "Bienioszek, Anna",
       "created": "2018-07-09T05:03:00Z",
       "modified": "2018-08-03T14:43:00Z"
@@ -91,36 +85,6 @@
     "the",
     "where",
     "wtf"
-  ],
-  "element_order": [
-    {
-      "type": "text",
-      "text": "Example of DOCX table where one or more rows is missing cell"
-    },
-    {
-      "type": "table",
-      "text": "a b"
-    },
-    {
-      "type": "table",
-      "text": "a"
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'a', 'colSpan': 2, 'merged': False}"
-    },
-    {
-      "type": "table",
-      "text": "a b"
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'a', 'colSpan': 2, 'merged': False} b c"
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'Data', 'colSpan': 2, 'merged': False}"
-    }
   ],
   "structure": {
     "table_cells": [
@@ -403,5 +367,31 @@
     "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "ce9765fa393eea92c019293fcf2ca2a29d140dcd94462e3e1167b93511009a79"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.0.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "ce9765fa393eea92c019293fcf2ca2a29d140dcd94462e3e1167b93511009a79",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

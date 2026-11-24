@@ -2,10 +2,9 @@
   "file": "challenge_nested_lists.docx",
   "format": "docx",
   "source": "unknown",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 2,
       "total_words": 25,
       "key_phrases": [
         "Project Requirements",
@@ -26,7 +25,6 @@
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
@@ -59,16 +57,8 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": true,
-      "count": 1,
-      "ordered_count": 0,
-      "unordered_count": 1,
-      "max_depth": 3,
-      "has_nested": true
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "python-docx",
       "created": "2013-12-23T23:15:00Z",
       "modified": "2013-12-23T23:15:00Z"
@@ -101,27 +91,6 @@
     "state",
     "timeline",
     "weeks"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Project Requirements"
-    },
-    {
-      "type": "list"
-    },
-    {
-      "type": "heading",
-      "text": "Timeline"
-    },
-    {
-      "type": "text",
-      "text": "Phase 1: Design (2 weeks)"
-    },
-    {
-      "type": "text",
-      "text": "Phase 2: Implementation (4 weeks)"
-    }
   ],
   "structure": {
     "list_items": [
@@ -184,13 +153,29 @@
   },
   "benchmark_version": "2.0.0",
   "legacy_verification": {
-    "method": "Selected legacy fields independently checked against source HTML/XML",
-    "oracle": "audit_legacy_truth.py v1",
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
     "source_sha256": "0f21f2c65b3e755752a84e73201aadd167d0c82020e0bb6a02b364bfdbbf4801",
     "fields": [
-      "features.lists",
-      "features.text.paragraph_count",
-      "element_order"
-    ]
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
   }
 }

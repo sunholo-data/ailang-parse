@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Enrich OfficeDocBench ground truth files from AILANG Parse golden outputs.
+"""Retired v1 utility: enrich ground truth from AILANG Parse golden outputs.
+
+Do not use for OfficeDocBench v2.1+: audit_legacy_truth.py rebuilds the legacy
+fields from the source documents, and this script skips every case it owns.
 
 Auto-generates element_order fields by reading the golden JSON outputs
 (which preserve document block ordering) and writing simplified element
@@ -142,6 +145,10 @@ def enrich_file(gt_path: Path, golden_path: Path, dry_run: bool = False) -> bool
     """
     with open(gt_path) as f:
         gt = json.load(f)
+    # Golden output is AILANG Parse's own; it must never become ground truth
+    # again. Source-rebuilt cases (audit_legacy_truth.py) are left alone.
+    if gt.get("verified") or gt.get("legacy_verification") or gt.get("structure_only"):
+        return False
 
     with open(golden_path) as f:
         golden = json.load(f)

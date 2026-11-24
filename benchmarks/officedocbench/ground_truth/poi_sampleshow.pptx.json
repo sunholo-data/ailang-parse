@@ -2,11 +2,10 @@
   "file": "poi_sampleshow.pptx",
   "format": "pptx",
   "source": "apache poi",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 3,
-      "total_words": 33,
+      "total_words": 41,
       "key_phrases": [
         "Title of the first slide",
         "Subtitle of the first slide",
@@ -17,16 +16,14 @@
     },
     "headings": {
       "present": true,
-      "count": 4,
+      "count": 2,
       "by_level": {
-        "1": 2,
-        "2": 2
+        "1": 2
       }
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -34,21 +31,15 @@
     "headers_footers": null,
     "footnotes_endnotes": null,
     "speaker_notes": {
-      "present": false,
-      "count": 0
+      "present": true,
+      "count": 2
     },
-    "text_boxes": {
-      "present": false,
-      "count": 0
-    },
+    "text_boxes": null,
     "images": {
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
       "title": "SlideShow Sample",
       "author": "Nick Burch",
@@ -59,12 +50,16 @@
   },
   "full_text_words": [
     "16",
+    "2nd",
     "a",
+    "am",
+    "are",
     "aren",
     "arial",
     "at",
     "bit",
     "black",
+    "bold",
     "bullet",
     "different",
     "especially",
@@ -73,11 +68,14 @@
     "fun",
     "green",
     "has",
+    "i",
     "in",
     "is",
     "it",
     "italic",
     "like",
+    "line",
+    "notes",
     "of",
     "on",
     "point",
@@ -88,43 +86,10 @@
     "subtitle",
     "t",
     "the",
+    "these",
     "they",
     "this",
     "title"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Title of the first slide",
-      "level": 1
-    },
-    {
-      "type": "heading",
-      "text": "Subtitle of the first slide",
-      "level": 2
-    },
-    {
-      "type": "heading",
-      "text": "This bit is in italic green",
-      "level": 2
-    },
-    {
-      "type": "heading",
-      "text": "This is the second slide",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "It has bullet points on it"
-    },
-    {
-      "type": "text",
-      "text": "They’re fun, aren’t they?"
-    },
-    {
-      "type": "text",
-      "text": "Especially in a different font like Arial Black at 16 point!"
-    }
   ],
   "structure": {
     "containers": [
@@ -159,5 +124,28 @@
     "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "bfb4b2f07c9233afd2f32aa5781d849d0c7d225bf03721a10becf487b481d828"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.0.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "pptx: slides in presentation order, notes slides, comments, docProps/core.xml",
+    "source_sha256": "bfb4b2f07c9233afd2f32aa5781d849d0c7d225bf03721a10becf487b481d828",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.speaker_notes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:pptx": "bullets are inherited from layouts/masters; which paragraphs form a list is a convention",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity",
+      "text_boxes:pptx": "every slide shape is a text frame; which are 'text boxes' is a convention"
+    }
+  }
 }

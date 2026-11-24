@@ -2,10 +2,9 @@
   "file": "unstructured_test.pptx",
   "format": "pptx",
   "source": "unstructured (Apache-2.0)",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 5,
       "total_words": 20,
       "key_phrases": [
         "Adding a Bullet Slide",
@@ -25,7 +24,6 @@
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -36,23 +34,14 @@
       "present": false,
       "count": 0
     },
-    "text_boxes": {
-      "present": false,
-      "count": 0
-    },
+    "text_boxes": null,
     "images": {
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
-      "author": "",
-      "created": "2013-01-27T09:14:16Z",
-      "modified": ""
+      "created": "2013-01-27T09:14:16Z"
     },
     "sheets": null
   },
@@ -78,33 +67,6 @@
     "the",
     "use"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Adding a Bullet Slide",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Find the bullet slide layout"
-    },
-    {
-      "type": "text",
-      "text": "Use _TextFrame.text for first bullet"
-    },
-    {
-      "type": "text",
-      "text": "Use _TextFrame.add_paragraph() for subsequent bullets"
-    },
-    {
-      "type": "text",
-      "text": "Here is a lot of text!"
-    },
-    {
-      "type": "text",
-      "text": "Here is some text in a text box!"
-    }
-  ],
   "structure": {
     "containers": [
       {
@@ -118,5 +80,28 @@
     "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "a51aba9c0f5f5615047b0a65e2ca8e8c434e2213986914bc71e30bd6a243901f"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.0.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "pptx: slides in presentation order, notes slides, comments, docProps/core.xml",
+    "source_sha256": "a51aba9c0f5f5615047b0a65e2ca8e8c434e2213986914bc71e30bd6a243901f",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.speaker_notes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:pptx": "bullets are inherited from layouts/masters; which paragraphs form a list is a convention",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity",
+      "text_boxes:pptx": "every slide shape is a text frame; which are 'text boxes' is a convention"
+    }
+  }
 }

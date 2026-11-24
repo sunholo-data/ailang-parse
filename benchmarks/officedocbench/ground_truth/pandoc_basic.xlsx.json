@@ -2,22 +2,13 @@
   "file": "pandoc_basic.xlsx",
   "format": "xlsx",
   "source": "pandoc",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 0,
-      "total_words": 26,
-      "key_phrases": [
-        "Secondary"
-      ]
+      "total_words": 24
     },
     "headings": null,
-    "tables": {
-      "present": true,
-      "count": 2,
-      "total_rows": 8,
-      "has_merged_cells": false
-    },
+    "tables": null,
     "track_changes": null,
     "comments": null,
     "headers_footers": null,
@@ -30,14 +21,16 @@
     },
     "lists": null,
     "metadata": {
-      "title": "",
       "author": "Anton Antic",
       "created": "2025-11-05T12:13:01Z",
       "modified": "2025-11-05T12:15:31Z"
     },
     "sheets": {
-      "present": false,
-      "names": []
+      "present": true,
+      "names": [
+        "Main",
+        "Secondary"
+      ]
     }
   },
   "full_text_words": [
@@ -57,36 +50,14 @@
     "just",
     "labels",
     "location",
-    "main",
     "moscow",
     "of",
     "person",
     "random",
     "row",
-    "secondary",
     "sum",
     "switzerland",
     "total"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Main",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Person Age Location"
-    },
-    {
-      "type": "heading",
-      "text": "Secondary",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Sum of Age Column Labels"
-    }
   ],
   "structure": {
     "containers": [
@@ -366,5 +337,23 @@
     "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "68f8e01ee5463f3f6596a12745f5d9de982c0140a728e97ddfbac1177b80b2ae"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.0.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "xlsx: workbook sheet order, sheet cells, comments, docProps/core.xml",
+    "source_sha256": "68f8e01ee5463f3f6596a12745f5d9de982c0140a728e97ddfbac1177b80b2ae",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.images",
+      "features.metadata",
+      "features.sheets"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables:xlsx": "how many tables a worksheet holds is a parser convention (v2 table_cells assertions cover cells)",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

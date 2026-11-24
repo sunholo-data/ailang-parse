@@ -50,8 +50,93 @@ class StructuralTests(unittest.TestCase):
         nested = audited(
             runner._find_test_file("challenge_nested_lists.docx"), {"features": {}}
         )
-        self.assertEqual(nested["features"]["lists"]["count"], 1)
-        self.assertEqual(nested["features"]["lists"]["max_depth"], 3)
+        # WordprocessingML has no list container: list grouping is not scored.
+        self.assertIsNone(nested["features"]["lists"])
+        self.assertIn("lists:docx", nested["legacy_verification"]["not_scored"])
+
+    def test_every_legacy_case_is_rebuilt_from_source(self):
+        self.assertEqual(len(CASES), 69)
+        for name in CASES:
+            with self.subTest(file=name):
+                truth = json.loads(
+                    (BENCH / "ground_truth" / (name + ".json")).read_text()
+                )
+                self.assertTrue(truth["verified"])
+                self.assertNotIn("element_order", truth)
+                self.assertNotIn("paragraph_count", truth["features"]["text"])
+                tables = truth["features"].get("tables") or {}
+                self.assertNotIn("total_rows", tables)
+                record = truth["legacy_verification"]
+                self.assertEqual(record["oracle"], "audit_legacy_truth.py v2")
+                self.assertIn("full_text_words", record["fields"])
+
+    def test_source_truth_corrections(self):
+        def build(name):
+            return audited(runner._find_test_file(name), {"features": {}})
+
+        # ODF creation date is meta:creation-date; dc:date is the last save.
+        odt = build("lo_listformat.odt")["features"]["metadata"]
+        self.assertEqual(odt["created"], "2021-06-14T11:52:30.242000000")
+        self.assertEqual(odt["modified"], "2021-06-14T11:53:55.192000000")
+        # dc:creator alone is the last editor, not the author.
+        self.assertNotIn("author", build("test.odt")["features"]["metadata"])
+        # A comment range is the text between commentRangeStart and End.
+        ranges = build("challenge_comment_ranges.docx")["features"]["comments"]["ranges"]
+        self.assertEqual(ranges[0]["annotated_text"], "deadline is March 15")
+        # Empty header parts are not headers; notes without w:type are notes.
+        hdr = build("docx-hdrftr.docx")["features"]["headers_footers"]
+        self.assertEqual((hdr["header_count"], hdr["footer_count"]), (1, 1))
+        self.assertEqual(build("pandoc_notes.docx")["features"]["footnotes_endnotes"]["count"], 2)
+        # mc:Fallback repeats each text box; count it once.
+        self.assertEqual(build("docx-shapes.docx")["features"]["text_boxes"]["count"], 4)
+        # The body's closing w:sectPr is not a section break.
+        fields = audited(
+            runner._find_test_file("challenge_fields.docx"),
+            {"features": {"section_breaks": {"present": True, "count": 1}}},
+        )
+        self.assertEqual(fields["features"]["section_breaks"]["count"], 0)
+        # Minimal hand-made ODF packages are recovery inputs.
+        for name in ("test.odt", "test.ods", "test.odp"):
+            self.assertEqual(build(name)["input_profile"], "recovery")
+        for name in ("lo_nested_table.odt", "lo_table_styles.odt"):
+            self.assertTrue(build(name)["allow_empty_output"])
+            self.assertEqual(build(name)["full_text_words"], [])
+
+    def test_key_phrases_occur_verbatim_in_the_source(self):
+        from source_truth import read
+
+        for name in CASES:
+            truth = json.loads((BENCH / "ground_truth" / (name + ".json")).read_text())
+            facts = read(runner._find_test_file(name), truth["format"])
+            for phrase in truth["features"]["text"].get("key_phrases", []):
+                with self.subTest(file=name, phrase=phrase):
+                    self.assertTrue(facts.contains_phrase(phrase))
+        kept = audited(
+            runner._find_test_file("docx-shapes.docx"),
+            {"features": {"text": {"key_phrases": ["Paragraph with <inline-image> within."]}}},
+        )
+        self.assertNotIn("key_phrases", kept["features"]["text"])
+
+    def test_structure_asserts_only_real_breaks_and_explicit_formatting(self):
+        import zipfile
+        from build_structure_truth import docx
+
+        with zipfile.ZipFile(runner._find_test_file("challenge_page_breaks.docx")) as z:
+            breaks = docx(z)["breaks"]
+        self.assertEqual(
+            sorted(b["kind"] for b in breaks), ["page-break", "section-break"]
+        )
+        with zipfile.ZipFile(runner._find_test_file("challenge_fields.docx")) as z:
+            self.assertNotIn("breaks", docx(z))
+        with zipfile.ZipFile(runner._find_test_file("docx-shapes.docx")) as z:
+            self.assertNotIn("runs", docx(z))
+        for name in ("table_header_rowspan.docx", "poi_comment.pptx", "image_vml.docx"):
+            runs = json.loads(
+                (BENCH / "ground_truth" / (name + ".json")).read_text()
+            )["structure"]["runs"]
+            for run in runs:
+                self.assertNotIn(False, run.values())
+                self.assertNotEqual(run.get("color"), "#000000")
 
     def test_html_audit_rejects_old_parse_error_expectations_and_counts_nesting(self):
         truth = audited(
@@ -64,7 +149,8 @@ class StructuralTests(unittest.TestCase):
         self.assertNotIn("error", truth["full_text_words"])
         self.assertIn("revenue", truth["full_text_words"])
         self.assertEqual(truth["features"]["headings"]["count"], 4)
-        self.assertEqual(truth["features"]["lists"]["count"], 2)
+        # One top-level <ol> whose item holds a nested <ul>: one list, depth 2.
+        self.assertEqual(truth["features"]["lists"]["count"], 1)
         self.assertEqual(truth["features"]["lists"]["max_depth"], 2)
         complex_html = audited(
             runner._find_test_file("test_complex.html"), {"features": {}}

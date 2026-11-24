@@ -2,10 +2,9 @@
   "file": "test.odp",
   "format": "odp",
   "source": "original",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 1,
       "total_words": 15,
       "key_phrases": [
         "DocParse Presentation",
@@ -24,7 +23,6 @@
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -35,27 +33,15 @@
       "present": false,
       "count": 0
     },
-    "text_boxes": {
-      "present": false,
-      "count": 0
-    },
+    "text_boxes": null,
     "images": {
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": true,
-      "count": 1,
-      "ordered_count": 0,
-      "unordered_count": 1,
-      "max_depth": 1,
-      "has_nested": false
-    },
+    "lists": null,
     "metadata": {
       "title": "DocParse ODP Test",
-      "author": "AILANG Team",
-      "created": "2024-06-15",
-      "modified": ""
+      "modified": "2024-06-15"
     },
     "sheets": null
   },
@@ -76,25 +62,29 @@
     "text",
     "universal"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "DocParse Presentation",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Universal document parsing in AILANG"
-    },
-    {
-      "type": "heading",
-      "text": "Supported Formats",
-      "level": 2
-    },
-    {
-      "type": "list",
-      "text": "ODT \u2014 OpenDocument Text",
-      "ordered": false
+  "input_profile": "recovery",
+  "input_note": "Hand-made minimal ODF package (mimetype, manifest, content.xml, meta.xml; no styles.xml or settings.xml); tests recovery from a minimal package as well as the content.",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "odp: content.xml draw:page order, presentation:notes, meta.xml",
+    "source_sha256": "ea485e353a51432ae558eae2d88e803a2b78c3e148950dfb7f3948bc41735c8e",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.speaker_notes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:odp": "slide outlines wrap each paragraph in its own text:list; the list count is not meaningful",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity",
+      "text_boxes:odp": "every slide shape is a text frame; which are 'text boxes' is a convention"
     }
-  ]
+  }
 }

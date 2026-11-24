@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Auto-generate OfficeDocBench ground truth from existing golden files.
+"""Retired v1 utility: generate ground truth from AILANG Parse golden files.
+
+v2.1 ground truth is computed from the source documents by
+audit_legacy_truth.py and build_structure_truth.py. This script never
+overwrites an existing annotation.
 
 Reads each golden output in benchmarks/office/golden/*.json, extracts
 structural features programmatically, and writes ground truth JSON files
@@ -376,13 +380,11 @@ def main():
         gt = annotate_golden(gf)
         out_path = GT_DIR / gf.name
 
-        # Skip hand-verified ground truth (don't overwrite manual annotations)
+        # Never overwrite an existing annotation: v2.1 ground truth is rebuilt
+        # from the source documents (audit_legacy_truth.py), not from goldens.
         if out_path.exists():
-            with open(out_path) as f:
-                existing = json.load(f)
-            if existing.get("verified", False):
-                print(f"  SKIP {gf.name} (hand-verified, use --force to overwrite)", file=sys.stderr)
-                continue
+            print(f"  SKIP {gf.name} (exists; source-derived)", file=sys.stderr)
+            continue
 
         with open(out_path, "w") as f:
             json.dump(gt, f, indent=2)
