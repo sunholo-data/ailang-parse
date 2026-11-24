@@ -1002,6 +1002,21 @@ class StructuralTests(unittest.TestCase):
         hit = score_structural_quality(feats, {"headings": [{"text": "Results", "level": 1}]})
         self.assertEqual(hit["details"]["heading_text_match"]["score"], 1.0)
 
+    def test_covered_cell_span_is_representation_not_meaning(self):
+        from structure_v2 import score_structure
+
+        want = {"table_cells": [{"table": 0, "row": 5, "col": 2, "text": "",
+                                 "col_span": 3, "merged": True}]}
+        html_style = {"structure": {"table_cells": [
+            {"table": 0, "row": 5, "col": c, "text": "", "col_span": 1, "merged": True}
+            for c in (2, 3, 4)
+        ]}}
+        self.assertEqual(score_structure(want, html_style)["score"], 1.0)
+        unmerged = {"structure": {"table_cells": [
+            {"table": 0, "row": 5, "col": 2, "text": "", "col_span": 1, "merged": False}
+        ]}}
+        self.assertEqual(score_structure(want, unmerged)["score"], 0.0)
+
     def test_track_change_type_synonyms_match(self):
         from scoring import score_structural_recall
 
