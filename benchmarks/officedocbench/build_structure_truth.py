@@ -173,6 +173,9 @@ def docx(z):
         if not content.strip() or pr is None:
             continue
         record = {"text": content}
+        # Only formatting the run sets to a non-default value is asserted. An
+        # explicit "off" (w:b w:val="0"), black text or baseline alignment is
+        # what a parser that reports no formatting already implies.
         for source, key in [
             ("b", "bold"),
             ("i", "italic"),
@@ -180,13 +183,13 @@ def docx(z):
             ("strike", "strike"),
         ]:
             node = pr.find("w:" + source, NS)
-            if node is not None:
-                record[key] = enabled(node)
+            if node is not None and enabled(node):
+                record[key] = True
         color = val(pr.find("w:color", NS), "w:val")
-        if re.fullmatch("[0-9a-fA-F]{6}", color):
+        if re.fullmatch("[0-9a-fA-F]{6}", color) and color.lower() != "000000":
             record["color"] = "#" + color.lower()
         vert = val(pr.find("w:vertAlign", NS), "w:val")
-        if vert:
+        if vert and vert != "baseline":
             record["vertAlign"] = vert
         if len(record) > 1:
             runs.append(record)
@@ -249,7 +252,23 @@ def docx(z):
             if val(b, "w:name") and not val(b, "w:name").startswith("_")
         ],
     )
-    put(out, "breaks", [{"kind": "section-break"} for b in body.iter(tag("w:sectPr"))])
+    # The body's final w:sectPr describes the last section; it is not a break.
+    # A break is a w:sectPr in a paragraph's properties (it ends that section)
+    # or an explicit page break, w:br w:type="page" (not lastRenderedPageBreak).
+    breaks = []
+
+    def find_breaks(node):
+        if node.tag == "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback":
+            return
+        if node.tag == tag("w:br") and val(node, "w:type") == "page":
+            breaks.append({"kind": "page-break"})
+        for child in node:
+            find_breaks(child)
+        if node.tag == tag("w:p") and node.find("w:pPr/w:sectPr", NS) is not None:
+            breaks.append({"kind": "section-break"})
+
+    find_breaks(body)
+    put(out, "breaks", breaks)
     return out
 
 
@@ -465,11 +484,12 @@ def pptx(z):
             if pr is None or not content:
                 continue
             rec = {"text": content}
+            # As for DOCX: assert only formatting switched on, never "off".
             for src, key in [("b", "bold"), ("i", "italic")]:
-                if src in pr.attrib:
-                    rec[key] = pr.get(src) in ("1", "true")
-            if pr.get("u"):
-                rec["underline"] = pr.get("u") != "none"
+                if pr.get(src) in ("1", "true"):
+                    rec[key] = True
+            if pr.get("u") and pr.get("u") != "none":
+                rec["underline"] = True
             if len(rec) > 1:
                 runs.append(rec)
     put(out, "containers", containers)
@@ -493,6 +513,18 @@ def main():
         with zipfile.ZipFile(source) as z:
             expect = {"docx": docx, "xlsx": xlsx, "pptx": pptx}[source.suffix[1:]](z)
         if not expect:
+            # A case left with no source assertion keeps its legacy fields
+            # only; stale assertions from an earlier oracle are removed.
+            if dest.exists():
+                gt = json.loads(dest.read_text())
+                if "structure" in gt and not gt.get("structure_only"):
+                    for key in ("structure", "verification"):
+                        gt.pop(key, None)
+                    rendered = json.dumps(gt, indent=2, ensure_ascii=False) + "\n"
+                    if check:
+                        errors.append(source.name)
+                    else:
+                        dest.write_text(rendered)
             continue
         if dest.exists():
             gt = json.loads(dest.read_text())
@@ -528,10 +560,10 @@ def main():
             )
         gt["verification"] = {
             "method": "Office XML assertions; independent of parser output",
-            "oracle": "build_structure_truth.py v2",
+            "oracle": "build_structure_truth.py v2.1",
             "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         }
-        gt["benchmark_version"] = "2.0.0"
+        gt["benchmark_version"] = "2.1.0"
         rendered = json.dumps(gt, indent=2, ensure_ascii=False) + "\n"
         if check:
             if not dest.exists() or dest.read_text() != rendered:

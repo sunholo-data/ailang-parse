@@ -2,10 +2,9 @@
   "file": "track_changes_move.docx",
   "format": "docx",
   "source": "original",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 9,
       "total_words": 9,
       "key_phrases": [
         "Here is some text.",
@@ -16,20 +15,20 @@
     "headings": {
       "present": false,
       "count": 0,
-      "by_level": {}
+      "by_level": {},
+      "texts": []
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
       "present": true,
       "count": 2,
       "types": {
-        "move-to": 1,
-        "move-from": 1
+        "move-from": 1,
+        "move-to": 1
       },
       "authors": [
         "Jesse Rosenthal"
@@ -59,12 +58,8 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "Jesse Rosenthal",
       "created": "2016-04-16T12:18:00Z",
       "modified": "2016-04-16T12:20:00Z"
@@ -82,39 +77,31 @@
     "the",
     "to"
   ],
-  "element_order": [
-    {
-      "type": "text",
-      "text": "Here is some text."
-    },
-    {
-      "type": "text",
-      "text": "Here is the text to be moved."
-    },
-    {
-      "type": "change",
-      "text": "Here is the text to be moved."
-    },
-    {
-      "type": "text",
-      "text": "Here is some more text."
-    },
-    {
-      "type": "change",
-      "text": "Here is the text to be moved."
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "9ea28f56f9fe00146a845497e226b19ec901685dd22798a2817b470abb0d1e5d",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
     }
-  ],
-  "structure": {
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
-    ]
-  },
-  "verification": {
-    "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
-    "source_sha256": "9ea28f56f9fe00146a845497e226b19ec901685dd22798a2817b470abb0d1e5d"
-  },
-  "benchmark_version": "2.0.0"
+  }
 }

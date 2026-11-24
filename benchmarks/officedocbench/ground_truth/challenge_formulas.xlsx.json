@@ -2,23 +2,16 @@
   "file": "challenge_formulas.xlsx",
   "format": "xlsx",
   "source": "unknown",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 0,
-      "total_words": 21,
+      "total_words": 20,
       "key_phrases": [
-        "Revenue",
-        "Employees"
+        "Revenue"
       ]
     },
     "headings": null,
-    "tables": {
-      "present": true,
-      "count": 2,
-      "total_rows": 6,
-      "has_merged_cells": false
-    },
+    "tables": null,
     "track_changes": null,
     "comments": null,
     "headers_footers": null,
@@ -31,14 +24,16 @@
     },
     "lists": null,
     "metadata": {
-      "title": "",
       "author": "openpyxl",
       "created": "2026-03-20T14:07:34Z",
       "modified": "2026-03-20T14:07:34Z"
     },
     "sheets": {
-      "present": false,
-      "names": []
+      "present": true,
+      "names": [
+        "Revenue",
+        "Employees"
+      ]
     }
   },
   "full_text_words": [
@@ -49,7 +44,6 @@
     "alice",
     "bob",
     "department",
-    "employees",
     "engineering",
     "expenses",
     "financial",
@@ -63,26 +57,6 @@
     "sales",
     "summary",
     "total"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Revenue",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Quarter Revenue Expenses"
-    },
-    {
-      "type": "heading",
-      "text": "Employees",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Name Department"
-    }
   ],
   "structure": {
     "containers": [
@@ -287,8 +261,27 @@
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "5b99ff5ac85fb4fac79a5d044dc8c34b5db147a0432c3b4e6f101284f2a0c33e"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "xlsx: workbook sheet order, sheet cells, comments, docProps/core.xml",
+    "source_sha256": "5b99ff5ac85fb4fac79a5d044dc8c34b5db147a0432c3b4e6f101284f2a0c33e",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.images",
+      "features.metadata",
+      "features.sheets"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables:xlsx": "how many tables a worksheet holds is a parser convention (v2 table_cells assertions cover cells)",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

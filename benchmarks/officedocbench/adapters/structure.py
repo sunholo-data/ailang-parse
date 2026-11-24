@@ -2,6 +2,28 @@
 
 from __future__ import annotations
 
+import re
+
+
+_FORMAT_FLAGS = ("bold", "italic", "underline", "strike")
+
+
+def attach_formatting(text_elements, runs):
+    """Give each text element the formatted runs it contains.
+
+    The reference adapter does this from AILANG's runs (text_elements[].
+    formatting, which earns 'styles' detection); adapters whose provider
+    returns bold/italic/underline/strike runs get the same field.
+    """
+    styled = [
+        r
+        for r in runs
+        if r.get("text", "").strip() and any(r.get(k) for k in _FORMAT_FLAGS)
+    ]
+    for item in text_elements:
+        item["formatting"] = [r for r in styled if r["text"] in item.get("text", "")]
+    return text_elements
+
 
 def cell(value):
     return dict(value) if isinstance(value, dict) else {"text": str(value)}
@@ -189,8 +211,43 @@ def html_rows(markup):
     return rows
 
 
-def markdown_output(source):
-    """Read only features explicitly present in a provider's Markdown/HTML."""
+def span_grid(rows):
+    """Lay out rows that omit span-covered cells on their logical grid.
+
+    For providers (Pandoc) whose rows list only the cells that start at a
+    position, each carrying colSpan/rowSpan: covered positions become
+    {"text": "", "merged": True} placeholders, as html_rows does for HTML,
+    so a cell after a row-spanned column keeps its real column.
+    """
+    out, occupied = [], {}
+    for ri, source in enumerate(rows):
+        row, ci = [], 0
+        for value in source:
+            while (ri, ci) in occupied:
+                row.append(occupied[ri, ci])
+                ci += 1
+            c = cell(value)
+            cs = c.get("colSpan", c.get("col_span", 1))
+            rs = c.get("rowSpan", c.get("row_span", 1))
+            row.append(c)
+            for dy in range(rs):
+                for dx in range(cs):
+                    if dx or dy:
+                        occupied[ri + dy, ci + dx] = {"text": "", "merged": True}
+            ci += 1
+        while (ri, ci) in occupied:
+            row.append(occupied[ri, ci])
+            ci += 1
+        out.append(row)
+    return out
+
+
+def markdown_output(source, placeholder_header=False):
+    """Read only features explicitly present in a provider's Markdown/HTML.
+
+    placeholder_header: the provider writes an all-empty GFM header row
+    when the source table has none (markdownify); such a row is dropped.
+    """
     from markdown_it import MarkdownIt
 
     parser = MarkdownIt("commonmark").enable("table")
@@ -216,7 +273,14 @@ def markdown_output(source):
         if token.type == "heading_open":
             heading = int(token.tag[1:])
         elif token.type in ("bullet_list_open", "ordered_list_open"):
-            list_stack.append(token.type == "ordered_list_open")
+            # One legacy list per top-level Markdown list: the consecutive
+            # items CommonMark groups, nested items included (depth = levels),
+            # as the reference adapter counts a list block with item levels.
+            ordered = token.type == "ordered_list_open"
+            if not list_stack:
+                out["lists"].append({"items": [], "ordered": ordered, "depth": 1})
+            list_stack.append(ordered)
+            out["lists"][-1]["depth"] = max(out["lists"][-1]["depth"], len(list_stack))
         elif token.type in ("bullet_list_close", "ordered_list_close"):
             list_stack.pop()
         elif token.type == "table_open":
@@ -226,6 +290,8 @@ def markdown_output(source):
         elif token.type == "tr_close":
             table.append(row)
         elif token.type == "table_close":
+            if placeholder_header and len(table) > 1 and not any(x.strip() for x in table[0]):
+                table = table[1:]
             idx = len(out["tables"])
             structure["table_cells"] += table_cells(table, idx)
             out["tables"].append(
@@ -256,6 +322,7 @@ def markdown_output(source):
                 }
             )
         elif token.type == "inline":
+            first_run = len(structure["runs"])
             value = "".join(
                 c.content
                 for c in (token.children or [])
@@ -294,13 +361,7 @@ def markdown_output(source):
                 structure["element_order"].append({"type": "heading", "text": value})
                 heading = 0
             elif list_stack:
-                out["lists"].append(
-                    {
-                        "items": [value],
-                        "ordered": list_stack[-1],
-                        "depth": len(list_stack),
-                    }
-                )
+                out["lists"][-1]["items"].append(value)
                 structure["list_items"].append(
                     {
                         "text": value,
@@ -309,12 +370,58 @@ def markdown_output(source):
                     }
                 )
             elif value.strip():
-                out["text_elements"].append({"text": value, "style": "paragraph"})
+                out["text_elements"].append(
+                    {
+                        "text": value,
+                        "style": "paragraph",
+                        # This paragraph's own formatted runs.
+                        "formatting": [
+                            r
+                            for r in structure["runs"][first_run:]
+                            if r["text"].strip() and any(r.get(k) for k in _FORMAT_FLAGS)
+                        ],
+                    }
+                )
                 structure["element_order"].append({"type": "text", "text": value})
+    out["lists"] = [x for x in out["lists"] if x["items"]]
     out["hyperlinks"] = structure["hyperlinks"]
     out["structure"] = structure
     out["metadata"] = {}
     return out
+
+
+_PANDOC_FLAGS = {
+    "Strong": "bold",
+    "Emph": "italic",
+    "Underline": "underline",
+    "Strikeout": "strike",
+}
+_PANDOC_VERT = {"Superscript": "superscript", "Subscript": "subscript"}
+_PANDOC_QUOTES = {"DoubleQuote": ("\u201c", "\u201d"), "SingleQuote": ("\u2018", "\u2019")}
+_RUN_DEFAULTS = {
+    "bold": False,
+    "italic": False,
+    "underline": False,
+    "strike": False,
+    "code": False,
+    "vertAlign": "",
+}
+
+
+def merge_runs(pieces):
+    """Join adjacent (text, flags) pieces that carry the same formatting.
+
+    A provider that splits a styled phrase into one node per word (Pandoc's
+    Str/Space) still marked the whole phrase; one run per formatting span
+    is what the phrase-level run assertions compare against.
+    """
+    runs = []
+    for value, flags in pieces:
+        if runs and all(runs[-1][k] == flags.get(k, v) for k, v in _RUN_DEFAULTS.items()):
+            runs[-1]["text"] += value
+        else:
+            runs.append({"text": value, **{k: flags.get(k, v) for k, v in _RUN_DEFAULTS.items()}})
+    return [r for r in runs if r["text"].strip()]
 
 
 def pandoc_structure(ast, table_parser):
@@ -327,50 +434,113 @@ def pandoc_structure(ast, table_parser):
             "list_items",
             "hyperlinks",
             "bookmarks",
+            "comment_anchors",
+            "containers",
+            "notes",
         )
     }
+    comments, open_ids = {}, []
+    scope = [""]
 
-    def inline(nodes, flags=None):
-        flags = flags or {}
+    def classes(c):
+        return c[0][1] if len(c[0]) > 1 else []
+
+    def collect(nodes, flags, acc, effects):
+        """Flatten inlines to (text, flags); effects=False only reads text."""
         for n in nodes:
             t, c = n.get("t"), n.get("c")
-            key = {
-                "Strong": "bold",
-                "Emph": "italic",
-                "Underline": "underline",
-                "Strikeout": "strike",
-            }.get(t)
-            if key:
-                inline(c, {**flags, key: True})
-            elif t in ("Str", "Code"):
-                out["runs"].append({"text": c if t == "Str" else c[1], **flags})
+            if t in _PANDOC_FLAGS:
+                collect(c, {**flags, _PANDOC_FLAGS[t]: True}, acc, effects)
+            elif t in _PANDOC_VERT:
+                collect(c, {**flags, "vertAlign": _PANDOC_VERT[t]}, acc, effects)
+            elif t == "SmallCaps":
+                collect(c, flags, acc, effects)
+            elif t == "Quoted":
+                left, right = _PANDOC_QUOTES.get(c[0].get("t"), ('"', '"'))
+                acc.append((left, flags))
+                collect(c[1], flags, acc, effects)
+                acc.append((right, flags))
+            elif t == "Str":
+                acc.append((c, flags))
+            elif t in ("Code", "Math"):
+                acc.append((c[1], {**flags, "code": t == "Code"}))
+            elif t in ("Space", "SoftBreak", "LineBreak"):
+                acc.append((" ", flags))
             elif t == "Link":
-                out["hyperlinks"].append({"text": plain(c[1]), "url": c[2][0]})
-                inline(c[1], flags)
+                if effects:
+                    out["hyperlinks"].append({"text": plain(c[1]), "url": c[2][0]})
+                collect(c[1], flags, acc, effects)
             elif t == "Span":
-                if c[0][0]:
-                    out["bookmarks"].append({"name": c[0][0]})
-                inline(c[1], flags)
+                kind = classes(c)
+                kv = dict(c[0][2]) if len(c[0]) > 2 else {}
+                if "comment-start" in kind:
+                    # The span body is the comment's text, not document text.
+                    if effects:
+                        cid = kv.get("comment-id", "")
+                        comments[cid] = {
+                            "text": plain(c[1]),
+                            "author": kv.get("author", ""),
+                            "annotated_text": "",
+                            "anchored": False,
+                            "scope": scope[0],
+                        }
+                        out["comment_anchors"].append(comments[cid])
+                        open_ids.append(cid)
+                elif "comment-end" in kind:
+                    cid = kv.get("comment-id", "")
+                    if effects and cid in open_ids:
+                        open_ids.remove(cid)
+                        comments[cid]["anchored"] = True
+                    collect(c[1], flags, acc, effects)  # ends can nest
+                elif "deletion" in kind:
+                    continue  # deleted text is not in the document
+                else:
+                    if effects and c[0][0]:
+                        out["bookmarks"].append({"name": c[0][0]})
+                    collect(c[1], flags, acc, effects)
+            elif t == "Cite":
+                collect(c[1], flags, acc, effects)
+        return acc
 
     def plain(ns):
-        return "".join(
-            n.get("c", "")
-            if n.get("t") == "Str"
-            else " "
-            if n.get("t") in ("Space", "SoftBreak")
-            else plain(n["c"])
-            if n.get("t") in ("Strong", "Emph", "Underline", "Strikeout")
-            else ""
-            for n in ns
-        )
+        return "".join(v for v, _ in collect(ns, {}, [], False)).strip()
 
-    def walk(bs, level=0):
+    def inline(nodes):
+        """Runs and comment ranges of one block's inlines, in document order."""
+        pieces = []
+        for n in nodes:
+            before = len(pieces)
+            collect([n], {}, pieces, True)
+            for cid in open_ids:
+                comments[cid].setdefault("_parts", []).append(
+                    "".join(v for v, _ in pieces[before:])
+                )
+        out["runs"].extend(merge_runs(pieces))
+        for cid in open_ids:
+            comments[cid].setdefault("_parts", []).append(" ")
+
+    def table_blocks(c):
+        """Every cell's blocks of a pandoc Table, head to foot."""
+        rows = list(c[3][1]) if len(c[3]) > 1 else []
+        for body in c[4]:
+            rows += body[2] + body[3]
+        rows += c[5][1] if len(c[5]) > 1 else []
+        return [cell_[4] for row in rows for cell_ in row[1]]
+
+    def walk(bs, level=0, order=True):
         for b in bs:
             t, c = b.get("t"), b.get("c")
             if t in ("Para", "Plain", "Header"):
                 ins = c[2] if t == "Header" else c
+                ident = c[1][0] if t == "Header" else ""
+                kind = ident.split("-")[0]
+                if order and kind in ("slide", "sheet") and ident[len(kind) + 1:].isdigit():
+                    # Pandoc's PPTX/XLSX readers open each slide/sheet with
+                    # a level-2 header whose id is slide-N / sheet-N.
+                    scope[0] = plain(ins)
+                    out["containers"].append({"kind": kind, "name": scope[0]})
                 inline(ins)
-                if not level:
+                if order:
                     out["element_order"].append(
                         {
                             "type": "heading" if t == "Header" else "text",
@@ -386,27 +556,115 @@ def pandoc_structure(ast, table_parser):
                     out["list_items"].append(
                         {"text": value, "ordered": t == "OrderedList", "level": level}
                     )
-                    walk(item, level + 1)
-                if not level:
+                    walk(item, level + 1, False)
+                if order:
                     out["element_order"].append({"type": "list"})
             elif t == "Table":
                 table = table_parser(c)
                 idx = len({x["table"] for x in out["table_cells"]})
-                out["table_cells"] += table_cells(table.get("rows", []), idx)
-                out["element_order"].append({"type": "table"})
+                out["table_cells"] += table_cells(table.get("rows", []), idx, scope[0])
+                for blocks in table_blocks(c):
+                    walk(blocks, level, False)
+                if order:
+                    out["element_order"].append({"type": "table"})
+            elif t == "Div" and "notes" in c[0][1]:
+                # PPTX speaker notes: a Div of class "notes" inside the slide.
+                out["notes"].append(
+                    {
+                        "scope": scope[0],
+                        "text": " ".join(
+                            plain(x["c"] if x.get("t") != "Header" else x["c"][2])
+                            for x in c[1]
+                            if x.get("t") in ("Para", "Plain", "Header")
+                        ),
+                    }
+                )
             elif t == "Div":
-                walk(c[1], level)
+                walk(c[1], level, order)
             elif t == "BlockQuote":
-                walk(c, level)
+                walk(c, level, order)
 
     walk(ast.get("blocks", []))
+    for cid, rec in comments.items():
+        parts = rec.pop("_parts", [])
+        if rec["anchored"]:
+            rec["annotated_text"] = re.sub(r"\s+", " ", "".join(parts)).strip()
+    return out
+
+
+def _docling_item(document, ref):
+    parts = (ref or {}).get("$ref", "").split("/")
+    if len(parts) == 3 and parts[1] in document:
+        return document[parts[1]][int(parts[2])]
+    return None
+
+
+def _docling_texts(document, node):
+    """Texts under a Docling node, in tree order (tables give their cells)."""
+    if node is None:
+        return []
+    if "data" in node:
+        return [c.get("text", "") for c in node["data"].get("table_cells", [])]
+    out = [node["text"]] if node.get("text") else []
+    for ref in node.get("children", []):
+        out += _docling_texts(document, _docling_item(document, ref))
+    return out
+
+
+_DOCLING_COMMENT = re.compile(r"^\[author: (?P<author>.*?)(?: \([^()]*\))?(?:, time: [^\]]*)?\]: ?")
+
+
+def docling_lists(document):
+    """One legacy list per top-level Docling list group, nested items included."""
+    lists = []
+
+    def walk(node, current=None, depth=0):
+        if node is None:
+            return
+        label = node.get("label", "")
+        if label in ("list", "ordered_list"):
+            depth += 1
+            if current is None:
+                current = {"items": [], "ordered": label == "ordered_list", "depth": 1}
+                lists.append(current)
+            current["depth"] = max(current["depth"], depth)
+        elif label == "list_item" and current is not None:
+            if not current["items"] and node.get("enumerated"):
+                current["ordered"] = True
+            current["items"].append(node.get("text", ""))
+        for ref in node.get("children", []):
+            walk(_docling_item(document, ref), current, depth)
+
+    walk(document.get("body", {}))
+    return [x for x in lists if x["items"]]
+
+
+def docling_headers_footers(document):
+    """DOCX page header/footer sections (furniture layer), one per part child."""
+    out = []
+    for group in document.get("groups", []):
+        kind = {"page header": "header", "page footer": "footer"}.get(group.get("name"))
+        if kind is None or group.get("content_layer") != "furniture":
+            continue
+        for ref in group.get("children", []):
+            value = " ".join(t for t in _docling_texts(document, _docling_item(document, ref)) if t)
+            if value.strip():
+                out.append({"type": kind, "text": value})
     return out
 
 
 def docling_structure(document):
     out = {
         k: []
-        for k in ("element_order", "table_cells", "runs", "list_items", "hyperlinks")
+        for k in (
+            "element_order",
+            "table_cells",
+            "runs",
+            "list_items",
+            "hyperlinks",
+            "comment_anchors",
+            "notes",
+        )
     }
     for item in document.get("texts", []):
         fmt = item.get("formatting") or {}
@@ -435,6 +693,7 @@ def docling_structure(document):
     out["containers"] = [
         {"kind": "sheet", "name": g.get("name", "")} for g in sheet_groups
     ]
+    slide_names = {}
     for group in document.get("groups", []):
         if group.get("label") == "chapter" and group.get("name", "").startswith(
             "slide-"
@@ -448,6 +707,41 @@ def docling_structure(document):
                         title = item.get("text", "")
                         break
             out["containers"].append({"kind": "slide", "name": title})
+            slide_names[group["self_ref"]] = title
+            # Speaker notes: the slide's own text in Docling's notes layer.
+            for ref in group.get("children", []):
+                item = _docling_item(document, ref)
+                if item and item.get("content_layer") == "notes" and "text" in item:
+                    out["notes"].append({"scope": title, "text": item["text"]})
+
+    # Comments: comment_section groups (notes layer) holding
+    # "[author: Name (initials), time: ...]: text"; the text items that
+    # carry them reference the group (optionally with a character range).
+    targets = {}
+    for item in document.get("texts", []):
+        for ref in item.get("comments") or []:
+            target = item.get("text", "")
+            if isinstance(ref.get("range"), (list, tuple)) and len(ref["range"]) == 2:
+                target = target[ref["range"][0] : ref["range"][1]]
+            targets.setdefault(ref.get("$ref") or ref.get("cref"), []).append(target)
+    for group in document.get("groups", []):
+        if group.get("label") != "comment_section":
+            continue
+        for ref in group.get("children", []):
+            item = _docling_item(document, ref)
+            if not item or "text" not in item:
+                continue
+            match = _DOCLING_COMMENT.match(item["text"])
+            anchor = targets.get(group["self_ref"], []) + targets.get(item["self_ref"], [])
+            out["comment_anchors"].append(
+                {
+                    "text": item["text"][match.end() :] if match else item["text"],
+                    "author": match.group("author") if match else "",
+                    "annotated_text": " ".join(anchor),
+                    "anchored": bool(anchor),
+                    "scope": slide_names.get((group.get("parent") or {}).get("$ref"), ""),
+                }
+            )
 
     for ti, tbl in enumerate(document.get("tables", [])):
         sheet_index, scope = table_sheets.get(tbl.get("self_ref"), (ti, ""))
@@ -455,17 +749,35 @@ def docling_structure(document):
         bbox = provenance[0].get("bbox", {}) if provenance and scope else {}
         row_offset, col_offset = int(bbox.get("t", 0)), int(bbox.get("l", 0))
         for c in tbl.get("data", {}).get("table_cells", []):
+            row = c.get("start_row_offset_idx", 0) + 1 + row_offset
+            col = c.get("start_col_offset_idx", 0) + 1 + col_offset
             out["table_cells"].append(
                 {
                     "table": sheet_index,
                     "scope": scope,
-                    "row": c.get("start_row_offset_idx", 0) + 1 + row_offset,
-                    "col": c.get("start_col_offset_idx", 0) + 1 + col_offset,
+                    "row": row,
+                    "col": col,
                     "text": c.get("text", ""),
                     "col_span": c.get("col_span", 1),
                     "merged": False,
                 }
             )
+            # Docling lists a spanning cell once; the positions it covers
+            # are merged cells, as html_rows records them for HTML.
+            for dy in range(c.get("row_span", 1)):
+                for dx in range(c.get("col_span", 1)):
+                    if dx or dy:
+                        out["table_cells"].append(
+                            {
+                                "table": sheet_index,
+                                "scope": scope,
+                                "row": row + dy,
+                                "col": col + dx,
+                                "text": "",
+                                "col_span": 1,
+                                "merged": True,
+                            }
+                        )
 
     def walk(node, level=0):
         label = node.get("label", "")

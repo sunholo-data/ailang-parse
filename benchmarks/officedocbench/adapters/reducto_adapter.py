@@ -48,7 +48,13 @@ from pathlib import Path
 from typing import Any
 
 from .base_adapter import OfficeDocBenchAdapter
-from .structure import add_sheet_scopes, cell, markdown_output, table_cells
+from .structure import (
+    add_sheet_scopes,
+    attach_formatting,
+    cell,
+    markdown_output,
+    table_cells,
+)
 
 API = os.environ.get("REDUCTO_API_BASE", "https://platform.reducto.ai")
 TIMEOUT_SECONDS = 600
@@ -320,9 +326,10 @@ class ReductoAdapter(OfficeDocBenchAdapter):
                 f"Reducto {run.get('failureReason')}: {run.get('failureMessage')}"
             )
         chunks = (run.get("result") or {}).get("chunks") or []
+        # A completed parse with no blocks is an empty answer (a blank deck),
+        # not a failure; the runner still refuses empty output unless the
+        # fixture's truth allows it (allow_empty_output).
         blocks = [b for ch in chunks for b in ch.get("blocks") or []]
-        if not blocks:
-            raise RuntimeError("Reducto returned no blocks")
 
         suffix = filepath.suffix.lower()
         body: list[str] = []
@@ -439,6 +446,7 @@ class ReductoAdapter(OfficeDocBenchAdapter):
         # Reducto writes emphasis as inline HTML, which markdown_output
         # cannot attribute; its runs are replaced by the HTML-derived ones.
         structure["runs"] = runs
+        attach_formatting(output["text_elements"], runs)
         if links:
             structure["hyperlinks"] = structure.get("hyperlinks", []) + links
             output["hyperlinks"] = structure["hyperlinks"]

@@ -78,6 +78,19 @@ ADAPTER_NAMES = [
 ]
 
 
+def _error_text(exc: Exception, limit: int = 500) -> str:
+    """An error message cut to `limit`, keeping its start and its end.
+
+    Tools often print warnings first and the real error last (LiteParse's
+    LibreOffice step: Fontconfig warnings, then "source file could not be
+    loaded"), so a head-only cut hid the cause.
+    """
+    text = str(exc)
+    if len(text) <= limit:
+        return text
+    return text[:80] + " ... " + text[-(limit - 85):]
+
+
 def _find_test_file(source_file: str) -> Path | None:
     """Find a test file in TEST_DIR or its subdirectories (e.g., challenge/)."""
     direct = TEST_DIR / source_file
@@ -202,12 +215,16 @@ def evaluate_adapter(
         if format_filter and fmt != format_filter:
             continue
 
+        # Minimal/damaged packages are labelled so reports can separate
+        # recovery failures from failures on fully formed documents.
+        profile = {"input_profile": gt["input_profile"]} if gt.get("input_profile") else {}
         if fmt not in supported:
             skip_results.append(
                 {
                     "file": source_file,
                     "format": fmt,
                     "status": "UNSUPPORTED",
+                    **profile,
                 }
             )
             continue
@@ -219,6 +236,7 @@ def evaluate_adapter(
                     "file": source_file,
                     "format": fmt,
                     "status": "MISSING",
+                    **profile,
                 }
             )
             continue
@@ -236,6 +254,7 @@ def evaluate_adapter(
 
     for test_path, gt, gt_path in parse_jobs:
         source_file, fmt = gt["file"], gt["format"]
+        profile = {"input_profile": gt["input_profile"]} if gt.get("input_profile") else {}
         before = time.monotonic()
         try:
             for verification in ("verification", "legacy_verification"):
@@ -309,6 +328,7 @@ def evaluate_adapter(
                     "file": source_file,
                     "format": fmt,
                     "status": "OK",
+                    **profile,
                     **(
                         {"time_ms": round(elapsed_ms, 1)}
                         if cached_at is None and not use_golden
@@ -329,11 +349,12 @@ def evaluate_adapter(
                     "file": source_file,
                     "format": fmt,
                     "status": "ERROR",
-                    "error": str(exc)[:500],
+                    "error": _error_text(exc),
+                    **profile,
                 }
             )
             print(
-                f"    {source_file}: ERROR {str(exc)[:120]}",
+                f"    {source_file}: ERROR {_error_text(exc, 200)}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -477,7 +498,7 @@ def main():
                         "file": json.loads(p.read_text())["file"],
                         "format": json.loads(p.read_text())["format"],
                         "status": "ERROR",
-                        "error": str(exc)[:500],
+                        "error": _error_text(exc),
                     }
                     for p in gt_files
                 ],
@@ -622,6 +643,12 @@ def _write_summary(all_results: list[dict]) -> None:
                 "timing": timing,
                 "structural_fidelity": _rounded(_avg("structural_fidelity"), 4),
                 "errors": sum(r["status"] == "ERROR" for r in ar["results"]),
+                # Errors on deliberately minimal (recovery-profile) inputs.
+                "recovery_errors": sorted(
+                    r["file"]
+                    for r in ar["results"]
+                    if r["status"] == "ERROR" and r.get("input_profile") == "recovery"
+                ),
                 "provenance": ar.get("provenance", {}),
                 "structural_features": {
                     kind: {
@@ -699,6 +726,16 @@ def _write_summary(all_results: list[dict]) -> None:
         ),
         "adapters": adapters_summary,
     }
+    # The range of competitor scores, so prose like "the other parsers score
+    # from X to Y" never names a tool that has since moved.
+    rivals = [a for a in adapters_summary if a["id"] != "ailang_parse"]
+    if rivals:
+        best = max(rivals, key=lambda a: a["adjusted"])
+        summary.update(
+            competitor_adjusted_min=min(a["adjusted"] for a in rivals),
+            competitor_adjusted_max=best["adjusted"],
+            competitor_best_name=best["name"],
+        )
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     summary_path = RESULTS_DIR / "summary.json"

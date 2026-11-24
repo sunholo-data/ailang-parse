@@ -2,22 +2,20 @@
   "file": "merged_cells.docx",
   "format": "docx",
   "source": "original",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 1,
-      "total_words": 8,
-      "key_phrases": []
+      "total_words": 8
     },
     "headings": {
       "present": false,
       "count": 0,
-      "by_level": {}
+      "by_level": {},
+      "texts": []
     },
     "tables": {
       "present": true,
       "count": 1,
-      "total_rows": 4,
       "has_merged_cells": true
     },
     "track_changes": {
@@ -50,12 +48,8 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "Shay Hill",
       "created": "2023-01-23T17:59:00Z",
       "modified": "2023-01-23T19:43:00Z"
@@ -71,12 +65,6 @@
     "3",
     "34",
     "4"
-  ],
-  "element_order": [
-    {
-      "type": "table",
-      "text": "0-0 {'text': '0-12', 'colSpan': 2, 'merged': False} 0-3"
-    }
   ],
   "structure": {
     "table_cells": [
@@ -200,17 +188,37 @@
         "col_span": 3,
         "merged": true
       }
-    ],
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
     ]
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "de283e6dedbe5365117c0e447735537983ff180809c17c59e28586885b323c0d"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "de283e6dedbe5365117c0e447735537983ff180809c17c59e28586885b323c0d",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

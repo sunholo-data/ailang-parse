@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-BENCHMARK_VERSION = "2.0.0"
+BENCHMARK_VERSION = "2.1.0"
 
 
 def text(value: Any) -> str:
@@ -66,6 +66,15 @@ def score_structure(expected: dict, output: dict) -> dict:
                             item.get("text", "")
                         ) and _same(
                             {k: v for k, v in want.items() if k != "text"}, item
+                        )
+                    if kind == "table_cells" and want.get("merged"):
+                        # A covered cell's span is how the source file happens
+                        # to store the merge (one placeholder spanning three
+                        # columns); an HTML-style grid reports the same region
+                        # as single-column merged cells. Position and the
+                        # merged flag carry the meaning; the span does not.
+                        return _same(
+                            {k: v for k, v in want.items() if k != "col_span"}, item
                         )
                     return _same(want, item)
 

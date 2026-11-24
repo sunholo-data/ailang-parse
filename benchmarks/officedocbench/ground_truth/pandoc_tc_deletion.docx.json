@@ -2,10 +2,9 @@
   "file": "pandoc_tc_deletion.docx",
   "format": "docx",
   "source": "pandoc",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 1,
       "total_words": 9,
       "key_phrases": [
         "This is a text with a deletion."
@@ -14,12 +13,12 @@
     "headings": {
       "present": false,
       "count": 0,
-      "by_level": {}
+      "by_level": {},
+      "texts": []
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
@@ -56,12 +55,8 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "eng-dept",
       "created": "2014-06-25T14:41:00Z",
       "modified": "2014-06-25T14:42:00Z"
@@ -79,27 +74,31 @@
     "this",
     "with"
   ],
-  "element_order": [
-    {
-      "type": "text",
-      "text": "This is a text with a deletion."
-    },
-    {
-      "type": "change",
-      "text": "n excessively modified"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "a7254a9f2c055e6d8e4d46336ba9f31794f54f9ebd04f1bacdb2805456e8e7df",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
     }
-  ],
-  "structure": {
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
-    ]
-  },
-  "verification": {
-    "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
-    "source_sha256": "a7254a9f2c055e6d8e4d46336ba9f31794f54f9ebd04f1bacdb2805456e8e7df"
-  },
-  "benchmark_version": "2.0.0"
+  }
 }

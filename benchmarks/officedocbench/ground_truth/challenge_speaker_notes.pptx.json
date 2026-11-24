@@ -2,10 +2,9 @@
   "file": "challenge_speaker_notes.pptx",
   "format": "pptx",
   "source": "unknown",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 5,
       "total_words": 26,
       "key_phrases": [
         "Introduction",
@@ -20,12 +19,25 @@
       "count": 3,
       "by_level": {
         "1": 3
-      }
+      },
+      "texts": [
+        {
+          "text": "Introduction",
+          "level": 1
+        },
+        {
+          "text": "Key Points",
+          "level": 1
+        },
+        {
+          "text": "Thank You",
+          "level": 1
+        }
+      ]
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -34,31 +46,15 @@
     "footnotes_endnotes": null,
     "speaker_notes": {
       "present": true,
-      "count": 2,
-      "notes": [
-        {
-          "text": "Remember to greet the audience warmly"
-        },
-        {
-          "text": "Spend 5 minutes on this slide. Emphasize point two."
-        }
-      ]
+      "count": 2
     },
-    "text_boxes": {
-      "present": false,
-      "count": 0
-    },
+    "text_boxes": null,
     "images": {
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
-      "author": "",
       "created": "2013-01-27T09:14:16Z",
       "modified": "2013-01-27T09:15:58Z"
     },
@@ -92,52 +88,6 @@
     "welcome",
     "you"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Introduction",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Welcome to the presentation"
-    },
-    {
-      "type": "heading",
-      "text": "Key Points",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Three important items"
-    },
-    {
-      "type": "heading",
-      "text": "Thank You",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Questions?"
-    },
-    {
-      "type": "notes",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "Remember to greet the audience warmly"
-    },
-    {
-      "type": "notes",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "Spend 5 minutes on this slide. Emphasize point two."
-    }
-  ],
-  "notes": "speaker_notes rebuilt 2026-08-11: GT said present=false/count=0 for a file that has two notes, and full_text_words omitted their words. It had been generated from output produced while notesSlide extraction was deleted (e9de665). paragraph_count 3 -> 5 to match the convention docx-shapes.docx uses (section text counts toward paragraph_count; that file has 3 paragraphs + 8 text boxes = 11).",
   "structure": {
     "containers": [
       {
@@ -166,8 +116,31 @@
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "961546ed68ade1458c89aa718d608e5eb9cd33c98fc7f19bb5306e9e4dc57f5c"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "pptx: slides in presentation order, notes slides, comments, docProps/core.xml",
+    "source_sha256": "961546ed68ade1458c89aa718d608e5eb9cd33c98fc7f19bb5306e9e4dc57f5c",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.speaker_notes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:pptx": "bullets are inherited from layouts/masters; which paragraphs form a list is a convention",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity",
+      "text_boxes:pptx": "every slide shape is a text frame; which are 'text boxes' is a convention"
+    }
+  }
 }

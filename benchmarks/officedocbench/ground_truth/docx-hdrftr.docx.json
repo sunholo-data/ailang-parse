@@ -2,10 +2,9 @@
   "file": "docx-hdrftr.docx",
   "format": "docx",
   "source": "pandoc",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 1,
       "total_words": 22,
       "key_phrases": [
         "Main document"
@@ -14,12 +13,12 @@
     "headings": {
       "present": false,
       "count": 0,
-      "by_level": {}
+      "by_level": {},
+      "texts": []
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
@@ -36,8 +35,8 @@
     },
     "headers_footers": {
       "present": true,
-      "header_count": 3,
-      "footer_count": 3
+      "header_count": 1,
+      "footer_count": 1
     },
     "footnotes_endnotes": {
       "present": false,
@@ -52,12 +51,8 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "Bernhard Schaefer",
       "created": "2023-11-20T22:14:00Z",
       "modified": "2023-11-20T23:15:00Z"
@@ -88,55 +83,31 @@
     "should",
     "table"
   ],
-  "element_order": [
-    {
-      "type": "header",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "First header para"
-    },
-    {
-      "type": "table",
-      "text": "Table cell1 Table cell2"
-    },
-    {
-      "type": "text",
-      "text": "Last header para"
-    },
-    {
-      "type": "text",
-      "text": "Main document"
-    },
-    {
-      "type": "footer",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "para1"
-    },
-    {
-      "type": "table",
-      "text": "cell1 a\nb\n\n c \nI should not be included\nd\n\ne\n\nf b"
-    },
-    {
-      "type": "text",
-      "text": "para2"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "ca8463d30948f4ddd6bf2fac001b11b6b21657107d82279ebd910e3ca8310dda",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
     }
-  ],
-  "structure": {
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
-    ]
-  },
-  "verification": {
-    "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
-    "source_sha256": "ca8463d30948f4ddd6bf2fac001b11b6b21657107d82279ebd910e3ca8310dda"
-  },
-  "benchmark_version": "2.0.0"
+  }
 }

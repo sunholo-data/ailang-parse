@@ -2,28 +2,25 @@
   "file": "docx-shapes.docx",
   "format": "docx",
   "source": "original",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 11,
       "total_words": 12,
       "key_phrases": [
-        "Paragraph with single <inline-image> within.",
         "<inline-image>",
         "<inline-image>",
-        "Paragraph with <inline-image1> and <inline-image2> within.",
         "<inline-image1>"
       ]
     },
     "headings": {
       "present": false,
       "count": 0,
-      "by_level": {}
+      "by_level": {},
+      "texts": []
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
@@ -50,19 +47,14 @@
     "speaker_notes": null,
     "text_boxes": {
       "present": true,
-      "count": 8
+      "count": 4
     },
     "images": {
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
-      "author": "",
       "created": "2024-02-06T13:54:12Z",
       "modified": "2024-02-07T09:51:55Z"
     },
@@ -82,129 +74,31 @@
     "with",
     "within"
   ],
-  "element_order": [
-    {
-      "type": "text",
-      "text": "Paragraph with single <inline-image> within."
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<inline-image>"
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<inline-image>"
-    },
-    {
-      "type": "text",
-      "text": "Paragraph with <inline-image1> and <inline-image2> within."
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<inline-image1>"
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<inline-image1>"
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<inline-image2>"
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<inline-image2>"
-    },
-    {
-      "type": "text",
-      "text": "<floating-shape>Paragraph with floating shape attached."
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<floating-shape>"
-    },
-    {
-      "type": "textbox",
-      "text": ""
-    },
-    {
-      "type": "text",
-      "text": "<floating-shape>"
-    }
-  ],
-  "structure": {
-    "runs": [
-      {
-        "text": "<inline-image>",
-        "color": "#000000"
-      },
-      {
-        "text": "<inline-image>",
-        "color": "#000000"
-      },
-      {
-        "text": "<inline-image1>",
-        "color": "#000000"
-      },
-      {
-        "text": "<inline-image1>",
-        "color": "#000000"
-      },
-      {
-        "text": "<inline-image2>",
-        "color": "#000000"
-      },
-      {
-        "text": "<inline-image2>",
-        "color": "#000000"
-      },
-      {
-        "text": "<floating-shape>",
-        "color": "#000000"
-      },
-      {
-        "text": "<floating-shape>",
-        "color": "#000000"
-      }
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "536efe9ff61931073d90adf5e234162bbf5374adea4ad1c03e07985ae01956a7",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata"
     ],
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
-    ]
-  },
-  "verification": {
-    "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
-    "source_sha256": "536efe9ff61931073d90adf5e234162bbf5374adea4ad1c03e07985ae01956a7"
-  },
-  "benchmark_version": "2.0.0"
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

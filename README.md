@@ -133,7 +133,7 @@ Every run produces, in the directory you ran from (`--output-dir DIR` or
 | Speaker notes | — | Yes | — | None |
 | Multi-sheet extraction | — | — | Yes | Kreuzberg |
 
-**OfficeDocBench v2** (87 files, 11 formats, 8 metrics): AILANG Parse PR #116 candidate **98.1%** composite with 100.0% coverage. Twelve adapters compared, including the hosted Reducto (r-1, 60.1% coverage-adjusted), Extend (Parse 2.0, 53.3%) and LlamaParse (standard mode) APIs, and LiteParse with LlamaIndex's OCRia-nano-1 model. Source-verified structural assertions now measure cell positions, comment targets, list depth, formatting, formulas, colours, and slide/notes relationships. [Methodology and results](benchmarks/officedocbench/README.md).
+**OfficeDocBench v2.1** (87 files, 11 formats): AILANG Parse **95.0%** composite with 100.0% coverage; the best of the other 11 tools is Pandoc at 73.5% coverage-adjusted. Every expected answer is read from the source document, not from any parser's output. [Methodology and results](benchmarks/officedocbench/README.md).
 
 ## Supported Formats
 

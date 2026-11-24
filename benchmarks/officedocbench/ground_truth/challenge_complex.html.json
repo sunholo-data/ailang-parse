@@ -2,10 +2,9 @@
   "file": "challenge_complex.html",
   "format": "html",
   "source": "unknown",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 3,
       "total_words": 36,
       "key_phrases": [
         "Report Title",
@@ -24,12 +23,29 @@
         "1": 1,
         "2": 2,
         "3": 1
-      }
+      },
+      "texts": [
+        {
+          "text": "Report Title",
+          "level": 1
+        },
+        {
+          "text": "Data Section",
+          "level": 2
+        },
+        {
+          "text": "Action Items",
+          "level": 2
+        },
+        {
+          "text": "Notes",
+          "level": 3
+        }
+      ]
     },
     "tables": {
       "present": true,
       "count": 1,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -44,17 +60,15 @@
     },
     "lists": {
       "present": true,
-      "count": 2,
+      "count": 1,
       "ordered_count": 1,
-      "unordered_count": 1,
+      "unordered_count": 0,
       "max_depth": 2,
       "has_nested": true
     },
     "metadata": {
       "title": "Complex HTML Document",
-      "author": "Test Author",
-      "created": "",
-      "modified": ""
+      "author": "Test Author"
     },
     "sheets": null
   },
@@ -96,65 +110,25 @@
     "users",
     "verify"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Report Title",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Executive summary paragraph."
-    },
-    {
-      "type": "heading",
-      "text": "Data Section",
-      "level": 2
-    },
-    {
-      "type": "table"
-    },
-    {
-      "type": "heading",
-      "text": "Action Items",
-      "level": 2
-    },
-    {
-      "type": "list"
-    },
-    {
-      "type": "list"
-    },
-    {
-      "type": "heading",
-      "text": "Notes",
-      "level": 3
-    },
-    {
-      "type": "text",
-      "text": "Important: all figures are preliminary."
-    },
-    {
-      "type": "image"
-    },
-    {
-      "type": "text",
-      "text": "Figure 1: Revenue growth"
-    }
-  ],
   "legacy_verification": {
-    "method": "Selected legacy fields independently checked against source HTML/XML",
-    "oracle": "audit_legacy_truth.py v1",
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "html: BeautifulSoup(html.parser) body, <title>, <meta name=author>",
     "source_sha256": "2f79aac29ea7387ac5cc976ed169ccf8f1b9172d2c5e97c9a28f13fcd5fc56f2",
     "fields": [
-      "features.text",
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
       "features.headings",
       "features.tables",
-      "features.lists",
       "features.images",
-      "features.metadata",
-      "full_text_words",
-      "element_order"
-    ]
+      "features.lists",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
   }
 }

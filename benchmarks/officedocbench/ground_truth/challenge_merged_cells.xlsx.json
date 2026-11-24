@@ -5,43 +5,13 @@
   "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 0,
-      "total_words": 36,
+      "total_words": 35,
       "key_phrases": [
-        "Sales Report",
-        "Matrix"
+        "Sales Report"
       ]
     },
     "headings": null,
-    "tables": {
-      "present": true,
-      "count": 2,
-      "total_rows": 9,
-      "has_merged_cells": true,
-      "merged_regions": [
-        {
-          "sheet": "Sales Report",
-          "description": "Header spanning 4 cols: Q1 2026 Sales Report"
-        },
-        {
-          "sheet": "Sales Report",
-          "description": "Revenue sub-header spanning 2 cols"
-        },
-        {
-          "sheet": "Matrix",
-          "description": "3x3 block merge"
-        },
-        {
-          "sheet": "Matrix",
-          "description": "2-col header merge"
-        },
-        {
-          "sheet": "Matrix",
-          "description": "2-row vertical merge"
-        }
-      ],
-      "merge_count": 5
-    },
+    "tables": null,
     "track_changes": null,
     "comments": null,
     "headers_footers": null,
@@ -54,7 +24,6 @@
     },
     "lists": null,
     "metadata": {
-      "title": "",
       "author": "openpyxl",
       "created": "2026-03-28T22:20:01Z",
       "modified": "2026-03-28T22:20:01Z"
@@ -90,7 +59,6 @@
     "cols",
     "europe",
     "latin",
-    "matrix",
     "merged",
     "normal",
     "north",
@@ -104,26 +72,6 @@
     "status",
     "target",
     "total"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Sales Report",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'Q1 2026 Sales Report', 'colSpan': 4, 'merged': Fal"
-    },
-    {
-      "type": "heading",
-      "text": "Matrix",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "{'text': 'Merged 3x3 Block', 'colSpan': 3, 'merged': False}"
-    }
   ],
   "structure": {
     "containers": [
@@ -495,8 +443,27 @@
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "9926c28cb98e6207c2f89743b126ed6b738f7bc4b697353bbc563a53add30b3e"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "xlsx: workbook sheet order, sheet cells, comments, docProps/core.xml",
+    "source_sha256": "9926c28cb98e6207c2f89743b126ed6b738f7bc4b697353bbc563a53add30b3e",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.images",
+      "features.metadata",
+      "features.sheets"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables:xlsx": "how many tables a worksheet holds is a parser convention (v2 table_cells assertions cover cells)",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

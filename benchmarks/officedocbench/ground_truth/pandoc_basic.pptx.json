@@ -2,10 +2,9 @@
   "file": "pandoc_basic.pptx",
   "format": "pptx",
   "source": "pandoc",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 20,
       "total_words": 65,
       "key_phrases": [
         "LLMs",
@@ -22,12 +21,29 @@
       "count": 4,
       "by_level": {
         "1": 4
-      }
+      },
+      "texts": [
+        {
+          "text": "LLMs",
+          "level": 1
+        },
+        {
+          "text": "Everworker venn \ndiagram",
+          "level": 1
+        },
+        {
+          "text": "Table",
+          "level": 1
+        },
+        {
+          "text": "Smart Art",
+          "level": 1
+        }
+      ]
     },
     "tables": {
       "present": true,
       "count": 1,
-      "total_rows": 2,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -38,20 +54,13 @@
       "present": false,
       "count": 0
     },
-    "text_boxes": {
-      "present": false,
-      "count": 0
-    },
+    "text_boxes": null,
     "images": {
       "present": true,
       "count": 1
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "Anton Antic",
       "created": "2025-11-04T19:20:30Z",
       "modified": "2025-11-08T10:05:07Z"
@@ -125,114 +134,6 @@
     "workflows",
     "years"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "LLMs",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Provider  Available LLMs – who manages? How?"
-    },
-    {
-      "type": "text",
-      "text": "EW maintained list of “approved” LLMs for Universal workers"
-    },
-    {
-      "type": "text",
-      "text": "Rebuilding of UWs to the “Newgen” thing completely"
-    },
-    {
-      "type": "text",
-      "text": "Streaming support"
-    },
-    {
-      "type": "text",
-      "text": "Multimodal (voice streaming) models?"
-    },
-    {
-      "type": "heading",
-      "text": "Everworker venn \ndiagram",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "SKILLS"
-    },
-    {
-      "type": "text",
-      "text": "Specialized Workers / Workflows:"
-    },
-    {
-      "type": "text",
-      "text": "n8n, UI Path, "
-    },
-    {
-      "type": "text",
-      "text": "other RPA"
-    },
-    {
-      "type": "text",
-      "text": "BRAINS"
-    },
-    {
-      "type": "text",
-      "text": "Universal Workers / AI Agents:"
-    },
-    {
-      "type": "text",
-      "text": "openai, anthropic,"
-    },
-    {
-      "type": "text",
-      "text": "Crew AI, other "
-    },
-    {
-      "type": "text",
-      "text": "“AI natives”"
-    },
-    {
-      "type": "text",
-      "text": "KNOWLEDGE "
-    },
-    {
-      "type": "text",
-      "text": "Data / "
-    },
-    {
-      "type": "text",
-      "text": "RAG Pipelines"
-    },
-    {
-      "type": "text",
-      "text": "Vector DBs, specialized data prep vendors, …"
-    },
-    {
-      "type": "text",
-      "text": "glean"
-    },
-    {
-      "type": "text",
-      "text": "EW"
-    },
-    {
-      "type": "heading",
-      "text": "Table",
-      "level": 1
-    },
-    {
-      "type": "table"
-    },
-    {
-      "type": "image"
-    },
-    {
-      "type": "heading",
-      "text": "Smart Art",
-      "level": 1
-    }
-  ],
   "structure": {
     "containers": [
       {
@@ -289,20 +190,31 @@
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "e48fd9c2f8369d1792197e301d5fea676bf6e51097a24af7d85831a6f96dc2dc"
   },
-  "benchmark_version": "2.0.0",
+  "benchmark_version": "2.1.0",
   "legacy_verification": {
-    "method": "Selected legacy fields independently checked against source HTML/XML",
-    "oracle": "audit_legacy_truth.py v1",
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "pptx: slides in presentation order, notes slides, comments, docProps/core.xml",
     "source_sha256": "e48fd9c2f8369d1792197e301d5fea676bf6e51097a24af7d85831a6f96dc2dc",
     "fields": [
       "full_text_words",
-      "features.text",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
       "features.headings",
+      "features.tables",
+      "features.speaker_notes",
       "features.images",
-      "element_order"
-    ]
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:pptx": "bullets are inherited from layouts/masters; which paragraphs form a list is a convention",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity",
+      "text_boxes:pptx": "every slide shape is a text frame; which are 'text boxes' is a convention"
+    }
   }
 }

@@ -2,10 +2,9 @@
   "file": "unstructured_test.xlsx",
   "format": "xlsx",
   "source": "unstructured (Apache-2.0)",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 0,
       "total_words": 17,
       "key_phrases": [
         "Stanley Cups",
@@ -13,12 +12,7 @@
       ]
     },
     "headings": null,
-    "tables": {
-      "present": true,
-      "count": 2,
-      "total_rows": 8,
-      "has_merged_cells": false
-    },
+    "tables": null,
     "track_changes": null,
     "comments": null,
     "headers_footers": null,
@@ -30,15 +24,13 @@
       "count": 0
     },
     "lists": null,
-    "metadata": {
-      "title": "",
-      "author": "",
-      "created": "",
-      "modified": ""
-    },
+    "metadata": {},
     "sheets": {
-      "present": false,
-      "names": []
+      "present": true,
+      "names": [
+        "Stanley Cups",
+        "Stanley Cups Since 67"
+      ]
     }
   },
   "full_text_words": [
@@ -59,26 +51,6 @@
     "stl",
     "team",
     "tor"
-  ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Stanley Cups",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Stanley Cups"
-    },
-    {
-      "type": "heading",
-      "text": "Stanley Cups Since 67",
-      "level": 1
-    },
-    {
-      "type": "table",
-      "text": "Stanley Cups Since 67"
-    }
   ],
   "structure": {
     "containers": [
@@ -346,8 +318,27 @@
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "e833722591ea0feaf3ef58582f44aac09920d2949372a85ab568ee4504f12605"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "xlsx: workbook sheet order, sheet cells, comments, docProps/core.xml",
+    "source_sha256": "e833722591ea0feaf3ef58582f44aac09920d2949372a85ab568ee4504f12605",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.images",
+      "features.metadata",
+      "features.sheets"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables:xlsx": "how many tables a worksheet holds is a parser convention (v2 table_cells assertions cover cells)",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }

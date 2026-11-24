@@ -2,10 +2,9 @@
   "file": "pandoc_inline_images.docx",
   "format": "docx",
   "source": "pandoc",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 2,
       "total_words": 9,
       "key_phrases": [
         "This picture  is an identicon.",
@@ -15,12 +14,12 @@
     "headings": {
       "present": false,
       "count": 0,
-      "by_level": {}
+      "by_level": {},
+      "texts": []
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
@@ -53,12 +52,8 @@
       "present": true,
       "count": 2
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "Jesse Rosenthal",
       "created": "2014-08-07T19:22:00Z",
       "modified": "2016-11-02T15:10:00Z"
@@ -76,51 +71,44 @@
     "that",
     "this"
   ],
-  "element_order": [
-    {
-      "type": "text",
-      "text": "This picture  is an identicon."
-    },
-    {
-      "type": "text",
-      "text": "Here is one   that links."
-    },
-    {
-      "type": "image",
-      "text": ""
-    },
-    {
-      "type": "image",
-      "text": ""
-    }
-  ],
   "structure": {
     "hyperlinks": [
       {
         "text": "one   that",
         "url": "http://www.google.com"
       }
-    ],
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
     ]
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "e7f289c4722968471fec2344d6cccb033cee2380b5958cf24f8467d86ee72ec8"
   },
-  "benchmark_version": "2.0.0",
+  "benchmark_version": "2.1.0",
   "legacy_verification": {
-    "method": "Selected legacy fields independently checked against source HTML/XML",
-    "oracle": "audit_legacy_truth.py v1",
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
     "source_sha256": "e7f289c4722968471fec2344d6cccb033cee2380b5958cf24f8467d86ee72ec8",
     "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
       "features.images",
-      "features.text.paragraph_count",
-      "element_order"
-    ]
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
   }
 }

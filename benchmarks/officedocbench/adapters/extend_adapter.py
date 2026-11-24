@@ -404,9 +404,11 @@ class ExtendAdapter(OfficeDocBenchAdapter):
                 f"Extend run {run.get('status')}: "
                 f"{run.get('failureReason')} {run.get('failureMessage')}"
             )
+        # A PROCESSED run with no blocks is an empty answer (a blank deck),
+        # not a failure: it maps to empty output (one slide container per
+        # PPTX chunk). The runner still refuses empty output unless the
+        # fixture's truth allows it (allow_empty_output).
         chunks = (run.get("output") or {}).get("chunks") or []
-        if not any(b for ch in chunks for b in ch.get("blocks") or []):
-            raise RuntimeError("Extend returned no blocks")
 
         suffix = filepath.suffix.lower()
         body: list[str] = []

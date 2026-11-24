@@ -2,10 +2,9 @@
   "file": "test_complex.html",
   "format": "html",
   "source": "original",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 7,
       "total_words": 60,
       "key_phrases": [
         "Document Title",
@@ -28,12 +27,29 @@
         "1": 1,
         "2": 2,
         "3": 1
-      }
+      },
+      "texts": [
+        {
+          "text": "Document Title",
+          "level": 1
+        },
+        {
+          "text": "Section One",
+          "level": 2
+        },
+        {
+          "text": "Nested Table Example",
+          "level": 3
+        },
+        {
+          "text": "Section Two",
+          "level": 2
+        }
+      ]
     },
     "tables": {
       "present": true,
       "count": 3,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": null,
@@ -48,17 +64,14 @@
     },
     "lists": {
       "present": true,
-      "count": 3,
+      "count": 2,
       "ordered_count": 1,
-      "unordered_count": 2,
+      "unordered_count": 1,
       "max_depth": 2,
       "has_nested": true
     },
     "metadata": {
-      "title": "Complex HTML Test",
-      "author": "",
-      "created": "",
-      "modified": ""
+      "title": "Complex HTML Test"
     },
     "sheets": null
   },
@@ -124,95 +137,25 @@
     "with",
     "world"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Document Title",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "Subtitle text"
-    },
-    {
-      "type": "list"
-    },
-    {
-      "type": "heading",
-      "text": "Section One",
-      "level": 2
-    },
-    {
-      "type": "text",
-      "text": "First paragraph with bold and italic text."
-    },
-    {
-      "type": "text",
-      "text": "A notable quotation from someone important."
-    },
-    {
-      "type": "table"
-    },
-    {
-      "type": "heading",
-      "text": "Nested Table Example",
-      "level": 3
-    },
-    {
-      "type": "table"
-    },
-    {
-      "type": "table"
-    },
-    {
-      "type": "text",
-      "text": "Term 1"
-    },
-    {
-      "type": "text",
-      "text": "Definition for term 1"
-    },
-    {
-      "type": "text",
-      "text": "Term 2"
-    },
-    {
-      "type": "text",
-      "text": "Definition for term 2"
-    },
-    {
-      "type": "heading",
-      "text": "Section Two",
-      "level": 2
-    },
-    {
-      "type": "list"
-    },
-    {
-      "type": "list"
-    },
-    {
-      "type": "text",
-      "text": "function hello() {\n  console.log(\"Hello, World!\");\n}"
-    },
-    {
-      "type": "text",
-      "text": "Footer text © 2025"
-    }
-  ],
   "legacy_verification": {
-    "method": "Selected legacy fields independently checked against source HTML/XML",
-    "oracle": "audit_legacy_truth.py v1",
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "html: BeautifulSoup(html.parser) body, <title>, <meta name=author>",
     "source_sha256": "ab388503059ab0db1abd93647980988cb77661084c449955e5813ff30c21897b",
     "fields": [
-      "features.text",
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
       "features.headings",
       "features.tables",
-      "features.lists",
       "features.images",
-      "features.metadata",
-      "full_text_words",
-      "element_order"
-    ]
+      "features.lists",
+      "features.metadata"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
   }
 }

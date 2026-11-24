@@ -2,10 +2,9 @@
   "file": "challenge_formatting.docx",
   "format": "docx",
   "source": "unknown",
-  "verified": false,
+  "verified": true,
   "features": {
     "text": {
-      "paragraph_count": 4,
       "total_words": 61,
       "key_phrases": [
         "Scientific Paper: Gene Expression Analysis",
@@ -20,12 +19,17 @@
       "count": 1,
       "by_level": {
         "1": 1
-      }
+      },
+      "texts": [
+        {
+          "text": "Scientific Paper: Gene Expression Analysis",
+          "level": 1
+        }
+      ]
     },
     "tables": {
       "present": false,
       "count": 0,
-      "total_rows": 0,
       "has_merged_cells": false
     },
     "track_changes": {
@@ -58,50 +62,18 @@
       "present": false,
       "count": 0
     },
-    "lists": {
-      "present": false,
-      "count": 0
-    },
+    "lists": null,
     "metadata": {
-      "title": "",
       "author": "python-docx",
       "created": "2013-12-23T23:15:00Z",
       "modified": "2013-12-23T23:15:00Z"
     },
     "sheets": null,
-    "styles": {
-      "present": true,
-      "styled_runs": [
-        {
-          "text": "bold text",
-          "bold": true
-        },
-        {
-          "text": "italic text",
-          "italic": true
-        },
-        {
-          "text": "bold and italic",
-          "bold": true,
-          "italic": true
-        },
-        {
-          "text": "underlined text",
-          "underline": true
-        },
-        {
-          "text": "strikethrough",
-          "strikethrough": true
-        }
-      ]
-    },
     "section_breaks": {
-      "present": true,
-      "count": 1,
-      "types": [
-        "section_break"
-      ]
-    }
+      "present": false,
+      "count": 0
+    },
+    "styles": null
   },
   "full_text_words": [
     "1",
@@ -166,29 +138,6 @@
     "understanding",
     "warning"
   ],
-  "element_order": [
-    {
-      "type": "heading",
-      "text": "Scientific Paper: Gene Expression Analysis",
-      "level": 1
-    },
-    {
-      "type": "text",
-      "text": "The gene ***BRCA1*** (also known as *breast cancer type 1*)"
-    },
-    {
-      "type": "text",
-      "text": "As discussed in *The Emperor of All Maladies* by Siddhartha"
-    },
-    {
-      "type": "text",
-      "text": "The **p53** pathway regulates apoptosis. Mutations in TP53 ("
-    },
-    {
-      "type": "text",
-      "text": "**PASSED** — Sample A; **FAILED** — Sample B; **WARNING** —"
-    }
-  ],
   "structure": {
     "runs": [
       {
@@ -243,17 +192,40 @@
         "bold": true,
         "color": "#ffa500"
       }
-    ],
-    "breaks": [
-      {
-        "kind": "section-break"
-      }
     ]
   },
   "verification": {
     "method": "Office XML assertions; independent of parser output",
-    "oracle": "build_structure_truth.py v2",
+    "oracle": "build_structure_truth.py v2.1",
     "source_sha256": "c5f281615f65898b5a7ee6d16003773a58aa1c0ba010abf1f8b5dc522b449cba"
   },
-  "benchmark_version": "2.0.0"
+  "benchmark_version": "2.1.0",
+  "legacy_verification": {
+    "method": "Every scored legacy field recomputed from the source file by an independent reader; fields that depend on a parser's conventions are removed and not scored",
+    "oracle": "audit_legacy_truth.py v2",
+    "reader": "docx: word/document.xml, headers/footers, notes, comments, docProps/core.xml",
+    "source_sha256": "c5f281615f65898b5a7ee6d16003773a58aa1c0ba010abf1f8b5dc522b449cba",
+    "fields": [
+      "full_text_words",
+      "features.text.total_words",
+      "features.text.key_phrases (kept only where verbatim in one source paragraph)",
+      "features.headings",
+      "features.tables",
+      "features.track_changes",
+      "features.comments",
+      "features.headers_footers",
+      "features.footnotes_endnotes",
+      "features.text_boxes",
+      "features.images",
+      "features.metadata",
+      "features.section_breaks"
+    ],
+    "not_scored": {
+      "element_order": "a reading-order sequence in one parser's block granularity",
+      "lists:docx": "WordprocessingML has numbered paragraphs but no list container; list grouping is a parser convention (v2 list_items assertions cover levels)",
+      "styles": "counts a parser's run segmentation; v2 run assertions check explicit formatting instead",
+      "tables.total_rows": "'rows excluding header' is a parser convention",
+      "text.paragraph_count": "counts a parser's paragraph segmentation (empty paragraphs, list items, cells), not a source quantity"
+    }
+  }
 }
