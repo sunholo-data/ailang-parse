@@ -222,8 +222,12 @@ def span_grid(rows):
     return out
 
 
-def markdown_output(source):
-    """Read only features explicitly present in a provider's Markdown/HTML."""
+def markdown_output(source, placeholder_header=False):
+    """Read only features explicitly present in a provider's Markdown/HTML.
+
+    placeholder_header: the provider writes an all-empty GFM header row
+    when the source table has none (markdownify); such a row is dropped.
+    """
     from markdown_it import MarkdownIt
 
     parser = MarkdownIt("commonmark").enable("table")
@@ -249,7 +253,16 @@ def markdown_output(source):
         if token.type == "heading_open":
             heading = int(token.tag[1:])
         elif token.type in ("bullet_list_open", "ordered_list_open"):
-            list_stack.append(token.type == "ordered_list_open")
+            # One legacy list per Markdown list node: its items are the
+            # consecutive entries CommonMark groups; a nested list is its own.
+            list_stack.append(
+                {
+                    "items": [],
+                    "ordered": token.type == "ordered_list_open",
+                    "depth": len(list_stack) + 1,
+                }
+            )
+            out["lists"].append(list_stack[-1])
         elif token.type in ("bullet_list_close", "ordered_list_close"):
             list_stack.pop()
         elif token.type == "table_open":
@@ -259,6 +272,8 @@ def markdown_output(source):
         elif token.type == "tr_close":
             table.append(row)
         elif token.type == "table_close":
+            if placeholder_header and len(table) > 1 and not any(x.strip() for x in table[0]):
+                table = table[1:]
             idx = len(out["tables"])
             structure["table_cells"] += table_cells(table, idx)
             out["tables"].append(
@@ -327,23 +342,18 @@ def markdown_output(source):
                 structure["element_order"].append({"type": "heading", "text": value})
                 heading = 0
             elif list_stack:
-                out["lists"].append(
-                    {
-                        "items": [value],
-                        "ordered": list_stack[-1],
-                        "depth": len(list_stack),
-                    }
-                )
+                list_stack[-1]["items"].append(value)
                 structure["list_items"].append(
                     {
                         "text": value,
-                        "ordered": list_stack[-1],
+                        "ordered": list_stack[-1]["ordered"],
                         "level": len(list_stack) - 1,
                     }
                 )
             elif value.strip():
                 out["text_elements"].append({"text": value, "style": "paragraph"})
                 structure["element_order"].append({"type": "text", "text": value})
+    out["lists"] = [x for x in out["lists"] if x["items"]]
     out["hyperlinks"] = structure["hyperlinks"]
     out["structure"] = structure
     out["metadata"] = {}

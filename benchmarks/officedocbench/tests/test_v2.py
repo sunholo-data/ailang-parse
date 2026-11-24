@@ -978,6 +978,45 @@ class AdapterMappingTests(unittest.TestCase):
         out = PandocAdapter().convert_ast({"blocks": [header("intro", "Intro")]})
         self.assertEqual(out["structure"]["containers"], [])
 
+    def test_markdown_list_items_group_into_their_list(self):
+        out = markdown_output(
+            "- a\n- b\n\n1. one\n2. two\n   - x\n   - y\n3. three\n\npara\n\n- c\n"
+        )
+        self.assertEqual(
+            [(x["items"], x["ordered"], x["depth"]) for x in out["lists"]],
+            [(["a", "b"], False, 1), (["one", "two", "three"], True, 1),
+             (["x", "y"], False, 2), (["c"], False, 1)],
+        )
+        self.assertEqual(
+            [(x["text"], x["level"]) for x in out["structure"]["list_items"]],
+            [("a", 0), ("b", 0), ("one", 0), ("two", 0), ("x", 1), ("y", 1),
+             ("three", 0), ("c", 0)],
+        )
+
+    def test_markitdown_formats_slides_notes_and_placeholder_header(self):
+        from adapters.markitdown_adapter import MarkItDownAdapter
+
+        self.assertLessEqual({"md", "tsv"}, MarkItDownAdapter().supported_formats())
+        out = MarkItDownAdapter().convert_slides(
+            "<!-- Slide number: 1 -->\n# Intro\nBody\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n"
+            "### Notes:\nSay hi\nthen go\n\n<!-- Slide number: 2 -->\n\n### Notes:\n\n"
+            "<!-- Slide number: 3 -->\nNo title\n"
+        )
+        s = out["structure"]
+        self.assertEqual([c["name"] for c in s["containers"]], ["Intro", "", ""])
+        self.assertEqual(s["notes"], [{"scope": "Intro", "text": "Say hi then go"}])
+        self.assertEqual(out["speaker_notes"], [{"text": "Say hi then go"}])
+        self.assertEqual({c["scope"] for c in s["table_cells"]}, {"Intro"})
+        self.assertNotIn("Notes:", [h["text"] for h in out["headings"]])
+        md = "|  |  |\n| --- | --- |\n| Name | Game |\n| a | b |\n"
+        out = markdown_output(md, placeholder_header=True)
+        self.assertEqual(out["structure"]["table_cells"][0], {
+            "table": 0, "scope": "", "row": 1, "col": 1, "text": "Name",
+            "col_span": 1, "merged": False})
+        self.assertEqual(out["tables"][0]["row_count"], 1)
+        # Without the provider flag an empty header row is a real row.
+        self.assertEqual(markdown_output(md)["structure"]["table_cells"][0]["text"], "")
+
 
 if __name__ == "__main__":
     unittest.main()
