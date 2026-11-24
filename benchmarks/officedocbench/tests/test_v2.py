@@ -939,6 +939,38 @@ class StructuralTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner._write_summary([{"adapter": "old", "results": []}])
 
+    def test_dimensions_without_checks_are_not_free_points(self):
+        from scoring import score_file
+
+        truth = {"features": {"metadata": {"title": "Q3"}}, "full_text_words": ["alpha"]}
+        good = score_file(truth, {"metadata": {"title": "Q3"}, "text_elements": [{"text": "alpha"}]})
+        bad = score_file(truth, {"metadata": {}, "text_elements": [{"text": "beta"}]})
+        self.assertEqual(good["composite"], 1.0)
+        # Only metadata and text are checked, so a wrong answer on both is 0,
+        # not 0.75 from five unchecked dimensions scoring 1.0.
+        self.assertEqual(bad["composite"], 0.0)
+        self.assertFalse(bad["structural_recall"]["applicable"])
+
+    def test_heading_text_uses_source_texts_and_penalises_none(self):
+        from scoring import score_structural_quality
+
+        feats = {"headings": {"present": True, "count": 1, "by_level": {"1": 1},
+                              "texts": [{"text": "Results", "level": 1}]}}
+        none = score_structural_quality(feats, {"headings": []})
+        self.assertEqual(none["details"]["heading_text_match"]["score"], 0.0)
+        empty = score_structural_quality(feats, {"headings": [{"text": "", "level": 1}]})
+        self.assertEqual(empty["details"]["heading_text_match"]["score"], 0.0)
+        hit = score_structural_quality(feats, {"headings": [{"text": "Results", "level": 1}]})
+        self.assertEqual(hit["details"]["heading_text_match"]["score"], 1.0)
+
+    def test_track_change_type_synonyms_match(self):
+        from scoring import score_structural_recall
+
+        feats = {"track_changes": {"present": True, "count": 2,
+                                   "types": {"insert": 1, "delete": 1}}}
+        out = {"track_changes": [{"type": "insertion"}, {"type": "deletion"}]}
+        self.assertEqual(score_structural_recall(feats, out)["per_feature"]["track_changes"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

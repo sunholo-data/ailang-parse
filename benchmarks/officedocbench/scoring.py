@@ -51,15 +51,25 @@ def score_file(ground_truth: dict, adapter_output: dict) -> dict[str, Any]:
                           features.get("sheets"))
     structural = score_structure(ground_truth.get("structure", {}), adapter_output)
 
-    # Composite weighted score
+    # Composite weighted score over the dimensions this file has checks for.
+    # A dimension with nothing to check is not applicable: counting it as 1.0
+    # would hand every tool the same free points and compress the spread.
+    metrics = {
+        "feature_detection": detection,
+        "structural_recall": recall,
+        "structural_quality": quality,
+        "content_fidelity": fidelity,
+        "text_jaccard": jaccard,
+        "element_count": counts,
+        "metadata": meta,
+    }
+    live = [k for k, m in metrics.items() if m.get("applicable", True)]
+    weight = sum(WEIGHTS[k] for k in live)
+    legacy_applicable = weight > 0
     composite = (
-        WEIGHTS["feature_detection"] * detection["score"]
-        + WEIGHTS["structural_recall"] * recall["score"]
-        + WEIGHTS["structural_quality"] * quality["score"]
-        + WEIGHTS["content_fidelity"] * fidelity["score"]
-        + WEIGHTS["text_jaccard"] * jaccard["score"]
-        + WEIGHTS["element_count"] * counts["score"]
-        + WEIGHTS["metadata"] * meta["score"]
+        sum(WEIGHTS[k] * metrics[k]["score"] for k in live) / weight
+        if legacy_applicable
+        else 1.0
     )
     # v2 reserves a quarter of the score for source-verified assertions when
     # the fixture has them. Legacy fixtures retain the seven original weights.
@@ -67,8 +77,10 @@ def score_file(ground_truth: dict, adapter_output: dict) -> dict[str, Any]:
         composite = structural["score"]
         for metric in (detection, recall, quality, fidelity, jaccard, counts, meta):
             metric["applicable"] = False
-    elif structural["applicable"]:
+    elif structural["applicable"] and legacy_applicable:
         composite = .75 * composite + .25 * structural["score"]
+    elif structural["applicable"]:
+        composite = structural["score"]
 
     return {
         "composite": round(composite, 4),
@@ -184,13 +196,29 @@ def score_feature_detection(features: dict, output: dict) -> dict[str, Any]:
             detected += 1
 
     score = detected / total if total > 0 else 1.0
+    applicable = total > 0
 
     return {
+        "applicable": applicable,
         "score": round(score, 4),
         "detected": detected,
         "total": total,
         "checks": checks,
     }
+
+
+_CHANGE_TYPES = {
+    "insertion": "insert", "ins": "insert", "inserted": "insert",
+    "deletion": "delete", "del": "delete", "deleted": "delete",
+    "movefrom": "move-from", "move_from": "move-from",
+    "moveto": "move-to", "move_to": "move-to",
+}
+
+
+def _change_type(value: str) -> str:
+    """Tools name the same tracked-change kinds differently; compare meanings."""
+    value = str(value).strip().lower()
+    return _CHANGE_TYPES.get(value, value)
 
 
 def score_structural_recall(features: dict, output: dict) -> dict[str, Any]:
@@ -221,10 +249,13 @@ def score_structural_recall(features: dict, output: dict) -> dict[str, Any]:
         expected = gt_tc["count"]
         actual = len(output.get("track_changes", []))
         count_score = min(actual, expected) / expected if expected > 0 else 1.0
-        gt_types = gt_tc.get("types", {})
+        gt_types: dict[str, int] = {}
+        for ct, n in gt_tc.get("types", {}).items():
+            ct = _change_type(ct)
+            gt_types[ct] = gt_types.get(ct, 0) + n
         actual_types: dict[str, int] = {}
         for c in output.get("track_changes", []):
-            ct = c.get("type", "unknown")
+            ct = _change_type(c.get("type", "unknown"))
             actual_types[ct] = actual_types.get(ct, 0) + 1
         type_match = 1.0 if gt_types == actual_types else 0.5 if actual_types else 0.0
         tc_score = 0.6 * count_score + 0.4 * type_match
@@ -269,8 +300,10 @@ def score_structural_recall(features: dict, output: dict) -> dict[str, Any]:
         weighted_sum += scores["images"]
 
     score = weighted_sum / total if total > 0 else 1.0
+    applicable = total > 0
 
     return {
+        "applicable": applicable,
         "score": round(score, 4),
         "per_feature": scores,
     }
@@ -479,14 +512,20 @@ def score_structural_quality(features: dict, output: dict,
                 weighted_sum += numbering_score
 
     # ── Heading text match ─────────────────────────────────────────
+    gt_h_feat = features.get("headings")
     gt_headings_from_order = [
-        e for e in (element_order or [])
-        if e.get("type") == "heading" and e.get("text")
+        e for e in (
+            gt_h_feat.get("texts", []) if isinstance(gt_h_feat, dict) and gt_h_feat.get("texts")
+            else element_order or []
+        )
+        if e.get("type", "heading") == "heading" and e.get("text")
     ]
     actual_headings = output.get("headings", [])
-    if gt_headings_from_order and actual_headings:
+    if gt_headings_from_order:
         matched = 0
-        actual_texts = [h.get("text", "").strip().lower() for h in actual_headings]
+        actual_texts = [
+            t for t in (h.get("text", "").strip().lower() for h in actual_headings) if t
+        ]
         for gt_h_entry in gt_headings_from_order:
             gt_text = gt_h_entry["text"].strip().lower()
             if any(gt_text in at or at in gt_text for at in actual_texts):
@@ -537,8 +576,10 @@ def score_structural_quality(features: dict, output: dict,
         weighted_sum += min(range_score, 1.0)
 
     score = weighted_sum / total if total > 0 else 1.0
+    applicable = total > 0
 
     return {
+        "applicable": applicable,
         "score": round(score, 4),
         "details": scores,
     }
@@ -790,8 +831,10 @@ def score_content_fidelity(ground_truth: dict, adapter_output: dict) -> dict[str
             weighted_sum += bm_recall
 
     score = weighted_sum / total if total > 0 else 1.0
+    applicable = total > 0
 
     return {
+        "applicable": applicable,
         "score": round(score, 4),
         "dimensions_scored": total,
         "details": details,
@@ -889,6 +932,7 @@ def score_text_jaccard(gt_words: set[str], output: dict) -> dict[str, Any]:
     jaccard = len(intersection) / len(union) if union else 1.0
 
     return {
+        "applicable": bool(union),
         "score": round(jaccard, 4),
         "gt_words": len(gt_words),
         "actual_words": len(actual_words),
@@ -925,8 +969,10 @@ def score_element_counts(features: dict, output: dict) -> dict[str, Any]:
             score_sum += acc
 
     score = score_sum / total if total > 0 else 1.0
+    applicable = total > 0
 
     return {
+        "applicable": applicable,
         "score": round(score, 4),
         "checks": checks,
     }
@@ -973,8 +1019,10 @@ def score_metadata(gt_meta: dict | None, output_meta: dict,
             matched += partial  # Partial credit for partial matches
 
     score = matched / total if total > 0 else 1.0
+    applicable = total > 0
 
     return {
+        "applicable": applicable,
         "score": round(score, 4),
         "matched": round(matched, 2),
         "total": total,
