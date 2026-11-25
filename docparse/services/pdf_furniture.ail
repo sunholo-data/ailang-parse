@@ -61,6 +61,14 @@ export pure func pdfFurnitureQualifies(count: int, threshold: int, pageCount: in
 =
   count >= threshold && threshold >= 2 && (pageCount > 2 || nearEdge)
 
+-- Guard against collapsing repeated-page documents (e.g. multi-copy forms) into
+-- furniture: inferred furniture stripping only runs when real body blocks remain.
+export pure func pdfFurnitureSafeToStrip(bodyCount: int, furnCount: int) -> bool
+  requires { bodyCount >= 0 && furnCount >= 0 }
+  ensures { result == false || bodyCount > 0 }
+=
+  bodyCount > 0 && furnCount > 0
+
 -- =====================================================================
 -- Line keys
 -- =====================================================================
@@ -287,7 +295,10 @@ export pure func pdfFurnitureApply(blocks: [Block], pageCount: int) -> [Block] {
          beforeBody: false, afterBody: false, afterPn: false, beforePn: false}
     }, zip(body, keyed));
   let marked = pfMarkBackward(reverse(pfMarkForward(items, false, false)), false, false, []);
-  let furn = filter(\it. it.role == 1, marked);
+  let bodyCount = listLength(filter(\it. it.role == 0, marked));
+  let rawFurn = filter(\it. it.role == 1, marked);
+  let stripInferred = pdfFurnitureSafeToStrip(bodyCount, listLength(rawFurn));
+  let furn = if stripInferred then rawFurn else [];
   -- Strongest evidence per key decides header vs footer.
   let rankStats = pfStats(map(\it. (it.key, pfCopyRank(it)), furn));
   let rankMap = mapFromList(map(\s. (s.key, s.last), rankStats));
@@ -296,7 +307,9 @@ export pure func pdfFurnitureApply(blocks: [Block], pageCount: int) -> [Block] {
   let footerCopies = map(\it. it.block, filter(\it. not isHeaderKey(it.key), furn));
   let headers = pfDedupe(explicitHeaders ++ headerCopies, []);
   let footers = pfDedupe(explicitFooters ++ footerCopies, []);
-  let kept = map(\it. it.block, filter(\it. it.role == 0 || it.role == 3, marked));
+  let kept = if stripInferred
+    then map(\it. it.block, filter(\it. it.role == 0 || it.role == 3, marked))
+    else body;
   let withHeader = if listLength(headers) > 0 then mkSection("header", headers) :: kept else kept;
   if listLength(footers) > 0 then withHeader ++ [mkSection("footer", footers)] else withHeader
 }
@@ -403,7 +416,10 @@ export pure func pdfFurnitureShape(spec: string) -> string
     ("1;h:Title|t:Only page|t:1", "h:Title|t:Only page|t:1"),
     -- Page markers (p:N) stay in place and do not break header/footer runs.
     ("2;p:1|t:ACME   REPORT|h:One|t:Body|t:Acme Ltd   1|p:2|t:ACME   REPORT|h:Two|t:Body two|t:Acme Ltd   2",
-     "H[ACME REPORT]|pb:1|h:One|t:Body|pb:2|h:Two|t:Body two|F[Acme Ltd]")
+     "H[ACME REPORT]|pb:1|h:One|t:Body|pb:2|h:Two|t:Body two|F[Acme Ltd]"),
+    -- Repeated identical form pages: no body would remain, so keep all pages intact.
+    ("3;t:FORM TITLE|t:Name:|t:FORM TITLE|t:Name:|t:FORM TITLE|t:Name:",
+     "t:FORM TITLE|t:Name:|t:FORM TITLE|t:Name:|t:FORM TITLE|t:Name:")
   ]
 {
   let at = find(spec, ";");
