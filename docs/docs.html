@@ -520,6 +520,104 @@
   </section>
 <!-- /nav:index -->
 
+  <section class="dp-docs-section" id="surface-matrix" style="margin-top:48px">
+    <div class="dp-docs-section-header">
+      <h2>Where each feature is available</h2>
+      <span class="dp-section-line"></span>
+    </div>
+    <p style="font-size:14px;color:var(--text-secondary);margin:-4px 0 18px">
+      Every surface runs the same AILANG parsers. Differences come from what the host environment can execute (local subprocesses, network, or browser sandbox).
+    </p>
+    <div style="overflow-x:auto">
+      <table class="dp-table" style="width:100%;border-collapse:collapse;font-size:13.5px">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)">Capability</th>
+            <th style="text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)">CLI (<code>docparse</code>)</th>
+            <th style="text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)">Hosted REST API</th>
+            <th style="text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)">MCP (Hosted / stdio)</th>
+            <th style="text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)">SDKs (Py / Go / R / JS)</th>
+            <th style="text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)">Browser WASM</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>Office &amp; ODF</strong><br><span style="color:var(--text-muted);font-size:12px">DOCX, PPTX, XLSX, ODT, ODP, ODS</span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (deterministic, $0)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (deterministic)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (in-browser, offline)</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>Web, Text &amp; Archives</strong><br><span style="color:var(--text-muted);font-size:12px">HTML, MD, CSV, TSV, EPUB, EML, MBOX, RTF, TeX</span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (incl. <code>--deep</code> EML &amp; LaTeX <code>\input</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (shallow EML, single-file TeX)</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>PDF &mdash; deterministic</strong><br><span style="color:var(--text-muted);font-size:12px"><code>pdftotext</code>, <code>poppler</code></span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>docparse-pdf</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (default, no AI quota)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>pdfBackend</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>pdf_backend</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">No (no local poppler)</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>PDF &mdash; hybrid &amp; AI OCR</strong><br><span style="color:var(--text-muted);font-size:12px"><code>hybrid</code> (scanned pages only), <code>ai</code></span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (BYO key / Vertex ADC)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (Vertex AI EU, AI quota)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>pdfBackend="hybrid"|"ai"</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>pdf_backend="hybrid"|"ai"</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">AI only (BYO Gemini key)</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>PDF &mdash; local ML OCR</strong><br><span style="color:var(--text-muted);font-size:12px"><code>docling</code>, <code>liteparse</code></span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>--install-backends</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">No (self-host only)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">stdio only</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Self-hosted API only</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">No</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>Images</strong><br><span style="color:var(--text-muted);font-size:12px">PNG, JPG, GIF, WebP, TIFF</span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (AI)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (Vertex AI EU, AI quota)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (BYO Gemini key)</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>Audio &amp; Video</strong><br><span style="color:var(--text-muted);font-size:12px">MP3, WAV, MP4, MOV, WebM</span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (AI)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">No (CLI / self-host only)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">stdio only</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Self-hosted API only</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (BYO Gemini key)</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>Convert &amp; Templates</strong><br><span style="color:var(--text-muted);font-size:12px">9 target formats + <code>--reference-doc</code></span></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>POST /api/v1/convert</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes (<code>mcpConvert</code>)</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Yes</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Parse &amp; A2UI preview</td>
+          </tr>
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)"><strong>Data residency / offline</strong></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">100% local / offline</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Cloud Run <code>europe-west1</code> + Vertex AI <code>eu</code></td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">EU hosted or 100% local stdio</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">Follows target API</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">100% client-side (zero upload)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 </div>
 
 <div id="footer-mount"></div>

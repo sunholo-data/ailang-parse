@@ -1,0 +1,110 @@
+module docparse/services/pdf_router
+
+-- Composable Page-Level PDF Router
+--
+-- Pure, contract-verified routing core that assigns each PDF page to a
+-- concrete extraction engine ("poppler", "pdftotext", "ai", or any future
+-- pluggable backend) based on deterministic per-page audit signals and the
+-- caller's policy.
+--
+-- Architecture:
+--   1. Audit  (PdfPageAudit per 1-based page)
+--   2. Route  (pdfRoutePages: pure, Z3-verified, swappable policies)
+--   3. Execute & Splice (orchestrator invokes each engine on its assigned pages)
+
+import std/list (map, filter, any, range, length as listLength)
+import std/string (join, intToStr)
+
+export type PdfPageAudit = {
+  page: int,
+  textless: bool,
+  popplerWords: int,
+  pdftotextWords: int
+}
+
+export type PdfPageRoute = {
+  page: int,
+  engine: string,
+  resolution: string,
+  reason: string
+}
+
+-- Word retention percentage of poppler relative to pdftotext (clamped 0..100).
+-- Returns 100 when pdftotextWords == 0 (nothing to lose).
+export pure func pdfWordRetentionPct(popplerWords: int, pdftotextWords: int) -> int
+  requires { popplerWords >= 0 && pdftotextWords >= 0 }
+  ensures { result >= 0 && result <= 100 }
+  tests [((100, 100), 100), ((95, 100), 95), ((20, 80), 25), ((120, 100), 100), ((0, 0), 100)]
+{
+  if pdftotextWords == 0 then 100
+  else {
+    let pct = (popplerWords * 100) / pdftotextWords;
+    if pct > 100 then 100 else pct
+  }
+}
+
+-- True when poppler dropped enough words relative to pdftotext to trigger
+-- the dual-deterministic fallback guard (< 95% retention).
+export pure func pdfPopplerWordLoss(popplerWords: int, pdftotextWords: int) -> bool
+  requires { popplerWords >= 0 && pdftotextWords >= 0 }
+  ensures { result == false || pdftotextWords > 0 }
+=
+  pdftotextWords > 0 && pdfWordRetentionPct(popplerWords, pdftotextWords) < 95
+
+-- Route a single page under the chosen policy.
+-- Policies:
+--   "hybrid"    -> textless pages to "ai"; word-loss pages to "pdftotext"; else "poppler"
+--   "auto-free" -> deterministic-only dual guard: word-loss pages to "pdftotext"; else "poppler"
+--   any other   -> explicit engine name verbatim ("poppler", "pdftotext", "ai", "docling", ...)
+export pure func pdfRouteOnePage(audit: PdfPageAudit, policy: string, aiResolution: string) -> PdfPageRoute =
+  if policy == "hybrid" then
+    if audit.textless then
+      {page: audit.page, engine: "ai", resolution: aiResolution, reason: "textless_page"}
+    else if audit.popplerWords >= 0 && audit.pdftotextWords > 0
+            && pdfPopplerWordLoss(audit.popplerWords, audit.pdftotextWords) then
+      {page: audit.page, engine: "pdftotext", resolution: "", reason: "poppler_word_loss"}
+    else
+      {page: audit.page, engine: "poppler", resolution: "", reason: "text_layer"}
+  else if policy == "auto-free" then
+    if audit.popplerWords >= 0 && audit.pdftotextWords > 0
+       && pdfPopplerWordLoss(audit.popplerWords, audit.pdftotextWords) then
+      {page: audit.page, engine: "pdftotext", resolution: "", reason: "poppler_word_loss"}
+    else
+      {page: audit.page, engine: "poppler", resolution: "", reason: "text_layer"}
+  else
+    {page: audit.page, engine: policy, resolution: if policy == "ai" then aiResolution else "", reason: "explicit"}
+
+-- Route all audited pages. Preserves exact page count (1:1).
+export pure func pdfRoutePages(audits: [PdfPageAudit], policy: string, aiResolution: string) -> [PdfPageRoute]
+  ensures { listLength(result) == listLength(audits) }
+=
+  map(\a. pdfRouteOnePage(a, policy, aiResolution), audits)
+
+-- Extract the 1-based page numbers assigned to a specific engine.
+export pure func pdfPagesForEngine(routes: [PdfPageRoute], engine: string) -> [int]
+  ensures { listLength(result) <= listLength(routes) }
+=
+  map(\r. r.page, filter(\r. r.engine == engine, routes))
+
+-- Build page audits from the text-layer audit (totalPages + textlessPages).
+export pure func pdfAuditsFromTextLayer(totalPages: int, textlessPages: [int]) -> [PdfPageAudit] =
+  if totalPages <= 0 then []
+  else map(\p. {
+    page: p,
+    textless: any(\t. t == p, textlessPages),
+    popplerWords: 0,
+    pdftotextWords: 0
+  }, range(1, totalPages + 1))
+
+-- Test surface for inline unit tests.
+export pure func pdfRouterTestShape() -> string
+  tests [((), "1:poppler|2:pdftotext|3:ai")]
+{
+  let audits = [
+    {page: 1, textless: false, popplerWords: 100, pdftotextWords: 100},
+    {page: 2, textless: false, popplerWords: 20, pdftotextWords: 80},
+    {page: 3, textless: true, popplerWords: 0, pdftotextWords: 0}
+  ];
+  let routes = pdfRoutePages(audits, "hybrid", "medium");
+  join("|", map(\r. "${intToStr(r.page)}:${r.engine}", routes))
+}
