@@ -671,9 +671,9 @@ while [ $# -gt 0 ]; do
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
-        pdftotext|poppler|ai|docling|liteparse) ;;
+        pdftotext|poppler|ai|hybrid|docling|liteparse) ;;
         *)
-          echo "Error: --pdf-backend must be one of: pdftotext, poppler, ai, docling, liteparse (got: $PDF_BACKEND)" >&2
+          echo "Error: --pdf-backend must be one of: pdftotext, poppler, ai, hybrid, docling, liteparse (got: $PDF_BACKEND)" >&2
           exit 2
           ;;
       esac
@@ -855,9 +855,9 @@ for f in "${RESOLVED_FILES[@]}"; do
   EXT_LOWER="$(echo "$EXT" | tr '[:upper:]' '[:lower:]')"
   case "$EXT_LOWER" in
     pdf)
-      if [ "$PDF_BACKEND" = "ai" ]; then
+      if [ "$PDF_BACKEND" = "ai" ] || [ "$PDF_BACKEND" = "hybrid" ]; then
         NEEDS_AI=true
-        NEEDS_PROCESS=true  # AI backend still calls pdftotext first; needs Process cap
+        NEEDS_PROCESS=true  # AI/hybrid backends still call poppler/pdftotext; needs Process cap
       else
         NEEDS_PROCESS=true
       fi
