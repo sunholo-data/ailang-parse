@@ -11,6 +11,22 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.60.0](https://github.com/sunholo-data/ailang-parse/compare/v0.59.0...v0.60.0) — 2026-11-25
+
+### Added: Composable PDF page router, `auto-free` dual-deterministic guard, `--pages`, and `--ai-resolution` (#177, #179)
+
+- **Composable page-level PDF router** (`docparse/services/pdf_router.ail`, exported): pure, Z3-verified per-page routing (`pdfWordRetentionPct`, `pdfPopplerWordLoss`, `pdfRoutePages`, `pdfPagesForEngine`, `pdfParsePageSpec`, `pdfFilterBlockPages`) with swappable policies (`hybrid`, `auto-free`, or explicit backend).
+- **Dual-deterministic `auto-free` PDF backend** (`orchestrator.ail`, `adapter.py`, `bin/docparse`): runs `poppler` by default and inspects live `popplerPageWords` vs `pdftotextPageWords` (zero extra subprocesses), automatically splicing `pdftotext-paged` on any page where `poppler` drops >5% of words ($0 AI cost). `hybrid` uses the same guard for free word-loss rescue while routing only `textlessPages` to AI OCR.
+- **Caller-specified `--pages` & `--ai-resolution`** (`bin/docparse`, `orchestrator.ail`): `--pages "1-5,12"` / `"3-"` / `"-3"` filters deterministic output and restricts `ai`/`hybrid` OCR calls strictly to the requested pages; `--ai-resolution low|medium|high` forwards per-page Gemini resolution.
+- **Forms PDF furniture guard** (`pdf_furniture.ail`): `pdfFurnitureSafeToStrip` (Z3-verified) prevents stripping legitimate repeated form pages (`forms.pdf` word retention 25.0% → 100.0%; 24-PDF mean retention 92.5% → 95.6%).
+- **Benchmarks & docs**: added `benchmarks/pdf/compare_deterministic_pdf.py` (24-PDF `pdftotext` vs `poppler` head-to-head) and a 5-surface feature availability matrix (CLI, Hosted API, MCP, SDKs, Browser WASM) on `docs/docs.html`.
+
+### Fixed: ODF metadata timestamps, ODP slide titles, speaker notes, and table spans (#178)
+
+- **ODF timestamps** (`odt_parser.ail`, `odp_parser.ail`, `ods_parser.ail`): read `meta:creation-date` → `created` and `dc:date` → `modified` per the ODF 1.2/1.3 specification.
+- **ODP structure** (`odp_parser.ail`): extract `<draw:frame presentation:class="title"|"subtitle">` as H1/H2 headings, `<presentation:notes>` as `SectionBlock(kind="notes")` (skipping `page-number`/`header`/`footer`/`date-time` placeholders), and `table:number-columns-spanned` / `table:number-rows-spanned`.
+- **OfficeDocBench v2.1**: composite score rises from **95.0% → 98.1%** across 87/87 files (ODT 96.0%, ODP 96.9%, ODS 99.9%, Metadata 98.9%, Structure v2 99.0%).
+
 ## [v0.59.0](https://github.com/sunholo-data/ailang-parse/compare/v0.58.0...v0.59.0) — 2026-11-25
 
 **Requires AILANG >= 0.61.0** (was >= 0.58.0): uses `std/ai.callMediaResult` and typed `MediaPart` (`File`) for Gemini file slicing controls (`sunholo-data/ailang#2458`).
