@@ -4,7 +4,7 @@ import std/xml (parseLenient, findAll, findFirst, getText, getAttr, getChildren,
 import std/zip (readEntry)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
-import std/string (length, trim, endsWith)
+import std/string (length, trim, endsWith, stringToInt)
 import std/list (map, flatMap, filter, concat, length as listLength)
 import docparse/services/odf_text (odfText)
 import docparse/types/document (mkHeading, mkList, mkText, Block, TextBlock, HeadingBlock, TableBlock, ImageBlock, ListBlock, SectionBlock, TableCell, DocMetadata, simpleCell, emptyMetadata, mkImage, mkTable, mkNamedSection)
@@ -69,15 +69,23 @@ export pure func odpExtractSlides(root: XmlNode) -> [Block] {
   }
 }
 
--- Parse a single draw:page (slide) into blocks
--- Wraps slide content in a SectionBlock with the slide name
+-- Parse a single draw:page (slide) into blocks.
+-- Wraps slide content in SectionBlock(kind="slide") and any speaker notes
+-- from <presentation:notes> in a following SectionBlock(kind="notes").
 pure func odpParseSlide(page: XmlNode) -> [Block] {
   let slideName = getOrElse(getAttr(page, "draw:name"), "slide");
-  let frames = getChildren(page);
-  let blocks = flatMap(odpProcessFrame, frames);
-  if listLength(blocks) > 0
-  then [mkNamedSection("slide", slideName, blocks)]
-  else []
+  let children = getChildren(page);
+  let blocks = flatMap(odpProcessFrame, children);
+  let noteBlocks = flatMap(odpProcessNotes, children);
+  let slideSection =
+    if listLength(blocks) > 0
+    then [mkNamedSection("slide", slideName, blocks)]
+    else [];
+  let notesSection =
+    if listLength(noteBlocks) > 0
+    then [mkNamedSection("notes", slideName, noteBlocks)]
+    else [];
+  concat(slideSection, notesSection)
 }
 
 -- Process a draw:frame or other slide child element
@@ -85,12 +93,50 @@ pure func odpProcessFrame(node: XmlNode) -> [Block] {
   let tag = getTag(node);
 
   if tag == "draw:frame" then {
+    let presClass = getOrElse(getAttr(node, "presentation:class"), "");
     let children = getChildren(node);
-    flatMap(odpProcessFrameChild, children)
+    if presClass == "title" then flatMap(\c. odpProcessTitleFrameChild(c, 1), children)
+    else if presClass == "subtitle" then flatMap(\c. odpProcessTitleFrameChild(c, 2), children)
+    else flatMap(odpProcessFrameChild, children)
   }
   -- Tables can appear directly in slides
   else if tag == "table:table" then [odpParseTable(node)]
   else []
+}
+
+-- Extract speaker notes from <presentation:notes>, skipping master placeholders
+-- like page-number, header, footer, and date-time.
+pure func odpProcessNotes(node: XmlNode) -> [Block] {
+  if getTag(node) == "presentation:notes" then
+    flatMap(odpProcessNoteFrame, getChildren(node))
+  else []
+}
+
+pure func odpProcessNoteFrame(node: XmlNode) -> [Block] {
+  if getTag(node) == "draw:frame" then {
+    let presClass = getOrElse(getAttr(node, "presentation:class"), "");
+    if presClass == "page-number" || presClass == "header" || presClass == "footer" || presClass == "date-time"
+    then []
+    else flatMap(odpProcessFrameChild, getChildren(node))
+  }
+  else []
+}
+
+-- Process children of a title/subtitle draw:frame so paragraphs become headings
+pure func odpProcessTitleFrameChild(node: XmlNode, level: int) -> [Block] {
+  let tag = getTag(node);
+  if tag == "draw:text-box" then
+    flatMap(\c. odpProcessTitleTextElement(c, level), getChildren(node))
+  else odpProcessFrameChild(node)
+}
+
+pure func odpProcessTitleTextElement(node: XmlNode, level: int) -> [Block] {
+  let tag = getTag(node);
+  if tag == "text:p" then
+    let text = trim(odfText(node)) in
+    if length(text) > 0 then [mkHeading(text, level)]
+    else []
+  else odpProcessTextElement(node)
 }
 
 -- Process children of a draw:frame (text boxes, tables, images)
@@ -187,10 +233,28 @@ pure func odpParseTableRow(tr: XmlNode) -> [TableCell] {
   map(odpParseTableCell, cells)
 }
 
--- Parse a table cell
+-- Parse a table cell, preserving column/row span attributes
 pure func odpParseTableCell(cell: XmlNode) -> TableCell {
   let text = trim(odfText(cell));
-  {text: text, colSpan: 1, rowSpan: 1, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
+  let colSpan = odpParseSpan(getOrElse(getAttr(cell, "table:number-columns-spanned"), "1"));
+  let rowSpan = odpParseSpan(getOrElse(getAttr(cell, "table:number-rows-spanned"), "1"));
+  {text: text, colSpan: colSpan, rowSpan: rowSpan, merged: false, scope: "", align: "", runs: [], fill: "", color: "", formula: ""}
+}
+
+pure func odpParseSpan(s: string) -> int
+  tests [
+    ("1", 1),
+    ("2", 2),
+    ("13", 13),
+    ("0", 1),
+    ("", 1),
+    ("abc", 1)
+  ]
+{
+  match stringToInt(s) {
+    Some(n) => if n > 1 then n else 1,
+    None => 1
+  }
 }
 
 -- Parse a text:list
@@ -207,8 +271,9 @@ pure func odpParseList(list: XmlNode) -> [Block] {
 export pure func odpParseMetadata(root: XmlNode) -> DocMetadata {
   let title = odpFindMeta(root, "dc:title");
   let author = odpFindMeta(root, "dc:creator");
-  let date = odpFindMeta(root, "dc:date");
-  {title: title, author: author, created: date, modified: "", pageCount: 0}
+  let created = odpFindMeta(root, "meta:creation-date");
+  let modified = odpFindMeta(root, "dc:date");
+  {title: title, author: author, created: created, modified: modified, pageCount: 0}
 }
 
 -- Find a metadata element's text
