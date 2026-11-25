@@ -45,7 +45,7 @@
 
 module docparse/services/orchestrator
 
-import std/string (length, toLower, startsWith, endsWith, substring, join, contains)
+import std/string (length, toLower, startsWith, endsWith, substring, join, contains, stringToInt)
 import std/list (concat, map, filter, take, length as listLength)
 import std/fs (readFile, readFileBytes, fileExists, writeFileBytes, removeFile)
 import std/bytes (fromBase64)
@@ -83,12 +83,12 @@ import docparse/services/rtf_parser (parseRtf)
 import docparse/services/tex_parser (parseLatex, parseLatexMetadata)
 import docparse/services/tex_input_resolver (expandInputs, texDirname)
 import docparse/services/tex_archive_extract (isTarGz, extractArxivBundle)
-import docparse/services/pdf_backend_external (parsePdfChecked, parsePdfLadder, parsePdfWithFallback, fetchPdfWords, pdfTextLayerPartialWarning, PdfTextLayer)
+import docparse/services/pdf_backend_external (parsePdfChecked, parsePdfLadder, parsePdfWithFallback, fetchPdfWords, pdfTextLayerPartialWarning, pdfPageRanges, PdfTextLayer)
 import docparse/services/pdf_furniture (pdfFurnitureApply)
 import docparse/services/pdf_annotations (scanAnnotations, annotationsAsBlocks, annotationsAsBlocksAnchored)
 import docparse/services/pdf_ai_pages (parsePdfPagedResult)
 import docparse/services/direct_ai_parser (
-  parsePdfResult, parsePdfMetadata, parseDocumentImage, parseAudio, parseVideo
+  parsePdfResult, parsePdfMetadata, parsePdfSelectedPagesResult, PageBlocks, parseDocumentImage, parseAudio, parseVideo
 )
 import docparse/services/layout_ai (describeImages, enhanceBlocks, dirOf)
 
@@ -874,6 +874,7 @@ func orchPdf(filepath: string, opts: ParseOptions)
         ann.warnings, 1))
     }
   }
+  else if backend == "hybrid" then orchPdfHybrid(filepath, opts)
   else
     -- An explicit non-AI backend choice is respected: no silent escalation,
     -- because the caller asked for exactly this engine (and AI costs money, so
@@ -928,6 +929,115 @@ func orchPdf(filepath: string, opts: ParseOptions)
         else Err(orchParseError("pdf_backend_failed",
           "PDF extraction failed on ${filepath}: ${f.message} You can also retry with --pdf-backend ai (external, paid) as a last resort."))
     }
+}
+
+-- Hybrid PDF backend: deterministic poppler first; AI OCR ONLY for pages
+-- whose text layer is empty/stamp-only (textlessPages). Clean digital PDFs
+-- make 0 AI calls. Full scans (pdf_text_layer_sparse) escalate to full AI OCR.
+func orchPdfHybrid(filepath: string, opts: ParseOptions)
+  -> Result[ParseOutcome, AIError] ! {IO, FS, AI, Env, Net, Process, Clock} =
+  match parsePdfChecked("poppler", filepath, opts.projectRoot) {
+    Ok(ext) => {
+      let textless = ext.textLayer.textlessPages;
+      match textless {
+        [] => {
+          let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+          let blocks = orchPdfFurniture("poppler", ext.blocks, ext.metadata.pageCount);
+          Ok(mkOutcome("pdf", filepath, ext.metadata,
+            concat(blocks, ann.blocks),
+            concat(["Parsed PDF (hybrid/poppler, 0 AI pages): ${show(countBlocks(blocks))} blocks"], ann.notes),
+            ann.warnings, 0))
+        },
+        _ => match parsePdfSelectedPagesResult(filepath, textless) {
+          Err(e) => Err(e),
+          Ok(ocrPages) => {
+            let merged = orchSplicePdfPages(ext.blocks, ocrPages);
+            let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+            let blocks = orchPdfFurniture("poppler", merged, ext.metadata.pageCount);
+            Ok(mkOutcome("pdf", filepath, ext.metadata,
+              concat(blocks, ann.blocks),
+              concat(["Parsed PDF (hybrid): poppler + AI OCR on page(s) ${pdfPageRanges(textless)} (${show(countBlocks(blocks))} blocks)"], ann.notes),
+              ann.warnings, listLength(textless)))
+          }
+        }
+      }
+    },
+    Err(f) =>
+      if f.code == "pdf_text_layer_sparse" then match parsePdfPagedResult(filepath) {
+        Err(e) => Err(e),
+        Ok(rawBlocks) => {
+          let ann = orchPdfAnnotations(filepath, opts.projectRoot);
+          let meta = parsePdfMetadata(filepath);
+          let blocks = orchPdfFurniture("ai", rawBlocks, meta.pageCount);
+          Ok(mkOutcome("pdf", filepath, meta,
+            concat(blocks, ann.blocks),
+            concat(["Parsed PDF (hybrid/ai, full scan): ${show(countBlocks(blocks))} blocks"], ann.notes),
+            ann.warnings, 1))
+        }
+      }
+      else Err(orchParseError("pdf_backend_failed",
+        "PDF backend 'hybrid' failed on ${filepath}: ${f.message}"))
+  }
+
+-- Splice AI-extracted blocks for specific 1-based pages into a paged poppler
+-- block stream (delimited by SectionBlock("page-break", "<N>", [])).
+-- Poppler blocks belonging to a replaced page (e.g. repeated stamps) are
+-- dropped and replaced by the AI blocks for that page; pages poppler emitted
+-- no blocks for are inserted in ascending page order.
+export pure func orchSplicePdfPages(blocks: [Block], ocrPages: [PageBlocks]) -> [Block] =
+  orchSpliceWalk(blocks, ocrPages, false)
+
+pure func orchSpliceWalk(blocks: [Block], pending: [PageBlocks], skipCurrent: bool) -> [Block] =
+  match blocks {
+    [] => orchEmitOcrPages(pending),
+    b :: rest => match orchPageBreakNum(b) {
+      Some(pageNum) => {
+        let before = filter(\op. op.page < pageNum, pending);
+        let at = filter(\op. op.page == pageNum, pending);
+        let after = filter(\op. op.page > pageNum, pending);
+        match at {
+          [] => concat(orchEmitOcrPages(before), b :: orchSpliceWalk(rest, after, false)),
+          _ => concat(orchEmitOcrPages(before),
+                      concat(orchEmitOcrPages(at), orchSpliceWalk(rest, after, true)))
+        }
+      },
+      None =>
+        if skipCurrent then orchSpliceWalk(rest, pending, true)
+        else b :: orchSpliceWalk(rest, pending, false)
+    }
+  }
+
+pure func orchEmitOcrPages(pages: [PageBlocks]) -> [Block] =
+  match pages {
+    [] => [],
+    p :: rest => concat(mkNamedSection("page-break", show(p.page), []) :: p.blocks, orchEmitOcrPages(rest))
+  }
+
+pure func orchPageBreakNum(b: Block) -> Option[int] =
+  match b {
+    SectionBlock(s) =>
+      if s.kind == "page-break" then stringToInt(s.name) else None,
+    _ => None
+  }
+
+pure func orchSpliceTestShape() -> string
+  tests [((), "pb:1|p1|pb:2|ocr2|pb:3|p3|pb:4|ocr4")]
+{
+  let popplerBlocks = [
+    mkNamedSection("page-break", "1", []), mkText("p1", "Normal", 0),
+    mkNamedSection("page-break", "2", []), mkText("STAMP", "Normal", 0),
+    mkNamedSection("page-break", "3", []), mkText("p3", "Normal", 0)
+  ];
+  let ocr = [
+    {page: 2, blocks: [mkText("ocr2", "Normal", 0)]},
+    {page: 4, blocks: [mkText("ocr4", "Normal", 0)]}
+  ];
+  let spliced = orchSplicePdfPages(popplerBlocks, ocr);
+  join("|", map(\b. match b {
+    SectionBlock(s) => if s.kind == "page-break" then "pb:${s.name}" else "sec",
+    TextBlock(t) => t.text,
+    _ => "other"
+  }, spliced))
 }
 
 -- The partly-scanned warning, when there is one.

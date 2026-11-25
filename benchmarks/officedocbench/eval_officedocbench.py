@@ -75,6 +75,7 @@ ADAPTER_NAMES = [
     "ooxml",
     "liteparse",
     "liteparse_ocria",
+    "gemini_native",
 ]
 
 
@@ -131,6 +132,13 @@ def load_adapter(name: str):
             from adapters.reducto_adapter import ReductoAdapter
 
             return ReductoAdapter()
+        except Exception:
+            return None
+    elif name == "gemini_native":
+        try:
+            from adapters.gemini_native_adapter import GeminiNativeAdapter
+
+            return GeminiNativeAdapter()
         except Exception:
             return None
     elif name == "markitdown":

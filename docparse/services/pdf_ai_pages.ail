@@ -101,7 +101,7 @@ func pdfAiPagesAllPresent(dir: string, page: int, total: int) -> bool ! {FS} =
     Ok(data) => if length(data) == 0 then false else pdfAiPagesAllPresent(dir, page + 1, total)
   }
 
-func pdfAiPagesExtract(dir: string, page: int, total: int, acc: [Block]) -> Result[[Block], AIError] ! {FS, AI, Clock} =
+func pdfAiPagesExtract(dir: string, page: int, total: int, acc: [Block]) -> Result[[Block], AIError] ! {FS, AI, Clock, Env} =
   if page > total then Ok(acc)
   else match readFileBytes(pdfAiPagesPath(dir, page)) {
     -- Checked present a moment ago; a page that vanished contributes nothing.
