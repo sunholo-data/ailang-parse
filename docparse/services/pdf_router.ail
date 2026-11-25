@@ -12,8 +12,10 @@ module docparse/services/pdf_router
 --   2. Route  (pdfRoutePages: pure, Z3-verified, swappable policies)
 --   3. Execute & Splice (orchestrator invokes each engine on its assigned pages)
 
-import std/list (map, filter, any, range, length as listLength)
-import std/string (join, intToStr)
+import std/list (map, filter, any, range, concat, nth, length as listLength)
+import std/string (join, intToStr, split, trim, length as strLength, stringToInt, contains)
+import std/option (Some, None)
+import docparse/types/document (Block, SectionBlock, TextBlock, mkText, mkNamedSection)
 
 export type PdfPageAudit = {
   page: int,
@@ -88,13 +90,90 @@ export pure func pdfPagesForEngine(routes: [PdfPageRoute], engine: string) -> [i
 
 -- Build page audits from the text-layer audit (totalPages + textlessPages).
 export pure func pdfAuditsFromTextLayer(totalPages: int, textlessPages: [int]) -> [PdfPageAudit] =
+  pdfAuditsWithWords(totalPages, textlessPages, [], [])
+
+-- Build page audits with live per-page word counts from poppler & pdftotext.
+export pure func pdfAuditsWithWords(totalPages: int, textlessPages: [int],
+                                    popplerWords: [int], pdftotextWords: [int]) -> [PdfPageAudit] =
   if totalPages <= 0 then []
   else map(\p. {
     page: p,
     textless: any(\t. t == p, textlessPages),
-    popplerWords: 0,
-    pdftotextWords: 0
+    popplerWords: pdfWordAt(popplerWords, p - 1),
+    pdftotextWords: pdfWordAt(pdftotextWords, p - 1)
   }, range(1, totalPages + 1))
+
+pure func pdfWordAt(xs: [int], idx: int) -> int =
+  match nth(xs, idx) {
+    Some(n) => if n < 0 then 0 else n,
+    None => 0
+  }
+
+-- Parse a 1-based page range spec like "1-5,12" or "3-" or "-3" into a sorted,
+-- deduplicated list of pages clamped to 1..totalPages. Empty spec returns []
+-- (meaning "all pages").
+export pure func pdfParsePageSpec(spec: string, totalPages: int) -> [int] {
+  let clean = trim(spec);
+  if strLength(clean) == 0 || totalPages <= 0 then []
+  else {
+    let raw = pdfParseTokens(split(clean, ","), totalPages);
+    filter(\p. any(\r. r == p, raw), range(1, totalPages + 1))
+  }
+}
+
+pure func pdfParseTokens(tokens: [string], totalPages: int) -> [int] =
+  match tokens {
+    [] => [],
+    tok :: rest => concat(pdfParseOneToken(trim(tok), totalPages), pdfParseTokens(rest, totalPages))
+  }
+
+pure func pdfParseOneToken(tok: string, totalPages: int) -> [int] =
+  if strLength(tok) == 0 then []
+  else if contains(tok, "-") then {
+    let parts = split(tok, "-");
+    let startStr = match nth(parts, 0) { Some(s) => trim(s), None => "" };
+    let endStr = match nth(parts, 1) { Some(s) => trim(s), None => "" };
+    let startPage = if strLength(startStr) == 0 then 1
+      else match stringToInt(startStr) { Some(n) => n, None => 0 };
+    let endPage = if strLength(endStr) == 0 then totalPages
+      else match stringToInt(endStr) { Some(n) => n, None => 0 };
+    let lo = if startPage < 1 then 1 else startPage;
+    let hi = if endPage > totalPages then totalPages else endPage;
+    if startPage <= 0 || endPage <= 0 || lo > hi then []
+    else range(lo, hi + 1)
+  }
+  else match stringToInt(tok) {
+    Some(n) => if n >= 1 && n <= totalPages then [n] else [],
+    None => []
+  }
+
+-- Filter a paged block stream (delimited by SectionBlock("page-break", "<N>", []))
+-- to keep only blocks belonging to selectedPages. Empty selectedPages keeps all.
+export pure func pdfFilterBlockPages(blocks: [Block], selectedPages: [int]) -> [Block] =
+  match selectedPages {
+    [] => blocks,
+    _ => pdfFilterWalk(blocks, selectedPages, 1, false)
+  }
+
+pure func pdfFilterWalk(blocks: [Block], selected: [int], curPage: int, seenBreak: bool) -> [Block] =
+  match blocks {
+    [] => [],
+    b :: rest => match b {
+      SectionBlock(s) =>
+        if s.kind == "page-break" then
+          let p = match stringToInt(s.name) { Some(n) => n, None => curPage } in
+          if any(\x. x == p, selected)
+          then b :: pdfFilterWalk(rest, selected, p, true)
+          else pdfFilterWalk(rest, selected, p, true)
+        else if seenBreak == false || any(\x. x == curPage, selected)
+          then b :: pdfFilterWalk(rest, selected, curPage, seenBreak)
+          else pdfFilterWalk(rest, selected, curPage, seenBreak),
+      _ =>
+        if seenBreak == false || any(\x. x == curPage, selected)
+        then b :: pdfFilterWalk(rest, selected, curPage, seenBreak)
+        else pdfFilterWalk(rest, selected, curPage, seenBreak)
+    }
+  }
 
 -- Test surface for inline unit tests.
 export pure func pdfRouterTestShape() -> string
@@ -107,4 +186,33 @@ export pure func pdfRouterTestShape() -> string
   ];
   let routes = pdfRoutePages(audits, "hybrid", "medium");
   join("|", map(\r. "${intToStr(r.page)}:${r.engine}", routes))
+}
+
+export pure func pdfPageSpecTestShape(spec: string, total: int) -> string
+  tests [
+    (("1-3,5", 10), "1,2,3,5"),
+    (("5,1-2,2", 10), "1,2,5"),
+    (("8-", 10), "8,9,10"),
+    (("-2", 10), "1,2"),
+    (("", 10), ""),
+    (("99", 5), "")
+  ]
+{
+  join(",", map(intToStr, pdfParsePageSpec(spec, total)))
+}
+
+export pure func pdfFilterPagesTestShape() -> string
+  tests [((), "pb:2|p2")]
+{
+  let blocks = [
+    mkNamedSection("page-break", "1", []), mkText("p1", "Normal", 0),
+    mkNamedSection("page-break", "2", []), mkText("p2", "Normal", 0),
+    mkNamedSection("page-break", "3", []), mkText("p3", "Normal", 0)
+  ];
+  let kept = pdfFilterBlockPages(blocks, [2]);
+  join("|", map(\b. match b {
+    SectionBlock(s) => "pb:${s.name}",
+    TextBlock(t) => t.text,
+    _ => "other"
+  }, kept))
 }

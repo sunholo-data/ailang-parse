@@ -60,7 +60,9 @@ export type PdfTextLayer = {
   known: bool,
   pages: int,
   textlessPages: [int],
-  distinctWords: int
+  distinctWords: int,
+  popplerPageWords: [int],
+  pdftotextPageWords: [int]
 }
 
 -- A PDF read that did not produce a document. `code` is the orchestrator's
@@ -291,7 +293,8 @@ pure func decodeMetadata(j: Json) -> DocMetadata = {
 -- =====================================================================
 
 export pure func pdfTextLayerUnknown() -> PdfTextLayer =
-  {known: false, pages: 0, textlessPages: [], distinctWords: 0}
+  {known: false, pages: 0, textlessPages: [], distinctWords: 0,
+   popplerPageWords: [], pdftotextPageWords: []}
 
 pure func decodeTextLayer(doc: Json) -> PdfTextLayer =
   match getObject(doc, "textLayer") {
@@ -300,7 +303,9 @@ pure func decodeTextLayer(doc: Json) -> PdfTextLayer =
       known: true,
       pages: pdfBackendNonNeg(getOrElse(getInt(t, "pages"), 0)),
       textlessPages: map(pdfBackendJsonInt, getOrElse(getArray(t, "textlessPages"), [])),
-      distinctWords: getOrElse(getInt(t, "distinctWords"), 0)
+      distinctWords: getOrElse(getInt(t, "distinctWords"), 0),
+      popplerPageWords: map(pdfBackendJsonInt, getOrElse(getArray(t, "popplerPageWords"), [])),
+      pdftotextPageWords: map(pdfBackendJsonInt, getOrElse(getArray(t, "pdftotextPageWords"), []))
     }
   }
 
