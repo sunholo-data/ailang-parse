@@ -5,7 +5,7 @@ import std/list (foldl, length as listLength)
 import docparse/services/docx_layout (docxUsableWidth)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, ParsedDocument)
 import docparse/services/xml_helpers (xmlDecl, docxRun, docxParagraph, docxStyledParagraph)
 import docparse/services/docx_template (DocxRefDoc, docxTplNone, docxTplLoad)
@@ -96,11 +96,14 @@ pure func docxPlan(doc: ParsedDocument, ref: DocxRefDoc) -> {documentXml: string
   { documentXml: docxBuildDocument("${bodyResult.xml}${sectPr}"), parts: parts }
 }
 
-export func generateDocx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
-  ensures { length(result) > 0 }
-{
-  generateDocxWithReference(doc, outputPath, "", 0, "")
-}
+-- Two forms of every generator. The Result form is the API: Ok carries the
+-- success message, Err the bare reason ("reference doc ... is not a .docx"),
+-- so a caller branches on the constructor instead of matching a prefix. The
+-- string form is kept for existing callers and is exactly what it always
+-- returned: the Ok message, or "Error generating DOCX: <reason>".
+-- In both forms a failure writes NOTHING.
+export func generateDocxResult(doc: ParsedDocument, outputPath: string) -> Result[string, string] ! {FS} =
+  generateDocxWithReferenceResult(doc, outputPath, "", 0, "")
 
 -- Generate against a Quarto/Pandoc-style reference doc: an existing .docx whose
 -- styles, numbering, theme, embedded fonts, headers, footers and page setup are
@@ -110,17 +113,34 @@ export func generateDocx(doc: ParsedDocument, outputPath: string) -> string ! {F
 -- back to the built-in styling would produce a plausible file missing exactly
 -- the letterhead it was asked for — the one failure mode nobody checks for,
 -- because the file opens.
-export func generateDocxWithReference(doc: ParsedDocument, outputPath: string,
-                                      referencePath: string, section: int,
-                                      tableStyle: string) -> string ! {FS} =
+export func generateDocxWithReferenceResult(doc: ParsedDocument, outputPath: string,
+                                            referencePath: string, section: int,
+                                            tableStyle: string) -> Result[string, string] ! {FS} =
   if length(referencePath) == 0
   then docxWriteArchive(doc, outputPath, docxTplNone())
   else match docxTplLoad(referencePath, section, tableStyle) {
-    Err(e) => "Error generating DOCX: ${e}",
+    Err(e) => Err(e),
     Ok(ref) => docxWriteArchive(doc, outputPath, ref)
   }
 
-func docxWriteArchive(doc: ParsedDocument, outputPath: string, ref: DocxRefDoc) -> string ! {FS} {
+export func generateDocx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
+  ensures { length(result) > 0 }
+{
+  docxResultMessage(generateDocxResult(doc, outputPath))
+}
+
+export func generateDocxWithReference(doc: ParsedDocument, outputPath: string,
+                                      referencePath: string, section: int,
+                                      tableStyle: string) -> string ! {FS} =
+  docxResultMessage(generateDocxWithReferenceResult(doc, outputPath, referencePath, section, tableStyle))
+
+pure func docxResultMessage(r: Result[string, string]) -> string =
+  match r {
+    Ok(msg) => msg,
+    Err(e) => "Error generating DOCX: ${e}"
+  }
+
+func docxWriteArchive(doc: ParsedDocument, outputPath: string, ref: DocxRefDoc) -> Result[string, string] ! {FS} {
   let plan = docxPlan(doc, ref);
   let parts = plan.parts;
   let images = parts.images;
@@ -140,10 +160,10 @@ func docxWriteArchive(doc: ParsedDocument, outputPath: string, ref: DocxRefDoc) 
       Ok(_) => {
         let count = listLength(ref.entries);
         if count == 0
-        then "Generated DOCX: ${outputPath} (reference doc applied, 0 template parts carried (template declares no theme, headers or fonts))"
-        else "Generated DOCX: ${outputPath} (reference doc applied, ${intToStr(count)} template parts carried)"
+        then Ok("Generated DOCX: ${outputPath} (reference doc applied, 0 template parts carried (template declares no theme, headers or fonts))")
+        else Ok("Generated DOCX: ${outputPath} (reference doc applied, ${intToStr(count)} template parts carried)")
       },
-      Err(e) => "Error generating DOCX: ${e}"
+      Err(e) => Err(e)
     }
   } else if hasImages then {
     -- Mixed text+binary archive: everything goes through base64.
@@ -152,14 +172,14 @@ func docxWriteArchive(doc: ParsedDocument, outputPath: string, ref: DocxRefDoc) 
       docxImageEntries(images, docxMediaPrefix(ref))
     );
     match createArchiveWithBytes(outputPath, allEntries) {
-      Ok(_) => "Generated DOCX: ${outputPath} (${intToStr(listLength(images))} images)",
-      Err(e) => "Error generating DOCX: ${e}"
+      Ok(_) => Ok("Generated DOCX: ${outputPath} (${intToStr(listLength(images))} images)"),
+      Err(e) => Err(e)
     }
   } else {
     -- No images: createArchive takes text directly, no base64 overhead.
     match createArchive(outputPath, textParts) {
-      Ok(_) => "Generated DOCX: ${outputPath}",
-      Err(e) => "Error generating DOCX: ${e}"
+      Ok(_) => Ok("Generated DOCX: ${outputPath}"),
+      Err(e) => Err(e)
     }
   }
 }

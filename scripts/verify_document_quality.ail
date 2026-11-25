@@ -1,6 +1,8 @@
 module scripts/verify_document_quality
 
-import docparse/services/docx_generator (generateDocx, generateDocxWithReference, docxPartsFor)
+import docparse/services/docx_generator (generateDocx, generateDocxResult, generateDocxWithReference, generateDocxWithReferenceResult, docxPartsFor)
+import docparse/services/xlsx_generator (generateXlsxResult)
+import docparse/services/pptx_generator (generatePptxWithReferenceResult)
 import docparse/services/docx_layout (docxUsableWidth, testUsableWidth)
 import docparse/services/docx_audit (auditDocx)
 import docparse/services/document_render (renderDocuments, changedPages)
@@ -11,7 +13,7 @@ import std/zip (createArchive, readEntry)
 import std/xml (parse, findAll, findFirst, getAttr, getText, XmlNode)
 import std/result (Result, Ok, Err)
 import std/option (Some, None, getOrElse)
-import std/string (contains, replace, stringToInt)
+import std/string (contains, replace, stringToInt, startsWith)
 import std/list (map, length, foldl, nth_or)
 import std/json (encode, ja)
 import std/env (getArgs)
@@ -58,10 +60,31 @@ func referenceCheck(dir: string, name: string, section: string, expected: int, i
     Err(e) => { println(e); exit(1) },
     Ok(_) => {
       let path = "${dir}/${name}.docx";
-      check("generate ${name}", not contains(generateDocxWithReference(fixture(), path, template, index, ""), "Error"));
+      check("generate ${name}", not failed(generateDocxWithReferenceResult(fixture(), path, template, index, "")));
       tableCheck(path, expected)
     }
   }
+}
+
+-- The Result forms are what a dependent package calls (specstore does). A
+-- failure is an Err carrying the bare reason, never a success-shaped string,
+-- and writes nothing; the string forms still say exactly what they always did.
+func resultApiCheck(dir: string) -> () ! {FS, IO} {
+  let missingRef = "${dir}/no-such-reference.docx";
+  let out = "${dir}/result-api-bad-ref.docx";
+  match generateDocxWithReferenceResult(fixture(), out, missingRef, 0, "") {
+    Ok(_) => check("missing reference is Err", false),
+    Err(e) => {
+      check("missing reference is Err", true);
+      check("Err carries the bare reason", contains(e, missingRef) && not startsWith(e, "Error"))
+    }
+  };
+  check("failed generation writes nothing", not fileExists(out));
+  check("string form keeps its prefix", startsWith(generateDocxWithReference(fixture(), out, missingRef, 0, ""), "Error generating DOCX: "));
+  check("string form success unchanged", startsWith(generateDocx(fixture(), "${dir}/result-api-ok.docx"), "Generated DOCX: "));
+  check("unwritable XLSX is Err", failed(generateXlsxResult(fixture(), "${dir}/no-such-dir/x.xlsx")));
+  check("non-PPTX reference deck is Err", failed(generatePptxWithReferenceResult(fixture(), "${dir}/x.pptx", "", "${dir}/result-api-ok.docx")));
+  check("failed PPTX writes nothing", not fileExists("${dir}/x.pptx"))
 }
 
 pure func failed(result: Result[string, string]) -> bool = match result {Err(_) => true, Ok(_) => false}
@@ -73,8 +96,9 @@ export func main() -> () ! {FS, IO, Env, Process} {
   mkdirAll(dir);
   check("section geometry cases", testUsableWidth());
   let path = "${dir}/base.docx";
-  check("generate default", not contains(generateDocx(fixture(), path), "Error"));
+  check("generate default", match generateDocxResult(fixture(), path) {Ok(m) => startsWith(m, "Generated DOCX: "), Err(_) => false});
   tableCheck(path, 9360);
+  resultApiCheck(dir);
   referenceCheck(dir, "narrow", "<w:sectPr><w:pgSz w:w=\"10000\"/><w:pgMar w:left=\"1000\" w:right=\"1500\" w:gutter=\"500\"/></w:sectPr>", 7000, 0);
   referenceCheck(dir, "landscape", "<w:sectPr><w:pgSz w:w=\"17280\" w:h=\"12240\" w:orient=\"landscape\"/><w:pgMar w:left=\"1440\" w:right=\"1440\"/></w:sectPr>", 14400, 0);
   referenceCheck(dir, "columns", "<w:sectPr><w:cols w:num=\"2\" w:space=\"720\"/></w:sectPr>", 4320, 0);
@@ -128,7 +152,7 @@ export func main() -> () ! {FS, IO, Env, Process} {
     }
     ; let changed = "${dir}/changed.docx";
     let original = fixture();
-    check("generate deliberate change", not contains(generateDocx({original | blocks: parseMarkdown("# A visibly changed document\n\nDifferent content for comparison.\n")}, changed), "Error"));
+    check("generate deliberate change", not failed(generateDocxResult({original | blocks: parseMarkdown("# A visibly changed document\n\nDifferent content for comparison.\n")}, changed)));
     match renderDocuments(path, changed, "${dir}/changed-render", nth_or(args, 1, ""), nth_or(args, 2, ""), "72") {
       Err(e) => {println(e); exit(1)},
       Ok(manifest) => check("real changed page detected", contains(readFile(manifest), "\"change\":\"changed\""))

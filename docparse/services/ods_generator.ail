@@ -3,7 +3,7 @@ module docparse/services/ods_generator
 import std/string (length, intToStr)
 import std/list (foldl, length as listLength, concat)
 import std/zip (createArchive, createArchiveWithBytes)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
@@ -14,10 +14,11 @@ import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFram
 -- ODS Generator — converts Block ADT to a valid .ods file.
 -- ODS = OpenDocument Spreadsheet. Uses table:table elements for sheets.
 
--- Generate an ODS file from ParsedDocument
-export func generateOds(doc: ParsedDocument, outputPath: string) -> string ! {FS}
-  ensures { length(result) > 0 }
-{
+-- Generate an ODS file from ParsedDocument.
+-- The Result form is the API: Ok carries the success message, Err the bare
+-- reason, and a failure writes nothing. generateOds below is the string form
+-- kept for existing callers: the Ok message or "Error generating ODS: <reason>".
+export func generateOdsResult(doc: ParsedDocument, outputPath: string) -> Result[string, string] ! {FS} {
   let sheets = odsCollectSheets(doc.blocks);
   let pics = odsAllPics(sheets, 1);
   let contentXml = odsBuildContent(sheets, pics);
@@ -38,7 +39,16 @@ export func generateOds(doc: ParsedDocument, outputPath: string) -> string ! {FS
     then createArchive(outputPath, entries)
     else createArchiveWithBytes(outputPath, concat(odfImgTextEntries(entries), odfImgByteEntries(odsPicParts(pics))));
   match result {
-    Ok(_) => "Generated ODS: ${outputPath} (${intToStr(listLength(sheets))} sheets)",
+    Ok(_) => Ok("Generated ODS: ${outputPath} (${intToStr(listLength(sheets))} sheets)"),
+    Err(e) => Err(e)
+  }
+}
+
+export func generateOds(doc: ParsedDocument, outputPath: string) -> string ! {FS}
+  ensures { length(result) > 0 }
+{
+  match generateOdsResult(doc, outputPath) {
+    Ok(msg) => msg,
     Err(e) => "Error generating ODS: ${e}"
   }
 }

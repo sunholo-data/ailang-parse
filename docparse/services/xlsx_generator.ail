@@ -4,7 +4,7 @@ import std/string (length, intToStr, contains)
 import std/list (foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import std/map (empty as emptyMap, insert as mapInsert, lookup as mapLookup)
 import std/option (getOrElse)
 import docparse/types/document (Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
@@ -42,10 +42,11 @@ import docparse/services/image_size (imageExtentEmu)
 --   - No merged cells in output (colspan tracking only)
 --   - Pictures are not placed beside the data, only below it
 
--- Generate an XLSX file from ParsedDocument
-export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
-  ensures { length(result) > 0 }
-{
+-- Generate an XLSX file from ParsedDocument.
+-- The Result form is the API: Ok carries the success message, Err the bare
+-- reason, and a failure writes nothing. generateXlsx below is the string form
+-- kept for existing callers: the Ok message or "Error generating XLSX: <reason>".
+export func generateXlsxResult(doc: ParsedDocument, outputPath: string) -> Result[string, string] ! {FS} {
   let sheets = xlsxCollectSheets(doc.blocks);
   let sheetCount = listLength(sheets);
 
@@ -81,7 +82,16 @@ export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {F
     then createArchive(outputPath, allEntries)
     else createArchiveWithBytes(outputPath, xlsxAppendBytes(xlsxTextToBytes(allEntries), mediaEntries));
   match result {
-    Ok(_) => "Generated XLSX: ${outputPath} (${intToStr(sheetCount)} sheets)",
+    Ok(_) => Ok("Generated XLSX: ${outputPath} (${intToStr(sheetCount)} sheets)"),
+    Err(e) => Err(e)
+  }
+}
+
+export func generateXlsx(doc: ParsedDocument, outputPath: string) -> string ! {FS}
+  ensures { length(result) > 0 }
+{
+  match generateXlsxResult(doc, outputPath) {
+    Ok(msg) => msg,
     Err(e) => "Error generating XLSX: ${e}"
   }
 }

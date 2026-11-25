@@ -6,7 +6,7 @@ import std/string (length, intToStr, floatToStr, toLower, split, contains, strin
 import std/list (last, concat, any, map, flatMap as listFlatMap, filter, length as listLength, take, foldl)
 import std/option (Some, None)
 import std/bytes (fromBase64)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import docparse/types/document (Block, TextBlock, TableCell, SectionBlock, ParsedDocument, ExtractionResult, DocMetadata, emptyMetadata, simpleCell, mergedCell, spanCell, cellText, countBlocks, filterHeadings, filterTables, filterImages, filterSections)
 import docparse/services/orchestrator (parseDocument, ParseOptions)
 import docparse/services/format_router (detectFormat, getExtension, officeType, strategyDescription, needsAI)
@@ -35,12 +35,12 @@ import docparse/services/console_report (printSummary, printBlocks)
 import docparse/services/markdown_writer (renderMarkdown)
 import docparse/services/eval (evalMain, evalNormalizeJson, evalJaccard, evalComputeScore)
 import docparse/services/html_generator (generateHtml, generateHtmlWithReference)
-import docparse/services/docx_generator (generateDocxWithReference)
-import docparse/services/pptx_generator (generatePptx, generatePptxWithReference)
-import docparse/services/xlsx_generator (generateXlsx)
-import docparse/services/odt_generator (generateOdt, generateOdtWithReference)
-import docparse/services/odp_generator (generateOdp)
-import docparse/services/ods_generator (generateOds)
+import docparse/services/docx_generator (generateDocxWithReferenceResult)
+import docparse/services/pptx_generator (generatePptxWithReferenceResult)
+import docparse/services/xlsx_generator (generateXlsxResult)
+import docparse/services/odt_generator (generateOdtWithReferenceResult)
+import docparse/services/odp_generator (generateOdpResult)
+import docparse/services/ods_generator (generateOdsResult)
 import docparse/services/qmd_generator (generateQmd)
 import docparse/services/ai_generator (aiGenerateBlocks)
 import docparse/services/xml_helpers (xmlEscape)
@@ -444,20 +444,22 @@ pure func getReferenceSection(args: [string]) -> int =
 
 -- Print a generator's result and STOP if it failed.
 --
--- Every generator reports failure by returning a string beginning "Error" —
--- an unreadable reference deck, a template with no master, an archive that
--- could not be written. Each of those already declines to write a file, but
--- until this existed the process still exited 0, so `ailang run --batch` and CI
--- both scored a failed generation as a success. That is the same defect
+-- Every generator has a Result form: Ok is the success message, Err the
+-- reason — an unreadable reference deck, a template with no master, an archive
+-- that could not be written. Each of those already declines to write a file,
+-- but until this existed the process still exited 0, so `ailang run --batch`
+-- and CI both scored a failed generation as a success. That is the same defect
 -- benchmarks/failure_check.py was written for on the PARSE side ("a file on
 -- disk means a document was parsed"); the generate side had only half of it.
-func emitGenerated(msg: string) -> () ! {IO} =
-  if startsWith(msg, "Error")
-  then {
-    println(msg);
-    exit(1)
+-- It branches on the constructor; it used to match an "Error" prefix.
+func emitGenerated(fmt: string, r: Result[string, string]) -> () ! {IO} =
+  match r {
+    Err(e) => {
+      println("Error generating ${fmt}: ${e}");
+      exit(1)
+    },
+    Ok(msg) => println(msg)
   }
-  else println(msg)
 
 -- Extract --slide-size 16:9|4:3: the aspect ratio of a generated .pptx.
 -- Absent (empty) means 16:9. Anything else is rejected in main, before a file
@@ -542,28 +544,22 @@ func generateDocument(outputPath: string, prompt: string, referenceDoc: string, 
     }
   }
   else if ext == "docx" then {
-    let msg = generateDocxWithReference(doc, outputPath, referenceDoc, referenceSection, tableStyle);
-    emitGenerated(msg)
+    emitGenerated("DOCX", generateDocxWithReferenceResult(doc, outputPath, referenceDoc, referenceSection, tableStyle))
   }
   else if ext == "pptx" then {
-    let msg = generatePptxWithReference(doc, outputPath, slideSize, referenceDoc);
-    emitGenerated(msg)
+    emitGenerated("PPTX", generatePptxWithReferenceResult(doc, outputPath, slideSize, referenceDoc))
   }
   else if ext == "xlsx" then {
-    let msg = generateXlsx(doc, outputPath);
-    emitGenerated(msg)
+    emitGenerated("XLSX", generateXlsxResult(doc, outputPath))
   }
   else if ext == "odt" then {
-    let msg = generateOdtWithReference(doc, outputPath, referenceDoc);
-    emitGenerated(msg)
+    emitGenerated("ODT", generateOdtWithReferenceResult(doc, outputPath, referenceDoc))
   }
   else if ext == "odp" then {
-    let msg = generateOdp(doc, outputPath);
-    emitGenerated(msg)
+    emitGenerated("ODP", generateOdpResult(doc, outputPath))
   }
   else if ext == "ods" then {
-    let msg = generateOds(doc, outputPath);
-    emitGenerated(msg)
+    emitGenerated("ODS", generateOdsResult(doc, outputPath))
   }
   else if ext == "md" then {
     let md = renderMarkdown(doc);
@@ -636,28 +632,22 @@ func writeOutputs(doc: ParsedDocument, result: ExtractionResult, outDir: string,
       }
     }
     else if convertExt == "docx" then {
-      let msg = generateDocxWithReference(cdoc, convertTarget, referenceDoc, referenceSection, tableStyle);
-      emitGenerated(msg)
+      emitGenerated("DOCX", generateDocxWithReferenceResult(cdoc, convertTarget, referenceDoc, referenceSection, tableStyle))
     }
     else if convertExt == "pptx" then {
-      let msg = generatePptxWithReference(cdoc, convertTarget, slideSize, referenceDoc);
-      emitGenerated(msg)
+      emitGenerated("PPTX", generatePptxWithReferenceResult(cdoc, convertTarget, slideSize, referenceDoc))
     }
     else if convertExt == "xlsx" then {
-      let msg = generateXlsx(cdoc, convertTarget);
-      emitGenerated(msg)
+      emitGenerated("XLSX", generateXlsxResult(cdoc, convertTarget))
     }
     else if convertExt == "odt" then {
-      let msg = generateOdtWithReference(cdoc, convertTarget, referenceDoc);
-      emitGenerated(msg)
+      emitGenerated("ODT", generateOdtWithReferenceResult(cdoc, convertTarget, referenceDoc))
     }
     else if convertExt == "odp" then {
-      let msg = generateOdp(cdoc, convertTarget);
-      emitGenerated(msg)
+      emitGenerated("ODP", generateOdpResult(cdoc, convertTarget))
     }
     else if convertExt == "ods" then {
-      let msg = generateOds(cdoc, convertTarget);
-      emitGenerated(msg)
+      emitGenerated("ODS", generateOdsResult(cdoc, convertTarget))
     }
     else if convertExt == "md" then {
       let md = renderMarkdown(cdoc);

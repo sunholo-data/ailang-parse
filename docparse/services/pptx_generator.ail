@@ -4,7 +4,7 @@ import std/string (length, intToStr, find, substring, split, contains)
 import std/list (foldl, length as listLength, reverse, concat, any, map, flatMap)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlAttrEscape, xmlDecl)
 import docparse/services/image_size (imageExtentEmu)
@@ -44,22 +44,39 @@ import docparse/services/pptx_template (PptxRefDoc, pptxTplNone, pptxTplLoad, pp
 -- NOTHING. Falling back to the built-in look would produce a plausible deck
 -- missing exactly the branding it was asked for — the failure nobody catches,
 -- because the file opens.
+export func generatePptxWithReferenceResult(doc: ParsedDocument, outputPath: string,
+                                            slideSize: string, referencePath: string) -> Result[string, string] ! {FS} =
+  if length(referencePath) == 0
+  then generatePptxResult(doc, outputPath, slideSize, pptxTplNone())
+  else match pptxTplLoad(referencePath) {
+    Err(e) => Err(e),
+    Ok(ref) => generatePptxResult(doc, outputPath, slideSize, ref)
+  }
+
+-- The Result forms are the API: Ok carries the success message, Err the bare
+-- reason, and a failure writes nothing. The string forms are kept for existing
+-- callers: the Ok message or "Error generating PPTX: <reason>".
 export func generatePptxWithReference(doc: ParsedDocument, outputPath: string,
                                       slideSize: string, referencePath: string) -> string ! {FS} =
-  if length(referencePath) == 0
-  then generatePptx(doc, outputPath, slideSize, pptxTplNone())
-  else match pptxTplLoad(referencePath) {
-    Err(e) => "Error generating PPTX: ${e}",
-    Ok(ref) => generatePptx(doc, outputPath, slideSize, ref)
+  pptxResultMessage(generatePptxWithReferenceResult(doc, outputPath, slideSize, referencePath))
+
+export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: string, ref: PptxRefDoc) -> string ! {FS}
+  ensures { length(result) > 0 }
+{
+  pptxResultMessage(generatePptxResult(doc, outputPath, slideSize, ref))
+}
+
+pure func pptxResultMessage(r: Result[string, string]) -> string =
+  match r {
+    Ok(msg) => msg,
+    Err(e) => "Error generating PPTX: ${e}"
   }
 
 -- slideSize is "16:9" (default, and what an empty string means) or "4:3".
 -- Validated by the caller so an unknown value fails before anything is written.
 -- ref is pptxTplNone() when no --reference-doc was given; the untemplated path
 -- below is then byte-identical to what it produced before the flag existed.
-export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: string, ref: PptxRefDoc) -> string ! {FS}
-  ensures { length(result) > 0 }
-{
+export func generatePptxResult(doc: ParsedDocument, outputPath: string, slideSize: string, ref: PptxRefDoc) -> Result[string, string] ! {FS} {
   -- Split blocks into slides: each SectionBlock(kind="slide") is a slide,
   -- or if no slides, headings and rules divide them (pptxCollectSlides)
   let slideContents = pptxLayoutSlides(pptxCollectSlides(doc.blocks));
@@ -138,8 +155,8 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
     -- createArchiveWithBytes whether or not the content has images.
     let allBytes = pptxAppendByteEntries(pptxAppendByteEntries(pptxPartsToByteEntries(ourParts), ref.entries), pptxPicEntries(pics));
     match createArchiveWithBytes(outputPath, allBytes) {
-      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s)${orphanNote}${picNote})",
-      Err(e) => "Error generating PPTX: ${e}"
+      Ok(_) => Ok("Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides, reference deck applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.masterCount)} master(s), ${intToStr(ref.layoutCount)} layout(s)${orphanNote}${picNote})"),
+      Err(e) => Err(e)
     }
   } else {
   let allEntries = concat(pptxAppendEntries(baseEntries, slideEntries, slideRelEntries), notesEntries);
@@ -149,14 +166,14 @@ export func generatePptx(doc: ParsedDocument, outputPath: string, slideSize: str
   if listLength(pics) > 0 then {
     let allBytes = pptxAppendByteEntries(pptxPartsToByteEntries(allEntries), pptxPicEntries(pics));
     match createArchiveWithBytes(outputPath, allBytes) {
-      Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote}${picNote})",
-      Err(e) => "Error generating PPTX: ${e}"
+      Ok(_) => Ok("Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote}${picNote})"),
+      Err(e) => Err(e)
     }
   } else {
   let result = createArchive(outputPath, allEntries);
   match result {
-    Ok(_) => "Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote})",
-    Err(e) => "Error generating PPTX: ${e}"
+    Ok(_) => Ok("Generated PPTX: ${outputPath} (${intToStr(slideCount)} slides${orphanNote})"),
+    Err(e) => Err(e)
   }
   }
   }

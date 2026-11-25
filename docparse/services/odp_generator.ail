@@ -4,7 +4,7 @@ import std/string (length, intToStr)
 import std/list (foldl, flatMap, map, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/list (concat)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
@@ -17,10 +17,11 @@ import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFram
 -- ODP Generator — converts Block ADT to a valid .odp file.
 -- ODP = OpenDocument Presentation. Uses draw:page elements for slides.
 
--- Generate an ODP file from ParsedDocument
-export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS}
-  ensures { length(result) > 0 }
-{
+-- Generate an ODP file from ParsedDocument.
+-- The Result form is the API: Ok carries the success message, Err the bare
+-- reason, and a failure writes nothing. generateOdp below is the string form
+-- kept for existing callers: the Ok message or "Error generating ODP: <reason>".
+export func generateOdpResult(doc: ParsedDocument, outputPath: string) -> Result[string, string] ! {FS} {
   let laid = odpLayoutSlides(odpCollectSlides(doc.blocks));
   let slides = map(\l. l.blocks, laid);
   let body = odpSlidesAcc(laid, 1, {xml: "", pics: [], shift: 0, flow: false});
@@ -43,7 +44,16 @@ export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS
     then createArchive(outputPath, entries)
     else createArchiveWithBytes(outputPath, concat(odfImgTextEntries(entries), odfImgByteEntries(pics)));
   match result {
-    Ok(_) => "Generated ODP: ${outputPath} (${intToStr(listLength(slides))} slides)",
+    Ok(_) => Ok("Generated ODP: ${outputPath} (${intToStr(listLength(slides))} slides)"),
+    Err(e) => Err(e)
+  }
+}
+
+export func generateOdp(doc: ParsedDocument, outputPath: string) -> string ! {FS}
+  ensures { length(result) > 0 }
+{
+  match generateOdpResult(doc, outputPath) {
+    Ok(msg) => msg,
     Err(e) => "Error generating ODP: ${e}"
   }
 }
