@@ -486,6 +486,8 @@ RECURSIVE=false
 # look explicit, which disabled the docling escalation on scanned PDFs and
 # pointed users at the paid AI backend.
 PDF_BACKEND="${DOCPARSE_PDF_BACKEND:-}"
+PAGES_SPEC="${DOCPARSE_PAGES:-}"
+AI_RESOLUTION="${DOCPARSE_AI_RESOLUTION:-}"
 EXTRA_FLAGS=()
 DEEP_REQUESTED=false
 THREADED_REQUESTED=false
@@ -673,9 +675,32 @@ while [ $# -gt 0 ]; do
     --pdf-backend)
       PDF_BACKEND="$2"
       case "$PDF_BACKEND" in
-        pdftotext|poppler|ai|hybrid|docling|liteparse) ;;
+        pdftotext|poppler|auto-free|ai|hybrid|docling|liteparse) ;;
         *)
-          echo "Error: --pdf-backend must be one of: pdftotext, poppler, ai, hybrid, docling, liteparse (got: $PDF_BACKEND)" >&2
+          echo "Error: --pdf-backend must be one of: pdftotext, poppler, auto-free, ai, hybrid, docling, liteparse (got: $PDF_BACKEND)" >&2
+          exit 2
+          ;;
+      esac
+      shift 2
+      ;;
+    --pages)
+      if [ $# -lt 2 ]; then
+        echo "Error: --pages requires a page range (e.g. --pages 1-5,12)" >&2
+        exit 2
+      fi
+      PAGES_SPEC="$2"
+      shift 2
+      ;;
+    --ai-resolution)
+      if [ $# -lt 2 ]; then
+        echo "Error: --ai-resolution requires low, medium, or high" >&2
+        exit 2
+      fi
+      AI_RESOLUTION="$2"
+      case "$AI_RESOLUTION" in
+        low|medium|high) ;;
+        *)
+          echo "Error: --ai-resolution must be one of: low, medium, high (got: $AI_RESOLUTION)" >&2
           exit 2
           ;;
       esac
@@ -1019,6 +1044,12 @@ fi
 # escalation — see the PDF_BACKEND comment above.
 if [ -n "$PDF_BACKEND" ]; then
   ENV_PREFIX+=(DOCPARSE_PDF_BACKEND="$PDF_BACKEND")
+fi
+if [ -n "$PAGES_SPEC" ]; then
+  ENV_PREFIX+=(DOCPARSE_PAGES="$PAGES_SPEC")
+fi
+if [ -n "$AI_RESOLUTION" ]; then
+  ENV_PREFIX+=(DOCPARSE_AI_RESOLUTION="$AI_RESOLUTION")
 fi
 if [ -n "$INPUT_ROOT" ]; then
   ENV_PREFIX+=(DOCPARSE_INPUT_ROOT="$INPUT_ROOT")

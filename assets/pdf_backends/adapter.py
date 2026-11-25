@@ -208,6 +208,31 @@ def run_pdftotext(pdf: Path) -> dict:
             "textLayer": _text_layer(_pdftotext_pages(proc.stdout), lambda: _picture_pages(pdf))}
 
 
+def run_pdftotext_paged(pdf: Path) -> dict:
+    """Same as run_pdftotext, but tags each block with its 1-based page number
+    so page-level routers (auto-free, hybrid) can splice individual pages."""
+    proc = subprocess.run(
+        ["pdftotext", "-layout", str(pdf), "-"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"pdftotext exited {proc.returncode}: {proc.stderr.strip()}"
+        )
+    pages = _pdftotext_pages(proc.stdout)
+    blocks: list[dict] = []
+    for pno, ptext in enumerate(pages, 1):
+        for blk in _blocks_from_plaintext(ptext):
+            blk["page"] = pno
+            blocks.append(blk)
+    meta = _empty_meta()
+    meta["pageCount"] = _pdf_page_count(pdf)
+    return {"metadata": meta, "blocks": blocks,
+            "textLayer": _text_layer(pages, lambda: _picture_pages(pdf))}
+
+
 def _rank_levels(sizes: list[float], max_levels: int = 3, step: float = 0.75) -> dict[float, int]:
     """Map heading sizes (font size, or a heading box's height) to levels 1..n.
 
@@ -1523,8 +1548,35 @@ def run_poppler(pdf: Path, slides: bool = False) -> dict:
     meta["pageCount"] = pages or _pdf_page_count(pdf)
     page_text = ["\n".join(" ".join(w["text"] for w in line["words"]) for line in page["lines"])
                  for page in _pp_parse_bbox(bbox.stdout)]
-    return {"metadata": meta, "blocks": blocks,
-            "textLayer": _text_layer(page_text, lambda: _picture_pages(pdf))}
+    tl = _text_layer(page_text, lambda: _picture_pages(pdf))
+    tl["pdftotextPageWords"] = [len(t.split()) for t in page_text]
+    tl["popplerPageWords"] = _poppler_page_word_counts(blocks, meta["pageCount"])
+    return {"metadata": meta, "blocks": blocks, "textLayer": tl}
+
+
+def _poppler_page_word_counts(blocks: list[dict], page_count: int) -> list[int]:
+    """Count extracted words per 1-based page from poppler's block stream."""
+    counts = [0] * max(0, page_count)
+    cur_page = 1
+    for b in blocks:
+        pno = b.get("page")
+        if isinstance(pno, int) and pno >= 1:
+            cur_page = pno
+        if 1 <= cur_page <= len(counts):
+            counts[cur_page - 1] += _block_word_count(b)
+    return counts
+
+
+def _block_word_count(b: dict) -> int:
+    kind = b.get("kind", "")
+    if kind == "table":
+        total = sum(len(str(h).split()) for h in b.get("headers", []))
+        for row in b.get("rows", []):
+            total += sum(len(str(c).split()) for c in row)
+        return total
+    if kind == "list":
+        return sum(len(str(it).split()) for it in b.get("items", []))
+    return len(str(b.get("text", "")).split())
 
 
 # ---------------------------------------------------------------------------
@@ -1652,6 +1704,7 @@ def _picture_pages(pdf: Path) -> set[int] | None:
 
 BACKENDS = {
     "pdftotext": run_pdftotext,
+    "pdftotext-paged": run_pdftotext_paged,
     "poppler": run_poppler,
     "poppler-slides": lambda pdf: run_poppler(pdf, slides=True),
     "docling": run_docling,
