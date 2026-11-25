@@ -551,6 +551,7 @@ _ADAPTER_ID = {
     "Raw OOXML": "ooxml",
     "LiteParse": "liteparse",
     "LiteParse + OCRia-nano-1": "liteparse_ocria",
+    "Gemini Native (gemini-4-neon)": "gemini_native",
 }
 
 

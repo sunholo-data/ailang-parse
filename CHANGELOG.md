@@ -11,6 +11,17 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.59.0](https://github.com/sunholo-data/ailang-parse/compare/v0.58.0...v0.59.0) — 2026-11-25
+
+**Requires AILANG >= 0.61.0** (was >= 0.58.0): uses `std/ai.callMediaResult` and typed `MediaPart` (`File`) for Gemini file slicing controls (`sunholo-data/ailang#2458`).
+
+### Added: Gemini file slicing (`std/ai.callMediaResult`), `pdfBackend="hybrid"`, and OfficeDocBench `gemini_native` adapter (#175)
+
+- **Typed `std/ai.callMediaResult` PDF extraction** (`direct_ai_parser.ail`): migrates `parsePdfOnePageResult` and `aiGetPageCountResult` off the legacy untyped JSON envelope onto `MediaPart` (`File`) with `page_options`, `content_layers: ["page_image"]`, and `DOCPARSE_AI_RESOLUTION` (`low` | `medium` | `high`) support.
+- **Opt-in `pdfBackend="hybrid"`** (`orchestrator.ail`, `bin/docparse`): runs deterministic `poppler` on pages with a text layer and slices only `textlessPages` through Gemini AI OCR, auto-escalating full scans (`pdf_text_layer_sparse`). Clean digital PDFs make 0 AI calls. Default stays 100% deterministic.
+- **Benchmarks**: added `benchmarks/pdf/hybrid_benchmark.py` and the OfficeDocBench `gemini_native` adapter (`gemini_native_adapter.py`, `gemini-4-neon:medium`).
+- **Contract verification**: tightened `csvParseLine` (`csv_parser.ail`) with `requires { length(delimiter) > 0 }` so Z3 verification passes cleanly on AILANG v0.61.1+.
+
 ## [v0.58.0](https://github.com/sunholo-data/ailang-parse/compare/v0.57.1...v0.58.0) — 2026-11-17
 
 **Requires AILANG >= 0.58.0** (was >= 0.50.0): the redaction pipeline's guarantee depends on IFC labels crossing module boundaries, which older toolchains do not enforce.
