@@ -19,7 +19,7 @@ import std/list (map, filter, foldl, reverse, length as listLength, concat as li
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/bytes (fromInts, toString as bytesToString)
-import std/fs (readFile, readFileBytes)
+import std/fs (readFile, readFileBase64)
 import docparse/types/document (Block, TextBlock, SectionBlock, CommentBlock, mkSection)
 import docparse/services/pdf_pages (pdfPackedObjects)
 
@@ -77,7 +77,7 @@ export func scanAnnotations(filepath: string) -> AnnotationScan ! {FS} {
 }
 
 func pdfannPacked(filepath: string) -> Result[string, string] ! {FS} =
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(e) => Err(e),
     Ok(data) => pdfPackedObjects(data)
   }

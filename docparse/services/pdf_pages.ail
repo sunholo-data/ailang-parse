@@ -27,10 +27,10 @@ module docparse/services/pdf_pages
 -- is given is rendered from the original and from its split file, and the two
 -- images must be identical.
 
-import std/bytes (fromBase64, toBase64, toString as bstr, fromString as bfrom, slice, byteAt, length as blen, toInts, concatList)
+import std/bytes (fromBase64, toBase64, toString as bstr, fromString as bfrom, sliceLen, byteAt, length as blen, toInts, concatList)
 import std/deflate (inflateZlib)
 import std/string (length, substring, find, trim, split, stringToInt, intToStr, charAt, contains, join)
-import std/list (map, filter, reverse, length as llen, concat, flatMap, nth_or, any)
+import std/list (map, filter, reverse, length as llen, concat, flatMap, nthOr, any)
 import std/map (fromList, lookup as mapLookup, values as mapValues)
 import std/option (Option, Some, None, getOrElse)
 import std/result (Result, Ok, Err)
@@ -55,7 +55,7 @@ func pdfpgSliceStr(data: bytes, from: int, to: int) -> string {
   let n = blen(data);
   let t = if to > n then n else to;
   let f = if from < 0 then 0 else from;
-  if f >= t then "" else match slice(data, f, t - f) { Some(b) => bstr(b), None => "" }
+  if f >= t then "" else match sliceLen(data, f, t - f) { Some(b) => bstr(b), None => "" }
 }
 
 func pdfpgMatchAt(data: bytes, pat: [int], at: int) -> bool =
@@ -270,7 +270,7 @@ export pure func pdfpgDropKey(d: string, key: string) -> string {
 -- ============================================================
 
 pure func pdfpgBeInt(row: [int], i: int, w: int, acc: int) -> int =
-  if w <= 0 then acc else pdfpgBeInt(row, i + 1, w - 1, acc * 256 + nth_or(row, i, 0))
+  if w <= 0 then acc else pdfpgBeInt(row, i + 1, w - 1, acc * 256 + nthOr(row, i, 0))
 
 pure func pdfpgTake(xs: [int], n: int, acc: [int]) -> [int] =
   if n <= 0 then reverse(acc) else match xs { [] => reverse(acc), x :: r => pdfpgTake(r, n - 1, x :: acc) }
@@ -329,7 +329,7 @@ func pdfpgStreamBytes(data: bytes, off: int, len: int) -> Option[bytes] {
   if s < 0 || len < 0 then None
   else {
     let e = pdfpgEolLen(getOrElse(byteAt(data, s + 6), 0), getOrElse(byteAt(data, s + 7), 0));
-    slice(data, s + 6 + e, len)
+    sliceLen(data, s + 6 + e, len)
   }
 }
 
@@ -400,9 +400,9 @@ func pdfpgReadXref(data: bytes, off: int, acc: PdfpgXref, depth: int) -> PdfpgXr
       Some(raw) => match (if contains(d, "/FlateDecode") then pdfpgInflate(raw) else Some(raw)) {
         None => pdfpgBad(acc, "cross-reference stream would not inflate"),
         Some(pb) => {
-          let w0 = nth_or(w, 0, 0);
-          let w1 = nth_or(w, 1, 0);
-          let w2 = nth_or(w, 2, 0);
+          let w0 = nthOr(w, 0, 0);
+          let w1 = nthOr(w, 1, 0);
+          let w2 = nthOr(w, 2, 0);
           let cols = w0 + w1 + w2;
           let un = if pdfpgDictInt(d, "/Predictor") >= 10 then pdfpgUnpredict(toInts(pb), cols, [], [], true)
                    else { rows: pdfpgRowsPlain(toInts(pb), cols, []), ok: true };
@@ -466,8 +466,8 @@ func pdfpgObjText(doc: PdfpgDoc, num: int) -> string {
   else if e.kind == 2 then match mapLookup(doc.stms, e.a) {
     None => "",
     Some(st) => {
-      let s = nth_or(st.header, 2 * e.b + 1, -1);
-      let nxt = if e.b + 1 < st.n then nth_or(st.header, 2 * e.b + 3, -1) else length(st.body) - st.first;
+      let s = nthOr(st.header, 2 * e.b + 1, -1);
+      let nxt = if e.b + 1 < st.n then nthOr(st.header, 2 * e.b + 3, -1) else length(st.body) - st.first;
       if s < 0 || nxt < s then "" else substring(st.body, st.first + s, st.first + nxt)
     }
   }
@@ -586,7 +586,7 @@ func pdfpgEmitObjs(doc: PdfpgDoc, nums: [int], o: PdfpgOut) -> PdfpgOut =
       let e = pdfpgEntry(doc.x, n);
       if e.kind == 1 then {
         let end = pdfpgObjEnd(doc, e.a);
-        match (if end > e.a then slice(doc.data, e.a, end - e.a) else None) {
+        match (if end > e.a then sliceLen(doc.data, e.a, end - e.a) else None) {
           Some(raw) => pdfpgEmitObjs(doc, rest, pdfpgEmit(o, n, concatList([raw, bfrom("\n")]))),
           None => { parts: o.parts, offs: o.offs, pos: o.pos, ok: false }
         }

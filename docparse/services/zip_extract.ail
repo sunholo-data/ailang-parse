@@ -7,7 +7,7 @@ import std/option (Some, None, getOrElse)
 import std/xml (parseLenient, findAll, findFirst, getAttr)
 import std/result (Ok, Err)
 import std/bytes (fromBase64)
-import std/fs (mkdirAllResult, writeFileBytes, readFileBytes, renameFileResult)
+import std/fs (mkdirAllResult, writeFileBytes, readFileBase64, renameFileResult)
 import std/crypto (sha256Bytes, sha256Hex)
 import docparse/types/document (Block, ImageBlock, SectionBlock, mkImage, mkNamedSection)
 
@@ -36,14 +36,6 @@ export func readDocxContent(path: string) -> string ! {FS} {
   match readEntry(path, "word/document.xml") {
     Ok(content) => content,
     Err(e) => ""
-  }
-}
-
--- Read the styles XML from a DOCX
-export func readDocxStyles(path: string) -> string ! {FS} {
-  match readEntry(path, "word/styles.xml") {
-    Ok(content) => content,
-    Err(_) => ""
   }
 }
 
@@ -675,7 +667,7 @@ pure func mediaExtension(filename: string) -> string {
 -- response shape that promises inline bytes) reads the file back here, per
 -- image, at the moment it serialises.
 export func imageDataUriFromFile(path: string, mime: string) -> Result[string, string] ! {FS} =
-  match readFileBytes(path) {
+  match readFileBase64(path) {
     Ok(b64) => Ok("data:${mime};base64,${b64}"),
     Err(msg) => Err(msg)
   }

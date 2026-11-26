@@ -4,7 +4,7 @@ import std/ai (AIError)
 import std/clock (now)
 import std/crypto (sha256Hex)
 import std/env (getEnvOr)
-import std/fs (readFileBytes, mkdirAllResult, removeFileResult, removeDirResult)
+import std/fs (readFileBase64, mkdirAllResult, removeFileResult, removeDirResult)
 import std/process (exec)
 import std/bytes (toString as bytesToString)
 import std/string (length, find, substring, trim, split, stringToInt, intToStr, endsWith)
@@ -58,7 +58,7 @@ pure func pdfAiPagesCountLines(lines: [string]) -> int
 
 -- The file's pages as cut by pdf_pages, or [] when it is short or refused.
 func pdfAiPagesNative(filepath: string) -> [string] ! {FS} =
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => [],
     Ok(data) => aiPdfLongPages(data)
   }
@@ -96,14 +96,14 @@ func pdfAiPagesCleanup(dir: string, page: int, total: int) -> () ! {FS} =
 -- after that point a failure cannot fall back without paying twice.
 func pdfAiPagesAllPresent(dir: string, page: int, total: int) -> bool ! {FS} =
   if page > total then true
-  else match readFileBytes(pdfAiPagesPath(dir, page)) {
+  else match readFileBase64(pdfAiPagesPath(dir, page)) {
     Err(_) => false,
     Ok(data) => if length(data) == 0 then false else pdfAiPagesAllPresent(dir, page + 1, total)
   }
 
 func pdfAiPagesExtract(dir: string, page: int, total: int, acc: [Block]) -> Result[[Block], AIError] ! {FS, AI, Clock, Env} =
   if page > total then Ok(acc)
-  else match readFileBytes(pdfAiPagesPath(dir, page)) {
+  else match readFileBase64(pdfAiPagesPath(dir, page)) {
     -- Checked present a moment ago; a page that vanished contributes nothing.
     Err(_) => pdfAiPagesExtract(dir, page + 1, total, acc),
     Ok(data) => match parsePdfSinglePageResult(data, pdfAiPagesPath(dir, page)) {

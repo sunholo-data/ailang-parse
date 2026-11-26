@@ -2,7 +2,7 @@ module docparse/services/docx_template
 
 import std/string (length, find, substring, contains, split, stringToInt, endsWith, intToStr)
 import std/option (getOrElse, Option, Some, None)
-import std/list (length as listLength, reverse, nth_or)
+import std/list (length as listLength, reverse, nthOr)
 import std/zip (listEntries, readEntry, readEntryBytes)
 import std/result (Result, Ok, Err)
 
@@ -214,7 +214,7 @@ export pure func docxTplSectPrAt(docXml: string, section: int) -> string
   let all = docxTplCollectSectPrs(docXml);
   let n = listLength(all);
   let idx = if section <= 0 then n - 1 else section - 1;
-  if idx < 0 || idx >= n then "" else nth_or(all, idx, "")
+  if idx < 0 || idx >= n then "" else nthOr(all, idx, "")
 }
 
 -- The no-flag entry point: the body-level <w:sectPr>, i.e. the last in document

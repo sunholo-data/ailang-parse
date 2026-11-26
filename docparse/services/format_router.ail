@@ -4,7 +4,7 @@ import std/string (length, substring, find, split, toLower, startsWith, contains
 import std/list (last)
 import std/option (Some, None)
 import std/result (Ok, Err)
-import std/fs (readFileBytes, fileExists)
+import std/fs (readFileBase64, fileExists)
 import std/zip (listEntries, readEntry)
 
 -- Format detection and routing
@@ -200,7 +200,7 @@ export pure func strategyDescription(format: string) -> string
 -- "xlsx", "odt", "pdf", ...) so callers can compose with detectFormat
 -- and officeType. Returns "unknown" if nothing matches.
 
--- Base64-prefix signatures for non-ZIP formats. readFileBytes returns
+-- Base64-prefix signatures for non-ZIP formats. readFileBase64 returns
 -- the file contents already base64-encoded, so we sniff against the
 -- base64 prefix rather than raw bytes — much simpler and avoids any
 -- string/UTF-8 hazards on binary data.
@@ -283,7 +283,7 @@ func sniffOoxmlSubtype(filepath: string) -> string ! {FS} {
 export func sniffFormat(filepath: string) -> string ! {FS} {
   if not fileExists(filepath) then "unknown"
   else {
-    match readFileBytes(filepath) {
+    match readFileBase64(filepath) {
       Err(_) => "unknown",
       Ok(b64) => {
         let prefix = sniffByBase64Prefix(b64);

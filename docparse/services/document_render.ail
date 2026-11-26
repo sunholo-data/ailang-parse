@@ -1,13 +1,13 @@
 module docparse/services/document_render
 
 import std/process (exec)
-import std/fs (fileExists, isDir, listDir, mkdirAll, readFileBytes, writeFileBytes, writeFile, renameFileResult, removeFileResult)
+import std/fs (fileExists, isDir, listDir, mkdirAll, readFileBase64, writeFileBytes, writeFile, renameFileResult, removeFileResult)
 import std/bytes (fromBase64, toString, length as bytesLength)
 import std/crypto (sha256Bytes)
 import std/result (Result, Ok, Err)
 import std/option (Some, None, getOrElse)
 import std/string (trim, length, endsWith, startsWith, split, join, stringToInt, intToStr)
-import std/list (map, filter, sortBy, length as listLength, nth_or, foldl)
+import std/list (map, filter, sortBy, length as listLength, nthOr, foldl)
 import std/json (Json, jo, ja, js, jint, kv, encode)
 import std/env (getArgs)
 import std/io (exit, println)
@@ -24,7 +24,7 @@ func runCommand(command: string, args: [string]) -> Result[string, string] ! {Pr
   }
 
 func fileHash(path: string) -> Result[string, string] ! {FS} =
-  match readFileBytes(path) {
+  match readFileBase64(path) {
     Err(e) => Err(e),
     Ok(data) => match fromBase64(data) {
       None => Err("Cannot decode file bytes: ${path}"),
@@ -33,7 +33,7 @@ func fileHash(path: string) -> Result[string, string] ! {FS} =
   }
 
 func copyFile(source: string, destination: string) -> Result[(), string] ! {FS} =
-  match readFileBytes(source) {
+  match readFileBase64(source) {
     Err(e) => Err(e),
     Ok(data) => match fromBase64(data) {
       None => Err("Cannot decode file bytes: ${source}"),
@@ -43,7 +43,7 @@ func copyFile(source: string, destination: string) -> Result[(), string] ! {FS} 
 
 pure func suffix(path: string) -> string = {
   let parts = split(path, ".");
-  nth_or(parts, listLength(parts) - 1, "")
+  nthOr(parts, listLength(parts) - 1, "")
 }
 
 -- The private profile path can contain spaces even though commands use argv.
@@ -55,8 +55,8 @@ pure func fileUri(path: string) -> string = {
 }
 
 pure func pageNumber(name: string) -> int = {
-  let stem = nth_or(split(name, "."), 0, "");
-  getOrElse(stringToInt(nth_or(split(stem, "-"), 1, "0")), 0)
+  let stem = nthOr(split(name, "."), 0, "");
+  getOrElse(stringToInt(nthOr(split(stem, "-"), 1, "0")), 0)
 }
 
 @allow_empty_ok("The recursive suffix is empty after all pages have been normalized")

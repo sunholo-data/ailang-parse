@@ -3,7 +3,7 @@ module docparse/services/direct_ai_parser
 import std/ai (call, callJson, callJsonSimple, callJsonSimpleResult, callResult, callMediaResult, MediaPart, File, MediaCallResult, AIError)
 import std/clock (sleep)
 import std/env (getEnvOr)
-import std/fs (readFileBytes, readFileBase64)
+import std/fs (readFileBase64)
 import std/string (length, substring, trim, find, startsWith, endsWith, intToStr, stringToInt)
 import std/json (decode, encode, jo, kv, js, jnum, ja, getString, getInt, getBool, getArray, asString, asArray)
 import std/option (Some, None, getOrElse)
@@ -37,7 +37,7 @@ pure func pdfMimeType() -> string = "application/pdf"
 -- and misses these entirely. Annotation extraction is fail-soft: if it errors
 -- or hits a compressed-object PDF, the AI output still ships.
 export func parsePdf(filepath: string) -> [Block] ! {Clock, FS, AI, Net, Env} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
@@ -85,7 +85,7 @@ export func parsePdf(filepath: string) -> [Block] ! {Clock, FS, AI, Net, Env} {
 -- and left for that review.
 @allow_empty_ok("read failure and zero-length input both yield no blocks, matching the non-Result parsePdf twin. Flagged for a semantics review against the hosted API before changing.")
 export func parsePdfResult(filepath: string) -> Result[[Block], AIError] ! {FS, AI, Net, Env, Clock} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => Ok([]),
     Ok(base64Data) =>
       if length(base64Data) == 0 then Ok([])
@@ -477,7 +477,7 @@ export func parsePdfSinglePageResult(base64Data: string, filepath: string) -> Re
 -- Same extraction pipeline as PDF but for image inputs (JPG, PNG, etc.)
 -- Use this for document page images (e.g., scanned pages, screenshots of documents)
 export func parseDocumentImage(filepath: string, mime: string) -> [Block] ! {FS, AI} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
@@ -500,7 +500,7 @@ export func parseDocumentImage(filepath: string, mime: string) -> [Block] ! {FS,
 -- Parse an image file using AI vision (describes the image, does NOT extract document content)
 -- Use parseDocumentImage instead if the image is a document page
 export func parseImage(filepath: string, mime: string) -> [Block] ! {FS, AI} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
@@ -522,7 +522,7 @@ export func parseImage(filepath: string, mime: string) -> [Block] ! {FS, AI} {
 
 -- Parse an audio file using AI (transcription + understanding)
 export func parseAudio(filepath: string, mime: string) -> [Block] ! {FS, AI} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
@@ -545,7 +545,7 @@ export func parseAudio(filepath: string, mime: string) -> [Block] ! {FS, AI} {
 
 -- Parse a video file using AI (visual + audio understanding)
 export func parseVideo(filepath: string, mime: string) -> [Block] ! {FS, AI} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => [],
     Ok(base64Data) =>
       if length(base64Data) == 0 then []
@@ -568,7 +568,7 @@ export func parseVideo(filepath: string, mime: string) -> [Block] ! {FS, AI} {
 
 -- Extract metadata from a PDF using AI
 export func parsePdfMetadata(filepath: string) -> DocMetadata ! {FS, AI} {
-  match readFileBytes(filepath) {
+  match readFileBase64(filepath) {
     Err(_) => emptyMetadata(),
     Ok(base64Data) =>
       if length(base64Data) == 0 then emptyMetadata()
