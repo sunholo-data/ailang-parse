@@ -74,6 +74,42 @@ the only signal. Image attachments are preserved as bytes but never parsed —
 `--deep` leaves their data blocks untouched — and `--no-attachment-data`
 omits the base64 entirely while keeping `attachment-meta`.
 
+## Using it from another AILANG package
+
+Add the dependency, then import through `pkg/sunholo/ailang_parse/...`. The
+bare names that `[exports]` lists (`docparse/services/...`, this package's
+`module_prefix`) also resolve, but the `pkg/` form names exactly one package.
+The bare form is resolved by prefix: if two of your dependencies ever declare
+the same `module_prefix`, the loader tries each, and the bare import no longer
+says which package you meant. Use `pkg/`.
+
+```ailang
+import std/io (println)
+import std/result (Ok, Err)
+import pkg/sunholo/ailang_parse/services/markdown_parser (parseMarkdown, parseMarkdownMeta)
+import pkg/sunholo/ailang_parse/services/docx_generator (generateDocxWithReferenceResult)
+
+func letter(md: string, out: string, letterhead: string) -> () ! {IO, FS} {
+  let doc = {format: "markdown", filename: "letter.md",
+             metadata: parseMarkdownMeta(md), blocks: parseMarkdown(md)};
+  match generateDocxWithReferenceResult(doc, out, letterhead, 0, "") {
+    Ok(msg) => println(msg),       -- "Generated DOCX: out.docx (reference doc applied, ...)"
+    Err(why) => println(why)       -- the bare reason; nothing was written
+  }
+}
+```
+
+Every file-writing generator has a `Result[string, string]` form:
+`generateDocxResult`, `generateDocxWithReferenceResult`, `generateXlsxResult`,
+`generatePptxResult`, `generatePptxWithReferenceResult`, `generateOdtResult`,
+`generateOdtWithReferenceResult`, `generateOdpResult`, `generateOdsResult`.
+`Err` carries the reason without a prefix, and a failure writes no file. The
+older string forms (`generateDocx`, ...) are unchanged: they return the same
+success message, or `"Error generating DOCX: <reason>"` on failure, which a
+caller would have to string-match. Prefer the `Result` forms.
+
+The markdown parser and these generators need only `FS`.
+
 ## SDKs
 
 ```bash

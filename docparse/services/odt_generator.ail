@@ -5,7 +5,7 @@ import std/list (foldl, length as listLength)
 import std/zip (createArchive, createArchiveWithBytes)
 import std/bytes (fromString, toBase64, fromBase64, toString)
 import std/option (Some, None)
-import std/result (Ok, Err)
+import std/result (Result, Ok, Err)
 import docparse/types/document (InlineRun, Block, TextBlock, HeadingBlock, TableBlock, ListBlock, ImageBlock, AudioBlock, VideoBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, ParsedDocument, countBlocks)
 import docparse/services/xml_helpers (xmlEscape, xmlDecl)
 import docparse/services/odf_text (odfEncodeText)
@@ -39,23 +39,39 @@ import docparse/services/odf_image (OdfImgPart, odfImgPart, odfImgCm, odfImgFram
 -- An unreadable or non-ODF reference is an error and writes NOTHING. Falling
 -- back to the built-in styling would produce a plausible file missing exactly
 -- the house style it was asked for.
-export func generateOdtWithReference(doc: ParsedDocument, outputPath: string,
-                                     referencePath: string) -> string ! {FS} =
+export func generateOdtWithReferenceResult(doc: ParsedDocument, outputPath: string,
+                                           referencePath: string) -> Result[string, string] ! {FS} =
   if length(referencePath) == 0
   then odtWriteArchive(doc, outputPath, odfTplNone())
   else match odfTplLoad(referencePath) {
-    Err(e) => "Error generating ODT: ${e}",
+    Err(e) => Err(e),
     Ok(ref) => odtWriteArchive(doc, outputPath, ref)
   }
+
+-- The Result form is the API: Ok carries the success message, Err the bare
+-- reason, and a failure writes nothing. The string forms are kept for existing
+-- callers: the Ok message or "Error generating ODT: <reason>".
+export func generateOdtResult(doc: ParsedDocument, outputPath: string) -> Result[string, string] ! {FS} =
+  odtWriteArchive(doc, outputPath, odfTplNone())
+
+export func generateOdtWithReference(doc: ParsedDocument, outputPath: string,
+                                     referencePath: string) -> string ! {FS} =
+  odtResultMessage(generateOdtWithReferenceResult(doc, outputPath, referencePath))
 
 -- Generate an ODT file from ParsedDocument
 export func generateOdt(doc: ParsedDocument, outputPath: string) -> string ! {FS}
   ensures { length(result) > 0 }
 {
-  odtWriteArchive(doc, outputPath, odfTplNone())
+  odtResultMessage(generateOdtResult(doc, outputPath))
 }
 
-func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) -> string ! {FS} {
+pure func odtResultMessage(r: Result[string, string]) -> string =
+  match r {
+    Ok(msg) => msg,
+    Err(e) => "Error generating ODT: ${e}"
+  }
+
+func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) -> Result[string, string] ! {FS} {
   let body = odtBodyAcc(doc.blocks, ref, {xml: "", pics: [], next: 1, taken: odtRefNames(ref.entries)});
   let pics = body.pics;
   let contentXml = odtBuildContent(doc.blocks, body);
@@ -81,9 +97,9 @@ func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) ->
     match createArchiveWithBytes(outputPath, allBytes) {
       Ok(_) =>
         if ref.resolvedCount == 0
-        then "Generated ODT: ${outputPath} (reference applied: ${intToStr(listLength(ref.entries))} parts carried; the template defines no heading styles, so headings use the built-in ones)"
-        else "Generated ODT: ${outputPath} (reference applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.resolvedCount)} of 6 heading levels from the template)",
-      Err(e) => "Error generating ODT: ${e}"
+        then Ok("Generated ODT: ${outputPath} (reference applied: ${intToStr(listLength(ref.entries))} parts carried; the template defines no heading styles, so headings use the built-in ones)")
+        else Ok("Generated ODT: ${outputPath} (reference applied: ${intToStr(listLength(ref.entries))} parts carried, ${intToStr(ref.resolvedCount)} of 6 heading levels from the template)"),
+      Err(e) => Err(e)
     }
   } else {
     let entries = [
@@ -95,14 +111,14 @@ func odtWriteArchive(doc: ParsedDocument, outputPath: string, ref: OdfRefDoc) ->
     ];
     if listLength(pics) == 0 then {
       match createArchive(outputPath, entries) {
-        Ok(_) => "Generated ODT: ${outputPath}",
-        Err(e) => "Error generating ODT: ${e}"
+        Ok(_) => Ok("Generated ODT: ${outputPath}"),
+        Err(e) => Err(e)
       }
     } else {
       match createArchiveWithBytes(outputPath,
           odtAppendByteEntries(odtPartsToByteEntries(entries), odfImgByteEntries(pics))) {
-        Ok(_) => "Generated ODT: ${outputPath}",
-        Err(e) => "Error generating ODT: ${e}"
+        Ok(_) => Ok("Generated ODT: ${outputPath}"),
+        Err(e) => Err(e)
       }
     }
   }

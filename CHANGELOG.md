@@ -11,6 +11,12 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+### Added: `Result` forms of every file-writing generator
+
+- **`generate<Fmt>Result`** (`docx_generator.ail`, `xlsx_generator.ail`, `pptx_generator.ail`, `odt_generator.ail`, `odp_generator.ail`, `ods_generator.ail`): each generator returns `Result[string, string]` — `Ok` the success message, `Err` the bare reason (no `"Error generating …:"` prefix) — so a dependent package branches on the constructor instead of string-matching. Requested by specstore, which builds client-letterhead DOCX through `generateDocxWithReference`. A failure still writes no file.
+- The string forms are thin wrappers and return exactly what they did before; CLI output and exit codes are byte-identical. `main.ail`'s `emitGenerated` now matches `Err` rather than `startsWith(msg, "Error")`.
+- `AGENT.md` documents how a dependent imports the package: `pkg/sunholo/ailang_parse/services/...` names exactly one package. The bare `docparse/...` names in `[exports]` also resolve, but are matched by prefix and become ambiguous if two dependencies share a `module_prefix`. `scripts/verify_document_quality.ail` (CI) checks the `Result` API: a missing reference is `Err` with a bare reason and writes nothing, and the string forms keep their prefix.
+
 ## [v0.60.0](https://github.com/sunholo-data/ailang-parse/compare/v0.59.0...v0.60.0) — 2026-11-25
 
 ### Added: Composable PDF page router, `auto-free` dual-deterministic guard, `--pages`, and `--ai-resolution` (#177, #179)
