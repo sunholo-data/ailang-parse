@@ -48,7 +48,7 @@ module docparse/services/orchestrator
 import std/string (length, toLower, startsWith, endsWith, substring, join, contains, stringToInt)
 import std/list (concat, map, filter, take, any, length as listLength)
 import std/env (getEnvOr)
-import std/fs (readFile, readFileBytes, fileExists, writeFileBytes, removeFile)
+import std/fs (readFile, readFileBase64, fileExists, writeFileBytes, removeFile)
 import std/bytes (fromBase64)
 import std/option (Some, None)
 import std/io (println)
@@ -496,7 +496,7 @@ func orchResolveMdImage(block: Block, baseDir: string) -> Block ! {FS} =
       else {
         let path = if startsWith(i.data, "/") then i.data else "${baseDir}/${i.data}";
         if not fileExists(path) then block
-        else match readFileBytes(path) {
+        else match readFileBase64(path) {
           Ok(b64) => mkImageFull(b64, i.description, orchImageMime(getExtension(i.data)), i.width, i.height, i.srcset, i.title, i.loading),
           Err(_) => block
         }

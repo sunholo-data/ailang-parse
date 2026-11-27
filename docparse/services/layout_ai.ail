@@ -6,8 +6,8 @@ import std/json (decode, encode, jo, kv, js, getString, getArray, getInt, asStri
 import std/math (floatToInt)
 import std/option (Some, None, flatMap as optFlatMap, getOrElse)
 import std/result (Ok, Err)
-import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, last_or)
-import std/fs (readFileBytes)
+import std/list (map, foldl, length as listLength, flatMap, mapE, nth, concat, take, lastOr)
+import std/fs (readFileBase64)
 import docparse/types/document (mkText, Block, TextBlock, TableBlock, ImageBlock, AudioBlock, VideoBlock, HeadingBlock, ListBlock, SectionBlock, ChangeBlock, LinkBlock, CommentBlock, commentText, TableCell, blockText, isImage, isTable, cellText, simpleCell, mkImage, mkTable, mkNamedSection, ImageSource, InlineBase64, LocalFile, RemoteUrl, NotAnImage, classifyImageSource)
 
 -- AI-powered layout understanding
@@ -63,7 +63,7 @@ func layoutDescribeOne(baseDir: string, b: Block) -> {block: Block, warnings: [s
         },
         LocalFile(path) => {
           let full = layoutJoinPath(baseDir, path);
-          match readFileBytes(full) {
+          match readFileBase64(full) {
             Ok(b64) => {
               let r = layoutDescribeBytes(b64, layoutMimeFromPath(path), "'${path}'");
               { block: ImageBlock({img | description: layoutPickDesc(r.desc, img.description)}), warnings: r.warnings, aiCalls: r.calls }
@@ -126,7 +126,7 @@ pure func layoutDataUriMime(data: string) -> string {
 
 pure func layoutMimeFromPath(path: string) -> string {
   let parts = split(path, ".");
-  let ext = toLower(last_or(parts, ""));
+  let ext = toLower(lastOr(parts, ""));
   if ext == "png" then "image/png"
   else if ext == "jpg" || ext == "jpeg" then "image/jpeg"
   else if ext == "gif" then "image/gif"

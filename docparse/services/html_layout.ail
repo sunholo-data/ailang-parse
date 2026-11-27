@@ -4,7 +4,7 @@ import std/xml (findAll, getAttr, getChildren, getTag, getText, nodeKind, NodeKi
 import std/option (Some, None, getOrElse)
 import std/string (stringToInt, replace, length, trim, find, split, join, words, startsWith, endsWith, stringToFloat, substring, charAt, charCode, floatToStr, toLower)
 import std/list (map, flatMap, filter, foldl, zip, any, range, nth, drop, concat, contains, length as listLength)
-import std/math (abs_Float, intToFloat)
+import std/math (absFloat, intToFloat)
 import docparse/types/document (Block, TextBlock, HeadingBlock, SectionBlock, TableBlock, TableCell, mergedCell, mkText, mkHeading, mkList, mkNamedSection, mkTableFull)
 
 -- Page-layout HTML: documents laid out as positioned lines, not paragraphs.
@@ -229,7 +229,7 @@ pure func htmlLayoutIsBackLink(line: XmlNode) -> bool {
 -- ("(2)", "(a)") after a line that finished a sentence starts the next note.
 pure func htmlLayoutContinues(prev: HtmlLayoutLine, next: HtmlLayoutLine) -> bool {
   let gap = next.top - prev.top;
-  abs_Float(next.fs - prev.fs) <= 0.3 && next.bold == prev.bold
+  absFloat(next.fs - prev.fs) <= 0.3 && next.bold == prev.bold
     && gap >= 0.0 && gap <= 1.55 * prev.fs
     && (htmlLayoutOpensNote(next.text) && htmlLayoutEndsSentence(prev.text)) == false
 }

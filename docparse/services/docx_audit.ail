@@ -4,7 +4,7 @@ import std/xml (XmlNode, parse, findAll, findFirst, getAttr, getText, serialize,
 import std/zip (listEntries, readEntry)
 import std/result (Result, Ok, Err)
 import std/option (Some, None, getOrElse)
-import std/list (map, foldl, filter, flatMap, member, length as listLength)
+import std/list (map, foldl, filter, flatMap, contains as listContains, length as listLength)
 import std/string (startsWith, endsWith, contains, trim, stringToInt, substring, length)
 import std/json (Json, jo, ja, js, jint, jb, kv, encode)
 import std/env (getArgs)
@@ -132,10 +132,10 @@ pure func commentIssues(stories: [Story], comments: [Story]) -> [Finding] = {
   let refs = storyIds(stories, "w:commentReference");
   let starts = storyIds(stories, "w:commentRangeStart");
   let ends = storyIds(stories, "w:commentRangeEnd");
-  map(\id. finding("comment_body_missing", "word/comments.xml", "Reference ${id} has no comment body."), filter(\id. not member(id, ids), refs)) ++
-  map(\id. finding("comment_anchor_missing", "word/comments.xml", "Comment ${id} has no reference."), filter(\id. not member(id, refs), ids)) ++
-  map(\id. finding("comment_range_unpaired", "word/document.xml", "Range ${id} has no matching end or reference."), filter(\id. not member(id, ends) || not member(id, refs), starts)) ++
-  map(\id. finding("comment_range_unpaired", "word/document.xml", "Range ${id} has no matching start."), filter(\id. not member(id, starts), ends))
+  map(\id. finding("comment_body_missing", "word/comments.xml", "Reference ${id} has no comment body."), filter(\id. not listContains(ids, id), refs)) ++
+  map(\id. finding("comment_anchor_missing", "word/comments.xml", "Comment ${id} has no reference."), filter(\id. not listContains(refs, id), ids)) ++
+  map(\id. finding("comment_range_unpaired", "word/document.xml", "Range ${id} has no matching end or reference."), filter(\id. not listContains(ends, id) || not listContains(refs, id), starts)) ++
+  map(\id. finding("comment_range_unpaired", "word/document.xml", "Range ${id} has no matching start."), filter(\id. not listContains(starts, id), ends))
 }
 
 -- Read-only audit: warnings are evidence for review, not certification or fixes.
@@ -143,7 +143,7 @@ export func auditDocx(path: string) -> Result[{report: Json, count: int}, string
   match listEntries(path) {
     Err(e) => Err(e),
     Ok(names) =>
-      if not member("word/document.xml", names) then Err("Not a DOCX package: word/document.xml is missing")
+      if not listContains(names, "word/document.xml") then Err("Not a DOCX package: word/document.xml is missing")
       else match readStories(path, filter(storyName, names)) {
         Err(e) => Err(e),
         Ok(stories) => match readStories(path, filter(\n. n == "word/comments.xml", names)) {
@@ -172,7 +172,7 @@ export func main() -> () ! {IO, FS, Env} {
   match args {
     path :: rest => match auditDocx(path) {
       Err(e) => { println(encode(jo([kv("error", js(e))]))); exit(2) },
-      Ok(audit) => { println(encode(audit.report)); if member("--strict", rest) && audit.count > 0 then exit(1) else () }
+      Ok(audit) => { println(encode(audit.report)); if listContains(rest, "--strict") && audit.count > 0 then exit(1) else () }
     },
     _ => { println("Usage: docparse-audit FILE.docx [--strict]"); exit(2) }
   }

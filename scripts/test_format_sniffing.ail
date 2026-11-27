@@ -1,7 +1,7 @@
 module scripts/test_format_sniffing
 
 import std/io (println)
-import std/fs (readFileBytes, writeFileBytes)
+import std/fs (readFileBase64, writeFileBytes)
 import std/bytes (fromBase64)
 import std/option (Some, None)
 import std/result (Ok, Err)
@@ -45,7 +45,7 @@ func runAll(cases: [(string, string, string, string)]) -> (int, int) ! {FS, IO} 
 -- Small filesystem helper: copy one file to another path. Done at the
 -- byte level so binary contents are preserved exactly.
 func copyFile(src: string, dst: string) -> () ! {FS} {
-  match readFileBytes(src) {
+  match readFileBase64(src) {
     Ok(b64) => match fromBase64(b64) {
       Some(bs) => writeFileBytes(dst, bs),
       None => ()

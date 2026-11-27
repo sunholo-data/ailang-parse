@@ -9,10 +9,10 @@ module docparse/services/pdf_pages_tool
 
 import std/io (println, exit)
 import std/env (getArgs)
-import std/fs (readFileBytes, writeFileBytes)
+import std/fs (readFileBase64, writeFileBytes)
 import std/bytes (fromBase64)
 import std/string (intToStr)
-import std/list (nth_or, length as llen)
+import std/list (nthOr, length as llen)
 import std/option (Some, None)
 import std/result (Ok, Err)
 import docparse/services/pdf_pages (pdfPagesSplit)
@@ -32,8 +32,8 @@ func pdfptWrite(pages: [string], i: int, prefix: string) -> bool ! {FS} {
 
 export func main() -> () ! {IO, FS, Env} {
   let args = getArgs();
-  let prefix = nth_or(args, 1, "");
-  match readFileBytes(nth_or(args, 0, "")) {
+  let prefix = nthOr(args, 1, "");
+  match readFileBase64(nthOr(args, 0, "")) {
     Err(e) => { println("error: ${e}"); exit(1) },
     Ok(b64) => match pdfPagesSplit(b64) {
       Err(e) => { println("error: ${e}"); exit(1) },

@@ -1,6 +1,6 @@
 module source/build
 
-import std/fs (readFile, readFileBytes, mkdirAll)
+import std/fs (readFile, readFileBase64, mkdirAll)
 import std/zip (createArchiveWithBytes)
 import std/bytes (fromString, toBase64)
 import std/result (Ok, Err)
@@ -16,7 +16,7 @@ func part(file: string, name: string, b: Brand) -> {name: string, data: string} 
 }
 
 func build(b: Brand) -> () ! {FS, IO} {
-  let logo = match readFileBytes("assets/${b.logo}-logo.png") {Ok(s) => s, Err(e) => {println(e); exit(1); ""}};
+  let logo = match readFileBase64("assets/${b.logo}-logo.png") {Ok(s) => s, Err(e) => {println(e); exit(1); ""}};
   let parts = [
     part("content-types.xml", "[Content_Types].xml", b),
     part("root.rels", "_rels/.rels", b),

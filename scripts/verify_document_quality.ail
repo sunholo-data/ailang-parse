@@ -14,7 +14,7 @@ import std/xml (parse, findAll, findFirst, getAttr, getText, XmlNode)
 import std/result (Result, Ok, Err)
 import std/option (Some, None, getOrElse)
 import std/string (contains, replace, stringToInt, startsWith)
-import std/list (map, length, foldl, nth_or)
+import std/list (map, length, foldl, nthOr)
 import std/json (encode, ja)
 import std/env (getArgs)
 import std/io (exit, println)
@@ -39,10 +39,10 @@ func tableCheck(path: string, expected: int) -> () ! {FS, IO} {
       Ok(root) => {
         let widths = map(\n. attrInt(n, "w:w"), findAll(root, "w:gridCol"));
         check("grid sums to section width", foldl(\a b. a + b, 0, widths) == expected);
-        check("description gets more room than ID", nth_or(widths, 1, 0) > nth_or(widths, 0, 0));
+        check("description gets more room than ID", nthOr(widths, 1, 0) > nthOr(widths, 0, 0));
         check("all grid columns positive", length(widths) == 3 && foldl(\a b. a && b > 0, true, widths));
         let cells = findAll(root, "w:tcW");
-        check("spanning cell uses full grid", attrInt(nth_or(cells, length(cells) - 1, root), "w:w") == expected);
+        check("spanning cell uses full grid", attrInt(nthOr(cells, length(cells) - 1, root), "w:w") == expected);
         check("only header row repeats", length(findAll(root, "w:tblHeader")) == 1);
         check("merged text retained", contains(getText(root), "Summary"))
       }
@@ -91,7 +91,7 @@ pure func failed(result: Result[string, string]) -> bool = match result {Err(_) 
 
 export func main() -> () ! {FS, IO, Env, Process} {
   let args = getArgs();
-  let dir = nth_or(args, 0, "");
+  let dir = nthOr(args, 0, "");
   check("fresh test directory supplied", dir != "" && not fileExists(dir));
   mkdirAll(dir);
   check("section geometry cases", testUsableWidth());
@@ -142,7 +142,7 @@ export func main() -> () ! {FS, IO, Env, Process} {
   check("process failure rejected", failed(renderDocuments(path, "", "${dir}/failed", "false", "true", "72")));
   if length(args) >= 3 then {
     let out = "${dir}/render";
-    match renderDocuments(path, path, out, nth_or(args, 1, ""), nth_or(args, 2, ""), "72") {
+    match renderDocuments(path, path, out, nthOr(args, 1, ""), nthOr(args, 2, ""), "72") {
       Err(e) => {println(e); exit(1)},
       Ok(manifest) => {
         check("real render produces pages", fileExists("${out}/render-1/page-1.png") && fileExists("${out}/render-2/page-1.png"));
@@ -153,7 +153,7 @@ export func main() -> () ! {FS, IO, Env, Process} {
     ; let changed = "${dir}/changed.docx";
     let original = fixture();
     check("generate deliberate change", not failed(generateDocxResult({original | blocks: parseMarkdown("# A visibly changed document\n\nDifferent content for comparison.\n")}, changed)));
-    match renderDocuments(path, changed, "${dir}/changed-render", nth_or(args, 1, ""), nth_or(args, 2, ""), "72") {
+    match renderDocuments(path, changed, "${dir}/changed-render", nthOr(args, 1, ""), nthOr(args, 2, ""), "72") {
       Err(e) => {println(e); exit(1)},
       Ok(manifest) => check("real changed page detected", contains(readFile(manifest), "\"change\":\"changed\""))
     }
