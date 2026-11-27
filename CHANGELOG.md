@@ -11,6 +11,14 @@ separately — see `sdks/` for per-SDK changelogs.
 
 ## [Unreleased]
 
+## [v0.61.0](https://github.com/sunholo-data/ailang-parse/compare/v0.60.0...v0.61.0) — 2026-11-27
+
+**Requires AILANG >= 0.61.0** (unchanged). The Floor Check job compiles against v0.61.0, and the package also builds on v0.64.x.
+
+### Fixed: the package compiles on AILANG v0.64
+
+- The published 0.60.0 does not build on AILANG v0.64, which removed the pre-1.0 `@deprecated` stdlib aliases: installing it fails with `IMP010: symbol 'readFileBytes' not exported by 'std/fs'`. This release uses the 1.0 names across 19 modules (c2ab4f0): `std/fs.readFileBytes` → `readFileBase64`, `std/list.nth_or`/`last_or` → `nthOr`/`lastOr`, `member(x, xs)` → `contains(xs, x)`, `std/bytes.slice` → `sliceLen`, `std/math.abs_Float` → `absFloat`. A duplicate `readDocxStyles` in `zip_extract.ail` (MOD007) is removed.
+
 ### Added: `Result` forms of every file-writing generator
 
 - **`generate<Fmt>Result`** (`docx_generator.ail`, `xlsx_generator.ail`, `pptx_generator.ail`, `odt_generator.ail`, `odp_generator.ail`, `ods_generator.ail`): each generator returns `Result[string, string]` — `Ok` the success message, `Err` the bare reason (no `"Error generating …:"` prefix) — so a dependent package branches on the constructor instead of string-matching. Requested by specstore, which builds client-letterhead DOCX through `generateDocxWithReference`. A failure still writes no file.
